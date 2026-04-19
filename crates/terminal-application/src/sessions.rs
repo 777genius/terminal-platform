@@ -5,7 +5,7 @@ use terminal_backend_api::{
     MuxCommand, MuxCommandResult,
 };
 use terminal_domain::{BackendKind, DegradedModeReason, PaneId, SessionId};
-use terminal_projection::{ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
 use crate::registry::{InMemorySessionRegistry, SessionDescriptor, SessionRegistry};
 
@@ -67,6 +67,16 @@ impl SessionService {
     ) -> Result<ScreenSnapshot, BackendError> {
         let session = self.attach_session(session_id).await?;
         session.screen_snapshot(pane_id).await
+    }
+
+    pub async fn screen_delta(
+        &self,
+        session_id: SessionId,
+        pane_id: PaneId,
+        from_sequence: u64,
+    ) -> Result<ScreenDelta, BackendError> {
+        let session = self.attach_session(session_id).await?;
+        session.screen_delta(pane_id, from_sequence).await
     }
 
     pub async fn dispatch(

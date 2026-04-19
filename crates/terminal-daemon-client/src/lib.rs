@@ -4,9 +4,9 @@ use terminal_backend_api::{CreateSessionSpec, MuxCommand, MuxCommandResult};
 use terminal_domain::{BackendKind, OperationId};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
-use terminal_projection::{ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{
-    CreateSessionRequest, CreateSessionResponse, DispatchMuxCommandRequest,
+    CreateSessionRequest, CreateSessionResponse, DispatchMuxCommandRequest, GetScreenDeltaRequest,
     GetScreenSnapshotRequest, GetTopologySnapshotRequest, Handshake, ListSessionsResponse,
     LocalSocketAddress, ProtocolError, ProtocolVersion, RequestEnvelope, RequestPayload,
     ResponsePayload, TransportResponse, decode_json_frame, encode_json_frame,
@@ -109,6 +109,26 @@ impl LocalSocketDaemonClient {
         match response.payload {
             ResponsePayload::ScreenSnapshot(snapshot) => Ok(snapshot),
             other => Err(ProtocolError::unexpected_payload("screen_snapshot", &other)),
+        }
+    }
+
+    pub async fn screen_delta(
+        &self,
+        session_id: terminal_domain::SessionId,
+        pane_id: terminal_domain::PaneId,
+        from_sequence: u64,
+    ) -> Result<ScreenDelta, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::GetScreenDelta(GetScreenDeltaRequest {
+                session_id,
+                pane_id,
+                from_sequence,
+            }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::ScreenDelta(delta) => Ok(delta),
+            other => Err(ProtocolError::unexpected_payload("screen_delta", &other)),
         }
     }
 
@@ -333,6 +353,44 @@ mod tests {
             .expect_err("close last tab should fail");
 
         assert_eq!(error.code, "backend_invalid_input");
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetches_screen_delta_for_native_session() {
+        let address = unique_address("daemon-client-delta");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    ..CreateSessionSpec::default()
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+        let topology = client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        let snapshot = client
+            .screen_snapshot(created.session.session_id, pane_id)
+            .await
+            .expect("screen_snapshot should succeed");
+        let delta = client
+            .screen_delta(created.session.session_id, pane_id, snapshot.sequence)
+            .await
+            .expect("screen_delta should succeed");
+
+        assert_eq!(delta.pane_id, pane_id);
+        assert_eq!(delta.from_sequence, snapshot.sequence);
+        assert_eq!(delta.to_sequence, snapshot.sequence);
+        assert!(delta.full_replace.is_none());
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

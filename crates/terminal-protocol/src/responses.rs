@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use terminal_backend_api::{BackendSessionSummary, MuxCommandResult};
-use terminal_projection::{ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
 use crate::Handshake;
 
@@ -23,6 +23,7 @@ pub enum ResponsePayload {
     ListSessions(ListSessionsResponse),
     TopologySnapshot(TopologySnapshot),
     ScreenSnapshot(ScreenSnapshot),
+    ScreenDelta(ScreenDelta),
     DispatchMuxCommand(MuxCommandResult),
     SubscriptionOpened,
 }

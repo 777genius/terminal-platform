@@ -47,6 +47,12 @@ impl TerminalDaemon {
                     .await
                     .map_err(map_backend_error)?,
             ),
+            RequestPayload::GetScreenDelta(request) => ResponsePayload::ScreenDelta(
+                self.state
+                    .screen_delta(request.session_id, request.pane_id, request.from_sequence)
+                    .await
+                    .map_err(map_backend_error)?,
+            ),
             RequestPayload::DispatchMuxCommand(request) => ResponsePayload::DispatchMuxCommand(
                 self.state
                     .dispatch(request.session_id, request.command)
@@ -200,6 +206,63 @@ mod tests {
 
         match response.payload {
             ResponsePayload::DispatchMuxCommand(result) => assert!(result.changed),
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_screen_delta_requests() {
+        let daemon = TerminalDaemon::default();
+        let created = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
+                    backend: terminal_domain::BackendKind::Native,
+                    spec: CreateSessionSpec {
+                        title: Some("shell".to_string()),
+                        ..CreateSessionSpec::default()
+                    },
+                }),
+            })
+            .await
+            .expect("create session routing should succeed");
+        let session_id = match created.payload {
+            ResponsePayload::CreateSession(created) => created.session.session_id,
+            other => panic!("unexpected response payload: {other:?}"),
+        };
+        let topology = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::GetTopologySnapshot(
+                    terminal_protocol::GetTopologySnapshotRequest { session_id },
+                ),
+            })
+            .await
+            .expect("topology routing should succeed");
+        let pane_id = match topology.payload {
+            ResponsePayload::TopologySnapshot(topology) => {
+                topology.tabs[0].focused_pane.expect("focused pane should exist")
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        };
+        let response = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::GetScreenDelta(terminal_protocol::GetScreenDeltaRequest {
+                    session_id,
+                    pane_id,
+                    from_sequence: 0,
+                }),
+            })
+            .await
+            .expect("screen delta routing should succeed");
+
+        match response.payload {
+            ResponsePayload::ScreenDelta(delta) => {
+                assert_eq!(delta.pane_id, pane_id);
+                assert_eq!(delta.from_sequence, 0);
+                assert!(delta.to_sequence >= delta.from_sequence);
+            }
             other => panic!("unexpected response payload: {other:?}"),
         }
     }

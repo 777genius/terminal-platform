@@ -11,7 +11,7 @@ use terminal_backend_api::{
 };
 use terminal_domain::{PaneId, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
-use terminal_projection::{ProjectionSource, ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{ProjectionSource, ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
 use crate::{emulator::EmulatorBuffer, transcript::TranscriptBuffer};
 
@@ -125,6 +125,24 @@ impl NativeSessionRuntime {
             cols,
             source: ProjectionSource::NativeEmulator,
             surface: rendered.surface,
+        })
+    }
+
+    pub(super) fn screen_delta(
+        &self,
+        pane_id: PaneId,
+        from_sequence: u64,
+    ) -> Result<ScreenDelta, BackendError> {
+        let snapshot = self.screen_snapshot(pane_id)?;
+        let full_replace =
+            if snapshot.sequence == from_sequence { None } else { Some(snapshot.surface) };
+
+        Ok(ScreenDelta {
+            pane_id,
+            from_sequence,
+            to_sequence: snapshot.sequence,
+            source: snapshot.source,
+            full_replace,
         })
     }
 

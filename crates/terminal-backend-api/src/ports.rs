@@ -4,7 +4,7 @@ use std::{future::Future, pin::Pin};
 
 use serde::{Deserialize, Serialize};
 use terminal_domain::{BackendKind, SessionId, SessionRoute};
-use terminal_projection::{ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
 use crate::{
     BackendCapabilities, BackendError, BackendSubscription, MuxCommand, MuxCommandResult,
@@ -95,6 +95,12 @@ pub trait BackendSessionPort: Send + Sync {
         &self,
         pane_id: terminal_domain::PaneId,
     ) -> BoxFuture<'_, Result<ScreenSnapshot, BackendError>>;
+
+    fn screen_delta(
+        &self,
+        pane_id: terminal_domain::PaneId,
+        from_sequence: u64,
+    ) -> BoxFuture<'_, Result<ScreenDelta, BackendError>>;
 
     fn dispatch(
         &self,

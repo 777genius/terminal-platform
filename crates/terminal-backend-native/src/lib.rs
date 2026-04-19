@@ -135,6 +135,14 @@ impl BackendSessionPort for NativeAttachedSession {
         Box::pin(async move { self.runtime.screen_snapshot(pane_id) })
     }
 
+    fn screen_delta(
+        &self,
+        pane_id: terminal_domain::PaneId,
+        from_sequence: u64,
+    ) -> BoxFuture<'_, Result<terminal_projection::ScreenDelta, BackendError>> {
+        Box::pin(async move { self.runtime.screen_delta(pane_id, from_sequence) })
+    }
+
     fn dispatch(
         &self,
         command: terminal_backend_api::MuxCommand,
@@ -208,12 +216,21 @@ mod tests {
         let pane_id = topology.tabs[0].focused_pane.expect("tab should expose a focused pane");
         let screen =
             session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
+        let delta = session
+            .screen_delta(pane_id, screen.sequence)
+            .await
+            .expect("screen delta should succeed");
 
         assert_eq!(topology.session_id, binding.session_id);
         assert_eq!(topology.tabs.len(), 1);
         assert_eq!(screen.pane_id, pane_id);
         assert_eq!(screen.source, ProjectionSource::NativeEmulator);
         assert!(!screen.surface.lines.is_empty());
+        assert_eq!(delta.pane_id, pane_id);
+        assert_eq!(delta.from_sequence, screen.sequence);
+        assert_eq!(delta.to_sequence, screen.sequence);
+        assert_eq!(delta.source, ProjectionSource::NativeEmulator);
+        assert!(delta.full_replace.is_none());
     }
 
     #[tokio::test]
@@ -264,6 +281,8 @@ mod tests {
         let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
 
         wait_for_screen_line(&*session, pane_id, "ready").await;
+        let before =
+            session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
         let result = session
             .dispatch(MuxCommand::SendInput(SendInputSpec {
                 pane_id,
@@ -274,6 +293,15 @@ mod tests {
 
         assert!(!result.changed);
         wait_for_screen_line(&*session, pane_id, "hello from backend test").await;
+        let delta = session
+            .screen_delta(pane_id, before.sequence)
+            .await
+            .expect("screen delta should succeed");
+
+        assert_eq!(delta.pane_id, pane_id);
+        assert_eq!(delta.from_sequence, before.sequence);
+        assert!(delta.to_sequence >= before.sequence);
+        assert!(delta.full_replace.is_some());
     }
 
     #[cfg(unix)]

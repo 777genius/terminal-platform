@@ -10,8 +10,8 @@ pub use envelope::{RequestEnvelope, ResponseEnvelope, SubscriptionEnvelope};
 pub use errors::ProtocolError;
 pub use handshake::{DaemonPhase, Handshake, ProtocolVersion};
 pub use requests::{
-    CreateSessionRequest, DispatchMuxCommandRequest, GetScreenSnapshotRequest,
-    GetTopologySnapshotRequest, OpenSubscriptionRequest, RequestPayload,
+    CreateSessionRequest, DispatchMuxCommandRequest, GetScreenDeltaRequest,
+    GetScreenSnapshotRequest, GetTopologySnapshotRequest, OpenSubscriptionRequest, RequestPayload,
 };
 pub use responses::{CreateSessionResponse, ListSessionsResponse, ResponsePayload};
 pub use subscriptions::SubscriptionEvent;

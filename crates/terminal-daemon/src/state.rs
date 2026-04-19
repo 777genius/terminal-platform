@@ -7,7 +7,7 @@ use terminal_backend_api::{
 };
 use terminal_backend_native::NativeBackend;
 use terminal_domain::{BackendKind, PaneId, SessionId};
-use terminal_projection::{ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{DaemonPhase, Handshake, ProtocolVersion};
 
 pub struct TerminalDaemonState {
@@ -64,6 +64,15 @@ impl TerminalDaemonState {
         pane_id: PaneId,
     ) -> Result<ScreenSnapshot, BackendError> {
         self.sessions.screen_snapshot(session_id, pane_id).await
+    }
+
+    pub async fn screen_delta(
+        &self,
+        session_id: SessionId,
+        pane_id: PaneId,
+        from_sequence: u64,
+    ) -> Result<ScreenDelta, BackendError> {
+        self.sessions.screen_delta(session_id, pane_id, from_sequence).await
     }
 
     pub async fn dispatch(
@@ -138,6 +147,39 @@ mod tests {
         assert_eq!(topology.session_id, created.session_id);
         assert_eq!(screen.pane_id, pane_id);
         assert!(!screen.surface.lines.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn returns_screen_delta_for_native_session() {
+        let state = TerminalDaemonState::default();
+        let created = state
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    ..CreateSessionSpec::default()
+                },
+            )
+            .await
+            .expect("native session create should succeed");
+        let topology = state
+            .topology_snapshot(created.session_id)
+            .await
+            .expect("topology snapshot should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        let snapshot = state
+            .screen_snapshot(created.session_id, pane_id)
+            .await
+            .expect("screen snapshot should succeed");
+        let delta = state
+            .screen_delta(created.session_id, pane_id, snapshot.sequence)
+            .await
+            .expect("screen delta should succeed");
+
+        assert_eq!(delta.pane_id, pane_id);
+        assert_eq!(delta.from_sequence, snapshot.sequence);
+        assert_eq!(delta.to_sequence, snapshot.sequence);
+        assert!(delta.full_replace.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]

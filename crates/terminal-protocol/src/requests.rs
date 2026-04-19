@@ -27,6 +27,13 @@ pub struct GetScreenSnapshotRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetScreenDeltaRequest {
+    pub session_id: SessionId,
+    pub pane_id: PaneId,
+    pub from_sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchMuxCommandRequest {
     pub session_id: SessionId,
     pub command: MuxCommand,
@@ -40,6 +47,7 @@ pub enum RequestPayload {
     ListSessions,
     GetTopologySnapshot(GetTopologySnapshotRequest),
     GetScreenSnapshot(GetScreenSnapshotRequest),
+    GetScreenDelta(GetScreenDeltaRequest),
     DispatchMuxCommand(DispatchMuxCommandRequest),
     OpenSubscription(OpenSubscriptionRequest),
 }

@@ -41,6 +41,11 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
         .screen_snapshot(created.session.session_id, pane_id)
         .await
         .expect("screen_snapshot should succeed");
+    let delta = fixture
+        .client
+        .screen_delta(created.session.session_id, pane_id, screen.sequence)
+        .await
+        .expect("screen_delta should succeed");
     let dispatch = fixture
         .client
         .dispatch(
@@ -64,6 +69,9 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
     assert_eq!(topology.session_id, created.session.session_id);
     assert_eq!(screen.pane_id, pane_id);
     assert!(!screen.surface.lines.is_empty());
+    assert_eq!(delta.from_sequence, screen.sequence);
+    assert_eq!(delta.to_sequence, screen.sequence);
+    assert!(delta.full_replace.is_none());
     assert!(dispatch.changed);
     assert_eq!(topology_after_dispatch.tabs.len(), 2);
 
@@ -90,6 +98,11 @@ async fn bootstrap_smoke_roundtrips_live_pty_io() {
     let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
 
     wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    let before = fixture
+        .client
+        .screen_snapshot(created.session.session_id, pane_id)
+        .await
+        .expect("screen_snapshot should succeed");
     let dispatch = fixture
         .client
         .dispatch(
@@ -104,6 +117,16 @@ async fn bootstrap_smoke_roundtrips_live_pty_io() {
 
     assert!(!dispatch.changed);
     wait_for_screen_line(&fixture, created.session.session_id, pane_id, "hello from smoke").await;
+    let delta = fixture
+        .client
+        .screen_delta(created.session.session_id, pane_id, before.sequence)
+        .await
+        .expect("screen_delta should succeed");
+
+    assert_eq!(delta.pane_id, pane_id);
+    assert_eq!(delta.from_sequence, before.sequence);
+    assert!(delta.to_sequence >= before.sequence);
+    assert!(delta.full_replace.is_some());
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
