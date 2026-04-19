@@ -12,6 +12,7 @@ terminal-backend-native = { path = "../terminal-backend-native" }
 terminal-backend-tmux = { path = "../terminal-backend-tmux" }
 terminal-backend-zellij = { path = "../terminal-backend-zellij" }
 terminal-domain = { path = "../terminal-domain" }
+terminal-persistence = { path = "../terminal-persistence" }
 terminal-protocol = { path = "../terminal-protocol" }
 terminal-projection = { path = "../terminal-projection" }
 tokio = { workspace = true }

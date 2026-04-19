@@ -8,12 +8,13 @@ use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{
     BackendCapabilitiesResponse, CreateSessionRequest, CreateSessionResponse,
     DiscoverSessionsRequest, DiscoverSessionsResponse, DispatchMuxCommandRequest,
-    GetBackendCapabilitiesRequest, GetScreenDeltaRequest, GetScreenSnapshotRequest,
-    GetTopologySnapshotRequest, Handshake, ImportSessionRequest, ImportSessionResponse,
-    ListSessionsResponse, LocalSocketAddress, OpenSubscriptionRequest, OpenSubscriptionResponse,
-    ProtocolError, ProtocolVersion, RequestEnvelope, RequestPayload, ResponsePayload,
-    SubscriptionEnvelope, SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope,
-    TransportResponse, decode_json_frame, encode_json_frame,
+    GetBackendCapabilitiesRequest, GetSavedSessionRequest, GetScreenDeltaRequest,
+    GetScreenSnapshotRequest, GetTopologySnapshotRequest, Handshake, ImportSessionRequest,
+    ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse, LocalSocketAddress,
+    OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError, ProtocolVersion,
+    RequestEnvelope, RequestPayload, ResponsePayload, SavedSessionResponse, SubscriptionEnvelope,
+    SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope, TransportResponse,
+    decode_json_frame, encode_json_frame,
 };
 
 type LocalFramedStream = Framed<Stream, LengthDelimitedCodec>;
@@ -126,6 +127,15 @@ impl LocalSocketDaemonClient {
         }
     }
 
+    pub async fn list_saved_sessions(&self) -> Result<ListSavedSessionsResponse, ProtocolError> {
+        let response = self.send_request(RequestPayload::ListSavedSessions).await?;
+
+        match response.payload {
+            ResponsePayload::ListSavedSessions(list) => Ok(list),
+            other => Err(ProtocolError::unexpected_payload("list_saved_sessions", &other)),
+        }
+    }
+
     pub async fn discover_sessions(
         &self,
         backend: BackendKind,
@@ -183,6 +193,20 @@ impl LocalSocketDaemonClient {
         match response.payload {
             ResponsePayload::ImportSession(imported) => Ok(imported),
             other => Err(ProtocolError::unexpected_payload("import_session", &other)),
+        }
+    }
+
+    pub async fn saved_session(
+        &self,
+        session_id: terminal_domain::SessionId,
+    ) -> Result<SavedSessionResponse, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::GetSavedSession(GetSavedSessionRequest { session_id }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::SavedSession(saved) => Ok(saved),
+            other => Err(ProtocolError::unexpected_payload("saved_session", &other)),
         }
     }
 
@@ -480,6 +504,58 @@ mod tests {
         assert_eq!(created.session.title.as_deref(), Some("shell"));
         assert_eq!(sessions.sessions.len(), 1);
         assert_eq!(sessions.sessions[0].session_id, created.session.session_id);
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn lists_and_loads_saved_native_sessions() {
+        let address = unique_address("daemon-client-saved");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    launch: Some(cat_launch_spec()),
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+        let topology = client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        wait_for_screen_line(&client, created.session.session_id, pane_id, "ready").await;
+        client
+            .dispatch(created.session.session_id, MuxCommand::SaveSession)
+            .await
+            .expect("save session should succeed");
+
+        let saved = client.list_saved_sessions().await.expect("list_saved_sessions should succeed");
+        let saved_summary = saved
+            .sessions
+            .iter()
+            .find(|session| session.session_id == created.session.session_id)
+            .expect("saved session should be listed");
+        let loaded = client
+            .saved_session(created.session.session_id)
+            .await
+            .expect("saved_session should succeed");
+
+        assert_eq!(saved_summary.route.backend, BackendKind::Native);
+        assert_eq!(saved_summary.title.as_deref(), Some("shell"));
+        assert_eq!(saved_summary.tab_count, 1);
+        assert_eq!(saved_summary.pane_count, 1);
+        assert!(saved_summary.has_launch);
+        assert_eq!(loaded.session.session_id, created.session.session_id);
+        assert_eq!(loaded.session.title.as_deref(), Some("shell"));
+        assert_eq!(loaded.session.topology.tabs.len(), 1);
+        assert_eq!(loaded.session.screens.len(), 1);
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

@@ -110,7 +110,7 @@ async fn handle_subscription_connection(
             subscription_id,
         }),
     };
-    let encoded_opened = encode_json_frame(&TransportResponse::Response(opened))
+    let encoded_opened = encode_json_frame(&TransportResponse::Response(Box::new(opened)))
         .map_err(|error| io::Error::other(error.to_string()))?;
     framed.send(encoded_opened).await?;
 

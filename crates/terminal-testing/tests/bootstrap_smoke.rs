@@ -548,6 +548,58 @@ async fn bootstrap_smoke_saves_native_session_snapshot_to_store() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_lists_and_loads_saved_native_sessions_via_daemon_api() {
+    let fixture = daemon_fixture("bootstrap-native-saved-api").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    fixture
+        .client
+        .dispatch(created.session.session_id, MuxCommand::SaveSession)
+        .await
+        .expect("save session should succeed");
+    let saved =
+        fixture.client.list_saved_sessions().await.expect("list_saved_sessions should succeed");
+    let saved_summary = saved
+        .sessions
+        .iter()
+        .find(|session| session.session_id == created.session.session_id)
+        .expect("saved session should be listed");
+    let loaded = fixture
+        .client
+        .saved_session(created.session.session_id)
+        .await
+        .expect("saved_session should succeed");
+
+    assert_eq!(saved_summary.title.as_deref(), Some("shell"));
+    assert_eq!(saved_summary.route.backend, BackendKind::Native);
+    assert_eq!(saved_summary.tab_count, 1);
+    assert_eq!(saved_summary.pane_count, 1);
+    assert!(saved_summary.has_launch);
+    assert_eq!(loaded.session.session_id, created.session.session_id);
+    assert_eq!(loaded.session.topology.backend_kind, BackendKind::Native);
+    assert_eq!(loaded.session.topology.tabs.len(), 1);
+    assert_eq!(loaded.session.screens.len(), 1);
+    assert_eq!(loaded.session.launch, Some(cat_launch_spec()));
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_overwrites_native_session_snapshot_on_resave() {
     let fixture = daemon_fixture("bootstrap-native-save-overwrite").expect("fixture should start");
     let created = fixture

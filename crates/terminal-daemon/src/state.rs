@@ -10,6 +10,9 @@ use terminal_backend_native::NativeBackend;
 use terminal_backend_tmux::TmuxBackend;
 use terminal_backend_zellij::ZellijBackend;
 use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
+use terminal_persistence::{
+    SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary,
+};
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{DaemonPhase, Handshake, ProtocolVersion};
 
@@ -49,6 +52,14 @@ impl TerminalDaemonState {
     #[must_use]
     pub fn list_sessions(&self) -> Vec<BackendSessionSummary> {
         self.sessions.list_sessions()
+    }
+
+    pub fn list_saved_sessions(&self) -> Result<Vec<PersistedSavedSessionSummary>, BackendError> {
+        self.sessions.list_saved_sessions()
+    }
+
+    pub fn saved_session(&self, session_id: SessionId) -> Result<SavedNativeSession, BackendError> {
+        self.sessions.saved_session(session_id)
     }
 
     pub async fn discover_sessions(

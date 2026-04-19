@@ -11,12 +11,15 @@ pub use errors::ProtocolError;
 pub use handshake::{DaemonPhase, Handshake, ProtocolVersion};
 pub use requests::{
     CreateSessionRequest, DiscoverSessionsRequest, DispatchMuxCommandRequest,
-    GetBackendCapabilitiesRequest, GetScreenDeltaRequest, GetScreenSnapshotRequest,
-    GetTopologySnapshotRequest, ImportSessionRequest, OpenSubscriptionRequest, RequestPayload,
+    GetBackendCapabilitiesRequest, GetSavedSessionRequest, GetScreenDeltaRequest,
+    GetScreenSnapshotRequest, GetTopologySnapshotRequest, ImportSessionRequest,
+    OpenSubscriptionRequest, RequestPayload,
 };
 pub use responses::{
     BackendCapabilitiesResponse, CreateSessionResponse, DiscoverSessionsResponse,
-    ImportSessionResponse, ListSessionsResponse, OpenSubscriptionResponse, ResponsePayload,
+    ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse,
+    OpenSubscriptionResponse, ResponsePayload, SavedSessionRecord, SavedSessionResponse,
+    SavedSessionSummary,
 };
 pub use subscriptions::{SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope};
 pub use transport::{LocalSocketAddress, TransportResponse, decode_json_frame, encode_json_frame};

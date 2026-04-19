@@ -10,8 +10,10 @@ use rusqlite_migration::{M, Migrations};
 use serde::{Deserialize, Serialize};
 use terminal_backend_api::ShellLaunchSpec;
 use terminal_domain::{SessionId, SessionRoute};
+use terminal_mux_domain::PaneTreeNode;
 use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 use thiserror::Error;
+use uuid::Uuid;
 
 fn migrations() -> Migrations<'static> {
     Migrations::new(vec![M::up(
@@ -40,6 +42,17 @@ pub struct SavedNativeSession {
     pub saved_at_ms: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedSessionSummary {
+    pub session_id: SessionId,
+    pub route: SessionRoute,
+    pub title: Option<String>,
+    pub saved_at_ms: i64,
+    pub has_launch: bool,
+    pub tab_count: usize,
+    pub pane_count: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct SqliteSessionStore {
     path: PathBuf,
@@ -51,6 +64,8 @@ pub enum PersistenceError {
     NoProjectDir,
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("invalid persisted data: {0}")]
+    InvalidData(String),
     #[error("sqlite: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("migration: {0}")]
@@ -166,6 +181,50 @@ impl SqliteSessionStore {
         )
     }
 
+    pub fn list_native_sessions(&self) -> Result<Vec<SavedSessionSummary>, PersistenceError> {
+        let connection = self.open_connection()?;
+        let mut statement = connection.prepare(
+            "
+            SELECT session_id, route_json, title, launch_json, topology_json, saved_at_ms
+            FROM native_saved_sessions
+            ORDER BY saved_at_ms DESC
+            ",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })?;
+
+        let mut sessions = Vec::new();
+        for row in rows {
+            let (session_id, route_json, title, launch_json, topology_json, saved_at_ms) = row?;
+            let route: SessionRoute = serde_json::from_str(&route_json)?;
+            let launch: Option<ShellLaunchSpec> = serde_json::from_str(&launch_json)?;
+            let topology: TopologySnapshot = serde_json::from_str(&topology_json)?;
+            sessions.push(SavedSessionSummary {
+                session_id: SessionId::from(Uuid::parse_str(&session_id).map_err(|error| {
+                    PersistenceError::InvalidData(format!(
+                        "invalid saved session id `{session_id}` - {error}"
+                    ))
+                })?),
+                route,
+                title,
+                saved_at_ms,
+                has_launch: launch.is_some(),
+                tab_count: topology.tabs.len(),
+                pane_count: topology.tabs.iter().map(|tab| pane_count(&tab.root)).sum(),
+            });
+        }
+
+        Ok(sessions)
+    }
+
     pub fn save_timestamp_ms() -> Result<i64, PersistenceError> {
         Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64)
     }
@@ -179,6 +238,13 @@ impl SqliteSessionStore {
     fn open_connection(&self) -> Result<Connection, PersistenceError> {
         self.ensure_schema()?;
         Ok(Connection::open(&self.path)?)
+    }
+}
+
+fn pane_count(root: &PaneTreeNode) -> usize {
+    match root {
+        PaneTreeNode::Leaf { .. } => 1,
+        PaneTreeNode::Split(split) => pane_count(&split.first) + pane_count(&split.second),
     }
 }
 
@@ -267,6 +333,34 @@ mod tests {
             Some("ready again")
         );
         assert!(loaded.saved_at_ms >= first.saved_at_ms);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn lists_saved_native_sessions_in_descending_timestamp_order() {
+        let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+        let path =
+            std::env::temp_dir().join(format!("terminal-platform-list-test-{nonce}.sqlite3"));
+        let store = SqliteSessionStore::open(&path).expect("store should open");
+        let older_session = SessionId::new();
+        let newer_session = SessionId::new();
+        let older = sample_snapshot(older_session, "older", "first");
+        let mut newer = sample_snapshot(newer_session, "newer", "second");
+        newer.saved_at_ms = older.saved_at_ms + 1;
+
+        store.save_native_session(&older).expect("older save should succeed");
+        store.save_native_session(&newer).expect("newer save should succeed");
+
+        let listed = store.list_native_sessions().expect("list should succeed");
+
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].session_id, newer_session);
+        assert_eq!(listed[0].title.as_deref(), Some("newer"));
+        assert_eq!(listed[0].tab_count, 0);
+        assert_eq!(listed[0].pane_count, 0);
+        assert!(listed[0].has_launch);
+        assert_eq!(listed[1].session_id, older_session);
 
         let _ = std::fs::remove_file(path);
     }

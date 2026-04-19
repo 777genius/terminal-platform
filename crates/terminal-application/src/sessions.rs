@@ -7,7 +7,9 @@ use terminal_domain::{
     BackendKind, DegradedModeReason, PaneId, RouteAuthority, SessionId, SessionRoute,
     imported_session_id,
 };
-use terminal_persistence::{SavedNativeSession, SqliteSessionStore};
+use terminal_persistence::{
+    SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary, SqliteSessionStore,
+};
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
 use crate::{
@@ -95,6 +97,21 @@ impl SessionService {
         self.registry.insert(descriptor);
 
         Ok(summary)
+    }
+
+    pub fn list_saved_sessions(&self) -> Result<Vec<PersistedSavedSessionSummary>, BackendError> {
+        self.persistence.list_native_sessions().map_err(|error| {
+            BackendError::internal(format!("failed to list saved native sessions - {error}"))
+        })
+    }
+
+    pub fn saved_session(&self, session_id: SessionId) -> Result<SavedNativeSession, BackendError> {
+        self.persistence
+            .load_native_session(session_id)
+            .map_err(|error| {
+                BackendError::internal(format!("failed to load saved native session - {error}"))
+            })?
+            .ok_or_else(|| BackendError::not_found(format!("unknown saved session {session_id:?}")))
     }
 
     #[must_use]

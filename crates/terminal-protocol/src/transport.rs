@@ -46,7 +46,7 @@ impl std::fmt::Display for LocalSocketAddress {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", content = "value")]
 pub enum TransportResponse {
-    Response(ResponseEnvelope),
+    Response(Box<ResponseEnvelope>),
     Error(ProtocolError),
 }
 
@@ -54,14 +54,14 @@ impl TransportResponse {
     #[must_use]
     pub fn from_result(result: Result<ResponseEnvelope, ProtocolError>) -> Self {
         match result {
-            Ok(response) => Self::Response(response),
+            Ok(response) => Self::Response(Box::new(response)),
             Err(error) => Self::Error(error),
         }
     }
 
     pub fn into_result(self) -> Result<ResponseEnvelope, ProtocolError> {
         match self {
-            Self::Response(response) => Ok(response),
+            Self::Response(response) => Ok(*response),
             Self::Error(error) => Err(error),
         }
     }

@@ -56,14 +56,21 @@ pub struct DispatchMuxCommandRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetSavedSessionRequest {
+    pub session_id: SessionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RequestPayload {
     Handshake,
     CreateSession(CreateSessionRequest),
     ListSessions,
+    ListSavedSessions,
     DiscoverSessions(DiscoverSessionsRequest),
     GetBackendCapabilities(GetBackendCapabilitiesRequest),
     ImportSession(ImportSessionRequest),
+    GetSavedSession(GetSavedSessionRequest),
     GetTopologySnapshot(GetTopologySnapshotRequest),
     GetScreenSnapshot(GetScreenSnapshotRequest),
     GetScreenDelta(GetScreenDeltaRequest),

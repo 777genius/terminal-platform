@@ -1,8 +1,10 @@
 use terminal_backend_api::{BackendError, BackendErrorKind};
 use terminal_protocol::{
     BackendCapabilitiesResponse, CreateSessionResponse, DiscoverSessionsResponse,
-    ImportSessionResponse, ListSessionsResponse, OpenSubscriptionRequest, OpenSubscriptionResponse,
-    ProtocolError, RequestEnvelope, RequestPayload, ResponseEnvelope, ResponsePayload,
+    ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse,
+    OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError, RequestEnvelope,
+    RequestPayload, ResponseEnvelope, ResponsePayload, SavedSessionRecord, SavedSessionResponse,
+    SavedSessionSummary,
 };
 
 use crate::TerminalDaemonState;
@@ -36,6 +38,17 @@ impl TerminalDaemon {
             RequestPayload::ListSessions => ResponsePayload::ListSessions(ListSessionsResponse {
                 sessions: self.state.list_sessions(),
             }),
+            RequestPayload::ListSavedSessions => {
+                ResponsePayload::ListSavedSessions(ListSavedSessionsResponse {
+                    sessions: self
+                        .state
+                        .list_saved_sessions()
+                        .map_err(map_backend_error)?
+                        .into_iter()
+                        .map(map_saved_session_summary)
+                        .collect(),
+                })
+            }
             RequestPayload::DiscoverSessions(request) => {
                 ResponsePayload::DiscoverSessions(DiscoverSessionsResponse {
                     sessions: self
@@ -63,6 +76,13 @@ impl TerminalDaemon {
                     .map_err(map_backend_error)?;
 
                 ResponsePayload::ImportSession(ImportSessionResponse { session })
+            }
+            RequestPayload::GetSavedSession(request) => {
+                ResponsePayload::SavedSession(SavedSessionResponse {
+                    session: map_saved_session_record(
+                        self.state.saved_session(request.session_id).map_err(map_backend_error)?,
+                    ),
+                })
             }
             RequestPayload::GetTopologySnapshot(request) => ResponsePayload::TopologySnapshot(
                 self.state
@@ -129,6 +149,34 @@ fn map_backend_error(error: BackendError) -> ProtocolError {
             ProtocolError::with_degraded_reason(code, message, degraded_reason)
         }
         None => ProtocolError::new(code, message),
+    }
+}
+
+fn map_saved_session_summary(
+    session: terminal_persistence::SavedSessionSummary,
+) -> SavedSessionSummary {
+    SavedSessionSummary {
+        session_id: session.session_id,
+        route: session.route,
+        title: session.title,
+        saved_at_ms: session.saved_at_ms,
+        has_launch: session.has_launch,
+        tab_count: session.tab_count,
+        pane_count: session.pane_count,
+    }
+}
+
+fn map_saved_session_record(
+    session: terminal_persistence::SavedNativeSession,
+) -> SavedSessionRecord {
+    SavedSessionRecord {
+        session_id: session.session_id,
+        route: session.route,
+        title: session.title,
+        launch: session.launch,
+        topology: session.topology,
+        screens: session.screens,
+        saved_at_ms: session.saved_at_ms,
     }
 }
 
@@ -208,6 +256,75 @@ mod tests {
                 assert!(capabilities.capabilities.tab_create);
                 assert!(capabilities.capabilities.tab_close);
                 assert!(capabilities.capabilities.tab_focus);
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_saved_session_requests() {
+        let daemon = TerminalDaemon::default();
+        let created = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
+                    backend: terminal_domain::BackendKind::Native,
+                    spec: CreateSessionSpec {
+                        title: Some("shell".to_string()),
+                        ..CreateSessionSpec::default()
+                    },
+                }),
+            })
+            .await
+            .expect("create session routing should succeed");
+        let session_id = match created.payload {
+            ResponsePayload::CreateSession(created) => created.session.session_id,
+            other => panic!("unexpected response payload: {other:?}"),
+        };
+        let saved = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::DispatchMuxCommand(
+                    terminal_protocol::DispatchMuxCommandRequest {
+                        session_id,
+                        command: terminal_backend_api::MuxCommand::SaveSession,
+                    },
+                ),
+            })
+            .await
+            .expect("save routing should succeed");
+        match saved.payload {
+            ResponsePayload::DispatchMuxCommand(result) => assert!(!result.changed),
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+
+        let listed = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::ListSavedSessions,
+            })
+            .await
+            .expect("list saved sessions routing should succeed");
+        let loaded = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::GetSavedSession(
+                    terminal_protocol::GetSavedSessionRequest { session_id },
+                ),
+            })
+            .await
+            .expect("get saved session routing should succeed");
+
+        match listed.payload {
+            ResponsePayload::ListSavedSessions(listed) => {
+                assert!(listed.sessions.iter().any(|session| session.session_id == session_id));
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+        match loaded.payload {
+            ResponsePayload::SavedSession(saved) => {
+                assert_eq!(saved.session.session_id, session_id);
+                assert_eq!(saved.session.route.backend, terminal_domain::BackendKind::Native);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }
