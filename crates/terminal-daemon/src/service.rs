@@ -125,7 +125,9 @@ fn map_backend_error(error: BackendError) -> ProtocolError {
     let message = error.to_string();
 
     match error.degraded_reason {
-        Some(degraded_reason) => ProtocolError::with_degraded_reason(code, message, degraded_reason),
+        Some(degraded_reason) => {
+            ProtocolError::with_degraded_reason(code, message, degraded_reason)
+        }
         None => ProtocolError::new(code, message),
     }
 }
