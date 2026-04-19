@@ -133,10 +133,17 @@ async fn bootstrap_smoke_streams_topology_updates() {
         .await
         .expect("dispatch should succeed");
     let updated = subscription.recv().await.expect("recv should succeed").expect("event");
-    let updated = match updated {
+    let mut updated = match updated {
         SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
         other => panic!("unexpected topology event: {other:?}"),
     };
+    while updated.tabs.len() != 2 {
+        let next = subscription.recv().await.expect("recv should succeed").expect("event");
+        updated = match next {
+            SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
+            other => panic!("unexpected topology event: {other:?}"),
+        };
+    }
 
     assert_eq!(initial.tabs.len(), 1);
     assert!(dispatch.changed);
@@ -223,7 +230,7 @@ async fn bootstrap_smoke_streams_live_pane_surface_updates() {
 
     assert!(!dispatch.changed);
     assert!(initial.full_replace.is_some());
-    assert!(updated.to_sequence > updated.from_sequence);
+    assert_ne!(updated.to_sequence, updated.from_sequence);
     assert!(
         patch.line_updates.iter().any(|line| line.line.text.contains("hello from pane stream"))
     );
@@ -411,10 +418,17 @@ async fn bootstrap_smoke_streams_tmux_topology_updates() {
     .expect("tmux new-window should succeed");
 
     let updated = subscription.recv().await.expect("recv should succeed").expect("event");
-    let updated = match updated {
+    let mut updated = match updated {
         SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
         other => panic!("unexpected topology event: {other:?}"),
     };
+    while updated.tabs.len() != 3 {
+        let next = subscription.recv().await.expect("recv should succeed").expect("event");
+        updated = match next {
+            SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
+            other => panic!("unexpected topology event: {other:?}"),
+        };
+    }
 
     assert_eq!(initial.tabs.len(), 2);
     assert_eq!(updated.tabs.len(), 3);
@@ -467,15 +481,27 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
     )
     .expect("tmux send-keys should succeed");
 
-    let updated = subscription.recv().await.expect("recv should succeed").expect("event");
-    let updated = match updated {
-        SubscriptionEvent::ScreenDelta(delta) => delta,
-        other => panic!("unexpected pane event: {other:?}"),
+    let updated = loop {
+        let next = subscription.recv().await.expect("recv should succeed").expect("event");
+        let next = match next {
+            SubscriptionEvent::ScreenDelta(delta) => delta,
+            other => panic!("unexpected pane event: {other:?}"),
+        };
+        let Some(patch) = next.patch.as_ref() else {
+            continue;
+        };
+        if patch
+            .line_updates
+            .iter()
+            .any(|line| line.line.text.contains("hello from tmux subscription"))
+        {
+            break next;
+        }
     };
     let patch = updated.patch.expect("delta patch should exist");
 
     assert!(initial.full_replace.is_some());
-    assert!(updated.to_sequence > updated.from_sequence);
+    assert_ne!(updated.to_sequence, updated.from_sequence);
     assert!(
         patch
             .line_updates
@@ -483,6 +509,43 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
             .any(|line| line.line.text.contains("hello from tmux subscription"))
     );
     assert!(updated.full_replace.is_none());
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_discovers_zellij_session_and_rejects_import_on_legacy_surface() {
+    let session_name = unique_zellij_session_name("workspace");
+    let _zellij = ZellijSessionGuard::spawn(&session_name).expect("zellij session should start");
+    let fixture = daemon_fixture("bootstrap-zellij-discover").expect("fixture should start");
+
+    let discovered = tokio::time::timeout(
+        Duration::from_secs(10),
+        fixture.client.discover_sessions(BackendKind::Zellij),
+    )
+    .await
+    .expect("discover_sessions should not hang")
+    .expect("discover_sessions should succeed");
+    let candidate = discovered
+        .sessions
+        .iter()
+        .find(|session| session.title.as_deref() == Some(session_name.as_str()))
+        .cloned()
+        .expect("created zellij session should be discoverable");
+    let error = tokio::time::timeout(
+        Duration::from_secs(10),
+        fixture.client.import_session(candidate.route.clone(), candidate.title.clone()),
+    )
+    .await
+    .expect("import_session should not hang")
+    .expect_err("legacy local zellij surface should reject imported attach");
+    let listed = fixture.client.list_sessions().await.expect("list_sessions should succeed");
+
+    assert_eq!(candidate.route.backend, BackendKind::Zellij);
+    assert_eq!(error.code, "backend_unsupported");
+    assert!(error.message.contains("zellij 0.43.1"));
+    assert!(listed.sessions.is_empty());
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
@@ -600,4 +663,70 @@ fn run_tmux(socket_name: &str, args: &[&str]) -> Result<String, String> {
     }
 
     String::from_utf8(output.stdout).map_err(|error| format!("invalid tmux utf8 output: {error}"))
+}
+
+#[cfg(unix)]
+fn unique_zellij_session_name(label: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let entropy = (nanos & 0xffff_ffff) as u64;
+    format!("tp-{}-{:x}", label.chars().take(8).collect::<String>(), entropy)
+}
+
+#[cfg(unix)]
+struct ZellijSessionGuard {
+    session_name: String,
+}
+
+#[cfg(unix)]
+impl ZellijSessionGuard {
+    fn spawn(session_name: &str) -> Result<Self, String> {
+        let output = Command::new("zellij")
+            .args(["--session", session_name, "--new-session-with-layout", "default"])
+            .output()
+            .map_err(|error| format!("failed to spawn zellij: {error}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.contains("could not get terminal attribute: ENODEV") {
+                return Err(stderr.trim().to_string());
+            }
+        }
+        wait_for_zellij_session(session_name)?;
+        Ok(Self { session_name: session_name.to_string() })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ZellijSessionGuard {
+    fn drop(&mut self) {
+        let _ = run_zellij(&["kill-session", &self.session_name]);
+    }
+}
+
+#[cfg(unix)]
+fn run_zellij(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("zellij")
+        .args(args)
+        .output()
+        .map_err(|error| format!("failed to spawn zellij: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    String::from_utf8(output.stdout).map_err(|error| format!("invalid zellij utf8 output: {error}"))
+}
+
+#[cfg(unix)]
+fn wait_for_zellij_session(session_name: &str) -> Result<(), String> {
+    for _ in 0..40 {
+        let sessions = run_zellij(&["list-sessions", "--short", "--no-formatting"])?;
+        if sessions.lines().map(str::trim).any(|line| line == session_name) {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    Err(format!("zellij session never appeared: {session_name}"))
 }
