@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+alacritty_terminal = { workspace = true }
 portable-pty = { workspace = true }
-strip-ansi-escapes = { workspace = true }
 terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-domain = { path = "../terminal-domain" }
 terminal-mux-domain = { path = "../terminal-mux-domain" }

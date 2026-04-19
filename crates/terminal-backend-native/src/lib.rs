@@ -1,3 +1,4 @@
+mod emulator;
 mod runtime;
 mod transcript;
 
@@ -211,7 +212,7 @@ mod tests {
         assert_eq!(topology.session_id, binding.session_id);
         assert_eq!(topology.tabs.len(), 1);
         assert_eq!(screen.pane_id, pane_id);
-        assert_eq!(screen.source, ProjectionSource::NativeTranscript);
+        assert_eq!(screen.source, ProjectionSource::NativeEmulator);
         assert!(!screen.surface.lines.is_empty());
     }
 

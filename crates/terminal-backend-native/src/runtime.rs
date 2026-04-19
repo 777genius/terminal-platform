@@ -11,9 +11,9 @@ use terminal_backend_api::{
 };
 use terminal_domain::{PaneId, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
-use terminal_projection::{ProjectionSource, ScreenSnapshot, ScreenSurface, TopologySnapshot};
+use terminal_projection::{ProjectionSource, ScreenSnapshot, TopologySnapshot};
 
-use crate::transcript::TranscriptBuffer;
+use crate::{emulator::EmulatorBuffer, transcript::TranscriptBuffer};
 
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
@@ -41,7 +41,8 @@ struct NativeTabRuntime {
 
 struct NativePaneRuntime {
     pane_id: PaneId,
-    transcript: Arc<TranscriptBuffer>,
+    emulator: Arc<EmulatorBuffer>,
+    _transcript: Arc<TranscriptBuffer>,
     process: Mutex<NativePtyProcess>,
 }
 
@@ -100,7 +101,7 @@ impl NativeSessionRuntime {
     }
 
     pub(super) fn screen_snapshot(&self, pane_id: PaneId) -> Result<ScreenSnapshot, BackendError> {
-        let (title, rows, cols, transcript) = {
+        let (title, rows, cols, emulator) = {
             let state = self.lock_state()?;
             let tab = state
                 .tabs
@@ -112,18 +113,18 @@ impl NativeSessionRuntime {
                 tab.title.clone().or_else(|| state.summary.title.clone()),
                 state.rows,
                 state.cols,
-                Arc::clone(&tab.pane.transcript),
+                Arc::clone(&tab.pane.emulator),
             )
         };
-        let rendered = transcript.render(rows, cols);
+        let rendered = emulator.render(title.clone());
 
         Ok(ScreenSnapshot {
             pane_id,
             sequence: rendered.sequence,
             rows,
             cols,
-            source: ProjectionSource::NativeTranscript,
-            surface: ScreenSurface { title, cursor: rendered.cursor, lines: rendered.lines },
+            source: ProjectionSource::NativeEmulator,
+            surface: rendered.surface,
         })
     }
 
@@ -225,16 +226,18 @@ fn spawn_tab(
         .master
         .take_writer()
         .map_err(|error| BackendError::transport(format!("failed to take pty writer - {error}")))?;
+    let emulator = Arc::new(EmulatorBuffer::new(rows, cols));
     let transcript = Arc::new(TranscriptBuffer::default());
 
-    spawn_reader_thread(reader, Arc::clone(&transcript));
+    spawn_reader_thread(reader, Arc::clone(&transcript), Arc::clone(&emulator));
 
     Ok(NativeTabRuntime {
         tab_id: TabId::new(),
         title,
         pane: NativePaneRuntime {
             pane_id: PaneId::new(),
-            transcript,
+            emulator,
+            _transcript: transcript,
             process: Mutex::new(NativePtyProcess { master: pty_pair.master, writer, child }),
         },
     })
@@ -254,13 +257,17 @@ fn build_command(launch: &ShellLaunchSpec) -> CommandBuilder {
 fn spawn_reader_thread(
     mut reader: Box<dyn std::io::Read + Send>,
     transcript: Arc<TranscriptBuffer>,
+    emulator: Arc<EmulatorBuffer>,
 ) {
     thread::spawn(move || {
         let mut chunk = [0_u8; 4096];
         loop {
             match reader.read(&mut chunk) {
                 Ok(0) => break,
-                Ok(read) => transcript.append(&chunk[..read]),
+                Ok(read) => {
+                    transcript.append(&chunk[..read]);
+                    emulator.advance(&chunk[..read]);
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
             }
@@ -419,6 +426,8 @@ impl NativePaneRuntime {
             .master
             .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|error| BackendError::transport(format!("failed to resize pty - {error}")))?;
+        drop(process);
+        self.emulator.resize(rows, cols);
         Ok(())
     }
 }
