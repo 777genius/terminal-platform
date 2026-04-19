@@ -84,6 +84,7 @@ impl MuxBackendPort for TmuxBackend {
         Box::pin(async {
             Ok(BackendCapabilities {
                 tiled_panes: true,
+                tab_close: true,
                 tab_rename: true,
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,
@@ -232,13 +233,13 @@ impl TmuxAttachedSession {
         match command {
             MuxCommand::SendInput(spec) => self.send_input(spec),
             MuxCommand::SendPaste(spec) => self.send_paste(spec),
+            MuxCommand::CloseTab { tab_id } => self.close_tab(tab_id),
             MuxCommand::RenameTab { tab_id, title } => self.rename_tab(tab_id, &title),
             MuxCommand::NewTab(_)
             | MuxCommand::SplitPane(_)
             | MuxCommand::ClosePane { .. }
             | MuxCommand::FocusPane { .. }
             | MuxCommand::ResizePane(_)
-            | MuxCommand::CloseTab { .. }
             | MuxCommand::FocusTab { .. }
             | MuxCommand::Detach
             | MuxCommand::SaveSession
@@ -359,6 +360,23 @@ impl TmuxAttachedSession {
             .ok_or_else(|| BackendError::not_found(format!("unknown tmux tab {tab_id:?}")))?;
         self.backend
             .run(Some(&self.target), &["rename-window", "-t", &tab_target.target, title])?;
+
+        Ok(MuxCommandResult { changed: true })
+    }
+
+    fn close_tab(&self, tab_id: TabId) -> Result<MuxCommandResult, BackendError> {
+        let snapshot = self.snapshot()?;
+        if snapshot.topology.tabs.len() <= 1 {
+            return Err(BackendError::unsupported(
+                "tmux imported routes refuse to close the last tab because it would terminate the foreign session",
+                DegradedModeReason::UnsupportedByBackend,
+            ));
+        }
+        let tab_target = snapshot
+            .tab_targets
+            .get(&tab_id)
+            .ok_or_else(|| BackendError::not_found(format!("unknown tmux tab {tab_id:?}")))?;
+        self.backend.run(Some(&self.target), &["kill-window", "-t", &tab_target.target])?;
 
         Ok(MuxCommandResult { changed: true })
     }

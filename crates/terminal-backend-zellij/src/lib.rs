@@ -53,6 +53,7 @@ impl MuxBackendPort for ZellijBackend {
                 ZellijSurface::RichCli044Plus => BackendCapabilities {
                     read_only_client_mode: true,
                     tab_create: true,
+                    tab_close: true,
                     tab_rename: true,
                     pane_input_write: true,
                     pane_paste_write: true,

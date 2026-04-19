@@ -61,18 +61,21 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert_eq!(native.backend, BackendKind::Native);
     assert!(native.capabilities.tiled_panes);
     assert!(native.capabilities.tab_create);
+    assert!(native.capabilities.tab_close);
     assert!(native.capabilities.tab_rename);
     assert!(native.capabilities.pane_input_write);
     assert!(native.capabilities.rendered_viewport_stream);
     assert_eq!(tmux.backend, BackendKind::Tmux);
     assert!(tmux.capabilities.read_only_client_mode);
     assert!(!tmux.capabilities.tab_create);
+    assert!(tmux.capabilities.tab_close);
     assert!(tmux.capabilities.tab_rename);
     assert!(tmux.capabilities.pane_input_write);
     assert!(tmux.capabilities.rendered_viewport_stream);
     assert_eq!(zellij.backend, BackendKind::Zellij);
     assert!(zellij.capabilities.read_only_client_mode);
     assert!(!zellij.capabilities.tab_create);
+    assert!(!zellij.capabilities.tab_close);
     assert!(!zellij.capabilities.rendered_viewport_stream);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
@@ -416,6 +419,27 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
         .screen_snapshot(imported.session.session_id, focused_pane)
         .await
         .expect("screen_snapshot should succeed");
+    let secondary_tab_id = topology
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id != focused_tab)
+        .map(|tab| tab.tab_id)
+        .expect("secondary tab should exist");
+    let close_tab = fixture
+        .client
+        .dispatch(imported.session.session_id, MuxCommand::CloseTab { tab_id: secondary_tab_id })
+        .await
+        .expect("close tab should succeed");
+    let topology_after_close = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let close_last_error = fixture
+        .client
+        .dispatch(imported.session.session_id, MuxCommand::CloseTab { tab_id: focused_tab })
+        .await
+        .expect_err("closing the last tmux tab should be rejected");
     let delta = fixture
         .client
         .screen_delta(imported.session.session_id, focused_pane, screen.sequence)
@@ -444,6 +468,8 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
                 && tab.title.as_deref() == Some("workspace-renamed"))
     );
     assert!(send_input.changed);
+    assert!(close_tab.changed);
+    assert_eq!(topology_after_close.tabs.len(), 1);
     assert_eq!(screen.source, ProjectionSource::TmuxCapturePane);
     assert!(screen.surface.lines.iter().any(|line| line.text.contains("hello from tmux")));
     assert!(
@@ -456,6 +482,7 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
     assert!(delta.patch.is_none());
     assert!(delta.full_replace.is_some());
     assert_eq!(dispatch_error.code, "backend_unsupported");
+    assert_eq!(close_last_error.code, "backend_unsupported");
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

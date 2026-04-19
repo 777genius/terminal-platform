@@ -200,6 +200,7 @@ mod tests {
                 assert_eq!(capabilities.backend, terminal_domain::BackendKind::Native);
                 assert!(capabilities.capabilities.tiled_panes);
                 assert!(capabilities.capabilities.tab_create);
+                assert!(capabilities.capabilities.tab_close);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }
