@@ -601,6 +601,52 @@ async fn bootstrap_smoke_lists_and_loads_saved_native_sessions_via_daemon_api() 
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_deletes_saved_native_sessions_via_daemon_api() {
+    let fixture = daemon_fixture("bootstrap-native-delete-saved").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    fixture
+        .client
+        .dispatch(created.session.session_id, MuxCommand::SaveSession)
+        .await
+        .expect("save session should succeed");
+
+    let deleted = fixture
+        .client
+        .delete_saved_session(created.session.session_id)
+        .await
+        .expect("delete_saved_session should succeed");
+    let saved =
+        fixture.client.list_saved_sessions().await.expect("list_saved_sessions should succeed");
+    let lookup_error = fixture
+        .client
+        .saved_session(created.session.session_id)
+        .await
+        .expect_err("saved session should be gone after delete");
+
+    assert_eq!(deleted.session_id, created.session.session_id);
+    assert!(!saved.sessions.iter().any(|session| session.session_id == created.session.session_id));
+    assert_eq!(lookup_error.code, "backend_not_found");
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     let fixture = daemon_fixture("bootstrap-native-restore-api").expect("fixture should start");
     let created = fixture

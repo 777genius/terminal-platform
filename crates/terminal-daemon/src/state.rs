@@ -62,6 +62,10 @@ impl TerminalDaemonState {
         self.sessions.saved_session(session_id)
     }
 
+    pub fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {
+        self.sessions.delete_saved_session(session_id)
+    }
+
     pub async fn restore_saved_session(
         &self,
         session_id: SessionId,

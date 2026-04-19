@@ -115,6 +115,17 @@ impl SessionService {
             .ok_or_else(|| BackendError::not_found(format!("unknown saved session {session_id:?}")))
     }
 
+    pub fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {
+        let deleted = self.persistence.delete_native_session(session_id).map_err(|error| {
+            BackendError::internal(format!("failed to delete saved native session - {error}"))
+        })?;
+        if !deleted {
+            return Err(BackendError::not_found(format!("unknown saved session {session_id:?}")));
+        }
+
+        Ok(())
+    }
+
     pub async fn restore_saved_session(
         &self,
         session_id: SessionId,

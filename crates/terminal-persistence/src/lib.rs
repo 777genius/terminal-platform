@@ -181,6 +181,19 @@ impl SqliteSessionStore {
         )
     }
 
+    pub fn delete_native_session(&self, session_id: SessionId) -> Result<bool, PersistenceError> {
+        let connection = self.open_connection()?;
+        let deleted = connection.execute(
+            "
+            DELETE FROM native_saved_sessions
+            WHERE session_id = ?1
+            ",
+            params![session_id.0.to_string()],
+        )?;
+
+        Ok(deleted > 0)
+    }
+
     pub fn list_native_sessions(&self) -> Result<Vec<SavedSessionSummary>, PersistenceError> {
         let connection = self.open_connection()?;
         let mut statement = connection.prepare(
@@ -333,6 +346,24 @@ mod tests {
             Some("ready again")
         );
         assert!(loaded.saved_at_ms >= first.saved_at_ms);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn deletes_saved_native_session_snapshot() {
+        let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+        let path =
+            std::env::temp_dir().join(format!("terminal-platform-delete-test-{nonce}.sqlite3"));
+        let store = SqliteSessionStore::open(&path).expect("store should open");
+        let session_id = SessionId::new();
+        let snapshot = sample_snapshot(session_id, "shell", "ready");
+
+        store.save_native_session(&snapshot).expect("save should succeed");
+
+        assert!(store.delete_native_session(session_id).expect("delete should succeed"));
+        assert!(store.load_native_session(session_id).expect("load should succeed").is_none());
+        assert!(!store.delete_native_session(session_id).expect("delete should succeed"));
 
         let _ = std::fs::remove_file(path);
     }

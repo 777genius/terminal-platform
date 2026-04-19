@@ -1,10 +1,10 @@
 use terminal_backend_api::{BackendError, BackendErrorKind};
 use terminal_protocol::{
-    BackendCapabilitiesResponse, CreateSessionResponse, DiscoverSessionsResponse,
-    ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse,
-    OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError, RequestEnvelope,
-    RequestPayload, ResponseEnvelope, ResponsePayload, RestoreSavedSessionResponse,
-    SavedSessionRecord, SavedSessionResponse, SavedSessionSummary,
+    BackendCapabilitiesResponse, CreateSessionResponse, DeleteSavedSessionResponse,
+    DiscoverSessionsResponse, ImportSessionResponse, ListSavedSessionsResponse,
+    ListSessionsResponse, OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError,
+    RequestEnvelope, RequestPayload, ResponseEnvelope, ResponsePayload,
+    RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionResponse, SavedSessionSummary,
 };
 
 use crate::TerminalDaemonState;
@@ -82,6 +82,12 @@ impl TerminalDaemon {
                     session: map_saved_session_record(
                         self.state.saved_session(request.session_id).map_err(map_backend_error)?,
                     ),
+                })
+            }
+            RequestPayload::DeleteSavedSession(request) => {
+                self.state.delete_saved_session(request.session_id).map_err(map_backend_error)?;
+                ResponsePayload::DeleteSavedSession(DeleteSavedSessionResponse {
+                    session_id: request.session_id,
                 })
             }
             RequestPayload::RestoreSavedSession(request) => {
@@ -337,6 +343,68 @@ mod tests {
             }
             other => panic!("unexpected response payload: {other:?}"),
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_delete_saved_session_requests() {
+        let daemon = TerminalDaemon::default();
+        let created = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
+                    backend: terminal_domain::BackendKind::Native,
+                    spec: CreateSessionSpec {
+                        title: Some("shell".to_string()),
+                        ..CreateSessionSpec::default()
+                    },
+                }),
+            })
+            .await
+            .expect("create session routing should succeed");
+        let session_id = match created.payload {
+            ResponsePayload::CreateSession(created) => created.session.session_id,
+            other => panic!("unexpected response payload: {other:?}"),
+        };
+        daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::DispatchMuxCommand(
+                    terminal_protocol::DispatchMuxCommandRequest {
+                        session_id,
+                        command: terminal_backend_api::MuxCommand::SaveSession,
+                    },
+                ),
+            })
+            .await
+            .expect("save routing should succeed");
+
+        let deleted = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::DeleteSavedSession(
+                    terminal_protocol::DeleteSavedSessionRequest { session_id },
+                ),
+            })
+            .await
+            .expect("delete saved session routing should succeed");
+
+        match deleted.payload {
+            ResponsePayload::DeleteSavedSession(deleted) => {
+                assert_eq!(deleted.session_id, session_id);
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+
+        let lookup_error = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::GetSavedSession(
+                    terminal_protocol::GetSavedSessionRequest { session_id },
+                ),
+            })
+            .await
+            .expect_err("deleted saved session lookup should fail");
+        assert_eq!(lookup_error.code, "backend_not_found");
     }
 
     #[tokio::test(flavor = "multi_thread")]

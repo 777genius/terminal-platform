@@ -7,15 +7,15 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{
     BackendCapabilitiesResponse, CreateSessionRequest, CreateSessionResponse,
-    DiscoverSessionsRequest, DiscoverSessionsResponse, DispatchMuxCommandRequest,
-    GetBackendCapabilitiesRequest, GetSavedSessionRequest, GetScreenDeltaRequest,
-    GetScreenSnapshotRequest, GetTopologySnapshotRequest, Handshake, ImportSessionRequest,
-    ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse, LocalSocketAddress,
-    OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError, ProtocolVersion,
-    RequestEnvelope, RequestPayload, ResponsePayload, RestoreSavedSessionRequest,
-    RestoreSavedSessionResponse, SavedSessionResponse, SubscriptionEnvelope, SubscriptionEvent,
-    SubscriptionRequest, SubscriptionRequestEnvelope, TransportResponse, decode_json_frame,
-    encode_json_frame,
+    DeleteSavedSessionRequest, DeleteSavedSessionResponse, DiscoverSessionsRequest,
+    DiscoverSessionsResponse, DispatchMuxCommandRequest, GetBackendCapabilitiesRequest,
+    GetSavedSessionRequest, GetScreenDeltaRequest, GetScreenSnapshotRequest,
+    GetTopologySnapshotRequest, Handshake, ImportSessionRequest, ImportSessionResponse,
+    ListSavedSessionsResponse, ListSessionsResponse, LocalSocketAddress, OpenSubscriptionRequest,
+    OpenSubscriptionResponse, ProtocolError, ProtocolVersion, RequestEnvelope, RequestPayload,
+    ResponsePayload, RestoreSavedSessionRequest, RestoreSavedSessionResponse, SavedSessionResponse,
+    SubscriptionEnvelope, SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope,
+    TransportResponse, decode_json_frame, encode_json_frame,
 };
 
 type LocalFramedStream = Framed<Stream, LengthDelimitedCodec>;
@@ -208,6 +208,22 @@ impl LocalSocketDaemonClient {
         match response.payload {
             ResponsePayload::SavedSession(saved) => Ok(saved),
             other => Err(ProtocolError::unexpected_payload("saved_session", &other)),
+        }
+    }
+
+    pub async fn delete_saved_session(
+        &self,
+        session_id: terminal_domain::SessionId,
+    ) -> Result<DeleteSavedSessionResponse, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::DeleteSavedSession(DeleteSavedSessionRequest {
+                session_id,
+            }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::DeleteSavedSession(deleted) => Ok(deleted),
+            other => Err(ProtocolError::unexpected_payload("delete_saved_session", &other)),
         }
     }
 
@@ -574,6 +590,54 @@ mod tests {
         assert_eq!(loaded.session.title.as_deref(), Some("shell"));
         assert_eq!(loaded.session.topology.tabs.len(), 1);
         assert_eq!(loaded.session.screens.len(), 1);
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deletes_saved_native_sessions() {
+        let address = unique_address("daemon-client-saved-delete");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    launch: Some(cat_launch_spec()),
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+        let topology = client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        wait_for_screen_line(&client, created.session.session_id, pane_id, "ready").await;
+        client
+            .dispatch(created.session.session_id, MuxCommand::SaveSession)
+            .await
+            .expect("save session should succeed");
+
+        let deleted = client
+            .delete_saved_session(created.session.session_id)
+            .await
+            .expect("delete_saved_session should succeed");
+        let listed =
+            client.list_saved_sessions().await.expect("list_saved_sessions should succeed");
+        let lookup_error = client
+            .saved_session(created.session.session_id)
+            .await
+            .expect_err("saved session lookup should fail after delete");
+
+        assert_eq!(deleted.session_id, created.session.session_id);
+        assert!(
+            !listed.sessions.iter().any(|session| session.session_id == created.session.session_id)
+        );
+        assert_eq!(lookup_error.code, "backend_not_found");
 
         server.shutdown().await.expect("server shutdown should succeed");
     }
