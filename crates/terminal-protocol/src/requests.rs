@@ -21,6 +21,11 @@ pub struct DiscoverSessionsRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetBackendCapabilitiesRequest {
+    pub backend: BackendKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportSessionRequest {
     pub route: SessionRoute,
     pub title: Option<String>,
@@ -57,6 +62,7 @@ pub enum RequestPayload {
     CreateSession(CreateSessionRequest),
     ListSessions,
     DiscoverSessions(DiscoverSessionsRequest),
+    GetBackendCapabilities(GetBackendCapabilitiesRequest),
     ImportSession(ImportSessionRequest),
     GetTopologySnapshot(GetTopologySnapshotRequest),
     GetScreenSnapshot(GetScreenSnapshotRequest),

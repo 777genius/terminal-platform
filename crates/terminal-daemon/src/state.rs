@@ -58,6 +58,13 @@ impl TerminalDaemonState {
         self.sessions.discover_sessions(backend).await
     }
 
+    pub async fn backend_capabilities(
+        &self,
+        backend: BackendKind,
+    ) -> Result<BackendCapabilities, BackendError> {
+        self.sessions.backend_capabilities(backend).await
+    }
+
     pub async fn create_session(
         &self,
         backend: BackendKind,
@@ -158,6 +165,18 @@ mod tests {
         assert_eq!(created.route.backend, BackendKind::Native);
         assert_eq!(created.title.as_deref(), Some("shell"));
         assert_eq!(state.session_count(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn returns_dynamic_backend_capabilities() {
+        let state = TerminalDaemonState::default();
+        let native = state
+            .backend_capabilities(BackendKind::Native)
+            .await
+            .expect("native capabilities should resolve");
+
+        assert!(native.tiled_panes);
+        assert!(native.rendered_viewport_stream);
     }
 
     #[tokio::test(flavor = "multi_thread")]

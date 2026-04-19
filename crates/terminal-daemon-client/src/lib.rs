@@ -6,8 +6,9 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{
-    CreateSessionRequest, CreateSessionResponse, DiscoverSessionsRequest, DiscoverSessionsResponse,
-    DispatchMuxCommandRequest, GetScreenDeltaRequest, GetScreenSnapshotRequest,
+    BackendCapabilitiesResponse, CreateSessionRequest, CreateSessionResponse,
+    DiscoverSessionsRequest, DiscoverSessionsResponse, DispatchMuxCommandRequest,
+    GetBackendCapabilitiesRequest, GetScreenDeltaRequest, GetScreenSnapshotRequest,
     GetTopologySnapshotRequest, Handshake, ImportSessionRequest, ImportSessionResponse,
     ListSessionsResponse, LocalSocketAddress, OpenSubscriptionRequest, OpenSubscriptionResponse,
     ProtocolError, ProtocolVersion, RequestEnvelope, RequestPayload, ResponsePayload,
@@ -136,6 +137,22 @@ impl LocalSocketDaemonClient {
         match response.payload {
             ResponsePayload::DiscoverSessions(discovered) => Ok(discovered),
             other => Err(ProtocolError::unexpected_payload("discover_sessions", &other)),
+        }
+    }
+
+    pub async fn backend_capabilities(
+        &self,
+        backend: BackendKind,
+    ) -> Result<BackendCapabilitiesResponse, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::GetBackendCapabilities(GetBackendCapabilitiesRequest {
+                backend,
+            }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::BackendCapabilities(capabilities) => Ok(capabilities),
+            other => Err(ProtocolError::unexpected_payload("backend_capabilities", &other)),
         }
     }
 
@@ -399,6 +416,31 @@ mod tests {
         assert_eq!(handshake.protocol_version.minor, 1);
         assert_eq!(client.info().expected_protocol, handshake.protocol_version);
         assert!(sessions.sessions.is_empty());
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetches_backend_capabilities() {
+        let address = unique_address("daemon-client-capabilities");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+
+        let native = client
+            .backend_capabilities(BackendKind::Native)
+            .await
+            .expect("native capabilities should succeed");
+        let zellij = client
+            .backend_capabilities(BackendKind::Zellij)
+            .await
+            .expect("zellij capabilities should succeed");
+
+        assert_eq!(native.backend, BackendKind::Native);
+        assert!(native.capabilities.tiled_panes);
+        assert!(native.capabilities.rendered_viewport_stream);
+        assert_eq!(zellij.backend, BackendKind::Zellij);
+        assert!(zellij.capabilities.read_only_client_mode);
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

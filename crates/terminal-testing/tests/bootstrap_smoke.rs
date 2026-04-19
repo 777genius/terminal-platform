@@ -39,6 +39,39 @@ fn bootstrap_smoke_exposes_empty_daemon_state() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
+    let fixture = daemon_fixture("bootstrap-backend-capabilities").expect("fixture should start");
+
+    let native = fixture
+        .client
+        .backend_capabilities(BackendKind::Native)
+        .await
+        .expect("native capabilities should succeed");
+    let tmux = fixture
+        .client
+        .backend_capabilities(BackendKind::Tmux)
+        .await
+        .expect("tmux capabilities should succeed");
+    let zellij = fixture
+        .client
+        .backend_capabilities(BackendKind::Zellij)
+        .await
+        .expect("zellij capabilities should succeed");
+
+    assert_eq!(native.backend, BackendKind::Native);
+    assert!(native.capabilities.tiled_panes);
+    assert!(native.capabilities.rendered_viewport_stream);
+    assert_eq!(tmux.backend, BackendKind::Tmux);
+    assert!(tmux.capabilities.read_only_client_mode);
+    assert!(tmux.capabilities.rendered_viewport_stream);
+    assert_eq!(zellij.backend, BackendKind::Zellij);
+    assert!(zellij.capabilities.read_only_client_mode);
+    assert!(!zellij.capabilities.rendered_viewport_stream);
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_roundtrips_request_reply_flow() {
     let fixture = daemon_fixture("bootstrap-smoke").expect("fixture should start");
     let created = fixture

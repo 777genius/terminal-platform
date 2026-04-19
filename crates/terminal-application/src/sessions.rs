@@ -1,6 +1,7 @@
 use terminal_backend_api::{
-    BackendError, BackendSessionPort, BackendSessionSummary, BackendSubscription,
-    CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult, SubscriptionSpec,
+    BackendCapabilities, BackendError, BackendSessionPort, BackendSessionSummary,
+    BackendSubscription, CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult,
+    SubscriptionSpec,
 };
 use terminal_domain::{
     BackendKind, DegradedModeReason, PaneId, RouteAuthority, SessionId, SessionRoute,
@@ -32,6 +33,13 @@ impl SessionService {
             .backend(backend)?
             .discover_sessions(terminal_backend_api::BackendScope::CurrentUser)
             .await
+    }
+
+    pub async fn backend_capabilities(
+        &self,
+        backend: BackendKind,
+    ) -> Result<BackendCapabilities, BackendError> {
+        self.backends.backend(backend)?.capabilities().await
     }
 
     pub async fn create_session(

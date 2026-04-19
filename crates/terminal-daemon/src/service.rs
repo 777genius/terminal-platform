@@ -1,8 +1,8 @@
 use terminal_backend_api::{BackendError, BackendErrorKind};
 use terminal_protocol::{
-    CreateSessionResponse, DiscoverSessionsResponse, ImportSessionResponse, ListSessionsResponse,
-    OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError, RequestEnvelope,
-    RequestPayload, ResponseEnvelope, ResponsePayload,
+    BackendCapabilitiesResponse, CreateSessionResponse, DiscoverSessionsResponse,
+    ImportSessionResponse, ListSessionsResponse, OpenSubscriptionRequest, OpenSubscriptionResponse,
+    ProtocolError, RequestEnvelope, RequestPayload, ResponseEnvelope, ResponsePayload,
 };
 
 use crate::TerminalDaemonState;
@@ -41,6 +41,16 @@ impl TerminalDaemon {
                     sessions: self
                         .state
                         .discover_sessions(request.backend)
+                        .await
+                        .map_err(map_backend_error)?,
+                })
+            }
+            RequestPayload::GetBackendCapabilities(request) => {
+                ResponsePayload::BackendCapabilities(BackendCapabilitiesResponse {
+                    backend: request.backend,
+                    capabilities: self
+                        .state
+                        .backend_capabilities(request.backend)
                         .await
                         .map_err(map_backend_error)?,
                 })
@@ -165,6 +175,30 @@ mod tests {
             ResponsePayload::CreateSession(created) => {
                 assert_eq!(created.session.route.backend, terminal_domain::BackendKind::Native);
                 assert_eq!(created.session.title.as_deref(), Some("shell"));
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_backend_capabilities_requests() {
+        let daemon = TerminalDaemon::default();
+        let response = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::GetBackendCapabilities(
+                    terminal_protocol::GetBackendCapabilitiesRequest {
+                        backend: terminal_domain::BackendKind::Native,
+                    },
+                ),
+            })
+            .await
+            .expect("capabilities routing should succeed");
+
+        match response.payload {
+            ResponsePayload::BackendCapabilities(capabilities) => {
+                assert_eq!(capabilities.backend, terminal_domain::BackendKind::Native);
+                assert!(capabilities.capabilities.tiled_panes);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }
