@@ -52,6 +52,10 @@ impl MuxBackendPort for ZellijBackend {
             Ok(match probe.surface {
                 ZellijSurface::RichCli044Plus => BackendCapabilities {
                     read_only_client_mode: true,
+                    tab_create: true,
+                    tab_rename: true,
+                    pane_input_write: true,
+                    pane_paste_write: true,
                     rendered_viewport_stream: true,
                     rendered_viewport_snapshot: true,
                     advisory_metadata_subscriptions: true,

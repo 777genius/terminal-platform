@@ -176,6 +176,9 @@ mod tests {
             .expect("native capabilities should resolve");
 
         assert!(native.tiled_panes);
+        assert!(native.tab_create);
+        assert!(native.tab_rename);
+        assert!(native.pane_input_write);
         assert!(native.rendered_viewport_stream);
     }
 

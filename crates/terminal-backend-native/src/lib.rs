@@ -38,8 +38,12 @@ impl MuxBackendPort for NativeBackend {
         Box::pin(async {
             Ok(BackendCapabilities {
                 tiled_panes: true,
+                tab_create: true,
+                tab_rename: true,
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,
+                pane_input_write: true,
+                pane_paste_write: true,
                 rendered_viewport_stream: true,
                 rendered_viewport_snapshot: true,
                 advisory_metadata_subscriptions: true,

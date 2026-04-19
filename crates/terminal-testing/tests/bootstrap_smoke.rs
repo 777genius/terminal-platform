@@ -60,12 +60,19 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
 
     assert_eq!(native.backend, BackendKind::Native);
     assert!(native.capabilities.tiled_panes);
+    assert!(native.capabilities.tab_create);
+    assert!(native.capabilities.tab_rename);
+    assert!(native.capabilities.pane_input_write);
     assert!(native.capabilities.rendered_viewport_stream);
     assert_eq!(tmux.backend, BackendKind::Tmux);
     assert!(tmux.capabilities.read_only_client_mode);
+    assert!(!tmux.capabilities.tab_create);
+    assert!(tmux.capabilities.tab_rename);
+    assert!(tmux.capabilities.pane_input_write);
     assert!(tmux.capabilities.rendered_viewport_stream);
     assert_eq!(zellij.backend, BackendKind::Zellij);
     assert!(zellij.capabilities.read_only_client_mode);
+    assert!(!zellij.capabilities.tab_create);
     assert!(!zellij.capabilities.rendered_viewport_stream);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
