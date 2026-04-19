@@ -54,6 +54,7 @@ impl MuxBackendPort for NativeBackend {
                 rendered_viewport_snapshot: true,
                 layout_dump: true,
                 layout_override: true,
+                explicit_session_save: true,
                 advisory_metadata_subscriptions: true,
                 ..BackendCapabilities::default()
             })

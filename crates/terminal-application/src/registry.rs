@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::RwLock};
 
+use terminal_backend_api::ShellLaunchSpec;
 use terminal_domain::{SessionId, SessionRoute};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7,6 +8,7 @@ pub struct SessionDescriptor {
     pub session_id: SessionId,
     pub route: SessionRoute,
     pub title: Option<String>,
+    pub launch: Option<ShellLaunchSpec>,
 }
 
 pub trait SessionRegistry: Send + Sync {
@@ -49,6 +51,7 @@ impl SessionRegistry for InMemorySessionRegistry {
 
 #[cfg(test)]
 mod tests {
+    use terminal_backend_api::ShellLaunchSpec;
     use terminal_domain::{BackendKind, RouteAuthority, SessionRoute};
 
     use super::{InMemorySessionRegistry, SessionDescriptor, SessionRegistry};
@@ -64,6 +67,7 @@ mod tests {
                 external: None,
             },
             title: Some("shell".to_string()),
+            launch: Some(ShellLaunchSpec::new("/bin/sh")),
         };
 
         registry.insert(descriptor.clone());

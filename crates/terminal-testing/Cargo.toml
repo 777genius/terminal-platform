@@ -13,6 +13,7 @@ terminal-daemon-client = { path = "../terminal-daemon-client" }
 terminal-daemon = { path = "../terminal-daemon" }
 terminal-domain = { path = "../terminal-domain" }
 terminal-mux-domain = { path = "../terminal-mux-domain" }
+terminal-persistence = { path = "../terminal-persistence" }
 terminal-projection = { path = "../terminal-projection" }
 terminal-protocol = { path = "../terminal-protocol" }
 tokio = { workspace = true }

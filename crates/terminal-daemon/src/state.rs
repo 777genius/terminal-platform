@@ -187,6 +187,7 @@ mod tests {
         assert!(native.pane_input_write);
         assert!(native.layout_dump);
         assert!(native.layout_override);
+        assert!(native.explicit_session_save);
         assert!(native.rendered_viewport_stream);
     }
 

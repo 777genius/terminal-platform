@@ -29,6 +29,8 @@ use terminal_domain::PaneId;
 #[cfg(unix)]
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection};
 #[cfg(unix)]
+use terminal_persistence::SqliteSessionStore;
+#[cfg(unix)]
 use terminal_projection::ProjectionSource;
 use terminal_protocol::SubscriptionEvent;
 use terminal_testing::{daemon_fixture, daemon_fixture_with_state, daemon_state};
@@ -77,6 +79,7 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert!(native.capabilities.pane_input_write);
     assert!(native.capabilities.layout_dump);
     assert!(native.capabilities.layout_override);
+    assert!(native.capabilities.explicit_session_save);
     assert!(native.capabilities.rendered_viewport_stream);
     assert_eq!(tmux.backend, BackendKind::Tmux);
     assert!(tmux.capabilities.read_only_client_mode);
@@ -475,6 +478,128 @@ async fn bootstrap_smoke_streams_surface_updates_for_all_native_panes_after_resi
     assert_eq!(resized_updated.pane_id, resized_pane);
     assert!(original_updated.full_replace.is_some());
     assert!(resized_updated.full_replace.is_some());
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_saves_native_session_snapshot_to_store() {
+    let fixture = daemon_fixture("bootstrap-native-save").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SplitPane(SplitPaneSpec { pane_id, direction: SplitDirection::Vertical }),
+        )
+        .await
+        .expect("split pane should succeed");
+    let after_split = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_ids = collect_pane_ids(&after_split.tabs[0].root);
+    let new_pane = pane_ids
+        .iter()
+        .copied()
+        .find(|candidate| *candidate != pane_id)
+        .expect("new pane should exist");
+    wait_for_screen_line(&fixture, created.session.session_id, new_pane, "ready").await;
+
+    let save = fixture
+        .client
+        .dispatch(created.session.session_id, MuxCommand::SaveSession)
+        .await
+        .expect("save session should succeed");
+    let store = SqliteSessionStore::open_default().expect("default store should open");
+    let saved = store
+        .load_native_session(created.session.session_id)
+        .expect("load should succeed")
+        .expect("saved session should exist");
+
+    assert!(!save.changed);
+    assert_eq!(saved.session_id, created.session.session_id);
+    assert_eq!(saved.route.backend, BackendKind::Native);
+    assert_eq!(saved.title.as_deref(), Some("shell"));
+    assert_eq!(saved.topology.tabs.len(), 1);
+    assert_eq!(collect_pane_ids(&saved.topology.tabs[0].root).len(), 2);
+    assert_eq!(saved.screens.len(), 2);
+    assert!(saved.launch.is_some());
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_overwrites_native_session_snapshot_on_resave() {
+    let fixture = daemon_fixture("bootstrap-native-save-overwrite").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let tab_id = topology.focused_tab.expect("focused tab should exist");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    fixture
+        .client
+        .dispatch(created.session.session_id, MuxCommand::SaveSession)
+        .await
+        .expect("first save should succeed");
+    let store = SqliteSessionStore::open_default().expect("default store should open");
+    let first = store
+        .load_native_session(created.session.session_id)
+        .expect("first load should succeed")
+        .expect("saved session should exist");
+
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::RenameTab { tab_id, title: "shell-renamed".to_string() },
+        )
+        .await
+        .expect("rename tab should succeed");
+    fixture
+        .client
+        .dispatch(created.session.session_id, MuxCommand::SaveSession)
+        .await
+        .expect("second save should succeed");
+    let second = store
+        .load_native_session(created.session.session_id)
+        .expect("second load should succeed")
+        .expect("saved session should exist");
+
+    assert_eq!(first.title.as_deref(), Some("shell"));
+    assert_eq!(second.title.as_deref(), Some("shell-renamed"));
+    assert_eq!(second.topology.tabs[0].title.as_deref(), Some("shell-renamed"));
+    assert!(second.saved_at_ms >= first.saved_at_ms);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
