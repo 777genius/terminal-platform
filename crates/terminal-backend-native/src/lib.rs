@@ -52,6 +52,8 @@ impl MuxBackendPort for NativeBackend {
                 pane_paste_write: true,
                 rendered_viewport_stream: true,
                 rendered_viewport_snapshot: true,
+                layout_dump: true,
+                layout_override: true,
                 advisory_metadata_subscriptions: true,
                 ..BackendCapabilities::default()
             })
@@ -286,11 +288,12 @@ mod tests {
 
     use terminal_backend_api::BackendSubscriptionEvent;
     use terminal_backend_api::{
-        BackendScope, CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, ResizePaneSpec,
-        SendInputSpec, ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
+        BackendScope, CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec,
+        OverrideLayoutSpec, ResizePaneSpec, SendInputSpec, ShellLaunchSpec, SplitPaneSpec,
+        SubscriptionSpec,
     };
     use terminal_domain::BackendKind;
-    use terminal_mux_domain::SplitDirection;
+    use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection};
     use terminal_projection::ProjectionSource;
 
     use super::NativeBackend;
@@ -524,6 +527,82 @@ mod tests {
             target_after.cols + original_after.cols,
             target_before.cols + original_before.cols
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn overrides_native_layout_with_existing_pane_set() {
+        let backend = NativeBackend::default();
+        let binding = backend
+            .create_session(CreateSessionSpec {
+                title: Some("shell".to_string()),
+                launch: Some(cat_launch_spec()),
+            })
+            .await
+            .expect("native session should be created");
+        let session =
+            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let initial = session.topology_snapshot().await.expect("topology should succeed");
+        let tab_id = initial.tabs[0].tab_id;
+        let original_pane = initial.tabs[0].focused_pane.expect("focused pane should exist");
+
+        wait_for_screen_line(&*session, original_pane, "ready").await;
+        session
+            .dispatch(MuxCommand::SplitPane(SplitPaneSpec {
+                pane_id: original_pane,
+                direction: SplitDirection::Vertical,
+            }))
+            .await
+            .expect("split pane should succeed");
+        let after_split = session.topology_snapshot().await.expect("topology should succeed");
+        let pane_ids = collect_pane_ids(&after_split.tabs[0].root);
+        let new_pane = pane_ids
+            .iter()
+            .copied()
+            .find(|candidate| *candidate != original_pane)
+            .expect("new pane should exist");
+        wait_for_screen_line(&*session, new_pane, "ready").await;
+
+        let original_before =
+            session.screen_snapshot(original_pane).await.expect("screen snapshot should succeed");
+        let new_before =
+            session.screen_snapshot(new_pane).await.expect("screen snapshot should succeed");
+        let override_layout = PaneTreeNode::Split(PaneSplit {
+            direction: SplitDirection::Horizontal,
+            first: Box::new(PaneTreeNode::Leaf { pane_id: original_pane }),
+            second: Box::new(PaneTreeNode::Leaf { pane_id: new_pane }),
+        });
+        let override_result = session
+            .dispatch(MuxCommand::OverrideLayout(OverrideLayoutSpec {
+                tab_id,
+                root: override_layout.clone(),
+            }))
+            .await
+            .expect("layout override should succeed");
+        let invalid_override = session
+            .dispatch(MuxCommand::OverrideLayout(OverrideLayoutSpec {
+                tab_id,
+                root: PaneTreeNode::Split(PaneSplit {
+                    direction: SplitDirection::Horizontal,
+                    first: Box::new(PaneTreeNode::Leaf { pane_id: original_pane }),
+                    second: Box::new(PaneTreeNode::Leaf { pane_id: original_pane }),
+                }),
+            }))
+            .await
+            .expect_err("duplicate pane ids should be rejected");
+        let after_override = session.topology_snapshot().await.expect("topology should succeed");
+        let original_after =
+            session.screen_snapshot(original_pane).await.expect("screen snapshot should succeed");
+        let new_after =
+            session.screen_snapshot(new_pane).await.expect("screen snapshot should succeed");
+
+        assert!(override_result.changed);
+        assert_eq!(after_override.tabs[0].root, override_layout);
+        assert!(original_after.rows < original_before.rows);
+        assert!(new_after.rows < new_before.rows);
+        assert!(original_after.cols > original_before.cols);
+        assert!(new_after.cols > new_before.cols);
+        assert_eq!(invalid_override.kind, terminal_backend_api::BackendErrorKind::InvalidInput);
     }
 
     #[cfg(unix)]

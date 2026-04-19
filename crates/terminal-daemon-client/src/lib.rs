@@ -447,6 +447,8 @@ mod tests {
         assert!(native.capabilities.pane_close);
         assert!(native.capabilities.pane_focus);
         assert!(native.capabilities.pane_input_write);
+        assert!(native.capabilities.layout_dump);
+        assert!(native.capabilities.layout_override);
         assert!(native.capabilities.rendered_viewport_stream);
         assert_eq!(zellij.backend, BackendKind::Zellij);
         assert!(zellij.capabilities.read_only_client_mode);

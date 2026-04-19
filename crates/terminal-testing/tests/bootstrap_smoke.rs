@@ -10,8 +10,8 @@ use std::{
 #[cfg(unix)]
 use terminal_application::BackendCatalog;
 use terminal_backend_api::{
-    CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, ResizePaneSpec, SendInputSpec,
-    ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
+    CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, OverrideLayoutSpec, ResizePaneSpec,
+    SendInputSpec, ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
 };
 #[cfg(unix)]
 use terminal_backend_native::NativeBackend;
@@ -27,7 +27,7 @@ use terminal_domain::DegradedModeReason;
 #[cfg(unix)]
 use terminal_domain::PaneId;
 #[cfg(unix)]
-use terminal_mux_domain::{PaneTreeNode, SplitDirection};
+use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection};
 #[cfg(unix)]
 use terminal_projection::ProjectionSource;
 use terminal_protocol::SubscriptionEvent;
@@ -75,6 +75,8 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert!(native.capabilities.pane_close);
     assert!(native.capabilities.pane_focus);
     assert!(native.capabilities.pane_input_write);
+    assert!(native.capabilities.layout_dump);
+    assert!(native.capabilities.layout_override);
     assert!(native.capabilities.rendered_viewport_stream);
     assert_eq!(tmux.backend, BackendKind::Tmux);
     assert!(tmux.capabilities.read_only_client_mode);
@@ -682,6 +684,119 @@ async fn bootstrap_smoke_resizes_native_split_panes_through_layout_ratios() {
     assert!(target_after.cols > target_before.cols);
     assert!(original_after.cols < original_before.cols);
     assert_eq!(target_after.cols + original_after.cols, target_before.cols + original_before.cols);
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_overrides_native_layout_via_dispatch() {
+    let fixture = daemon_fixture("bootstrap-native-layout-override").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let initial = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let tab_id = initial.tabs[0].tab_id;
+    let original_pane = initial.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, original_pane, "ready").await;
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SplitPane(SplitPaneSpec {
+                pane_id: original_pane,
+                direction: SplitDirection::Vertical,
+            }),
+        )
+        .await
+        .expect("split pane should succeed");
+    let after_split = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_ids = collect_pane_ids(&after_split.tabs[0].root);
+    let new_pane = pane_ids
+        .iter()
+        .copied()
+        .find(|candidate| *candidate != original_pane)
+        .expect("new pane should exist");
+    wait_for_screen_line(&fixture, created.session.session_id, new_pane, "ready").await;
+
+    let original_before = fixture
+        .client
+        .screen_snapshot(created.session.session_id, original_pane)
+        .await
+        .expect("screen_snapshot should succeed");
+    let new_before = fixture
+        .client
+        .screen_snapshot(created.session.session_id, new_pane)
+        .await
+        .expect("screen_snapshot should succeed");
+    let override_layout = PaneTreeNode::Split(PaneSplit {
+        direction: SplitDirection::Horizontal,
+        first: Box::new(PaneTreeNode::Leaf { pane_id: original_pane }),
+        second: Box::new(PaneTreeNode::Leaf { pane_id: new_pane }),
+    });
+    let override_result = fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::OverrideLayout(OverrideLayoutSpec {
+                tab_id,
+                root: override_layout.clone(),
+            }),
+        )
+        .await
+        .expect("layout override should succeed");
+    let invalid_override = fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::OverrideLayout(OverrideLayoutSpec {
+                tab_id,
+                root: PaneTreeNode::Split(PaneSplit {
+                    direction: SplitDirection::Horizontal,
+                    first: Box::new(PaneTreeNode::Leaf { pane_id: original_pane }),
+                    second: Box::new(PaneTreeNode::Leaf { pane_id: original_pane }),
+                }),
+            }),
+        )
+        .await
+        .expect_err("duplicate pane ids should be rejected");
+    let after_override = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let original_after = fixture
+        .client
+        .screen_snapshot(created.session.session_id, original_pane)
+        .await
+        .expect("screen_snapshot should succeed");
+    let new_after = fixture
+        .client
+        .screen_snapshot(created.session.session_id, new_pane)
+        .await
+        .expect("screen_snapshot should succeed");
+
+    assert!(override_result.changed);
+    assert_eq!(after_override.tabs[0].root, override_layout);
+    assert!(original_after.rows < original_before.rows);
+    assert!(new_after.rows < new_before.rows);
+    assert!(original_after.cols > original_before.cols);
+    assert!(new_after.cols > new_before.cols);
+    assert_eq!(invalid_override.code, "backend_invalid_input");
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

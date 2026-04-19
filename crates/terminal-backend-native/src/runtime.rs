@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     io::{Read as _, Write as _},
     sync::{Arc, Mutex},
     thread,
@@ -8,7 +8,8 @@ use std::{
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use terminal_backend_api::{
     BackendError, BackendSessionSummary, CreateSessionSpec, MuxCommand, MuxCommandResult,
-    NewTabSpec, ResizePaneSpec, SendInputSpec, SendPasteSpec, ShellLaunchSpec, SplitPaneSpec,
+    NewTabSpec, OverrideLayoutSpec, ResizePaneSpec, SendInputSpec, SendPasteSpec, ShellLaunchSpec,
+    SplitPaneSpec,
 };
 use terminal_domain::{PaneId, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
@@ -202,9 +203,10 @@ impl NativeSessionRuntime {
                 };
                 (changed, surface_updates)
             }
+            MuxCommand::OverrideLayout(spec) => dispatch_override_layout(&mut state, spec)?,
             MuxCommand::SendInput(spec) => (dispatch_send_input(&state, spec)?, Vec::new()),
             MuxCommand::SendPaste(spec) => (dispatch_send_paste(&state, spec)?, Vec::new()),
-            MuxCommand::Detach | MuxCommand::SaveSession | MuxCommand::OverrideLayout(_) => {
+            MuxCommand::Detach | MuxCommand::SaveSession => {
                 return Err(BackendError::unsupported(
                     "native mux command is not wired in v1 start phase",
                     terminal_domain::DegradedModeReason::NotYetImplemented,
@@ -472,6 +474,18 @@ impl NativeTabRuntime {
 }
 
 impl NativePaneLayoutNode {
+    fn from_snapshot(root: PaneTreeNode) -> Self {
+        match root {
+            PaneTreeNode::Leaf { pane_id } => Self::Leaf { pane_id },
+            PaneTreeNode::Split(split) => Self::Split(NativePaneLayoutSplit {
+                direction: split.direction,
+                ratio_bps: DEFAULT_SPLIT_RATIO_BPS,
+                first: Box::new(Self::from_snapshot(*split.first)),
+                second: Box::new(Self::from_snapshot(*split.second)),
+            }),
+        }
+    }
+
     fn snapshot(&self) -> PaneTreeNode {
         match self {
             Self::Leaf { pane_id } => PaneTreeNode::Leaf { pane_id: *pane_id },
@@ -936,6 +950,68 @@ fn dispatch_resize_pane(
 
     reflow_tab_layout(tab, state.rows, state.cols)?;
     Ok(true)
+}
+
+fn dispatch_override_layout(
+    state: &mut NativeSessionState,
+    spec: OverrideLayoutSpec,
+) -> Result<(bool, Vec<PaneId>), BackendError> {
+    let tab = state
+        .tabs
+        .iter_mut()
+        .find(|tab| tab.tab_id == spec.tab_id)
+        .ok_or_else(|| BackendError::not_found(format!("unknown tab {:?}", spec.tab_id)))?;
+    let current_snapshot = tab.root.snapshot();
+    if current_snapshot == spec.root {
+        return Ok((false, Vec::new()));
+    }
+
+    validate_layout_override(tab, &spec.root)?;
+    tab.root = NativePaneLayoutNode::from_snapshot(spec.root);
+    if !tab.contains_pane(tab.focused_pane) {
+        tab.focused_pane = tab
+            .first_pane_id()
+            .ok_or_else(|| BackendError::internal("native layout override lost all panes"))?;
+    }
+    reflow_tab_layout(tab, state.rows, state.cols)?;
+
+    Ok((true, tab.pane_ids()))
+}
+
+fn validate_layout_override(
+    tab: &NativeTabRuntime,
+    root: &PaneTreeNode,
+) -> Result<(), BackendError> {
+    let current_panes: HashSet<_> = tab.pane_ids().into_iter().collect();
+    let requested_panes = collect_snapshot_pane_ids(root);
+    let requested_unique: HashSet<_> = requested_panes.iter().copied().collect();
+
+    if requested_panes.len() != requested_unique.len() {
+        return Err(BackendError::invalid_input("layout override contains duplicate pane ids"));
+    }
+    if current_panes != requested_unique {
+        return Err(BackendError::invalid_input(
+            "layout override must preserve the exact pane set for the target tab",
+        ));
+    }
+
+    Ok(())
+}
+
+fn collect_snapshot_pane_ids(root: &PaneTreeNode) -> Vec<PaneId> {
+    let mut pane_ids = Vec::new();
+    collect_snapshot_pane_ids_inner(root, &mut pane_ids);
+    pane_ids
+}
+
+fn collect_snapshot_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
+    match root {
+        PaneTreeNode::Leaf { pane_id } => pane_ids.push(*pane_id),
+        PaneTreeNode::Split(split) => {
+            collect_snapshot_pane_ids_inner(&split.first, pane_ids);
+            collect_snapshot_pane_ids_inner(&split.second, pane_ids);
+        }
+    }
 }
 
 fn dispatch_send_input(

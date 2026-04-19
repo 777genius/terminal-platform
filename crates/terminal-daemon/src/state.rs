@@ -185,6 +185,8 @@ mod tests {
         assert!(native.pane_close);
         assert!(native.pane_focus);
         assert!(native.pane_input_write);
+        assert!(native.layout_dump);
+        assert!(native.layout_override);
         assert!(native.rendered_viewport_stream);
     }
 
