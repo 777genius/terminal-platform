@@ -590,11 +590,19 @@ async fn bootstrap_smoke_lists_and_loads_saved_native_sessions_via_daemon_api() 
     assert_eq!(saved_summary.tab_count, 1);
     assert_eq!(saved_summary.pane_count, 1);
     assert!(saved_summary.has_launch);
+    assert!(saved_summary.restore_semantics.restores_topology);
+    assert!(saved_summary.restore_semantics.uses_saved_launch_spec);
+    assert!(!saved_summary.restore_semantics.replays_saved_screen_buffers);
+    assert!(!saved_summary.restore_semantics.preserves_process_state);
     assert_eq!(loaded.session.session_id, created.session.session_id);
     assert_eq!(loaded.session.topology.backend_kind, BackendKind::Native);
     assert_eq!(loaded.session.topology.tabs.len(), 1);
     assert_eq!(loaded.session.screens.len(), 1);
     assert_eq!(loaded.session.launch, Some(cat_launch_spec()));
+    assert!(loaded.session.restore_semantics.restores_focus_state);
+    assert!(loaded.session.restore_semantics.restores_tab_titles);
+    assert!(!loaded.session.restore_semantics.replays_saved_screen_buffers);
+    assert!(!loaded.session.restore_semantics.preserves_process_state);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
@@ -726,9 +734,14 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     wait_for_screen_line(&fixture, restored.session.session_id, restored_second_pane, "ready")
         .await;
 
+    assert_eq!(restored.saved_session_id, created.session.session_id);
     assert_ne!(restored.session.session_id, created.session.session_id);
     assert_eq!(restored.session.route.backend, BackendKind::Native);
     assert_eq!(restored.session.title.as_deref(), Some("logs"));
+    assert!(restored.restore_semantics.restores_topology);
+    assert!(restored.restore_semantics.uses_saved_launch_spec);
+    assert!(!restored.restore_semantics.replays_saved_screen_buffers);
+    assert!(!restored.restore_semantics.preserves_process_state);
     assert_eq!(restored_topology.tabs.len(), 2);
     assert_eq!(collect_pane_ids(&first_restored_tab.root).len(), 2);
     assert_eq!(collect_pane_ids(&second_restored_tab.root).len(), 1);

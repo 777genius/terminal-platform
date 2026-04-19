@@ -23,6 +23,17 @@ pub struct SavedSessionSummary {
     pub has_launch: bool,
     pub tab_count: usize,
     pub pane_count: usize,
+    pub restore_semantics: SavedSessionRestoreSemantics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedSessionRestoreSemantics {
+    pub restores_topology: bool,
+    pub restores_focus_state: bool,
+    pub restores_tab_titles: bool,
+    pub uses_saved_launch_spec: bool,
+    pub replays_saved_screen_buffers: bool,
+    pub preserves_process_state: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +45,7 @@ pub struct SavedSessionRecord {
     pub topology: TopologySnapshot,
     pub screens: Vec<ScreenSnapshot>,
     pub saved_at_ms: i64,
+    pub restore_semantics: SavedSessionRestoreSemantics,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,7 +60,9 @@ pub struct SavedSessionResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestoreSavedSessionResponse {
+    pub saved_session_id: SessionId,
     pub session: BackendSessionSummary,
+    pub restore_semantics: SavedSessionRestoreSemantics,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

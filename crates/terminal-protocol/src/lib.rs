@@ -19,7 +19,7 @@ pub use responses::{
     BackendCapabilitiesResponse, CreateSessionResponse, DeleteSavedSessionResponse,
     DiscoverSessionsResponse, ImportSessionResponse, ListSavedSessionsResponse,
     ListSessionsResponse, OpenSubscriptionResponse, ResponsePayload, RestoreSavedSessionResponse,
-    SavedSessionRecord, SavedSessionResponse, SavedSessionSummary,
+    SavedSessionRecord, SavedSessionResponse, SavedSessionRestoreSemantics, SavedSessionSummary,
 };
 pub use subscriptions::{SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope};
 pub use transport::{LocalSocketAddress, TransportResponse, decode_json_frame, encode_json_frame};

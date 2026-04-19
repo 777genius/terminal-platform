@@ -4,7 +4,8 @@ use terminal_protocol::{
     DiscoverSessionsResponse, ImportSessionResponse, ListSavedSessionsResponse,
     ListSessionsResponse, OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError,
     RequestEnvelope, RequestPayload, ResponseEnvelope, ResponsePayload,
-    RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionResponse, SavedSessionSummary,
+    RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionResponse,
+    SavedSessionRestoreSemantics, SavedSessionSummary,
 };
 
 use crate::TerminalDaemonState;
@@ -91,12 +92,16 @@ impl TerminalDaemon {
                 })
             }
             RequestPayload::RestoreSavedSession(request) => {
+                let saved =
+                    self.state.saved_session(request.session_id).map_err(map_backend_error)?;
                 ResponsePayload::RestoreSavedSession(RestoreSavedSessionResponse {
                     session: self
                         .state
                         .restore_saved_session(request.session_id)
                         .await
                         .map_err(map_backend_error)?,
+                    saved_session_id: request.session_id,
+                    restore_semantics: saved_session_restore_semantics(saved.launch.is_some()),
                 })
             }
             RequestPayload::GetTopologySnapshot(request) => ResponsePayload::TopologySnapshot(
@@ -178,12 +183,14 @@ fn map_saved_session_summary(
         has_launch: session.has_launch,
         tab_count: session.tab_count,
         pane_count: session.pane_count,
+        restore_semantics: saved_session_restore_semantics(session.has_launch),
     }
 }
 
 fn map_saved_session_record(
     session: terminal_persistence::SavedNativeSession,
 ) -> SavedSessionRecord {
+    let has_launch = session.launch.is_some();
     SavedSessionRecord {
         session_id: session.session_id,
         route: session.route,
@@ -192,6 +199,18 @@ fn map_saved_session_record(
         topology: session.topology,
         screens: session.screens,
         saved_at_ms: session.saved_at_ms,
+        restore_semantics: saved_session_restore_semantics(has_launch),
+    }
+}
+
+fn saved_session_restore_semantics(has_launch: bool) -> SavedSessionRestoreSemantics {
+    SavedSessionRestoreSemantics {
+        restores_topology: true,
+        restores_focus_state: true,
+        restores_tab_titles: true,
+        uses_saved_launch_spec: has_launch,
+        replays_saved_screen_buffers: false,
+        preserves_process_state: false,
     }
 }
 
@@ -332,7 +351,15 @@ mod tests {
 
         match listed.payload {
             ResponsePayload::ListSavedSessions(listed) => {
-                assert!(listed.sessions.iter().any(|session| session.session_id == session_id));
+                let session = listed
+                    .sessions
+                    .iter()
+                    .find(|session| session.session_id == session_id)
+                    .expect("saved session should be listed");
+                assert!(session.restore_semantics.restores_topology);
+                assert!(!session.restore_semantics.uses_saved_launch_spec);
+                assert!(!session.restore_semantics.replays_saved_screen_buffers);
+                assert!(!session.restore_semantics.preserves_process_state);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }
@@ -340,6 +367,10 @@ mod tests {
             ResponsePayload::SavedSession(saved) => {
                 assert_eq!(saved.session.session_id, session_id);
                 assert_eq!(saved.session.route.backend, terminal_domain::BackendKind::Native);
+                assert!(saved.session.restore_semantics.restores_focus_state);
+                assert!(saved.session.restore_semantics.restores_tab_titles);
+                assert!(!saved.session.restore_semantics.replays_saved_screen_buffers);
+                assert!(!saved.session.restore_semantics.preserves_process_state);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }
@@ -452,8 +483,13 @@ mod tests {
 
         match restored.payload {
             ResponsePayload::RestoreSavedSession(restored) => {
+                assert_eq!(restored.saved_session_id, session_id);
                 assert_ne!(restored.session.session_id, session_id);
                 assert_eq!(restored.session.route.backend, terminal_domain::BackendKind::Native);
+                assert!(restored.restore_semantics.restores_topology);
+                assert!(!restored.restore_semantics.uses_saved_launch_spec);
+                assert!(!restored.restore_semantics.replays_saved_screen_buffers);
+                assert!(!restored.restore_semantics.preserves_process_state);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }
