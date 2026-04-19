@@ -230,6 +230,9 @@ mod tests {
         assert_eq!(delta.from_sequence, screen.sequence);
         assert_eq!(delta.to_sequence, screen.sequence);
         assert_eq!(delta.source, ProjectionSource::NativeEmulator);
+        assert_eq!(delta.rows, screen.rows);
+        assert_eq!(delta.cols, screen.cols);
+        assert!(delta.patch.is_none());
         assert!(delta.full_replace.is_none());
     }
 
@@ -297,11 +300,53 @@ mod tests {
             .screen_delta(pane_id, before.sequence)
             .await
             .expect("screen delta should succeed");
+        let patch = delta.patch.expect("delta patch should exist");
 
         assert_eq!(delta.pane_id, pane_id);
         assert_eq!(delta.from_sequence, before.sequence);
-        assert!(delta.to_sequence >= before.sequence);
-        assert!(delta.full_replace.is_some());
+        assert!(delta.to_sequence > before.sequence);
+        assert!(
+            patch
+                .line_updates
+                .iter()
+                .any(|line| line.line.text.contains("hello from backend test"))
+        );
+        assert!(delta.full_replace.is_none());
+    }
+
+    #[tokio::test]
+    async fn emits_screen_delta_for_tab_title_changes() {
+        let backend = NativeBackend::default();
+        let binding = backend
+            .create_session(CreateSessionSpec {
+                title: Some("shell".to_string()),
+                ..CreateSessionSpec::default()
+            })
+            .await
+            .expect("native session should be created");
+        let session =
+            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let topology = session.topology_snapshot().await.expect("topology should succeed");
+        let tab_id = topology.tabs[0].tab_id;
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        let before =
+            session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
+
+        let result = session
+            .dispatch(MuxCommand::RenameTab { tab_id, title: "renamed".to_string() })
+            .await
+            .expect("rename tab should succeed");
+        let delta = session
+            .screen_delta(pane_id, before.sequence)
+            .await
+            .expect("screen delta should succeed");
+        let patch = delta.patch.expect("delta patch should exist");
+
+        assert!(result.changed);
+        assert!(delta.to_sequence > before.sequence);
+        assert!(patch.title_changed);
+        assert_eq!(patch.title.as_deref(), Some("renamed"));
+        assert!(delta.full_replace.is_none());
     }
 
     #[cfg(unix)]

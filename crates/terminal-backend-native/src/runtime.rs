@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     io::{Read as _, Write as _},
     sync::{Arc, Mutex},
     thread,
@@ -17,6 +18,7 @@ use crate::{emulator::EmulatorBuffer, transcript::TranscriptBuffer};
 
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
+const SNAPSHOT_HISTORY_LIMIT: usize = 64;
 
 pub(super) struct NativeSessionRuntime {
     session_id: SessionId,
@@ -30,7 +32,6 @@ struct NativeSessionState {
     focused_tab: TabId,
     rows: u16,
     cols: u16,
-    topology_sequence: u64,
 }
 
 struct NativeTabRuntime {
@@ -43,7 +44,13 @@ struct NativePaneRuntime {
     pane_id: PaneId,
     emulator: Arc<EmulatorBuffer>,
     _transcript: Arc<TranscriptBuffer>,
+    projection: Mutex<NativeProjectionState>,
     process: Mutex<NativePtyProcess>,
+}
+
+#[derive(Default)]
+struct NativeProjectionState {
+    history: VecDeque<ScreenSnapshot>,
 }
 
 struct NativePtyProcess {
@@ -71,7 +78,6 @@ impl NativeSessionRuntime {
                 tabs: vec![first_tab],
                 rows: DEFAULT_ROWS,
                 cols: DEFAULT_COLS,
-                topology_sequence: 0,
             }),
         })
     }
@@ -101,31 +107,18 @@ impl NativeSessionRuntime {
     }
 
     pub(super) fn screen_snapshot(&self, pane_id: PaneId) -> Result<ScreenSnapshot, BackendError> {
-        let (title, rows, cols, emulator) = {
-            let state = self.lock_state()?;
-            let tab = state
-                .tabs
-                .iter()
-                .find(|tab| tab.pane.pane_id == pane_id)
-                .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
+        let state = self.lock_state()?;
+        let tab = state
+            .tabs
+            .iter()
+            .find(|tab| tab.pane.pane_id == pane_id)
+            .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
 
-            (
-                tab.title.clone().or_else(|| state.summary.title.clone()),
-                state.rows,
-                state.cols,
-                Arc::clone(&tab.pane.emulator),
-            )
-        };
-        let rendered = emulator.render(title.clone());
-
-        Ok(ScreenSnapshot {
-            pane_id,
-            sequence: rendered.sequence,
-            rows,
-            cols,
-            source: ProjectionSource::NativeEmulator,
-            surface: rendered.surface,
-        })
+        tab.pane.render_snapshot(
+            tab.title.clone().or_else(|| state.summary.title.clone()),
+            state.rows,
+            state.cols,
+        )
     }
 
     pub(super) fn screen_delta(
@@ -133,17 +126,19 @@ impl NativeSessionRuntime {
         pane_id: PaneId,
         from_sequence: u64,
     ) -> Result<ScreenDelta, BackendError> {
-        let snapshot = self.screen_snapshot(pane_id)?;
-        let full_replace =
-            if snapshot.sequence == from_sequence { None } else { Some(snapshot.surface) };
+        let state = self.lock_state()?;
+        let tab = state
+            .tabs
+            .iter()
+            .find(|tab| tab.pane.pane_id == pane_id)
+            .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
 
-        Ok(ScreenDelta {
-            pane_id,
+        tab.pane.screen_delta(
+            tab.title.clone().or_else(|| state.summary.title.clone()),
+            state.rows,
+            state.cols,
             from_sequence,
-            to_sequence: snapshot.sequence,
-            source: snapshot.source,
-            full_replace,
-        })
+        )
     }
 
     pub(super) fn dispatch(&self, command: MuxCommand) -> Result<MuxCommandResult, BackendError> {
@@ -171,11 +166,6 @@ impl NativeSessionRuntime {
                 ));
             }
         };
-
-        if changed {
-            state.topology_sequence += 1;
-        }
-
         Ok(MuxCommandResult { changed })
     }
 
@@ -256,6 +246,7 @@ fn spawn_tab(
             pane_id: PaneId::new(),
             emulator,
             _transcript: transcript,
+            projection: Mutex::new(NativeProjectionState::default()),
             process: Mutex::new(NativePtyProcess { master: pty_pair.master, writer, child }),
         },
     })
@@ -291,6 +282,72 @@ fn spawn_reader_thread(
             }
         }
     });
+}
+
+impl NativePaneRuntime {
+    fn render_snapshot(
+        &self,
+        title: Option<String>,
+        rows: u16,
+        cols: u16,
+    ) -> Result<ScreenSnapshot, BackendError> {
+        let rendered = self.emulator.render(title.clone());
+        let mut projection = self
+            .projection
+            .lock()
+            .map_err(|_| BackendError::internal("native pane projection state lock poisoned"))?;
+
+        if let Some(current) = projection.history.back()
+            && current.rows == rows
+            && current.cols == cols
+            && current.source == ProjectionSource::NativeEmulator
+            && current.surface == rendered.surface
+        {
+            return Ok(current.clone());
+        }
+
+        let sequence = projection.history.back().map_or(1, |snapshot| snapshot.sequence + 1);
+        let snapshot = ScreenSnapshot {
+            pane_id: self.pane_id,
+            sequence,
+            rows,
+            cols,
+            source: ProjectionSource::NativeEmulator,
+            surface: rendered.surface,
+        };
+
+        projection.history.push_back(snapshot.clone());
+        while projection.history.len() > SNAPSHOT_HISTORY_LIMIT {
+            projection.history.pop_front();
+        }
+
+        Ok(snapshot)
+    }
+
+    fn screen_delta(
+        &self,
+        title: Option<String>,
+        rows: u16,
+        cols: u16,
+        from_sequence: u64,
+    ) -> Result<ScreenDelta, BackendError> {
+        let current = self.render_snapshot(title, rows, cols)?;
+        if current.sequence == from_sequence {
+            return Ok(ScreenDelta::unchanged_from(&current));
+        }
+
+        let projection = self
+            .projection
+            .lock()
+            .map_err(|_| BackendError::internal("native pane projection state lock poisoned"))?;
+        let previous =
+            projection.history.iter().find(|snapshot| snapshot.sequence == from_sequence);
+
+        Ok(match previous {
+            Some(previous) => ScreenDelta::between(previous, &current),
+            None => ScreenDelta::full_replace(from_sequence, &current),
+        })
+    }
 }
 
 fn dispatch_new_tab(

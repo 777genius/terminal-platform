@@ -15,12 +15,10 @@ pub(super) struct EmulatorBuffer {
 struct EmulatorState {
     term: Term<VoidListener>,
     parser: ansi::Processor,
-    sequence: u64,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct RenderedEmulator {
-    pub sequence: u64,
     pub surface: ScreenSurface,
 }
 
@@ -55,9 +53,7 @@ impl EmulatorBuffer {
         let dimensions = TerminalDimensions::new(rows, cols);
         let term = Term::new(Config::default(), &dimensions, VoidListener);
 
-        Self {
-            inner: Mutex::new(EmulatorState { term, parser: ansi::Processor::new(), sequence: 0 }),
-        }
+        Self { inner: Mutex::new(EmulatorState { term, parser: ansi::Processor::new() }) }
     }
 
     pub(super) fn advance(&self, chunk: &[u8]) {
@@ -66,23 +62,20 @@ impl EmulatorBuffer {
         }
 
         if let Ok(mut state) = self.inner.lock() {
-            let EmulatorState { term, parser, sequence } = &mut *state;
+            let EmulatorState { term, parser } = &mut *state;
             parser.advance(term, chunk);
-            *sequence += 1;
         }
     }
 
     pub(super) fn resize(&self, rows: u16, cols: u16) {
         if let Ok(mut state) = self.inner.lock() {
             state.term.resize(TerminalDimensions::new(rows, cols));
-            state.sequence += 1;
         }
     }
 
     pub(super) fn render(&self, title: Option<String>) -> RenderedEmulator {
         let Ok(state) = self.inner.lock() else {
             return RenderedEmulator {
-                sequence: 0,
                 surface: ScreenSurface {
                     title,
                     cursor: Some(ScreenCursor { row: 0, col: 0 }),
@@ -130,9 +123,6 @@ impl EmulatorBuffer {
             .ok()
             .map(|row| ScreenCursor { row: row as u16, col: content.cursor.point.column.0 as u16 });
 
-        RenderedEmulator {
-            sequence: state.sequence,
-            surface: ScreenSurface { title, cursor, lines: rendered_lines },
-        }
+        RenderedEmulator { surface: ScreenSurface { title, cursor, lines: rendered_lines } }
     }
 }

@@ -69,6 +69,9 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
     assert_eq!(topology.session_id, created.session.session_id);
     assert_eq!(screen.pane_id, pane_id);
     assert!(!screen.surface.lines.is_empty());
+    assert_eq!(delta.rows, screen.rows);
+    assert_eq!(delta.cols, screen.cols);
+    assert!(delta.patch.is_none());
     assert_eq!(delta.from_sequence, screen.sequence);
     assert_eq!(delta.to_sequence, screen.sequence);
     assert!(delta.full_replace.is_none());
@@ -122,11 +125,13 @@ async fn bootstrap_smoke_roundtrips_live_pty_io() {
         .screen_delta(created.session.session_id, pane_id, before.sequence)
         .await
         .expect("screen_delta should succeed");
+    let patch = delta.patch.expect("delta patch should exist");
 
     assert_eq!(delta.pane_id, pane_id);
     assert_eq!(delta.from_sequence, before.sequence);
-    assert!(delta.to_sequence >= before.sequence);
-    assert!(delta.full_replace.is_some());
+    assert!(delta.to_sequence > before.sequence);
+    assert!(patch.line_updates.iter().any(|line| line.line.text.contains("hello from smoke")));
+    assert!(delta.full_replace.is_none());
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

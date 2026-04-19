@@ -179,6 +179,9 @@ mod tests {
         assert_eq!(delta.pane_id, pane_id);
         assert_eq!(delta.from_sequence, snapshot.sequence);
         assert_eq!(delta.to_sequence, snapshot.sequence);
+        assert_eq!(delta.rows, snapshot.rows);
+        assert_eq!(delta.cols, snapshot.cols);
+        assert!(delta.patch.is_none());
         assert!(delta.full_replace.is_none());
     }
 
