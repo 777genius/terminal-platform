@@ -17,4 +17,5 @@ workspace = true
 
 [dev-dependencies]
 terminal-daemon = { path = "../terminal-daemon" }
+terminal-persistence = { path = "../terminal-persistence" }
 tokio = { workspace = true }

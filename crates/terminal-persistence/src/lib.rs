@@ -61,6 +61,12 @@ pub struct SavedSessionSummary {
     pub pane_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrunedSavedSessions {
+    pub deleted_count: usize,
+    pub kept_count: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct SqliteSessionStore {
     path: PathBuf,
@@ -213,6 +219,33 @@ impl SqliteSessionStore {
         )?;
 
         Ok(deleted > 0)
+    }
+
+    pub fn prune_native_sessions(
+        &self,
+        keep_latest: usize,
+    ) -> Result<PrunedSavedSessions, PersistenceError> {
+        let mut connection = self.open_connection()?;
+        let transaction = connection.transaction()?;
+        let deleted_count = transaction.execute(
+            "
+            DELETE FROM native_saved_sessions
+            WHERE session_id IN (
+                SELECT session_id
+                FROM native_saved_sessions
+                ORDER BY saved_at_ms DESC, session_id DESC
+                LIMIT -1 OFFSET ?1
+            )
+            ",
+            params![keep_latest as i64],
+        )?;
+        let kept_count =
+            transaction.query_row("SELECT COUNT(*) FROM native_saved_sessions", [], |row| {
+                row.get::<_, i64>(0)
+            })? as usize;
+        transaction.commit()?;
+
+        Ok(PrunedSavedSessions { deleted_count, kept_count })
     }
 
     pub fn list_native_sessions(&self) -> Result<Vec<SavedSessionSummary>, PersistenceError> {
@@ -430,6 +463,36 @@ mod tests {
         assert!(store.delete_native_session(session_id).expect("delete should succeed"));
         assert!(store.load_native_session(session_id).expect("load should succeed").is_none());
         assert!(!store.delete_native_session(session_id).expect("delete should succeed"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn prunes_saved_native_sessions_to_latest_count() {
+        let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+        let path =
+            std::env::temp_dir().join(format!("terminal-platform-prune-test-{nonce}.sqlite3"));
+        let store = SqliteSessionStore::open(&path).expect("store should open");
+        let oldest_session = SessionId::new();
+        let middle_session = SessionId::new();
+        let newest_session = SessionId::new();
+        let oldest = sample_snapshot(oldest_session, "older", "first");
+        let mut middle = sample_snapshot(middle_session, "middle", "second");
+        middle.saved_at_ms = oldest.saved_at_ms + 1;
+        let mut newest = sample_snapshot(newest_session, "newest", "third");
+        newest.saved_at_ms = oldest.saved_at_ms + 2;
+
+        store.save_native_session(&oldest).expect("oldest save should succeed");
+        store.save_native_session(&middle).expect("middle save should succeed");
+        store.save_native_session(&newest).expect("newest save should succeed");
+
+        let pruned = store.prune_native_sessions(1).expect("prune should succeed");
+        let listed = store.list_native_sessions().expect("list should succeed");
+
+        assert_eq!(pruned.deleted_count, 2);
+        assert_eq!(pruned.kept_count, 1);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].session_id, newest_session);
 
         let _ = std::fs::remove_file(path);
     }

@@ -35,7 +35,9 @@ use terminal_persistence::SqliteSessionStore;
 #[cfg(unix)]
 use terminal_projection::ProjectionSource;
 use terminal_protocol::SubscriptionEvent;
-use terminal_testing::{daemon_fixture, daemon_fixture_with_state, daemon_state};
+use terminal_testing::{
+    daemon_fixture, daemon_fixture_with_state, daemon_state, isolated_daemon_state,
+};
 
 #[test]
 fn bootstrap_smoke_exposes_empty_daemon_state() {
@@ -760,6 +762,60 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
         .find(|tab| tab.tab_id == focused_tab)
         .expect("focused tab should exist");
     assert_eq!(focused_tab.title.as_deref(), Some("logs"));
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_prunes_saved_native_sessions_via_daemon_api() {
+    let fixture = daemon_fixture_with_state(
+        "bootstrap-native-prune-saved",
+        isolated_daemon_state("bootstrap-native-prune-saved"),
+    )
+    .expect("fixture should start");
+    let mut last_saved_session = None;
+
+    for title in ["shell-a", "shell-b", "shell-c"] {
+        let created = fixture
+            .client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some(title.to_string()),
+                    launch: Some(cat_launch_spec()),
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+        let topology = fixture
+            .client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+        fixture
+            .client
+            .dispatch(created.session.session_id, MuxCommand::SaveSession)
+            .await
+            .expect("save session should succeed");
+        last_saved_session = Some(created.session.session_id);
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    let pruned =
+        fixture.client.prune_saved_sessions(1).await.expect("prune_saved_sessions should succeed");
+    let listed =
+        fixture.client.list_saved_sessions().await.expect("list_saved_sessions should succeed");
+
+    assert_eq!(pruned.deleted_count, 2);
+    assert_eq!(pruned.kept_count, 1);
+    assert_eq!(listed.sessions.len(), 1);
+    assert_eq!(
+        listed.sessions[0].session_id,
+        last_saved_session.expect("saved session id should exist")
+    );
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

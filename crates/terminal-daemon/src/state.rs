@@ -14,7 +14,8 @@ use terminal_domain::{
     SessionId, SessionRoute,
 };
 use terminal_persistence::{
-    SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary,
+    PrunedSavedSessions as PersistedPrunedSavedSessions, SavedNativeSession,
+    SavedSessionSummary as PersistedSavedSessionSummary, SqliteSessionStore,
 };
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{DaemonPhase, Handshake, ProtocolVersion};
@@ -33,6 +34,11 @@ impl TerminalDaemonState {
     #[must_use]
     pub fn new(backends: BackendCatalog) -> Self {
         Self { sessions: SessionService::new(backends) }
+    }
+
+    #[must_use]
+    pub fn with_default_persistence(persistence: SqliteSessionStore) -> Self {
+        Self { sessions: SessionService::with_persistence(default_backend_catalog(), persistence) }
     }
 
     #[must_use]
@@ -70,6 +76,13 @@ impl TerminalDaemonState {
 
     pub fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {
         self.sessions.delete_saved_session(session_id)
+    }
+
+    pub fn prune_saved_sessions(
+        &self,
+        keep_latest: usize,
+    ) -> Result<PersistedPrunedSavedSessions, BackendError> {
+        self.sessions.prune_saved_sessions(keep_latest)
     }
 
     pub async fn restore_saved_session(

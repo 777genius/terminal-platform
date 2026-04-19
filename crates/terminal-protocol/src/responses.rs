@@ -74,6 +74,12 @@ pub struct DeleteSavedSessionResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PruneSavedSessionsResponse {
+    pub deleted_count: usize,
+    pub kept_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateSessionResponse {
     pub session: BackendSessionSummary,
 }
@@ -111,6 +117,7 @@ pub enum ResponsePayload {
     ImportSession(ImportSessionResponse),
     SavedSession(SavedSessionResponse),
     DeleteSavedSession(DeleteSavedSessionResponse),
+    PruneSavedSessions(PruneSavedSessionsResponse),
     RestoreSavedSession(RestoreSavedSessionResponse),
     TopologySnapshot(TopologySnapshot),
     ScreenSnapshot(ScreenSnapshot),

@@ -3,7 +3,7 @@ use terminal_protocol::{
     BackendCapabilitiesResponse, CreateSessionResponse, DeleteSavedSessionResponse,
     DiscoverSessionsResponse, ImportSessionResponse, ListSavedSessionsResponse,
     ListSessionsResponse, OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError,
-    RequestEnvelope, RequestPayload, ResponseEnvelope, ResponsePayload,
+    PruneSavedSessionsResponse, RequestEnvelope, RequestPayload, ResponseEnvelope, ResponsePayload,
     RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionResponse,
     SavedSessionRestoreSemantics, SavedSessionSummary,
 };
@@ -89,6 +89,16 @@ impl TerminalDaemon {
                 self.state.delete_saved_session(request.session_id).map_err(map_backend_error)?;
                 ResponsePayload::DeleteSavedSession(DeleteSavedSessionResponse {
                     session_id: request.session_id,
+                })
+            }
+            RequestPayload::PruneSavedSessions(request) => {
+                let pruned = self
+                    .state
+                    .prune_saved_sessions(request.keep_latest)
+                    .map_err(map_backend_error)?;
+                ResponsePayload::PruneSavedSessions(PruneSavedSessionsResponse {
+                    deleted_count: pruned.deleted_count,
+                    kept_count: pruned.kept_count,
                 })
             }
             RequestPayload::RestoreSavedSession(request) => {
@@ -219,13 +229,30 @@ fn saved_session_restore_semantics(has_launch: bool) -> SavedSessionRestoreSeman
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec};
     use terminal_domain::{
         CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR, OperationId,
     };
+    use terminal_persistence::SqliteSessionStore;
     use terminal_protocol::{RequestEnvelope, RequestPayload, ResponsePayload};
 
     use super::TerminalDaemon;
+
+    fn isolated_daemon() -> TerminalDaemon {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let store = SqliteSessionStore::open(std::env::temp_dir().join(format!(
+            "terminal-platform-daemon-service-{}-{nanos}.sqlite3",
+            std::process::id()
+        )))
+        .expect("isolated sqlite session store should open");
+
+        TerminalDaemon::new(crate::TerminalDaemonState::with_default_persistence(store))
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_handshake_requests() {
@@ -501,6 +528,75 @@ mod tests {
                 assert!(!restored.restore_semantics.uses_saved_launch_spec);
                 assert!(!restored.restore_semantics.replays_saved_screen_buffers);
                 assert!(!restored.restore_semantics.preserves_process_state);
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_prune_saved_sessions_requests() {
+        let daemon = isolated_daemon();
+        for title in ["shell-a", "shell-b", "shell-c"] {
+            let created = daemon
+                .handle_request(RequestEnvelope {
+                    operation_id: OperationId::new(),
+                    payload: RequestPayload::CreateSession(
+                        terminal_protocol::CreateSessionRequest {
+                            backend: terminal_domain::BackendKind::Native,
+                            spec: CreateSessionSpec {
+                                title: Some(title.to_string()),
+                                ..CreateSessionSpec::default()
+                            },
+                        },
+                    ),
+                })
+                .await
+                .expect("create session routing should succeed");
+            let session_id = match created.payload {
+                ResponsePayload::CreateSession(created) => created.session.session_id,
+                other => panic!("unexpected response payload: {other:?}"),
+            };
+            daemon
+                .handle_request(RequestEnvelope {
+                    operation_id: OperationId::new(),
+                    payload: RequestPayload::DispatchMuxCommand(
+                        terminal_protocol::DispatchMuxCommandRequest {
+                            session_id,
+                            command: terminal_backend_api::MuxCommand::SaveSession,
+                        },
+                    ),
+                })
+                .await
+                .expect("save routing should succeed");
+        }
+
+        let pruned = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::PruneSavedSessions(
+                    terminal_protocol::PruneSavedSessionsRequest { keep_latest: 1 },
+                ),
+            })
+            .await
+            .expect("prune saved sessions routing should succeed");
+        let listed = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::ListSavedSessions,
+            })
+            .await
+            .expect("list saved sessions routing should succeed");
+
+        match pruned.payload {
+            ResponsePayload::PruneSavedSessions(pruned) => {
+                assert_eq!(pruned.deleted_count, 2);
+                assert_eq!(pruned.kept_count, 1);
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+        match listed.payload {
+            ResponsePayload::ListSavedSessions(listed) => {
+                assert_eq!(listed.sessions.len(), 1);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }

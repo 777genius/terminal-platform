@@ -12,8 +12,9 @@ use terminal_protocol::{
     GetSavedSessionRequest, GetScreenDeltaRequest, GetScreenSnapshotRequest,
     GetTopologySnapshotRequest, Handshake, ImportSessionRequest, ImportSessionResponse,
     ListSavedSessionsResponse, ListSessionsResponse, LocalSocketAddress, OpenSubscriptionRequest,
-    OpenSubscriptionResponse, ProtocolError, ProtocolVersion, RequestEnvelope, RequestPayload,
-    ResponsePayload, RestoreSavedSessionRequest, RestoreSavedSessionResponse, SavedSessionResponse,
+    OpenSubscriptionResponse, ProtocolError, ProtocolVersion, PruneSavedSessionsRequest,
+    PruneSavedSessionsResponse, RequestEnvelope, RequestPayload, ResponsePayload,
+    RestoreSavedSessionRequest, RestoreSavedSessionResponse, SavedSessionResponse,
     SubscriptionEnvelope, SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope,
     TransportResponse, decode_json_frame, encode_json_frame,
 };
@@ -227,6 +228,22 @@ impl LocalSocketDaemonClient {
         }
     }
 
+    pub async fn prune_saved_sessions(
+        &self,
+        keep_latest: usize,
+    ) -> Result<PruneSavedSessionsResponse, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::PruneSavedSessions(PruneSavedSessionsRequest {
+                keep_latest,
+            }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::PruneSavedSessions(pruned) => Ok(pruned),
+            other => Err(ProtocolError::unexpected_payload("prune_saved_sessions", &other)),
+        }
+    }
+
     pub async fn restore_saved_session(
         &self,
         session_id: terminal_domain::SessionId,
@@ -421,6 +438,7 @@ mod tests {
     use terminal_domain::{
         BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
     };
+    use terminal_persistence::SqliteSessionStore;
     use terminal_protocol::SubscriptionEvent;
 
     use super::LocalSocketDaemonClient;
@@ -433,6 +451,20 @@ mod tests {
         let slug = format!("terminal-platform-{label}-{}-{nanos}.sock", std::process::id());
 
         terminal_protocol::LocalSocketAddress::from_runtime_slug(slug)
+    }
+
+    fn isolated_daemon() -> TerminalDaemon {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let store = SqliteSessionStore::open(std::env::temp_dir().join(format!(
+            "terminal-platform-daemon-client-{}-{nanos}.sqlite3",
+            std::process::id()
+        )))
+        .expect("isolated sqlite session store should open");
+
+        TerminalDaemon::new(terminal_daemon::TerminalDaemonState::with_default_persistence(store))
     }
 
     #[cfg(unix)]
@@ -728,6 +760,56 @@ mod tests {
             .find(|tab| tab.tab_id == focused_tab)
             .expect("focused tab should exist");
         assert_eq!(focused_tab.title.as_deref(), Some("logs"));
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prunes_saved_native_sessions_to_latest_count() {
+        let address = unique_address("daemon-client-prune-saved");
+        let server = spawn_local_socket_server(isolated_daemon(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let mut last_saved_session = None;
+
+        for title in ["shell-a", "shell-b", "shell-c"] {
+            let created = client
+                .create_session(
+                    BackendKind::Native,
+                    CreateSessionSpec {
+                        title: Some(title.to_string()),
+                        launch: Some(cat_launch_spec()),
+                    },
+                )
+                .await
+                .expect("create_session should succeed");
+            let topology = client
+                .topology_snapshot(created.session.session_id)
+                .await
+                .expect("topology_snapshot should succeed");
+            let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+            wait_for_screen_line(&client, created.session.session_id, pane_id, "ready").await;
+            client
+                .dispatch(created.session.session_id, MuxCommand::SaveSession)
+                .await
+                .expect("save session should succeed");
+            last_saved_session = Some(created.session.session_id);
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        let pruned =
+            client.prune_saved_sessions(1).await.expect("prune_saved_sessions should succeed");
+        let listed =
+            client.list_saved_sessions().await.expect("list_saved_sessions should succeed");
+
+        assert_eq!(pruned.deleted_count, 2);
+        assert_eq!(pruned.kept_count, 1);
+        assert_eq!(listed.sessions.len(), 1);
+        assert_eq!(
+            listed.sessions[0].session_id,
+            last_saved_session.expect("saved session id should exist")
+        );
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

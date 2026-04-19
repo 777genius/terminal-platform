@@ -9,7 +9,8 @@ use terminal_domain::{
 };
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
 use terminal_persistence::{
-    SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary, SqliteSessionStore,
+    PrunedSavedSessions, SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary,
+    SqliteSessionStore,
 };
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
@@ -124,6 +125,15 @@ impl SessionService {
         }
 
         Ok(())
+    }
+
+    pub fn prune_saved_sessions(
+        &self,
+        keep_latest: usize,
+    ) -> Result<PrunedSavedSessions, BackendError> {
+        self.persistence.prune_native_sessions(keep_latest).map_err(|error| {
+            BackendError::internal(format!("failed to prune saved native sessions - {error}"))
+        })
     }
 
     pub async fn restore_saved_session(
