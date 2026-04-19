@@ -382,6 +382,12 @@ async fn bootstrap_smoke_controls_native_pane_lifecycle_via_dispatch() {
         .find(|tab| tab.tab_id == focused_tab)
         .expect("focused tab should exist");
     let pane_id = tab.focused_pane.expect("focused pane should exist");
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    let initial_screen = fixture
+        .client
+        .screen_snapshot(created.session.session_id, pane_id)
+        .await
+        .expect("screen_snapshot should succeed");
 
     let split = fixture
         .client
@@ -409,6 +415,16 @@ async fn bootstrap_smoke_controls_native_pane_lifecycle_via_dispatch() {
         .expect("new pane should exist");
 
     wait_for_screen_line(&fixture, created.session.session_id, new_pane, "ready").await;
+    let original_after_split = fixture
+        .client
+        .screen_snapshot(created.session.session_id, pane_id)
+        .await
+        .expect("screen_snapshot should succeed");
+    let new_after_split = fixture
+        .client
+        .screen_snapshot(created.session.session_id, new_pane)
+        .await
+        .expect("screen_snapshot should succeed");
     let focus = fixture
         .client
         .dispatch(created.session.session_id, MuxCommand::FocusPane { pane_id })
@@ -424,6 +440,11 @@ async fn bootstrap_smoke_controls_native_pane_lifecycle_via_dispatch() {
         .topology_snapshot(created.session.session_id)
         .await
         .expect("topology_snapshot should succeed");
+    let restored_screen = fixture
+        .client
+        .screen_snapshot(created.session.session_id, pane_id)
+        .await
+        .expect("screen_snapshot should succeed");
     let close_last = fixture
         .client
         .dispatch(created.session.session_id, MuxCommand::ClosePane { pane_id })
@@ -432,9 +453,15 @@ async fn bootstrap_smoke_controls_native_pane_lifecycle_via_dispatch() {
 
     assert!(split.changed);
     assert_eq!(split_tab.focused_pane, Some(new_pane));
+    assert_eq!(original_after_split.rows, initial_screen.rows);
+    assert_eq!(new_after_split.rows, initial_screen.rows);
+    assert!(original_after_split.cols < initial_screen.cols);
+    assert!(new_after_split.cols < initial_screen.cols);
     assert!(focus.changed);
     assert!(close.changed);
     assert_eq!(collect_pane_ids(&after_close.tabs[0].root), vec![pane_id]);
+    assert_eq!(restored_screen.rows, initial_screen.rows);
+    assert_eq!(restored_screen.cols, initial_screen.cols);
     assert_eq!(close_last.code, "backend_invalid_input");
 
     fixture.shutdown().await.expect("fixture should stop cleanly");

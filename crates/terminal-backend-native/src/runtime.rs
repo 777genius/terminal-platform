@@ -49,6 +49,7 @@ struct NativePaneRuntime {
     emulator: Arc<EmulatorBuffer>,
     _transcript: Arc<TranscriptBuffer>,
     projection: Mutex<NativeProjectionState>,
+    geometry: Mutex<PaneGeometry>,
     surface_tick: watch::Sender<u64>,
     process: Mutex<NativePtyProcess>,
 }
@@ -56,6 +57,12 @@ struct NativePaneRuntime {
 #[derive(Default)]
 struct NativeProjectionState {
     history: VecDeque<ScreenSnapshot>,
+}
+
+#[derive(Clone, Copy)]
+struct PaneGeometry {
+    rows: u16,
+    cols: u16,
 }
 
 struct NativePtyProcess {
@@ -121,11 +128,7 @@ impl NativeSessionRuntime {
             .find_map(|tab| tab.pane(pane_id).map(|pane| (tab, pane)))
             .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
 
-        pane.render_snapshot(
-            tab.title.clone().or_else(|| state.summary.title.clone()),
-            state.rows,
-            state.cols,
-        )
+        pane.render_snapshot(tab.title.clone().or_else(|| state.summary.title.clone()))
     }
 
     pub(super) fn screen_delta(
@@ -140,12 +143,7 @@ impl NativeSessionRuntime {
             .find_map(|tab| tab.pane(pane_id).map(|pane| (tab, pane)))
             .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
 
-        pane.screen_delta(
-            tab.title.clone().or_else(|| state.summary.title.clone()),
-            state.rows,
-            state.cols,
-            from_sequence,
-        )
+        pane.screen_delta(tab.title.clone().or_else(|| state.summary.title.clone()), from_sequence)
     }
 
     pub(super) fn dispatch(&self, command: MuxCommand) -> Result<MuxCommandResult, BackendError> {
@@ -170,12 +168,9 @@ impl NativeSessionRuntime {
                 (dispatch_close_tab(&mut state, tab_id)?, Vec::new())
             }
             MuxCommand::ResizePane(spec) => {
+                let pane_id = spec.pane_id;
                 let changed = dispatch_resize_pane(&mut state, spec)?;
-                let surface_updates = if changed {
-                    state.tabs.iter().flat_map(NativeTabRuntime::pane_ids).collect()
-                } else {
-                    Vec::new()
-                };
+                let surface_updates = if changed { vec![pane_id] } else { Vec::new() };
                 (changed, surface_updates)
             }
             MuxCommand::SendInput(spec) => (dispatch_send_input(&state, spec)?, Vec::new()),
@@ -316,6 +311,7 @@ fn spawn_pane(
         emulator,
         _transcript: transcript,
         projection: Mutex::new(NativeProjectionState::default()),
+        geometry: Mutex::new(PaneGeometry { rows, cols }),
         surface_tick,
         process: Mutex::new(NativePtyProcess { master: pty_pair.master, writer, child }),
     })
@@ -360,12 +356,10 @@ impl NativePaneRuntime {
         bump_watch(&self.surface_tick);
     }
 
-    fn render_snapshot(
-        &self,
-        title: Option<String>,
-        rows: u16,
-        cols: u16,
-    ) -> Result<ScreenSnapshot, BackendError> {
+    fn render_snapshot(&self, title: Option<String>) -> Result<ScreenSnapshot, BackendError> {
+        let geometry = self.geometry()?;
+        let rows = geometry.rows;
+        let cols = geometry.cols;
         let rendered = self.emulator.render(title.clone());
         let mut projection = self
             .projection
@@ -402,11 +396,9 @@ impl NativePaneRuntime {
     fn screen_delta(
         &self,
         title: Option<String>,
-        rows: u16,
-        cols: u16,
         from_sequence: u64,
     ) -> Result<ScreenDelta, BackendError> {
-        let current = self.render_snapshot(title, rows, cols)?;
+        let current = self.render_snapshot(title)?;
         if current.sequence == from_sequence {
             return Ok(ScreenDelta::unchanged_from(&current));
         }
@@ -422,6 +414,13 @@ impl NativePaneRuntime {
             Some(previous) => ScreenDelta::between(previous, &current),
             None => ScreenDelta::full_replace(from_sequence, &current),
         })
+    }
+
+    fn geometry(&self) -> Result<PaneGeometry, BackendError> {
+        self.geometry
+            .lock()
+            .map(|geometry| *geometry)
+            .map_err(|_| BackendError::internal("native pane geometry lock poisoned"))
     }
 }
 
@@ -495,6 +494,51 @@ fn collect_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
     }
 }
 
+fn reflow_tab_layout(tab: &NativeTabRuntime, rows: u16, cols: u16) -> Result<(), BackendError> {
+    apply_pane_layout(&tab.root, tab, rows.max(1), cols.max(1))
+}
+
+fn apply_pane_layout(
+    node: &PaneTreeNode,
+    tab: &NativeTabRuntime,
+    rows: u16,
+    cols: u16,
+) -> Result<(), BackendError> {
+    match node {
+        PaneTreeNode::Leaf { pane_id } => {
+            let pane = tab.pane(*pane_id).ok_or_else(|| {
+                BackendError::internal(format!(
+                    "native pane tree references missing pane {pane_id:?}"
+                ))
+            })?;
+            pane.resize(rows, cols)?;
+            Ok(())
+        }
+        PaneTreeNode::Split(split) => match split.direction {
+            SplitDirection::Vertical => {
+                let (first_cols, second_cols) = partition_dimension(cols);
+                apply_pane_layout(&split.first, tab, rows, first_cols)?;
+                apply_pane_layout(&split.second, tab, rows, second_cols)
+            }
+            SplitDirection::Horizontal => {
+                let (first_rows, second_rows) = partition_dimension(rows);
+                apply_pane_layout(&split.first, tab, first_rows, cols)?;
+                apply_pane_layout(&split.second, tab, second_rows, cols)
+            }
+        },
+    }
+}
+
+fn partition_dimension(total: u16) -> (u16, u16) {
+    if total <= 1 {
+        return (1, 1);
+    }
+
+    let first = (total / 2).max(1);
+    let second = total.saturating_sub(first).max(1);
+    (first, second)
+}
+
 fn dispatch_new_tab(
     state: &mut NativeSessionState,
     spec: NewTabSpec,
@@ -524,6 +568,7 @@ fn dispatch_split_pane(
     tab.focused_pane = new_pane_id;
     tab.panes.push(pane);
     state.focused_tab = tab.tab_id;
+    reflow_tab_layout(tab, state.rows, state.cols)?;
     Ok(true)
 }
 
@@ -623,6 +668,7 @@ fn dispatch_close_pane(
             .next()
             .ok_or_else(|| BackendError::internal("native tab root lost all panes"))?;
     }
+    reflow_tab_layout(tab, state.rows, state.cols)?;
 
     Ok(true)
 }
@@ -631,21 +677,16 @@ fn dispatch_resize_pane(
     state: &mut NativeSessionState,
     spec: ResizePaneSpec,
 ) -> Result<bool, BackendError> {
-    if !state.tabs.iter().any(|tab| tab.contains_pane(spec.pane_id)) {
-        return Err(BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)));
-    }
-
-    if state.rows == spec.rows && state.cols == spec.cols {
+    let pane = state
+        .tabs
+        .iter()
+        .find_map(|tab| tab.pane(spec.pane_id))
+        .ok_or_else(|| BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)))?;
+    let current = pane.geometry()?;
+    if current.rows == spec.rows && current.cols == spec.cols {
         return Ok(false);
     }
-
-    for tab in &state.tabs {
-        for pane in &tab.panes {
-            pane.resize(spec.rows, spec.cols)?;
-        }
-    }
-    state.rows = spec.rows;
-    state.cols = spec.cols;
+    pane.resize(spec.rows, spec.cols)?;
     Ok(true)
 }
 
@@ -700,6 +741,13 @@ impl NativePaneRuntime {
             .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|error| BackendError::transport(format!("failed to resize pty - {error}")))?;
         drop(process);
+        let mut geometry = self
+            .geometry
+            .lock()
+            .map_err(|_| BackendError::internal("native pane geometry lock poisoned"))?;
+        geometry.rows = rows;
+        geometry.cols = cols;
+        drop(geometry);
         self.emulator.resize(rows, cols);
         self.mark_surface_dirty();
         Ok(())

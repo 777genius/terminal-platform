@@ -402,6 +402,9 @@ mod tests {
         let initial = session.topology_snapshot().await.expect("topology should succeed");
         let tab = &initial.tabs[0];
         let pane_id = tab.focused_pane.expect("focused pane should exist");
+        wait_for_screen_line(&*session, pane_id, "ready").await;
+        let initial_screen =
+            session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
 
         let split = session
             .dispatch(MuxCommand::SplitPane(SplitPaneSpec {
@@ -420,11 +423,17 @@ mod tests {
             .expect("new pane should exist");
 
         wait_for_screen_line(&*session, new_pane, "ready").await;
+        let original_after_split =
+            session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
+        let new_after_split =
+            session.screen_snapshot(new_pane).await.expect("screen snapshot should succeed");
         let close = session
             .dispatch(MuxCommand::ClosePane { pane_id: new_pane })
             .await
             .expect("close pane should succeed");
         let after_close = session.topology_snapshot().await.expect("topology should succeed");
+        let restored_screen =
+            session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
         let close_last = session
             .dispatch(MuxCommand::ClosePane { pane_id })
             .await
@@ -433,8 +442,14 @@ mod tests {
         assert!(split.changed);
         assert_eq!(pane_ids.len(), 2);
         assert_eq!(split_tab.focused_pane, Some(new_pane));
+        assert_eq!(original_after_split.rows, initial_screen.rows);
+        assert_eq!(new_after_split.rows, initial_screen.rows);
+        assert!(original_after_split.cols < initial_screen.cols);
+        assert!(new_after_split.cols < initial_screen.cols);
         assert!(close.changed);
         assert_eq!(collect_pane_ids(&after_close.tabs[0].root), vec![pane_id]);
+        assert_eq!(restored_screen.rows, initial_screen.rows);
+        assert_eq!(restored_screen.cols, initial_screen.cols);
         assert_eq!(close_last.kind, terminal_backend_api::BackendErrorKind::InvalidInput);
     }
 
