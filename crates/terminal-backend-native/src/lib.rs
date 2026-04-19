@@ -45,6 +45,8 @@ impl MuxBackendPort for NativeBackend {
                 tab_rename: true,
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,
+                pane_split: true,
+                pane_close: true,
                 pane_focus: true,
                 pane_input_write: true,
                 pane_paste_write: true,
@@ -285,9 +287,10 @@ mod tests {
     use terminal_backend_api::BackendSubscriptionEvent;
     use terminal_backend_api::{
         BackendScope, CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, SendInputSpec,
-        ShellLaunchSpec, SubscriptionSpec,
+        ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
     };
     use terminal_domain::BackendKind;
+    use terminal_mux_domain::SplitDirection;
     use terminal_projection::ProjectionSource;
 
     use super::NativeBackend;
@@ -381,6 +384,58 @@ mod tests {
         assert!(focus_same_pane.changed);
         assert_eq!(after.tabs.len(), 2);
         assert_eq!(after.focused_tab, Some(before.tabs[0].tab_id));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn splits_and_closes_panes_within_native_tab() {
+        let backend = NativeBackend::default();
+        let binding = backend
+            .create_session(CreateSessionSpec {
+                title: Some("shell".to_string()),
+                launch: Some(cat_launch_spec()),
+            })
+            .await
+            .expect("native session should be created");
+        let session =
+            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let initial = session.topology_snapshot().await.expect("topology should succeed");
+        let tab = &initial.tabs[0];
+        let pane_id = tab.focused_pane.expect("focused pane should exist");
+
+        let split = session
+            .dispatch(MuxCommand::SplitPane(SplitPaneSpec {
+                pane_id,
+                direction: SplitDirection::Vertical,
+            }))
+            .await
+            .expect("split pane should succeed");
+        let after_split = session.topology_snapshot().await.expect("topology should succeed");
+        let split_tab = &after_split.tabs[0];
+        let pane_ids = collect_pane_ids(&split_tab.root);
+        let new_pane = pane_ids
+            .iter()
+            .copied()
+            .find(|candidate| *candidate != pane_id)
+            .expect("new pane should exist");
+
+        wait_for_screen_line(&*session, new_pane, "ready").await;
+        let close = session
+            .dispatch(MuxCommand::ClosePane { pane_id: new_pane })
+            .await
+            .expect("close pane should succeed");
+        let after_close = session.topology_snapshot().await.expect("topology should succeed");
+        let close_last = session
+            .dispatch(MuxCommand::ClosePane { pane_id })
+            .await
+            .expect_err("closing last pane should fail");
+
+        assert!(split.changed);
+        assert_eq!(pane_ids.len(), 2);
+        assert_eq!(split_tab.focused_pane, Some(new_pane));
+        assert!(close.changed);
+        assert_eq!(collect_pane_ids(&after_close.tabs[0].root), vec![pane_id]);
+        assert_eq!(close_last.kind, terminal_backend_api::BackendErrorKind::InvalidInput);
     }
 
     #[cfg(unix)]
@@ -566,5 +621,24 @@ mod tests {
         }
 
         panic!("screen never contained expected text: {needle}");
+    }
+
+    fn collect_pane_ids(root: &terminal_mux_domain::PaneTreeNode) -> Vec<terminal_domain::PaneId> {
+        let mut pane_ids = Vec::new();
+        collect_pane_ids_inner(root, &mut pane_ids);
+        pane_ids
+    }
+
+    fn collect_pane_ids_inner(
+        root: &terminal_mux_domain::PaneTreeNode,
+        pane_ids: &mut Vec<terminal_domain::PaneId>,
+    ) {
+        match root {
+            terminal_mux_domain::PaneTreeNode::Leaf { pane_id } => pane_ids.push(*pane_id),
+            terminal_mux_domain::PaneTreeNode::Split(split) => {
+                collect_pane_ids_inner(&split.first, pane_ids);
+                collect_pane_ids_inner(&split.second, pane_ids);
+            }
+        }
     }
 }

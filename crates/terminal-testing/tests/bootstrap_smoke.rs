@@ -71,8 +71,8 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert!(native.capabilities.tab_close);
     assert!(native.capabilities.tab_focus);
     assert!(native.capabilities.tab_rename);
-    assert!(!native.capabilities.pane_split);
-    assert!(!native.capabilities.pane_close);
+    assert!(native.capabilities.pane_split);
+    assert!(native.capabilities.pane_close);
     assert!(native.capabilities.pane_focus);
     assert!(native.capabilities.pane_input_write);
     assert!(native.capabilities.rendered_viewport_stream);
@@ -354,6 +354,88 @@ async fn bootstrap_smoke_roundtrips_live_pty_io() {
     assert!(delta.to_sequence > before.sequence);
     assert!(patch.line_updates.iter().any(|line| line.line.text.contains("hello from smoke")));
     assert!(delta.full_replace.is_none());
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_controls_native_pane_lifecycle_via_dispatch() {
+    let fixture = daemon_fixture("bootstrap-native-pane-control").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let initial = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let focused_tab = initial.focused_tab.expect("focused tab should exist");
+    let tab = initial
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id == focused_tab)
+        .expect("focused tab should exist");
+    let pane_id = tab.focused_pane.expect("focused pane should exist");
+
+    let split = fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SplitPane(SplitPaneSpec { pane_id, direction: SplitDirection::Vertical }),
+        )
+        .await
+        .expect("split pane should succeed");
+    let after_split = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let split_tab = after_split
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id == focused_tab)
+        .expect("split tab should exist");
+    let pane_ids = collect_pane_ids(&split_tab.root);
+    let new_pane = pane_ids
+        .iter()
+        .copied()
+        .find(|candidate| *candidate != pane_id)
+        .expect("new pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, new_pane, "ready").await;
+    let focus = fixture
+        .client
+        .dispatch(created.session.session_id, MuxCommand::FocusPane { pane_id })
+        .await
+        .expect("focus pane should succeed");
+    let close = fixture
+        .client
+        .dispatch(created.session.session_id, MuxCommand::ClosePane { pane_id: new_pane })
+        .await
+        .expect("close pane should succeed");
+    let after_close = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let close_last = fixture
+        .client
+        .dispatch(created.session.session_id, MuxCommand::ClosePane { pane_id })
+        .await
+        .expect_err("closing last pane should fail");
+
+    assert!(split.changed);
+    assert_eq!(split_tab.focused_pane, Some(new_pane));
+    assert!(focus.changed);
+    assert!(close.changed);
+    assert_eq!(collect_pane_ids(&after_close.tabs[0].root), vec![pane_id]);
+    assert_eq!(close_last.code, "backend_invalid_input");
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

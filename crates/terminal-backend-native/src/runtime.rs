@@ -8,10 +8,10 @@ use std::{
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use terminal_backend_api::{
     BackendError, BackendSessionSummary, CreateSessionSpec, MuxCommand, MuxCommandResult,
-    NewTabSpec, ResizePaneSpec, SendInputSpec, SendPasteSpec, ShellLaunchSpec,
+    NewTabSpec, ResizePaneSpec, SendInputSpec, SendPasteSpec, ShellLaunchSpec, SplitPaneSpec,
 };
 use terminal_domain::{PaneId, SessionId, SessionRoute, TabId};
-use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
+use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 use terminal_projection::{ProjectionSource, ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use tokio::sync::watch;
 
@@ -39,7 +39,9 @@ struct NativeSessionState {
 struct NativeTabRuntime {
     tab_id: TabId,
     title: Option<String>,
-    pane: NativePaneRuntime,
+    focused_pane: PaneId,
+    root: PaneTreeNode,
+    panes: Vec<NativePaneRuntime>,
 }
 
 struct NativePaneRuntime {
@@ -104,8 +106,8 @@ impl NativeSessionRuntime {
                 .map(|tab| TabSnapshot {
                     tab_id: tab.tab_id,
                     title: tab.title.clone(),
-                    root: PaneTreeNode::Leaf { pane_id: tab.pane.pane_id },
-                    focused_pane: Some(tab.pane.pane_id),
+                    root: tab.root.clone(),
+                    focused_pane: Some(tab.focused_pane),
                 })
                 .collect(),
         })
@@ -113,13 +115,13 @@ impl NativeSessionRuntime {
 
     pub(super) fn screen_snapshot(&self, pane_id: PaneId) -> Result<ScreenSnapshot, BackendError> {
         let state = self.lock_state()?;
-        let tab = state
+        let (tab, pane) = state
             .tabs
             .iter()
-            .find(|tab| tab.pane.pane_id == pane_id)
+            .find_map(|tab| tab.pane(pane_id).map(|pane| (tab, pane)))
             .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
 
-        tab.pane.render_snapshot(
+        pane.render_snapshot(
             tab.title.clone().or_else(|| state.summary.title.clone()),
             state.rows,
             state.cols,
@@ -132,13 +134,13 @@ impl NativeSessionRuntime {
         from_sequence: u64,
     ) -> Result<ScreenDelta, BackendError> {
         let state = self.lock_state()?;
-        let tab = state
+        let (tab, pane) = state
             .tabs
             .iter()
-            .find(|tab| tab.pane.pane_id == pane_id)
+            .find_map(|tab| tab.pane(pane_id).map(|pane| (tab, pane)))
             .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
 
-        tab.pane.screen_delta(
+        pane.screen_delta(
             tab.title.clone().or_else(|| state.summary.title.clone()),
             state.rows,
             state.cols,
@@ -151,6 +153,7 @@ impl NativeSessionRuntime {
 
         let (changed, surface_updates) = match command {
             MuxCommand::NewTab(spec) => (dispatch_new_tab(&mut state, spec)?, Vec::new()),
+            MuxCommand::SplitPane(spec) => (dispatch_split_pane(&mut state, spec)?, Vec::new()),
             MuxCommand::FocusTab { tab_id } => {
                 (dispatch_focus_tab(&mut state, tab_id)?, Vec::new())
             }
@@ -160,13 +163,16 @@ impl NativeSessionRuntime {
             MuxCommand::FocusPane { pane_id } => {
                 (dispatch_focus_pane(&mut state, pane_id)?, Vec::new())
             }
+            MuxCommand::ClosePane { pane_id } => {
+                (dispatch_close_pane(&mut state, pane_id)?, Vec::new())
+            }
             MuxCommand::CloseTab { tab_id } => {
                 (dispatch_close_tab(&mut state, tab_id)?, Vec::new())
             }
             MuxCommand::ResizePane(spec) => {
                 let changed = dispatch_resize_pane(&mut state, spec)?;
                 let surface_updates = if changed {
-                    state.tabs.iter().map(|tab| tab.pane.pane_id).collect()
+                    state.tabs.iter().flat_map(NativeTabRuntime::pane_ids).collect()
                 } else {
                     Vec::new()
                 };
@@ -174,11 +180,7 @@ impl NativeSessionRuntime {
             }
             MuxCommand::SendInput(spec) => (dispatch_send_input(&state, spec)?, Vec::new()),
             MuxCommand::SendPaste(spec) => (dispatch_send_paste(&state, spec)?, Vec::new()),
-            MuxCommand::ClosePane { .. }
-            | MuxCommand::SplitPane(_)
-            | MuxCommand::Detach
-            | MuxCommand::SaveSession
-            | MuxCommand::OverrideLayout(_) => {
+            MuxCommand::Detach | MuxCommand::SaveSession | MuxCommand::OverrideLayout(_) => {
                 return Err(BackendError::unsupported(
                     "native mux command is not wired in v1 start phase",
                     terminal_domain::DegradedModeReason::NotYetImplemented,
@@ -190,8 +192,8 @@ impl NativeSessionRuntime {
             bump_watch(&self.topology_tick);
         }
         for pane_id in surface_updates {
-            if let Some(tab) = state.tabs.iter().find(|tab| tab.pane.pane_id == pane_id) {
-                tab.pane.mark_surface_dirty();
+            if let Some(pane) = state.tabs.iter().find_map(|tab| tab.pane(pane_id)) {
+                pane.mark_surface_dirty();
             }
         }
         Ok(MuxCommandResult { changed })
@@ -206,13 +208,13 @@ impl NativeSessionRuntime {
         pane_id: PaneId,
     ) -> Result<watch::Receiver<u64>, BackendError> {
         let state = self.lock_state()?;
-        let tab = state
+        let pane = state
             .tabs
             .iter()
-            .find(|tab| tab.pane.pane_id == pane_id)
+            .find_map(|tab| tab.pane(pane_id))
             .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
 
-        Ok(tab.pane.surface_tick.subscribe())
+        Ok(pane.surface_tick.subscribe())
     }
 
     fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, NativeSessionState>, BackendError> {
@@ -262,6 +264,23 @@ fn spawn_tab(
     rows: u16,
     cols: u16,
 ) -> Result<NativeTabRuntime, BackendError> {
+    let pane = spawn_pane(launch, rows, cols)?;
+    let pane_id = pane.pane_id;
+
+    Ok(NativeTabRuntime {
+        tab_id: TabId::new(),
+        title,
+        focused_pane: pane_id,
+        root: PaneTreeNode::Leaf { pane_id },
+        panes: vec![pane],
+    })
+}
+
+fn spawn_pane(
+    launch: &ShellLaunchSpec,
+    rows: u16,
+    cols: u16,
+) -> Result<NativePaneRuntime, BackendError> {
     let pty_system = native_pty_system();
     let pty_pair = pty_system
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
@@ -292,17 +311,13 @@ fn spawn_tab(
         surface_tick.clone(),
     );
 
-    Ok(NativeTabRuntime {
-        tab_id: TabId::new(),
-        title,
-        pane: NativePaneRuntime {
-            pane_id,
-            emulator,
-            _transcript: transcript,
-            projection: Mutex::new(NativeProjectionState::default()),
-            surface_tick,
-            process: Mutex::new(NativePtyProcess { master: pty_pair.master, writer, child }),
-        },
+    Ok(NativePaneRuntime {
+        pane_id,
+        emulator,
+        _transcript: transcript,
+        projection: Mutex::new(NativeProjectionState::default()),
+        surface_tick,
+        process: Mutex::new(NativePtyProcess { master: pty_pair.master, writer, child }),
     })
 }
 
@@ -410,6 +425,76 @@ impl NativePaneRuntime {
     }
 }
 
+impl NativeTabRuntime {
+    fn pane(&self, pane_id: PaneId) -> Option<&NativePaneRuntime> {
+        self.panes.iter().find(|pane| pane.pane_id == pane_id)
+    }
+
+    fn pane_ids(&self) -> Vec<PaneId> {
+        self.panes.iter().map(|pane| pane.pane_id).collect()
+    }
+
+    fn contains_pane(&self, pane_id: PaneId) -> bool {
+        self.panes.iter().any(|pane| pane.pane_id == pane_id)
+    }
+}
+
+fn replace_leaf_with_split(
+    node: &mut PaneTreeNode,
+    target: PaneId,
+    direction: SplitDirection,
+    new_pane: PaneId,
+) -> bool {
+    match node {
+        PaneTreeNode::Leaf { pane_id } if *pane_id == target => {
+            *node = PaneTreeNode::Split(PaneSplit {
+                direction,
+                first: Box::new(PaneTreeNode::Leaf { pane_id: *pane_id }),
+                second: Box::new(PaneTreeNode::Leaf { pane_id: new_pane }),
+            });
+            true
+        }
+        PaneTreeNode::Leaf { .. } => false,
+        PaneTreeNode::Split(split) => {
+            replace_leaf_with_split(&mut split.first, target, direction, new_pane)
+                || replace_leaf_with_split(&mut split.second, target, direction, new_pane)
+        }
+    }
+}
+
+fn remove_leaf(node: &PaneTreeNode, target: PaneId) -> Option<PaneTreeNode> {
+    match node {
+        PaneTreeNode::Leaf { pane_id } => (*pane_id != target).then_some(node.clone()),
+        PaneTreeNode::Split(split) => {
+            match (remove_leaf(&split.first, target), remove_leaf(&split.second, target)) {
+                (Some(first), Some(second)) => Some(PaneTreeNode::Split(PaneSplit {
+                    direction: split.direction,
+                    first: Box::new(first),
+                    second: Box::new(second),
+                })),
+                (Some(node), None) | (None, Some(node)) => Some(node),
+                (None, None) => None,
+            }
+        }
+    }
+}
+
+fn collect_pane_ids(root: &PaneTreeNode) -> Vec<PaneId> {
+    let mut pane_ids = Vec::new();
+    collect_pane_ids_inner(root, &mut pane_ids);
+    pane_ids
+}
+
+fn collect_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
+    match root {
+        PaneTreeNode::Leaf { pane_id } => pane_ids.push(*pane_id),
+        PaneTreeNode::Split(split) => {
+            collect_pane_ids_inner(&split.first, pane_ids);
+            collect_pane_ids_inner(&split.second, pane_ids);
+        }
+    }
+}
+
 fn dispatch_new_tab(
     state: &mut NativeSessionState,
     spec: NewTabSpec,
@@ -417,6 +502,28 @@ fn dispatch_new_tab(
     let tab = spawn_tab(spec.title.clone(), &state.launch, state.rows, state.cols)?;
     state.focused_tab = tab.tab_id;
     state.tabs.push(tab);
+    Ok(true)
+}
+
+fn dispatch_split_pane(
+    state: &mut NativeSessionState,
+    spec: SplitPaneSpec,
+) -> Result<bool, BackendError> {
+    let tab = state
+        .tabs
+        .iter_mut()
+        .find(|tab| tab.contains_pane(spec.pane_id))
+        .ok_or_else(|| BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)))?;
+
+    let pane = spawn_pane(&state.launch, state.rows, state.cols)?;
+    let new_pane_id = pane.pane_id;
+    if !replace_leaf_with_split(&mut tab.root, spec.pane_id, spec.direction, new_pane_id) {
+        return Err(BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)));
+    }
+
+    tab.focused_pane = new_pane_id;
+    tab.panes.push(pane);
+    state.focused_tab = tab.tab_id;
     Ok(true)
 }
 
@@ -449,7 +556,7 @@ fn dispatch_rename_tab(
     }
 
     tab.title = Some(title);
-    Ok((true, vec![tab.pane.pane_id]))
+    Ok((true, tab.pane_ids()))
 }
 
 fn dispatch_focus_pane(
@@ -458,15 +565,16 @@ fn dispatch_focus_pane(
 ) -> Result<bool, BackendError> {
     let tab = state
         .tabs
-        .iter()
-        .find(|tab| tab.pane.pane_id == pane_id)
+        .iter_mut()
+        .find(|tab| tab.contains_pane(pane_id))
         .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
 
-    if state.focused_tab == tab.tab_id {
+    if state.focused_tab == tab.tab_id && tab.focused_pane == pane_id {
         return Ok(false);
     }
 
     state.focused_tab = tab.tab_id;
+    tab.focused_pane = pane_id;
     Ok(true)
 }
 
@@ -491,11 +599,39 @@ fn dispatch_close_tab(state: &mut NativeSessionState, tab_id: TabId) -> Result<b
     Ok(true)
 }
 
+fn dispatch_close_pane(
+    state: &mut NativeSessionState,
+    pane_id: PaneId,
+) -> Result<bool, BackendError> {
+    let tab = state
+        .tabs
+        .iter_mut()
+        .find(|tab| tab.contains_pane(pane_id))
+        .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
+    if tab.panes.len() <= 1 {
+        return Err(BackendError::invalid_input("native tab must keep at least one pane"));
+    }
+
+    let Some(new_root) = remove_leaf(&tab.root, pane_id) else {
+        return Err(BackendError::not_found(format!("unknown pane {pane_id:?}")));
+    };
+    tab.root = new_root;
+    tab.panes.retain(|pane| pane.pane_id != pane_id);
+    if tab.focused_pane == pane_id {
+        tab.focused_pane = collect_pane_ids(&tab.root)
+            .into_iter()
+            .next()
+            .ok_or_else(|| BackendError::internal("native tab root lost all panes"))?;
+    }
+
+    Ok(true)
+}
+
 fn dispatch_resize_pane(
     state: &mut NativeSessionState,
     spec: ResizePaneSpec,
 ) -> Result<bool, BackendError> {
-    if !state.tabs.iter().any(|tab| tab.pane.pane_id == spec.pane_id) {
+    if !state.tabs.iter().any(|tab| tab.contains_pane(spec.pane_id)) {
         return Err(BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)));
     }
 
@@ -504,7 +640,9 @@ fn dispatch_resize_pane(
     }
 
     for tab in &state.tabs {
-        tab.pane.resize(spec.rows, spec.cols)?;
+        for pane in &tab.panes {
+            pane.resize(spec.rows, spec.cols)?;
+        }
     }
     state.rows = spec.rows;
     state.cols = spec.cols;
@@ -518,9 +656,9 @@ fn dispatch_send_input(
     let pane = state
         .tabs
         .iter()
-        .find(|tab| tab.pane.pane_id == spec.pane_id)
+        .find_map(|tab| tab.pane(spec.pane_id))
         .ok_or_else(|| BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)))?;
-    pane.pane.write_all(spec.data.as_bytes())?;
+    pane.write_all(spec.data.as_bytes())?;
     Ok(false)
 }
 
@@ -531,9 +669,9 @@ fn dispatch_send_paste(
     let pane = state
         .tabs
         .iter()
-        .find(|tab| tab.pane.pane_id == spec.pane_id)
+        .find_map(|tab| tab.pane(spec.pane_id))
         .ok_or_else(|| BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)))?;
-    pane.pane.write_all(spec.data.as_bytes())?;
+    pane.write_all(spec.data.as_bytes())?;
     Ok(false)
 }
 
