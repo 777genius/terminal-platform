@@ -40,6 +40,7 @@ impl MuxBackendPort for NativeBackend {
                 tiled_panes: true,
                 tab_create: true,
                 tab_close: true,
+                tab_focus: true,
                 tab_rename: true,
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,

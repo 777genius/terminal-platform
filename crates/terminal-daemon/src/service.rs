@@ -207,6 +207,7 @@ mod tests {
                 assert!(capabilities.capabilities.tiled_panes);
                 assert!(capabilities.capabilities.tab_create);
                 assert!(capabilities.capabilities.tab_close);
+                assert!(capabilities.capabilities.tab_focus);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }

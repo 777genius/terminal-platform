@@ -64,13 +64,15 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert!(native.capabilities.tiled_panes);
     assert!(native.capabilities.tab_create);
     assert!(native.capabilities.tab_close);
+    assert!(native.capabilities.tab_focus);
     assert!(native.capabilities.tab_rename);
     assert!(native.capabilities.pane_input_write);
     assert!(native.capabilities.rendered_viewport_stream);
     assert_eq!(tmux.backend, BackendKind::Tmux);
     assert!(tmux.capabilities.read_only_client_mode);
-    assert!(!tmux.capabilities.tab_create);
+    assert!(tmux.capabilities.tab_create);
     assert!(tmux.capabilities.tab_close);
+    assert!(tmux.capabilities.tab_focus);
     assert!(tmux.capabilities.tab_rename);
     assert!(tmux.capabilities.pane_input_write);
     assert!(tmux.capabilities.rendered_viewport_stream);
@@ -78,6 +80,7 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert!(zellij.capabilities.read_only_client_mode);
     assert!(!zellij.capabilities.tab_create);
     assert!(!zellij.capabilities.tab_close);
+    assert!(!zellij.capabilities.tab_focus);
     assert!(!zellij.capabilities.rendered_viewport_stream);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
@@ -449,12 +452,9 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
         .expect("screen_delta should succeed");
     let dispatch_error = fixture
         .client
-        .dispatch(
-            imported.session.session_id,
-            MuxCommand::NewTab(NewTabSpec { title: Some("forbidden".to_string()) }),
-        )
+        .dispatch(imported.session.session_id, MuxCommand::SaveSession)
         .await
-        .expect_err("tmux imported routes should be observe-only");
+        .expect_err("tmux imported routes should reject unsupported control paths");
 
     assert_eq!(imported.session.route.backend, BackendKind::Tmux);
     assert_eq!(imported.session.session_id, imported_again.session.session_id);
@@ -484,8 +484,90 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
     assert!(delta.patch.is_none());
     assert!(delta.full_replace.is_some());
     assert_eq!(dispatch_error.code, "backend_unsupported");
+    assert_eq!(dispatch_error.degraded_reason, Some(DegradedModeReason::UnsupportedByBackend));
     assert_eq!(close_last_error.code, "backend_unsupported");
     assert_eq!(close_last_error.degraded_reason, Some(DegradedModeReason::UnsupportedByBackend));
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_controls_tmux_tab_lifecycle_via_dispatch() {
+    let socket_name = unique_tmux_socket_name("bootstrap-tmux-tabs");
+    let session_name = unique_tmux_session_name("workspace");
+    let _tmux =
+        TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
+    let fixture =
+        daemon_fixture_with_state("bootstrap-tmux-tab-control", tmux_daemon_state(&socket_name))
+            .expect("fixture should start");
+
+    let discovered = fixture
+        .client
+        .discover_sessions(BackendKind::Tmux)
+        .await
+        .expect("discover_sessions should succeed");
+    let imported = fixture
+        .client
+        .import_session(discovered.sessions[0].route.clone(), discovered.sessions[0].title.clone())
+        .await
+        .expect("import_session should succeed");
+    let initial = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let initial_focused_tab = initial.focused_tab.expect("focused tab should exist");
+
+    let created = fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::NewTab(NewTabSpec { title: Some("metrics".to_string()) }),
+        )
+        .await
+        .expect("new tab should succeed");
+    let after_create = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let metrics_tab = after_create
+        .tabs
+        .iter()
+        .find(|tab| tab.title.as_deref() == Some("metrics"))
+        .map(|tab| tab.tab_id)
+        .expect("created tab should exist");
+
+    let focused = fixture
+        .client
+        .dispatch(imported.session.session_id, MuxCommand::FocusTab { tab_id: initial_focused_tab })
+        .await
+        .expect("focus tab should succeed");
+    let after_focus = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let closed = fixture
+        .client
+        .dispatch(imported.session.session_id, MuxCommand::CloseTab { tab_id: metrics_tab })
+        .await
+        .expect("close tab should succeed");
+    let after_close = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+
+    assert!(created.changed);
+    assert_eq!(after_create.tabs.len(), 3);
+    assert_eq!(after_create.focused_tab, Some(metrics_tab));
+    assert!(focused.changed);
+    assert_eq!(after_focus.focused_tab, Some(initial_focused_tab));
+    assert!(closed.changed);
+    assert_eq!(after_close.tabs.len(), 2);
+    assert!(after_close.tabs.iter().all(|tab| tab.tab_id != metrics_tab));
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

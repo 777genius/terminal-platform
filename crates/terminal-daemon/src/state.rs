@@ -178,6 +178,7 @@ mod tests {
         assert!(native.tiled_panes);
         assert!(native.tab_create);
         assert!(native.tab_close);
+        assert!(native.tab_focus);
         assert!(native.tab_rename);
         assert!(native.pane_input_write);
         assert!(native.rendered_viewport_stream);

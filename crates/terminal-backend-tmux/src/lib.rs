@@ -84,7 +84,9 @@ impl MuxBackendPort for TmuxBackend {
         Box::pin(async {
             Ok(BackendCapabilities {
                 tiled_panes: true,
+                tab_create: true,
                 tab_close: true,
+                tab_focus: true,
                 tab_rename: true,
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,
@@ -231,16 +233,16 @@ impl BackendSessionPort for TmuxAttachedSession {
 impl TmuxAttachedSession {
     fn dispatch_inner(&self, command: MuxCommand) -> Result<MuxCommandResult, BackendError> {
         match command {
+            MuxCommand::NewTab(spec) => self.new_tab(spec),
             MuxCommand::SendInput(spec) => self.send_input(spec),
             MuxCommand::SendPaste(spec) => self.send_paste(spec),
             MuxCommand::CloseTab { tab_id } => self.close_tab(tab_id),
+            MuxCommand::FocusTab { tab_id } => self.focus_tab(tab_id),
             MuxCommand::RenameTab { tab_id, title } => self.rename_tab(tab_id, &title),
-            MuxCommand::NewTab(_)
-            | MuxCommand::SplitPane(_)
+            MuxCommand::SplitPane(_)
             | MuxCommand::ClosePane { .. }
             | MuxCommand::FocusPane { .. }
             | MuxCommand::ResizePane(_)
-            | MuxCommand::FocusTab { .. }
             | MuxCommand::Detach
             | MuxCommand::SaveSession
             | MuxCommand::OverrideLayout(_) => Err(BackendError::unsupported(
@@ -360,6 +362,38 @@ impl TmuxAttachedSession {
             .ok_or_else(|| BackendError::not_found(format!("unknown tmux tab {tab_id:?}")))?;
         self.backend
             .run(Some(&self.target), &["rename-window", "-t", &tab_target.target, title])?;
+
+        Ok(MuxCommandResult { changed: true })
+    }
+
+    fn focus_tab(&self, tab_id: TabId) -> Result<MuxCommandResult, BackendError> {
+        let snapshot = self.snapshot()?;
+        let tab_target = snapshot
+            .tab_targets
+            .get(&tab_id)
+            .ok_or_else(|| BackendError::not_found(format!("unknown tmux tab {tab_id:?}")))?;
+        self.backend.run(Some(&self.target), &["select-window", "-t", &tab_target.target])?;
+
+        Ok(MuxCommandResult { changed: true })
+    }
+
+    fn new_tab(
+        &self,
+        spec: terminal_backend_api::NewTabSpec,
+    ) -> Result<MuxCommandResult, BackendError> {
+        let mut args = vec![
+            "new-window".to_string(),
+            "-P".to_string(),
+            "-F".to_string(),
+            "#{window_id}".to_string(),
+        ];
+        args.push("-t".to_string());
+        args.push(self.target.session_name.clone());
+        if let Some(title) = spec.title {
+            args.push("-n".to_string());
+            args.push(title);
+        }
+        self.backend.run_owned(Some(&self.target), &args)?;
 
         Ok(MuxCommandResult { changed: true })
     }

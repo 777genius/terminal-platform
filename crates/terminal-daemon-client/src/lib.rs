@@ -440,6 +440,7 @@ mod tests {
         assert!(native.capabilities.tiled_panes);
         assert!(native.capabilities.tab_create);
         assert!(native.capabilities.tab_close);
+        assert!(native.capabilities.tab_focus);
         assert!(native.capabilities.tab_rename);
         assert!(native.capabilities.pane_input_write);
         assert!(native.capabilities.rendered_viewport_stream);

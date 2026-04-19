@@ -7,6 +7,7 @@ pub struct BackendCapabilities {
     pub split_resize: bool,
     pub tab_create: bool,
     pub tab_close: bool,
+    pub tab_focus: bool,
     pub tab_rename: bool,
     pub session_scoped_tab_refs: bool,
     pub session_scoped_pane_refs: bool,
