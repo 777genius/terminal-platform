@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use terminal_backend_api::{
     BackendError, BackendSessionPort, BackendSessionSummary, CreateSessionSpec, MuxBackendPort,
+    MuxCommand, MuxCommandResult,
 };
 use terminal_domain::{BackendKind, DegradedModeReason, PaneId, SessionId};
 use terminal_projection::{ScreenSnapshot, TopologySnapshot};
@@ -66,6 +67,15 @@ impl SessionService {
     ) -> Result<ScreenSnapshot, BackendError> {
         let session = self.attach_session(session_id).await?;
         session.screen_snapshot(pane_id).await
+    }
+
+    pub async fn dispatch(
+        &self,
+        session_id: SessionId,
+        command: MuxCommand,
+    ) -> Result<MuxCommandResult, BackendError> {
+        let session = self.attach_session(session_id).await?;
+        session.dispatch(command).await
     }
 
     async fn create_native_session(

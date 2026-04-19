@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use terminal_application::SessionService;
 use terminal_backend_api::{
-    BackendCapabilities, BackendError, BackendSessionSummary, CreateSessionSpec,
+    BackendCapabilities, BackendError, BackendSessionSummary, CreateSessionSpec, MuxCommand,
+    MuxCommandResult,
 };
 use terminal_backend_native::NativeBackend;
 use terminal_domain::{BackendKind, PaneId, SessionId};
@@ -64,11 +65,19 @@ impl TerminalDaemonState {
     ) -> Result<ScreenSnapshot, BackendError> {
         self.sessions.screen_snapshot(session_id, pane_id).await
     }
+
+    pub async fn dispatch(
+        &self,
+        session_id: SessionId,
+        command: MuxCommand,
+    ) -> Result<MuxCommandResult, BackendError> {
+        self.sessions.dispatch(session_id, command).await
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use terminal_backend_api::CreateSessionSpec;
+    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec};
     use terminal_domain::BackendKind;
 
     use super::TerminalDaemonState;
@@ -123,5 +132,31 @@ mod tests {
         assert_eq!(topology.session_id, created.session_id);
         assert_eq!(screen.pane_id, pane_id);
         assert_eq!(screen.surface.lines.len(), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dispatches_native_tab_mutations() {
+        let state = TerminalDaemonState::default();
+        let created = state
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec { title: Some("shell".to_string()) },
+            )
+            .await
+            .expect("native session create should succeed");
+        let result = state
+            .dispatch(
+                created.session_id,
+                MuxCommand::NewTab(NewTabSpec { title: Some("logs".to_string()) }),
+            )
+            .await
+            .expect("dispatch should succeed");
+        let topology = state
+            .topology_snapshot(created.session_id)
+            .await
+            .expect("topology snapshot should succeed");
+
+        assert!(result.changed);
+        assert_eq!(topology.tabs.len(), 2);
     }
 }

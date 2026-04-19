@@ -1,4 +1,4 @@
-use terminal_backend_api::CreateSessionSpec;
+use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec};
 use terminal_domain::BackendKind;
 use terminal_testing::{daemon_fixture, daemon_state};
 
@@ -34,6 +34,19 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
         .screen_snapshot(created.session.session_id, pane_id)
         .await
         .expect("screen_snapshot should succeed");
+    let dispatch = fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::NewTab(NewTabSpec { title: Some("logs".to_string()) }),
+        )
+        .await
+        .expect("dispatch should succeed");
+    let topology_after_dispatch = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
 
     assert_eq!(handshake.protocol_version.major, 0);
     assert_eq!(handshake.protocol_version.minor, 1);
@@ -44,6 +57,8 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
     assert_eq!(topology.session_id, created.session.session_id);
     assert_eq!(screen.pane_id, pane_id);
     assert_eq!(screen.surface.lines.len(), 2);
+    assert!(dispatch.changed);
+    assert_eq!(topology_after_dispatch.tabs.len(), 2);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

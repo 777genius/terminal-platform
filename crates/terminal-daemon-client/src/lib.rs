@@ -1,15 +1,15 @@
 use futures_util::{SinkExt as _, StreamExt as _};
 use interprocess::local_socket::{tokio::Stream, traits::tokio::Stream as _};
-use terminal_backend_api::CreateSessionSpec;
+use terminal_backend_api::{CreateSessionSpec, MuxCommand, MuxCommandResult};
 use terminal_domain::{BackendKind, OperationId};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{
-    CreateSessionRequest, CreateSessionResponse, GetScreenSnapshotRequest,
-    GetTopologySnapshotRequest, Handshake, ListSessionsResponse, LocalSocketAddress, ProtocolError,
-    ProtocolVersion, RequestEnvelope, RequestPayload, ResponsePayload, TransportResponse,
-    decode_json_frame, encode_json_frame,
+    CreateSessionRequest, CreateSessionResponse, DispatchMuxCommandRequest,
+    GetScreenSnapshotRequest, GetTopologySnapshotRequest, Handshake, ListSessionsResponse,
+    LocalSocketAddress, ProtocolError, ProtocolVersion, RequestEnvelope, RequestPayload,
+    ResponsePayload, TransportResponse, decode_json_frame, encode_json_frame,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +112,24 @@ impl LocalSocketDaemonClient {
         }
     }
 
+    pub async fn dispatch(
+        &self,
+        session_id: terminal_domain::SessionId,
+        command: MuxCommand,
+    ) -> Result<MuxCommandResult, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::DispatchMuxCommand(DispatchMuxCommandRequest {
+                session_id,
+                command,
+            }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::DispatchMuxCommand(result) => Ok(result),
+            other => Err(ProtocolError::unexpected_payload("dispatch_mux_command", &other)),
+        }
+    }
+
     async fn send_request(
         &self,
         payload: RequestPayload,
@@ -158,7 +176,7 @@ impl LocalSocketDaemonClient {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use terminal_backend_api::CreateSessionSpec;
+    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec};
     use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
     use terminal_domain::BackendKind;
 
@@ -242,6 +260,39 @@ mod tests {
         assert_eq!(topology.session_id, created.session.session_id);
         assert_eq!(screen.pane_id, pane_id);
         assert_eq!(screen.surface.lines.len(), 2);
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dispatches_tab_mutations_and_observes_topology_change() {
+        let address = unique_address("daemon-client-dispatch");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec { title: Some("shell".to_string()) },
+            )
+            .await
+            .expect("create_session should succeed");
+
+        let result = client
+            .dispatch(
+                created.session.session_id,
+                MuxCommand::NewTab(NewTabSpec { title: Some("logs".to_string()) }),
+            )
+            .await
+            .expect("dispatch should succeed");
+        let topology = client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology snapshot should succeed");
+
+        assert!(result.changed);
+        assert_eq!(topology.tabs.len(), 2);
+        assert_eq!(topology.focused_tab, Some(topology.tabs[1].tab_id));
 
         server.shutdown().await.expect("server shutdown should succeed");
     }
