@@ -1,3 +1,4 @@
+use terminal_backend_api::{BackendError, BackendErrorKind};
 use terminal_protocol::{
     CreateSessionResponse, ListSessionsResponse, ProtocolError, RequestEnvelope, RequestPayload,
     ResponseEnvelope, ResponsePayload,
@@ -27,7 +28,7 @@ impl TerminalDaemon {
                     .state
                     .create_session(request.backend, request.spec)
                     .await
-                    .map_err(|error| ProtocolError::new("backend_error", error.to_string()))?;
+                    .map_err(map_backend_error)?;
 
                 ResponsePayload::CreateSession(CreateSessionResponse { session })
             }
@@ -38,25 +39,37 @@ impl TerminalDaemon {
                 self.state
                     .topology_snapshot(request.session_id)
                     .await
-                    .map_err(|error| ProtocolError::new("backend_error", error.to_string()))?,
+                    .map_err(map_backend_error)?,
             ),
             RequestPayload::GetScreenSnapshot(request) => ResponsePayload::ScreenSnapshot(
                 self.state
                     .screen_snapshot(request.session_id, request.pane_id)
                     .await
-                    .map_err(|error| ProtocolError::new("backend_error", error.to_string()))?,
+                    .map_err(map_backend_error)?,
             ),
             RequestPayload::DispatchMuxCommand(request) => ResponsePayload::DispatchMuxCommand(
                 self.state
                     .dispatch(request.session_id, request.command)
                     .await
-                    .map_err(|error| ProtocolError::new("backend_error", error.to_string()))?,
+                    .map_err(map_backend_error)?,
             ),
             RequestPayload::OpenSubscription(_) => ResponsePayload::SubscriptionOpened,
         };
 
         Ok(ResponseEnvelope { operation_id: request.operation_id, payload })
     }
+}
+
+fn map_backend_error(error: BackendError) -> ProtocolError {
+    let code = match error.kind {
+        BackendErrorKind::Unsupported => "backend_unsupported",
+        BackendErrorKind::NotFound => "backend_not_found",
+        BackendErrorKind::InvalidInput => "backend_invalid_input",
+        BackendErrorKind::Transport => "backend_transport",
+        BackendErrorKind::Internal => "backend_internal",
+    };
+
+    ProtocolError::new(code, error.to_string())
 }
 
 #[cfg(test)]

@@ -296,4 +296,32 @@ mod tests {
 
         server.shutdown().await.expect("server shutdown should succeed");
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn maps_backend_errors_for_invalid_close_tab_sequence() {
+        let address = unique_address("daemon-client-errors");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec { title: Some("shell".to_string()) },
+            )
+            .await
+            .expect("create_session should succeed");
+        let topology = client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let only_tab = topology.tabs[0].tab_id;
+        let error = client
+            .dispatch(created.session.session_id, MuxCommand::CloseTab { tab_id: only_tab })
+            .await
+            .expect_err("close last tab should fail");
+
+        assert_eq!(error.code, "backend_unsupported");
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
 }
