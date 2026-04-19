@@ -9,6 +9,7 @@ terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-domain = { path = "../terminal-domain" }
 terminal-mux-domain = { path = "../terminal-mux-domain" }
 terminal-projection = { path = "../terminal-projection" }
+tokio = { workspace = true }
 uuid = { workspace = true }
 
 [lints]

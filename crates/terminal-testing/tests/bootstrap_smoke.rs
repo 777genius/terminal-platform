@@ -362,6 +362,132 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
 }
 
 #[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_streams_tmux_topology_updates() {
+    let socket_name = unique_tmux_socket_name("bootstrap-tmux-topology");
+    let session_name = unique_tmux_session_name("workspace");
+    let _tmux =
+        TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
+    let fixture =
+        daemon_fixture_with_state("bootstrap-tmux-topology-sub", tmux_daemon_state(&socket_name))
+            .expect("fixture should start");
+
+    let discovered = fixture
+        .client
+        .discover_sessions(BackendKind::Tmux)
+        .await
+        .expect("discover_sessions should succeed");
+    let imported = fixture
+        .client
+        .import_session(discovered.sessions[0].route.clone(), discovered.sessions[0].title.clone())
+        .await
+        .expect("import_session should succeed");
+    let mut subscription = fixture
+        .client
+        .open_subscription(imported.session.session_id, SubscriptionSpec::SessionTopology)
+        .await
+        .expect("subscription should open");
+
+    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = match initial {
+        SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
+        other => panic!("unexpected initial event: {other:?}"),
+    };
+
+    run_tmux(
+        &socket_name,
+        &[
+            "new-window",
+            "-d",
+            "-t",
+            &session_name,
+            "-n",
+            "metrics",
+            "sh",
+            "-lc",
+            "printf 'metrics ready\\n'; exec cat",
+        ],
+    )
+    .expect("tmux new-window should succeed");
+
+    let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+    let updated = match updated {
+        SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
+        other => panic!("unexpected topology event: {other:?}"),
+    };
+
+    assert_eq!(initial.tabs.len(), 2);
+    assert_eq!(updated.tabs.len(), 3);
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
+    let socket_name = unique_tmux_socket_name("bootstrap-tmux-pane");
+    let session_name = unique_tmux_session_name("workspace");
+    let _tmux =
+        TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
+    let fixture =
+        daemon_fixture_with_state("bootstrap-tmux-pane-sub", tmux_daemon_state(&socket_name))
+            .expect("fixture should start");
+
+    let discovered = fixture
+        .client
+        .discover_sessions(BackendKind::Tmux)
+        .await
+        .expect("discover_sessions should succeed");
+    let imported = fixture
+        .client
+        .import_session(discovered.sessions[0].route.clone(), discovered.sessions[0].title.clone())
+        .await
+        .expect("import_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+    let mut subscription = fixture
+        .client
+        .open_subscription(imported.session.session_id, SubscriptionSpec::PaneSurface { pane_id })
+        .await
+        .expect("subscription should open");
+
+    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = match initial {
+        SubscriptionEvent::ScreenDelta(delta) => delta,
+        other => panic!("unexpected initial event: {other:?}"),
+    };
+
+    run_tmux(
+        &socket_name,
+        &["send-keys", "-t", &format!("{session_name}:0.0"), "hello from tmux subscription", "C-m"],
+    )
+    .expect("tmux send-keys should succeed");
+
+    let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+    let updated = match updated {
+        SubscriptionEvent::ScreenDelta(delta) => delta,
+        other => panic!("unexpected pane event: {other:?}"),
+    };
+    let patch = updated.patch.expect("delta patch should exist");
+
+    assert!(initial.full_replace.is_some());
+    assert!(updated.to_sequence > updated.from_sequence);
+    assert!(
+        patch
+            .line_updates
+            .iter()
+            .any(|line| line.line.text.contains("hello from tmux subscription"))
+    );
+    assert!(updated.full_replace.is_none());
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
 fn cat_launch_spec() -> ShellLaunchSpec {
     ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
 }

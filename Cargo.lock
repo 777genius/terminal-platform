@@ -756,6 +756,7 @@ dependencies = [
  "terminal-domain",
  "terminal-mux-domain",
  "terminal-projection",
+ "tokio",
  "uuid",
 ]
 

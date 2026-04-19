@@ -7,8 +7,8 @@ use std::{
 
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
-    BackendSessionSummary, BackendSubscription, BoxFuture, CreateSessionSpec, DiscoveredSession,
-    MuxBackendPort,
+    BackendSessionSummary, BackendSubscription, BackendSubscriptionEvent, BoxFuture,
+    CreateSessionSpec, DiscoveredSession, MuxBackendPort, SubscriptionSpec,
 };
 use terminal_domain::{
     BackendKind, DegradedModeReason, ExternalSessionRef, PaneId, RouteAuthority, SessionId,
@@ -18,9 +18,14 @@ use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 use terminal_projection::{
     ProjectionSource, ScreenDelta, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
 };
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::{self, Duration, MissedTickBehavior},
+};
 use uuid::Uuid;
 
 const TMUX_ROUTE_NAMESPACE: &str = "tmux_target";
+const TMUX_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Default)]
 pub struct TmuxBackend {
@@ -71,7 +76,9 @@ impl MuxBackendPort for TmuxBackend {
                 tiled_panes: true,
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,
+                rendered_viewport_stream: true,
                 rendered_viewport_snapshot: true,
+                advisory_metadata_subscriptions: true,
                 read_only_client_mode: true,
                 ..BackendCapabilities::default()
             })
@@ -157,6 +164,7 @@ impl MuxBackendPort for TmuxBackend {
     }
 }
 
+#[derive(Clone)]
 struct TmuxAttachedSession {
     backend: Arc<TmuxBackend>,
     session_id: SessionId,
@@ -204,18 +212,116 @@ impl BackendSessionPort for TmuxAttachedSession {
 
     fn subscribe(
         &self,
-        _spec: terminal_backend_api::SubscriptionSpec,
+        spec: SubscriptionSpec,
     ) -> BoxFuture<'_, Result<BackendSubscription, BackendError>> {
-        Box::pin(async {
-            Err(BackendError::unsupported(
-                "tmux subscriptions are not implemented in the current rollout phase",
-                DegradedModeReason::MissingCapability,
-            ))
-        })
+        let session = self.clone();
+        Box::pin(async move { session.open_subscription(spec) })
     }
 }
 
 impl TmuxAttachedSession {
+    fn open_subscription(
+        &self,
+        spec: SubscriptionSpec,
+    ) -> Result<BackendSubscription, BackendError> {
+        match spec {
+            SubscriptionSpec::SessionTopology => self.open_topology_subscription(),
+            SubscriptionSpec::PaneSurface { pane_id } => {
+                self.open_pane_surface_subscription(pane_id)
+            }
+        }
+    }
+
+    fn open_topology_subscription(&self) -> Result<BackendSubscription, BackendError> {
+        let subscription_id = terminal_domain::SubscriptionId::new();
+        let session = self.clone();
+        let initial = session.snapshot()?.topology;
+        let (events_tx, events_rx) = mpsc::channel(32);
+        let (cancel_tx, mut cancel_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            if events_tx
+                .send(BackendSubscriptionEvent::TopologySnapshot(initial.clone()))
+                .await
+                .is_err()
+            {
+                return;
+            }
+
+            let mut last = initial;
+            let mut ticker = time::interval(TMUX_POLL_INTERVAL);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+            loop {
+                tokio::select! {
+                    _ = &mut cancel_rx => break,
+                    _ = ticker.tick() => {
+                        let current = match session.snapshot() {
+                            Ok(snapshot) => snapshot.topology,
+                            Err(_) => break,
+                        };
+                        if current == last {
+                            continue;
+                        }
+                        last = current.clone();
+                        if events_tx.send(BackendSubscriptionEvent::TopologySnapshot(current)).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(BackendSubscription::new(subscription_id, events_rx, cancel_tx))
+    }
+
+    fn open_pane_surface_subscription(
+        &self,
+        pane_id: PaneId,
+    ) -> Result<BackendSubscription, BackendError> {
+        let subscription_id = terminal_domain::SubscriptionId::new();
+        let session = self.clone();
+        let initial = session.screen_snapshot_inner(pane_id)?;
+        let (events_tx, events_rx) = mpsc::channel(32);
+        let (cancel_tx, mut cancel_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            if events_tx
+                .send(BackendSubscriptionEvent::ScreenDelta(ScreenDelta::full_replace(0, &initial)))
+                .await
+                .is_err()
+            {
+                return;
+            }
+
+            let mut last = initial;
+            let mut ticker = time::interval(TMUX_POLL_INTERVAL);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+            loop {
+                tokio::select! {
+                    _ = &mut cancel_rx => break,
+                    _ = ticker.tick() => {
+                        let current = match session.screen_snapshot_inner(pane_id) {
+                            Ok(snapshot) => snapshot,
+                            Err(_) => break,
+                        };
+                        if current.sequence == last.sequence {
+                            continue;
+                        }
+                        let delta = ScreenDelta::between(&last, &current);
+                        last = current;
+                        if events_tx.send(BackendSubscriptionEvent::ScreenDelta(delta)).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(BackendSubscription::new(subscription_id, events_rx, cancel_tx))
+    }
+
     fn snapshot(&self) -> Result<TmuxSessionSnapshot, BackendError> {
         let windows_output = self.backend.run(
             Some(&self.target),
