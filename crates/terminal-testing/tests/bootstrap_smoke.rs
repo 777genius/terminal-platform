@@ -125,6 +125,34 @@ async fn bootstrap_smoke_streams_topology_updates() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_closes_subscription_lane_explicitly() {
+    let fixture = daemon_fixture("bootstrap-sub-close").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), ..CreateSessionSpec::default() },
+        )
+        .await
+        .expect("create_session should succeed");
+    let mut subscription = fixture
+        .client
+        .open_subscription(created.session.session_id, SubscriptionSpec::SessionTopology)
+        .await
+        .expect("subscription should open");
+
+    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    match initial {
+        SubscriptionEvent::TopologySnapshot(_) => {}
+        other => panic!("unexpected initial event: {other:?}"),
+    }
+    subscription.close().await.expect("close should succeed");
+    assert!(subscription.recv().await.expect("recv should succeed").is_none());
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_streams_live_pane_surface_updates() {

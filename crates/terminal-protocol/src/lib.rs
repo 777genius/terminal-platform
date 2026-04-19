@@ -16,5 +16,5 @@ pub use requests::{
 pub use responses::{
     CreateSessionResponse, ListSessionsResponse, OpenSubscriptionResponse, ResponsePayload,
 };
-pub use subscriptions::SubscriptionEvent;
+pub use subscriptions::{SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope};
 pub use transport::{LocalSocketAddress, TransportResponse, decode_json_frame, encode_json_frame};

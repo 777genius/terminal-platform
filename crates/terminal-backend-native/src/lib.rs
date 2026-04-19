@@ -13,7 +13,7 @@ use terminal_backend_api::{
     CreateSessionSpec, MuxBackendPort, SubscriptionSpec,
 };
 use terminal_domain::{BackendKind, RouteAuthority, SessionId, SessionRoute};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use runtime::NativeSessionRuntime;
 
@@ -181,24 +181,33 @@ fn open_topology_subscription(
     let initial = runtime.topology_snapshot()?;
     let mut topology_tick = runtime.subscribe_topology();
     let (events_tx, events_rx) = mpsc::channel(32);
+    let (cancel_tx, mut cancel_rx) = oneshot::channel();
 
     tokio::spawn(async move {
         if events_tx.send(BackendSubscriptionEvent::TopologySnapshot(initial)).await.is_err() {
             return;
         }
 
-        while topology_tick.changed().await.is_ok() {
-            let snapshot = match runtime.topology_snapshot() {
-                Ok(snapshot) => snapshot,
-                Err(_) => break,
-            };
-            if events_tx.send(BackendSubscriptionEvent::TopologySnapshot(snapshot)).await.is_err() {
-                break;
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => break,
+                changed = topology_tick.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    let snapshot = match runtime.topology_snapshot() {
+                        Ok(snapshot) => snapshot,
+                        Err(_) => break,
+                    };
+                    if events_tx.send(BackendSubscriptionEvent::TopologySnapshot(snapshot)).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     });
 
-    Ok(BackendSubscription { subscription_id, events: events_rx })
+    Ok(BackendSubscription::new(subscription_id, events_rx, cancel_tx))
 }
 
 fn open_pane_surface_subscription(
@@ -210,6 +219,7 @@ fn open_pane_surface_subscription(
     let mut last_sequence = initial.sequence;
     let mut surface_tick = runtime.subscribe_pane_surface(pane_id)?;
     let (events_tx, events_rx) = mpsc::channel(32);
+    let (cancel_tx, mut cancel_rx) = oneshot::channel();
 
     tokio::spawn(async move {
         if events_tx
@@ -222,22 +232,30 @@ fn open_pane_surface_subscription(
             return;
         }
 
-        while surface_tick.changed().await.is_ok() {
-            let delta = match runtime.screen_delta(pane_id, last_sequence) {
-                Ok(delta) => delta,
-                Err(_) => break,
-            };
-            if delta.to_sequence == last_sequence {
-                continue;
-            }
-            last_sequence = delta.to_sequence;
-            if events_tx.send(BackendSubscriptionEvent::ScreenDelta(delta)).await.is_err() {
-                break;
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => break,
+                changed = surface_tick.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    let delta = match runtime.screen_delta(pane_id, last_sequence) {
+                        Ok(delta) => delta,
+                        Err(_) => break,
+                    };
+                    if delta.to_sequence == last_sequence {
+                        continue;
+                    }
+                    last_sequence = delta.to_sequence;
+                    if events_tx.send(BackendSubscriptionEvent::ScreenDelta(delta)).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     });
 
-    Ok(BackendSubscription { subscription_id, events: events_rx })
+    Ok(BackendSubscription::new(subscription_id, events_rx, cancel_tx))
 }
 
 #[cfg(test)]

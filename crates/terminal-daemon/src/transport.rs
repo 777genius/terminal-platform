@@ -10,7 +10,8 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use terminal_protocol::{
     LocalSocketAddress, RequestEnvelope, ResponseEnvelope, ResponsePayload, SubscriptionEnvelope,
-    SubscriptionEvent, TransportResponse, decode_json_frame, encode_json_frame,
+    SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope, TransportResponse,
+    decode_json_frame, encode_json_frame,
 };
 
 use crate::TerminalDaemon;
@@ -98,7 +99,7 @@ async fn handle_subscription_connection(
     let terminal_protocol::RequestPayload::OpenSubscription(open_request) = request.payload else {
         return Err(io::Error::other("subscription connection requires open_subscription request"));
     };
-    let subscription = daemon
+    let mut subscription = daemon
         .open_subscription(open_request)
         .await
         .map_err(|error| io::Error::other(error.to_string()))?;
@@ -113,16 +114,49 @@ async fn handle_subscription_connection(
         .map_err(|error| io::Error::other(error.to_string()))?;
     framed.send(encoded_opened).await?;
 
-    let mut events = subscription.events;
-    while let Some(event) = events.recv().await {
-        let envelope =
-            SubscriptionEnvelope { subscription_id, event: map_subscription_event(event) };
-        let encoded_event =
-            encode_json_frame(&envelope).map_err(|error| io::Error::other(error.to_string()))?;
-        framed.send(encoded_event).await?;
-    }
+    let result = loop {
+        tokio::select! {
+            biased;
+            inbound = framed.next() => {
+                match inbound {
+                    Some(Ok(frame)) => {
+                        let envelope = decode_json_frame::<SubscriptionRequestEnvelope>(&frame)
+                            .map_err(|error| io::Error::other(error.to_string()));
+                        let envelope = match envelope {
+                            Ok(envelope) => envelope,
+                            Err(error) => break Err(error),
+                        };
+                        if envelope.subscription_id != subscription_id {
+                            break Err(io::Error::other("subscription control targeted wrong subscription"));
+                        }
+                        match envelope.request {
+                            SubscriptionRequest::Close => break Ok(()),
+                        }
+                    }
+                    Some(Err(error)) => break Err(error),
+                    None => break Ok(()),
+                }
+            }
+            event = subscription.events.recv() => {
+                let Some(event) = event else {
+                    break Ok(());
+                };
+                let envelope =
+                    SubscriptionEnvelope { subscription_id, event: map_subscription_event(event) };
+                let encoded_event = match encode_json_frame(&envelope) {
+                    Ok(encoded_event) => encoded_event,
+                    Err(error) => break Err(io::Error::other(error.to_string())),
+                };
+                if let Err(error) = framed.send(encoded_event).await {
+                    break Err(error);
+                }
+            }
+        }
+    };
 
-    Ok(())
+    subscription.cancel();
+
+    result
 }
 
 fn map_subscription_event(
