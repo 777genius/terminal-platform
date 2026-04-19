@@ -61,6 +61,11 @@ pub struct GetSavedSessionRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoreSavedSessionRequest {
+    pub session_id: SessionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RequestPayload {
     Handshake,
@@ -71,6 +76,7 @@ pub enum RequestPayload {
     GetBackendCapabilities(GetBackendCapabilitiesRequest),
     ImportSession(ImportSessionRequest),
     GetSavedSession(GetSavedSessionRequest),
+    RestoreSavedSession(RestoreSavedSessionRequest),
     GetTopologySnapshot(GetTopologySnapshotRequest),
     GetScreenSnapshot(GetScreenSnapshotRequest),
     GetScreenDelta(GetScreenDeltaRequest),

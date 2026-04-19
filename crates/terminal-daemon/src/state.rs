@@ -62,6 +62,13 @@ impl TerminalDaemonState {
         self.sessions.saved_session(session_id)
     }
 
+    pub async fn restore_saved_session(
+        &self,
+        session_id: SessionId,
+    ) -> Result<BackendSessionSummary, BackendError> {
+        self.sessions.restore_saved_session(session_id).await
+    }
+
     pub async fn discover_sessions(
         &self,
         backend: BackendKind,
@@ -199,6 +206,7 @@ mod tests {
         assert!(native.layout_dump);
         assert!(native.layout_override);
         assert!(native.explicit_session_save);
+        assert!(native.explicit_session_restore);
         assert!(native.rendered_viewport_stream);
     }
 

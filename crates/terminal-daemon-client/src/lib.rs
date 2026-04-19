@@ -12,9 +12,10 @@ use terminal_protocol::{
     GetScreenSnapshotRequest, GetTopologySnapshotRequest, Handshake, ImportSessionRequest,
     ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse, LocalSocketAddress,
     OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError, ProtocolVersion,
-    RequestEnvelope, RequestPayload, ResponsePayload, SavedSessionResponse, SubscriptionEnvelope,
-    SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope, TransportResponse,
-    decode_json_frame, encode_json_frame,
+    RequestEnvelope, RequestPayload, ResponsePayload, RestoreSavedSessionRequest,
+    RestoreSavedSessionResponse, SavedSessionResponse, SubscriptionEnvelope, SubscriptionEvent,
+    SubscriptionRequest, SubscriptionRequestEnvelope, TransportResponse, decode_json_frame,
+    encode_json_frame,
 };
 
 type LocalFramedStream = Framed<Stream, LengthDelimitedCodec>;
@@ -207,6 +208,22 @@ impl LocalSocketDaemonClient {
         match response.payload {
             ResponsePayload::SavedSession(saved) => Ok(saved),
             other => Err(ProtocolError::unexpected_payload("saved_session", &other)),
+        }
+    }
+
+    pub async fn restore_saved_session(
+        &self,
+        session_id: terminal_domain::SessionId,
+    ) -> Result<RestoreSavedSessionResponse, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::RestoreSavedSession(RestoreSavedSessionRequest {
+                session_id,
+            }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::RestoreSavedSession(restored) => Ok(restored),
+            other => Err(ProtocolError::unexpected_payload("restore_saved_session", &other)),
         }
     }
 
@@ -474,6 +491,7 @@ mod tests {
         assert!(native.capabilities.layout_dump);
         assert!(native.capabilities.layout_override);
         assert!(native.capabilities.explicit_session_save);
+        assert!(native.capabilities.explicit_session_restore);
         assert!(native.capabilities.rendered_viewport_stream);
         assert_eq!(zellij.backend, BackendKind::Zellij);
         assert!(zellij.capabilities.read_only_client_mode);
@@ -556,6 +574,75 @@ mod tests {
         assert_eq!(loaded.session.title.as_deref(), Some("shell"));
         assert_eq!(loaded.session.topology.tabs.len(), 1);
         assert_eq!(loaded.session.screens.len(), 1);
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn restores_saved_native_session_topology() {
+        let address = unique_address("daemon-client-restore");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    launch: Some(cat_launch_spec()),
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+        let initial = client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let first_pane = initial.tabs[0].focused_pane.expect("focused pane should exist");
+
+        wait_for_screen_line(&client, created.session.session_id, first_pane, "ready").await;
+        client
+            .dispatch(
+                created.session.session_id,
+                MuxCommand::NewTab(NewTabSpec { title: Some("logs".to_string()) }),
+            )
+            .await
+            .expect("new tab should succeed");
+        let with_tabs = client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let second_tab_id = with_tabs.tabs[1].tab_id;
+        client
+            .dispatch(created.session.session_id, MuxCommand::FocusTab { tab_id: second_tab_id })
+            .await
+            .expect("focus tab should succeed");
+        client
+            .dispatch(created.session.session_id, MuxCommand::SaveSession)
+            .await
+            .expect("save session should succeed");
+
+        let restored = client
+            .restore_saved_session(created.session.session_id)
+            .await
+            .expect("restore_saved_session should succeed");
+        let restored_topology = client
+            .topology_snapshot(restored.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+
+        assert_ne!(restored.session.session_id, created.session.session_id);
+        assert_eq!(restored.session.route.backend, BackendKind::Native);
+        assert_eq!(restored.session.title.as_deref(), Some("logs"));
+        assert_eq!(restored_topology.tabs.len(), 2);
+        let focused_tab = restored_topology.focused_tab.expect("focused tab should exist");
+        let focused_tab = restored_topology
+            .tabs
+            .iter()
+            .find(|tab| tab.tab_id == focused_tab)
+            .expect("focused tab should exist");
+        assert_eq!(focused_tab.title.as_deref(), Some("logs"));
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

@@ -13,13 +13,13 @@ pub use requests::{
     CreateSessionRequest, DiscoverSessionsRequest, DispatchMuxCommandRequest,
     GetBackendCapabilitiesRequest, GetSavedSessionRequest, GetScreenDeltaRequest,
     GetScreenSnapshotRequest, GetTopologySnapshotRequest, ImportSessionRequest,
-    OpenSubscriptionRequest, RequestPayload,
+    OpenSubscriptionRequest, RequestPayload, RestoreSavedSessionRequest,
 };
 pub use responses::{
     BackendCapabilitiesResponse, CreateSessionResponse, DiscoverSessionsResponse,
     ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse,
-    OpenSubscriptionResponse, ResponsePayload, SavedSessionRecord, SavedSessionResponse,
-    SavedSessionSummary,
+    OpenSubscriptionResponse, ResponsePayload, RestoreSavedSessionResponse, SavedSessionRecord,
+    SavedSessionResponse, SavedSessionSummary,
 };
 pub use subscriptions::{SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope};
 pub use transport::{LocalSocketAddress, TransportResponse, decode_json_frame, encode_json_frame};

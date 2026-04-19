@@ -24,6 +24,7 @@ pub struct BackendCapabilities {
     pub layout_override: bool,
     pub read_only_client_mode: bool,
     pub explicit_session_save: bool,
+    pub explicit_session_restore: bool,
     pub plugin_panes: bool,
     pub advisory_metadata_subscriptions: bool,
     pub independent_resize_authority: bool,

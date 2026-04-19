@@ -12,7 +12,10 @@ use terminal_backend_api::{
     BackendSessionSummary, BackendSubscription, BackendSubscriptionEvent, BoxFuture,
     CreateSessionSpec, DiscoveredSession, MuxBackendPort, SubscriptionSpec,
 };
-use terminal_domain::{BackendKind, DegradedModeReason, RouteAuthority, SessionId, SessionRoute};
+use terminal_domain::{
+    BackendKind, DegradedModeReason, SessionId, SessionRoute, local_native_route,
+    local_native_session_id,
+};
 use tokio::sync::{mpsc, oneshot};
 
 use runtime::NativeSessionRuntime;
@@ -55,6 +58,7 @@ impl MuxBackendPort for NativeBackend {
                 layout_dump: true,
                 layout_override: true,
                 explicit_session_save: true,
+                explicit_session_restore: true,
                 advisory_metadata_subscriptions: true,
                 ..BackendCapabilities::default()
             })
@@ -79,11 +83,7 @@ impl MuxBackendPort for NativeBackend {
     ) -> BoxFuture<'_, Result<BackendSessionBinding, BackendError>> {
         Box::pin(async move {
             let session_id = SessionId::new();
-            let route = SessionRoute {
-                backend: BackendKind::Native,
-                authority: RouteAuthority::LocalDaemon,
-                external: None,
-            };
+            let route = local_native_route(session_id);
             let runtime = Arc::new(NativeSessionRuntime::spawn(session_id, route.clone(), spec)?);
 
             let mut sessions = self
@@ -107,7 +107,17 @@ impl MuxBackendPort for NativeBackend {
                 ));
             }
 
-            let runtime = {
+            let runtime = if let Some(session_id) = local_native_session_id(&route) {
+                let sessions = self
+                    .sessions
+                    .read()
+                    .map_err(|_| BackendError::internal("native backend read lock poisoned"))?;
+                Arc::clone(
+                    sessions
+                        .get(&session_id)
+                        .ok_or_else(|| BackendError::not_found("native route is not registered"))?,
+                )
+            } else {
                 let sessions = self
                     .sessions
                     .read()

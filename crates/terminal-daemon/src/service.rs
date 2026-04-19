@@ -3,8 +3,8 @@ use terminal_protocol::{
     BackendCapabilitiesResponse, CreateSessionResponse, DiscoverSessionsResponse,
     ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse,
     OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError, RequestEnvelope,
-    RequestPayload, ResponseEnvelope, ResponsePayload, SavedSessionRecord, SavedSessionResponse,
-    SavedSessionSummary,
+    RequestPayload, ResponseEnvelope, ResponsePayload, RestoreSavedSessionResponse,
+    SavedSessionRecord, SavedSessionResponse, SavedSessionSummary,
 };
 
 use crate::TerminalDaemonState;
@@ -82,6 +82,15 @@ impl TerminalDaemon {
                     session: map_saved_session_record(
                         self.state.saved_session(request.session_id).map_err(map_backend_error)?,
                     ),
+                })
+            }
+            RequestPayload::RestoreSavedSession(request) => {
+                ResponsePayload::RestoreSavedSession(RestoreSavedSessionResponse {
+                    session: self
+                        .state
+                        .restore_saved_session(request.session_id)
+                        .await
+                        .map_err(map_backend_error)?,
                 })
             }
             RequestPayload::GetTopologySnapshot(request) => ResponsePayload::TopologySnapshot(
@@ -325,6 +334,58 @@ mod tests {
             ResponsePayload::SavedSession(saved) => {
                 assert_eq!(saved.session.session_id, session_id);
                 assert_eq!(saved.session.route.backend, terminal_domain::BackendKind::Native);
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_restore_saved_session_requests() {
+        let daemon = TerminalDaemon::default();
+        let created = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
+                    backend: terminal_domain::BackendKind::Native,
+                    spec: CreateSessionSpec {
+                        title: Some("shell".to_string()),
+                        ..CreateSessionSpec::default()
+                    },
+                }),
+            })
+            .await
+            .expect("create session routing should succeed");
+        let session_id = match created.payload {
+            ResponsePayload::CreateSession(created) => created.session.session_id,
+            other => panic!("unexpected response payload: {other:?}"),
+        };
+        daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::DispatchMuxCommand(
+                    terminal_protocol::DispatchMuxCommandRequest {
+                        session_id,
+                        command: terminal_backend_api::MuxCommand::SaveSession,
+                    },
+                ),
+            })
+            .await
+            .expect("save routing should succeed");
+
+        let restored = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::RestoreSavedSession(
+                    terminal_protocol::RestoreSavedSessionRequest { session_id },
+                ),
+            })
+            .await
+            .expect("restore routing should succeed");
+
+        match restored.payload {
+            ResponsePayload::RestoreSavedSession(restored) => {
+                assert_ne!(restored.session.session_id, session_id);
+                assert_eq!(restored.session.route.backend, terminal_domain::BackendKind::Native);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }

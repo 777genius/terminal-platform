@@ -47,6 +47,11 @@ pub struct SavedSessionResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoreSavedSessionResponse {
+    pub session: BackendSessionSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateSessionResponse {
     pub session: BackendSessionSummary,
 }
@@ -83,6 +88,7 @@ pub enum ResponsePayload {
     BackendCapabilities(BackendCapabilitiesResponse),
     ImportSession(ImportSessionResponse),
     SavedSession(SavedSessionResponse),
+    RestoreSavedSession(RestoreSavedSessionResponse),
     TopologySnapshot(TopologySnapshot),
     ScreenSnapshot(ScreenSnapshot),
     ScreenDelta(ScreenDelta),
