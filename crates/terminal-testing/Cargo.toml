@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 terminal-daemon-client = { path = "../terminal-daemon-client" }
 terminal-daemon = { path = "../terminal-daemon" }
+terminal-protocol = { path = "../terminal-protocol" }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

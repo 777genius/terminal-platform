@@ -10,11 +10,13 @@ rust-version = "1.90"
 
 [workspace.dependencies]
 bytes = "1.11.1"
+futures-util = { version = "0.3.32", features = ["sink"] }
+interprocess = { version = "2.4.2", features = ["tokio"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"
-tokio = { version = "1.52.1", features = ["rt-multi-thread", "macros", "sync"] }
-tokio-util = "0.7.18"
+tokio = { version = "1.52.1", features = ["rt-multi-thread", "macros", "sync", "net", "io-util"] }
+tokio-util = { version = "0.7.18", features = ["codec"] }
 tracing = "0.1.44"
 uuid = { version = "1.23.1", features = ["serde", "v4"] }
 
@@ -25,4 +27,3 @@ unsafe_code = "forbid"
 dbg_macro = "deny"
 todo = "deny"
 unwrap_used = "deny"
-

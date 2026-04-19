@@ -4,9 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-terminal-daemon = { path = "../terminal-daemon" }
+futures-util = { workspace = true }
+interprocess = { workspace = true }
 terminal-domain = { path = "../terminal-domain" }
 terminal-protocol = { path = "../terminal-protocol" }
+tokio-util = { workspace = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+terminal-daemon = { path = "../terminal-daemon" }
+tokio = { workspace = true }

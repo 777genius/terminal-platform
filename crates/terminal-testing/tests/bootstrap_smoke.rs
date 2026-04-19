@@ -1,4 +1,4 @@
-use terminal_testing::{daemon_client, daemon_state};
+use terminal_testing::{daemon_fixture, daemon_state};
 
 #[test]
 fn bootstrap_smoke_exposes_empty_daemon_state() {
@@ -11,12 +11,15 @@ fn bootstrap_smoke_exposes_empty_daemon_state() {
     assert_eq!(daemon.session_count(), 0);
 }
 
-#[test]
-fn bootstrap_smoke_roundtrips_request_reply_flow() {
-    let client = daemon_client();
-    let handshake = client.handshake().expect("handshake should succeed");
-    let sessions = client.list_sessions().expect("list_sessions should succeed");
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_roundtrips_request_reply_flow() {
+    let fixture = daemon_fixture("bootstrap-smoke").expect("fixture should start");
+    let handshake = fixture.client.handshake().await.expect("handshake should succeed");
+    let sessions = fixture.client.list_sessions().await.expect("list_sessions should succeed");
 
     assert_eq!(handshake.protocol_version.major, 0);
+    assert_eq!(handshake.protocol_version.minor, 1);
     assert_eq!(sessions.sessions.len(), 0);
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
 }

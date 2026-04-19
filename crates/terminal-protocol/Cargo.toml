@@ -4,10 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bytes = { workspace = true }
+interprocess = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-domain = { path = "../terminal-domain" }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

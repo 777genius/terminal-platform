@@ -4,6 +4,7 @@ pub mod handshake;
 pub mod requests;
 pub mod responses;
 pub mod subscriptions;
+pub mod transport;
 
 pub use envelope::{RequestEnvelope, ResponseEnvelope, SubscriptionEnvelope};
 pub use errors::ProtocolError;
@@ -11,3 +12,4 @@ pub use handshake::{DaemonPhase, Handshake, ProtocolVersion};
 pub use requests::{OpenSubscriptionRequest, RequestPayload};
 pub use responses::{ListSessionsResponse, ResponsePayload};
 pub use subscriptions::SubscriptionEvent;
+pub use transport::{LocalSocketAddress, TransportResponse, decode_json_frame, encode_json_frame};
