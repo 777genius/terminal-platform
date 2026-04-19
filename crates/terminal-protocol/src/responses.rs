@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use terminal_backend_api::{BackendSessionSummary, MuxCommandResult};
+use terminal_backend_api::{BackendSessionSummary, DiscoveredSession, MuxCommandResult};
 use terminal_domain::SubscriptionId;
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
@@ -17,6 +17,16 @@ pub struct CreateSessionResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoverSessionsResponse {
+    pub sessions: Vec<DiscoveredSession>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportSessionResponse {
+    pub session: BackendSessionSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenSubscriptionResponse {
     pub subscription_id: SubscriptionId,
 }
@@ -27,6 +37,8 @@ pub enum ResponsePayload {
     Handshake(Handshake),
     CreateSession(CreateSessionResponse),
     ListSessions(ListSessionsResponse),
+    DiscoverSessions(DiscoverSessionsResponse),
+    ImportSession(ImportSessionResponse),
     TopologySnapshot(TopologySnapshot),
     ScreenSnapshot(ScreenSnapshot),
     ScreenDelta(ScreenDelta),

@@ -12,6 +12,7 @@ pub struct SessionDescriptor {
 pub trait SessionRegistry: Send + Sync {
     fn insert(&self, session: SessionDescriptor);
     fn get(&self, session_id: SessionId) -> Option<SessionDescriptor>;
+    fn get_by_route(&self, route: &SessionRoute) -> Option<SessionDescriptor>;
     fn list(&self) -> Vec<SessionDescriptor>;
 }
 
@@ -31,6 +32,12 @@ impl SessionRegistry for InMemorySessionRegistry {
         let sessions =
             self.sessions.read().expect("session registry read lock should not be poisoned");
         sessions.get(&session_id).cloned()
+    }
+
+    fn get_by_route(&self, route: &SessionRoute) -> Option<SessionDescriptor> {
+        let sessions =
+            self.sessions.read().expect("session registry read lock should not be poisoned");
+        sessions.values().find(|session| &session.route == route).cloned()
     }
 
     fn list(&self) -> Vec<SessionDescriptor> {
@@ -62,6 +69,7 @@ mod tests {
         registry.insert(descriptor.clone());
 
         assert_eq!(registry.get(descriptor.session_id), Some(descriptor.clone()));
+        assert_eq!(registry.get_by_route(&descriptor.route), Some(descriptor.clone()));
 
         let sessions = registry.list();
         assert_eq!(sessions, vec![descriptor]);

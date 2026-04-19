@@ -4,10 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+terminal-application = { path = "../terminal-application" }
 terminal-backend-api = { path = "../terminal-backend-api" }
+terminal-backend-native = { path = "../terminal-backend-native" }
+terminal-backend-tmux = { path = "../terminal-backend-tmux" }
+terminal-backend-zellij = { path = "../terminal-backend-zellij" }
 terminal-daemon-client = { path = "../terminal-daemon-client" }
 terminal-daemon = { path = "../terminal-daemon" }
 terminal-domain = { path = "../terminal-domain" }
+terminal-projection = { path = "../terminal-projection" }
 terminal-protocol = { path = "../terminal-protocol" }
 tokio = { workspace = true }
 

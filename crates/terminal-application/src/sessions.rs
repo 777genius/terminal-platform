@@ -1,23 +1,37 @@
-use std::sync::Arc;
-
 use terminal_backend_api::{
     BackendError, BackendSessionPort, BackendSessionSummary, BackendSubscription,
-    CreateSessionSpec, MuxBackendPort, MuxCommand, MuxCommandResult, SubscriptionSpec,
+    CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult, SubscriptionSpec,
 };
-use terminal_domain::{BackendKind, DegradedModeReason, PaneId, SessionId};
+use terminal_domain::{
+    BackendKind, DegradedModeReason, PaneId, RouteAuthority, SessionId, SessionRoute,
+    imported_session_id,
+};
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
-use crate::registry::{InMemorySessionRegistry, SessionDescriptor, SessionRegistry};
+use crate::{
+    backend_catalog::BackendCatalog,
+    registry::{InMemorySessionRegistry, SessionDescriptor, SessionRegistry},
+};
 
 pub struct SessionService {
-    native_backend: Arc<dyn MuxBackendPort>,
+    backends: BackendCatalog,
     registry: InMemorySessionRegistry,
 }
 
 impl SessionService {
     #[must_use]
-    pub fn new(native_backend: Arc<dyn MuxBackendPort>) -> Self {
-        Self { native_backend, registry: InMemorySessionRegistry::default() }
+    pub fn new(backends: BackendCatalog) -> Self {
+        Self { backends, registry: InMemorySessionRegistry::default() }
+    }
+
+    pub async fn discover_sessions(
+        &self,
+        backend: BackendKind,
+    ) -> Result<Vec<DiscoveredSession>, BackendError> {
+        self.backends
+            .backend(backend)?
+            .discover_sessions(terminal_backend_api::BackendScope::CurrentUser)
+            .await
     }
 
     pub async fn create_session(
@@ -28,23 +42,46 @@ impl SessionService {
         match backend {
             BackendKind::Native => self.create_native_session(spec).await,
             BackendKind::Tmux | BackendKind::Zellij => Err(BackendError::unsupported(
-                "foreign backends are not creatable in v1 start phase",
-                DegradedModeReason::NotYetImplemented,
+                "foreign backends are imported, not created",
+                DegradedModeReason::ImportedForeignSession,
             )),
         }
     }
 
+    pub async fn import_session(
+        &self,
+        route: SessionRoute,
+        title: Option<String>,
+    ) -> Result<BackendSessionSummary, BackendError> {
+        if route.authority != RouteAuthority::ImportedForeign {
+            return Err(BackendError::invalid_input(
+                "imported sessions must use imported_foreign route authority",
+            ));
+        }
+        if route.backend == BackendKind::Native {
+            return Err(BackendError::invalid_input("native sessions are created, not imported"));
+        }
+        if let Some(existing) = self.registry.get_by_route(&route) {
+            return Ok(Self::to_summary(existing));
+        }
+
+        self.backends.backend(route.backend)?.attach_session(route.clone()).await?;
+
+        let descriptor = SessionDescriptor {
+            session_id: imported_session_id(&route)
+                .ok_or_else(|| BackendError::invalid_input("route is not importable"))?,
+            route,
+            title,
+        };
+        let summary = Self::to_summary(descriptor.clone());
+        self.registry.insert(descriptor);
+
+        Ok(summary)
+    }
+
     #[must_use]
     pub fn list_sessions(&self) -> Vec<BackendSessionSummary> {
-        self.registry
-            .list()
-            .into_iter()
-            .map(|session| BackendSessionSummary {
-                session_id: session.session_id,
-                route: session.route,
-                title: session.title,
-            })
-            .collect()
+        self.registry.list().into_iter().map(Self::to_summary).collect()
     }
 
     #[must_use]
@@ -101,18 +138,15 @@ impl SessionService {
         &self,
         spec: CreateSessionSpec,
     ) -> Result<BackendSessionSummary, BackendError> {
-        let binding = self.native_backend.create_session(spec.clone()).await?;
-        let summary = BackendSessionSummary {
-            session_id: binding.session_id,
-            route: binding.route.clone(),
-            title: spec.title.clone(),
-        };
-
-        self.registry.insert(SessionDescriptor {
+        let binding =
+            self.backends.backend(BackendKind::Native)?.create_session(spec.clone()).await?;
+        let descriptor = SessionDescriptor {
             session_id: binding.session_id,
             route: binding.route,
             title: spec.title,
-        });
+        };
+        let summary = Self::to_summary(descriptor.clone());
+        self.registry.insert(descriptor);
 
         Ok(summary)
     }
@@ -126,12 +160,14 @@ impl SessionService {
             .get(session_id)
             .ok_or_else(|| BackendError::not_found(format!("unknown session {session_id:?}")))?;
 
-        match descriptor.route.backend {
-            BackendKind::Native => self.native_backend.attach_session(descriptor.route).await,
-            BackendKind::Tmux | BackendKind::Zellij => Err(BackendError::unsupported(
-                "foreign backends are not attachable in v1 start phase",
-                DegradedModeReason::NotYetImplemented,
-            )),
+        self.backends.backend(descriptor.route.backend)?.attach_session(descriptor.route).await
+    }
+
+    fn to_summary(session: SessionDescriptor) -> BackendSessionSummary {
+        BackendSessionSummary {
+            session_id: session.session_id,
+            route: session.route,
+            title: session.title,
         }
     }
 }

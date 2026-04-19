@@ -639,6 +639,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "shared_library"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -745,13 +751,19 @@ dependencies = [
 name = "terminal-backend-tmux"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "terminal-backend-api",
  "terminal-domain",
+ "terminal-mux-domain",
+ "terminal-projection",
+ "uuid",
 ]
 
 [[package]]
 name = "terminal-backend-zellij"
 version = "0.1.0"
 dependencies = [
+ "terminal-backend-api",
  "terminal-domain",
 ]
 
@@ -771,6 +783,8 @@ dependencies = [
  "terminal-application",
  "terminal-backend-api",
  "terminal-backend-native",
+ "terminal-backend-tmux",
+ "terminal-backend-zellij",
  "terminal-domain",
  "terminal-projection",
  "terminal-protocol",
@@ -850,10 +864,15 @@ dependencies = [
 name = "terminal-testing"
 version = "0.1.0"
 dependencies = [
+ "terminal-application",
  "terminal-backend-api",
+ "terminal-backend-native",
+ "terminal-backend-tmux",
+ "terminal-backend-zellij",
  "terminal-daemon",
  "terminal-daemon-client",
  "terminal-domain",
+ "terminal-projection",
  "terminal-protocol",
  "tokio",
 ]
@@ -964,6 +983,7 @@ dependencies = [
  "getrandom",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

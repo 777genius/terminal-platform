@@ -36,8 +36,15 @@ pub fn unique_socket_address(label: &str) -> LocalSocketAddress {
 }
 
 pub fn daemon_fixture(label: &str) -> std::io::Result<DaemonFixture> {
+    daemon_fixture_with_state(label, TerminalDaemonState::default())
+}
+
+pub fn daemon_fixture_with_state(
+    label: &str,
+    state: TerminalDaemonState,
+) -> std::io::Result<DaemonFixture> {
     let address = unique_socket_address(label);
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())?;
+    let server = spawn_local_socket_server(TerminalDaemon::new(state), address.clone())?;
     let client = LocalSocketDaemonClient::new(address);
 
     Ok(DaemonFixture { client, server })

@@ -10,9 +10,9 @@ use std::{
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
     BackendSessionSummary, BackendSubscription, BackendSubscriptionEvent, BoxFuture,
-    CreateSessionSpec, MuxBackendPort, SubscriptionSpec,
+    CreateSessionSpec, DiscoveredSession, MuxBackendPort, SubscriptionSpec,
 };
-use terminal_domain::{BackendKind, RouteAuthority, SessionId, SessionRoute};
+use terminal_domain::{BackendKind, DegradedModeReason, RouteAuthority, SessionId, SessionRoute};
 use tokio::sync::{mpsc, oneshot};
 
 use runtime::NativeSessionRuntime;
@@ -45,6 +45,18 @@ impl MuxBackendPort for NativeBackend {
                 advisory_metadata_subscriptions: true,
                 ..BackendCapabilities::default()
             })
+        })
+    }
+
+    fn discover_sessions(
+        &self,
+        _scope: BackendScope,
+    ) -> BoxFuture<'_, Result<Vec<DiscoveredSession>, BackendError>> {
+        Box::pin(async {
+            Err(BackendError::unsupported(
+                "native backend is created through canonical session creation",
+                DegradedModeReason::NotYetImplemented,
+            ))
         })
     }
 

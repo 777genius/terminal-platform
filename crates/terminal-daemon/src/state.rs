@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
-use terminal_application::SessionService;
+use terminal_application::{BackendCatalog, SessionService};
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendSessionSummary, BackendSubscription,
-    CreateSessionSpec, MuxCommand, MuxCommandResult, SubscriptionSpec,
+    CreateSessionSpec, DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult,
+    SubscriptionSpec,
 };
 use terminal_backend_native::NativeBackend;
-use terminal_domain::{BackendKind, PaneId, SessionId};
+use terminal_backend_tmux::TmuxBackend;
+use terminal_backend_zellij::ZellijBackend;
+use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{DaemonPhase, Handshake, ProtocolVersion};
 
@@ -16,11 +19,16 @@ pub struct TerminalDaemonState {
 
 impl Default for TerminalDaemonState {
     fn default() -> Self {
-        Self { sessions: SessionService::new(Arc::new(NativeBackend::default())) }
+        Self::new(default_backend_catalog())
     }
 }
 
 impl TerminalDaemonState {
+    #[must_use]
+    pub fn new(backends: BackendCatalog) -> Self {
+        Self { sessions: SessionService::new(backends) }
+    }
+
     #[must_use]
     pub fn handshake(&self) -> Handshake {
         Handshake {
@@ -43,12 +51,27 @@ impl TerminalDaemonState {
         self.sessions.list_sessions()
     }
 
+    pub async fn discover_sessions(
+        &self,
+        backend: BackendKind,
+    ) -> Result<Vec<DiscoveredSession>, BackendError> {
+        self.sessions.discover_sessions(backend).await
+    }
+
     pub async fn create_session(
         &self,
         backend: BackendKind,
         spec: CreateSessionSpec,
     ) -> Result<BackendSessionSummary, BackendError> {
         self.sessions.create_session(backend, spec).await
+    }
+
+    pub async fn import_session(
+        &self,
+        route: SessionRoute,
+        title: Option<String>,
+    ) -> Result<BackendSessionSummary, BackendError> {
+        self.sessions.import_session(route, title).await
     }
 
     pub async fn topology_snapshot(
@@ -90,6 +113,14 @@ impl TerminalDaemonState {
     ) -> Result<BackendSubscription, BackendError> {
         self.sessions.open_subscription(session_id, spec).await
     }
+}
+
+fn default_backend_catalog() -> BackendCatalog {
+    BackendCatalog::new([
+        Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
+        Arc::new(TmuxBackend::default()) as Arc<dyn MuxBackendPort>,
+        Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>,
+    ])
 }
 
 #[cfg(test)]

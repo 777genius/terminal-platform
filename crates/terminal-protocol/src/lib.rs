@@ -10,11 +10,13 @@ pub use envelope::{RequestEnvelope, ResponseEnvelope, SubscriptionEnvelope};
 pub use errors::ProtocolError;
 pub use handshake::{DaemonPhase, Handshake, ProtocolVersion};
 pub use requests::{
-    CreateSessionRequest, DispatchMuxCommandRequest, GetScreenDeltaRequest,
-    GetScreenSnapshotRequest, GetTopologySnapshotRequest, OpenSubscriptionRequest, RequestPayload,
+    CreateSessionRequest, DiscoverSessionsRequest, DispatchMuxCommandRequest,
+    GetScreenDeltaRequest, GetScreenSnapshotRequest, GetTopologySnapshotRequest,
+    ImportSessionRequest, OpenSubscriptionRequest, RequestPayload,
 };
 pub use responses::{
-    CreateSessionResponse, ListSessionsResponse, OpenSubscriptionResponse, ResponsePayload,
+    CreateSessionResponse, DiscoverSessionsResponse, ImportSessionResponse, ListSessionsResponse,
+    OpenSubscriptionResponse, ResponsePayload,
 };
 pub use subscriptions::{SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope};
 pub use transport::{LocalSocketAddress, TransportResponse, decode_json_frame, encode_json_frame};

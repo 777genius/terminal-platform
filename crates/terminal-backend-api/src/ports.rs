@@ -67,10 +67,21 @@ pub struct BackendSessionSummary {
     pub title: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveredSession {
+    pub route: SessionRoute,
+    pub title: Option<String>,
+}
+
 pub trait MuxBackendPort: Send + Sync {
     fn kind(&self) -> BackendKind;
 
     fn capabilities(&self) -> BoxFuture<'_, Result<BackendCapabilities, BackendError>>;
+
+    fn discover_sessions(
+        &self,
+        scope: BackendScope,
+    ) -> BoxFuture<'_, Result<Vec<DiscoveredSession>, BackendError>>;
 
     fn create_session(
         &self,

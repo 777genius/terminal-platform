@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use terminal_backend_api::{CreateSessionSpec, MuxCommand, SubscriptionSpec};
-use terminal_domain::{BackendKind, PaneId, SessionId};
+use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateSessionRequest {
@@ -13,6 +13,17 @@ pub struct CreateSessionRequest {
 pub struct OpenSubscriptionRequest {
     pub session_id: SessionId,
     pub spec: SubscriptionSpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoverSessionsRequest {
+    pub backend: BackendKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportSessionRequest {
+    pub route: SessionRoute,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +56,8 @@ pub enum RequestPayload {
     Handshake,
     CreateSession(CreateSessionRequest),
     ListSessions,
+    DiscoverSessions(DiscoverSessionsRequest),
+    ImportSession(ImportSessionRequest),
     GetTopologySnapshot(GetTopologySnapshotRequest),
     GetScreenSnapshot(GetScreenSnapshotRequest),
     GetScreenDelta(GetScreenDeltaRequest),

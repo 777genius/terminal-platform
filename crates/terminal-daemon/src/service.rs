@@ -1,7 +1,8 @@
 use terminal_backend_api::{BackendError, BackendErrorKind};
 use terminal_protocol::{
-    CreateSessionResponse, ListSessionsResponse, OpenSubscriptionRequest, OpenSubscriptionResponse,
-    ProtocolError, RequestEnvelope, RequestPayload, ResponseEnvelope, ResponsePayload,
+    CreateSessionResponse, DiscoverSessionsResponse, ImportSessionResponse, ListSessionsResponse,
+    OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError, RequestEnvelope,
+    RequestPayload, ResponseEnvelope, ResponsePayload,
 };
 
 use crate::TerminalDaemonState;
@@ -35,6 +36,24 @@ impl TerminalDaemon {
             RequestPayload::ListSessions => ResponsePayload::ListSessions(ListSessionsResponse {
                 sessions: self.state.list_sessions(),
             }),
+            RequestPayload::DiscoverSessions(request) => {
+                ResponsePayload::DiscoverSessions(DiscoverSessionsResponse {
+                    sessions: self
+                        .state
+                        .discover_sessions(request.backend)
+                        .await
+                        .map_err(map_backend_error)?,
+                })
+            }
+            RequestPayload::ImportSession(request) => {
+                let session = self
+                    .state
+                    .import_session(request.route, request.title)
+                    .await
+                    .map_err(map_backend_error)?;
+
+                ResponsePayload::ImportSession(ImportSessionResponse { session })
+            }
             RequestPayload::GetTopologySnapshot(request) => ResponsePayload::TopologySnapshot(
                 self.state
                     .topology_snapshot(request.session_id)

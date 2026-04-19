@@ -1,11 +1,31 @@
 use std::{thread, time::Duration};
 
-use terminal_backend_api::{
-    CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SubscriptionSpec,
+#[cfg(unix)]
+use std::{
+    process::Command,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(unix)]
+use terminal_application::BackendCatalog;
+use terminal_backend_api::{
+    CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec,
+    SubscriptionSpec,
+};
+#[cfg(unix)]
+use terminal_backend_native::NativeBackend;
+#[cfg(unix)]
+use terminal_backend_tmux::TmuxBackend;
+#[cfg(unix)]
+use terminal_backend_zellij::ZellijBackend;
+#[cfg(unix)]
+use terminal_daemon::TerminalDaemonState;
 use terminal_domain::BackendKind;
+#[cfg(unix)]
+use terminal_projection::ProjectionSource;
 use terminal_protocol::SubscriptionEvent;
-use terminal_testing::{daemon_fixture, daemon_state};
+use terminal_testing::{daemon_fixture, daemon_fixture_with_state, daemon_state};
 
 #[test]
 fn bootstrap_smoke_exposes_empty_daemon_state() {
@@ -268,6 +288,80 @@ async fn bootstrap_smoke_roundtrips_live_pty_io() {
 }
 
 #[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
+    let socket_name = unique_tmux_socket_name("bootstrap-tmux");
+    let session_name = unique_tmux_session_name("workspace");
+    let _tmux =
+        TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
+    let fixture =
+        daemon_fixture_with_state("bootstrap-tmux-import", tmux_daemon_state(&socket_name))
+            .expect("fixture should start");
+
+    let discovered = fixture
+        .client
+        .discover_sessions(BackendKind::Tmux)
+        .await
+        .expect("discover_sessions should succeed");
+    assert_eq!(discovered.sessions.len(), 1);
+    let candidate = discovered.sessions[0].clone();
+    let imported = fixture
+        .client
+        .import_session(candidate.route.clone(), candidate.title.clone())
+        .await
+        .expect("import_session should succeed");
+    let imported_again = fixture
+        .client
+        .import_session(candidate.route.clone(), candidate.title.clone())
+        .await
+        .expect("second import should be idempotent");
+    let listed = fixture.client.list_sessions().await.expect("list_sessions should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let focused_tab = topology.focused_tab.expect("focused tab should exist");
+    let focused_pane = topology
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id == focused_tab)
+        .and_then(|tab| tab.focused_pane)
+        .expect("focused pane should exist");
+    let screen = fixture
+        .client
+        .screen_snapshot(imported.session.session_id, focused_pane)
+        .await
+        .expect("screen_snapshot should succeed");
+    let delta = fixture
+        .client
+        .screen_delta(imported.session.session_id, focused_pane, screen.sequence)
+        .await
+        .expect("screen_delta should succeed");
+    let dispatch_error = fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::NewTab(NewTabSpec { title: Some("forbidden".to_string()) }),
+        )
+        .await
+        .expect_err("tmux imported routes should be observe-only");
+
+    assert_eq!(imported.session.route.backend, BackendKind::Tmux);
+    assert_eq!(imported.session.session_id, imported_again.session.session_id);
+    assert_eq!(listed.sessions.len(), 1);
+    assert_eq!(topology.backend_kind, BackendKind::Tmux);
+    assert_eq!(topology.tabs.len(), 2);
+    assert_eq!(screen.source, ProjectionSource::TmuxCapturePane);
+    assert!(screen.surface.lines.iter().any(|line| line.text.contains("hello from tmux")));
+    assert!(delta.patch.is_none());
+    assert!(delta.full_replace.is_none());
+    assert_eq!(dispatch_error.code, "backend_unsupported");
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
 fn cat_launch_spec() -> ShellLaunchSpec {
     ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
 }
@@ -292,4 +386,92 @@ async fn wait_for_screen_line(
     }
 
     panic!("screen never contained expected text: {needle}");
+}
+
+#[cfg(unix)]
+fn tmux_daemon_state(socket_name: &str) -> TerminalDaemonState {
+    TerminalDaemonState::new(BackendCatalog::new([
+        Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
+        Arc::new(TmuxBackend::with_socket_name(socket_name)) as Arc<dyn MuxBackendPort>,
+        Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>,
+    ]))
+}
+
+#[cfg(unix)]
+fn unique_tmux_socket_name(label: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("terminal-platform-{label}-{}-{nanos}", std::process::id())
+}
+
+#[cfg(unix)]
+fn unique_tmux_session_name(label: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{label}-{}-{nanos}", std::process::id())
+}
+
+#[cfg(unix)]
+struct TmuxServerGuard {
+    socket_name: String,
+}
+
+#[cfg(unix)]
+impl TmuxServerGuard {
+    fn spawn(socket_name: &str, session_name: &str) -> Result<Self, String> {
+        run_tmux(
+            socket_name,
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                session_name,
+                "sh",
+                "-lc",
+                "printf 'hello from tmux\\n'; exec cat",
+            ],
+        )?;
+        run_tmux(
+            socket_name,
+            &[
+                "new-window",
+                "-d",
+                "-t",
+                session_name,
+                "-n",
+                "logs",
+                "sh",
+                "-lc",
+                "printf 'logs ready\\n'; exec cat",
+            ],
+        )?;
+
+        Ok(Self { socket_name: socket_name.to_string() })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for TmuxServerGuard {
+    fn drop(&mut self) {
+        let _ = run_tmux(&self.socket_name, &["kill-server"]);
+    }
+}
+
+#[cfg(unix)]
+fn run_tmux(socket_name: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("tmux")
+        .arg("-L")
+        .arg(socket_name)
+        .args(args)
+        .output()
+        .map_err(|error| format!("failed to spawn tmux: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    String::from_utf8(output.stdout).map_err(|error| format!("invalid tmux utf8 output: {error}"))
 }

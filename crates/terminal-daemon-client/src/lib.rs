@@ -1,17 +1,18 @@
 use futures_util::{SinkExt as _, StreamExt as _};
 use interprocess::local_socket::{tokio::Stream, traits::tokio::Stream as _};
 use terminal_backend_api::{CreateSessionSpec, MuxCommand, MuxCommandResult, SubscriptionSpec};
-use terminal_domain::{BackendKind, OperationId};
+use terminal_domain::{BackendKind, OperationId, SessionRoute};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{
-    CreateSessionRequest, CreateSessionResponse, DispatchMuxCommandRequest, GetScreenDeltaRequest,
-    GetScreenSnapshotRequest, GetTopologySnapshotRequest, Handshake, ListSessionsResponse,
-    LocalSocketAddress, OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError,
-    ProtocolVersion, RequestEnvelope, RequestPayload, ResponsePayload, SubscriptionEnvelope,
-    SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope, TransportResponse,
-    decode_json_frame, encode_json_frame,
+    CreateSessionRequest, CreateSessionResponse, DiscoverSessionsRequest, DiscoverSessionsResponse,
+    DispatchMuxCommandRequest, GetScreenDeltaRequest, GetScreenSnapshotRequest,
+    GetTopologySnapshotRequest, Handshake, ImportSessionRequest, ImportSessionResponse,
+    ListSessionsResponse, LocalSocketAddress, OpenSubscriptionRequest, OpenSubscriptionResponse,
+    ProtocolError, ProtocolVersion, RequestEnvelope, RequestPayload, ResponsePayload,
+    SubscriptionEnvelope, SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope,
+    TransportResponse, decode_json_frame, encode_json_frame,
 };
 
 type LocalFramedStream = Framed<Stream, LengthDelimitedCodec>;
@@ -124,6 +125,20 @@ impl LocalSocketDaemonClient {
         }
     }
 
+    pub async fn discover_sessions(
+        &self,
+        backend: BackendKind,
+    ) -> Result<DiscoverSessionsResponse, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::DiscoverSessions(DiscoverSessionsRequest { backend }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::DiscoverSessions(discovered) => Ok(discovered),
+            other => Err(ProtocolError::unexpected_payload("discover_sessions", &other)),
+        }
+    }
+
     pub async fn create_session(
         &self,
         backend: BackendKind,
@@ -136,6 +151,21 @@ impl LocalSocketDaemonClient {
         match response.payload {
             ResponsePayload::CreateSession(created) => Ok(created),
             other => Err(ProtocolError::unexpected_payload("create_session", &other)),
+        }
+    }
+
+    pub async fn import_session(
+        &self,
+        route: SessionRoute,
+        title: Option<String>,
+    ) -> Result<ImportSessionResponse, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::ImportSession(ImportSessionRequest { route, title }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::ImportSession(imported) => Ok(imported),
+            other => Err(ProtocolError::unexpected_payload("import_session", &other)),
         }
     }
 
