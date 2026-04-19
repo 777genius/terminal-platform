@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+terminal-daemon = { path = "../terminal-daemon" }
+terminal-domain = { path = "../terminal-domain" }
 terminal-protocol = { path = "../terminal-protocol" }
 
 [lints]

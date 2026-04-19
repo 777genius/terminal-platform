@@ -1,5 +1,5 @@
 use terminal_application::{InMemorySessionRegistry, SessionRegistry};
-use terminal_backend_api::BackendCapabilities;
+use terminal_backend_api::{BackendCapabilities, BackendSessionSummary};
 use terminal_domain::BackendKind;
 use terminal_protocol::{DaemonPhase, Handshake, ProtocolVersion};
 
@@ -24,6 +24,19 @@ impl TerminalDaemonState {
     #[must_use]
     pub fn session_count(&self) -> usize {
         self.registry.list().len()
+    }
+
+    #[must_use]
+    pub fn list_sessions(&self) -> Vec<BackendSessionSummary> {
+        self.registry
+            .list()
+            .into_iter()
+            .map(|session| BackendSessionSummary {
+                session_id: session.session_id,
+                route: session.route,
+                title: session.title,
+            })
+            .collect()
     }
 }
 

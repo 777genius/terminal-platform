@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+terminal-daemon-client = { path = "../terminal-daemon-client" }
 terminal-daemon = { path = "../terminal-daemon" }
 
 [lints]

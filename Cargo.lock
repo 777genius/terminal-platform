@@ -297,6 +297,8 @@ dependencies = [
 name = "terminal-daemon-client"
 version = "0.1.0"
 dependencies = [
+ "terminal-daemon",
+ "terminal-domain",
  "terminal-protocol",
 ]
 
@@ -354,6 +356,7 @@ name = "terminal-testing"
 version = "0.1.0"
 dependencies = [
  "terminal-daemon",
+ "terminal-daemon-client",
 ]
 
 [[package]]
