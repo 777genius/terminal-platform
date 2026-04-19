@@ -984,6 +984,7 @@ dependencies = [
  "terminal-backend-api",
  "terminal-daemon",
  "terminal-domain",
+ "terminal-persistence",
  "terminal-projection",
  "terminal-protocol",
  "tokio",
