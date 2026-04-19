@@ -127,6 +127,65 @@ async fn bootstrap_smoke_streams_topology_updates() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_streams_live_pane_surface_updates() {
+    let fixture = daemon_fixture("bootstrap-pane-sub").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    let mut subscription = fixture
+        .client
+        .open_subscription(created.session.session_id, SubscriptionSpec::PaneSurface { pane_id })
+        .await
+        .expect("subscription should open");
+
+    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = match initial {
+        SubscriptionEvent::ScreenDelta(delta) => delta,
+        other => panic!("unexpected initial event: {other:?}"),
+    };
+    let dispatch = fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id,
+                data: "hello from pane stream\r".to_string(),
+            }),
+        )
+        .await
+        .expect("dispatch should succeed");
+    let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+    let updated = match updated {
+        SubscriptionEvent::ScreenDelta(delta) => delta,
+        other => panic!("unexpected screen event: {other:?}"),
+    };
+    let patch = updated.patch.expect("delta patch should exist");
+
+    assert!(!dispatch.changed);
+    assert!(initial.full_replace.is_some());
+    assert!(updated.to_sequence > updated.from_sequence);
+    assert!(
+        patch.line_updates.iter().any(|line| line.line.text.contains("hello from pane stream"))
+    );
+    assert!(updated.full_replace.is_none());
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_roundtrips_live_pty_io() {
     let fixture = daemon_fixture("bootstrap-pty-smoke").expect("fixture should start");
     let created = fixture

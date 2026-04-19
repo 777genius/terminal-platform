@@ -69,6 +69,14 @@ impl ScreenDelta {
 
     #[must_use]
     pub fn between(previous: &ScreenSnapshot, current: &ScreenSnapshot) -> Self {
+        if previous.pane_id != current.pane_id
+            || previous.rows != current.rows
+            || previous.cols != current.cols
+            || previous.source != current.source
+        {
+            return Self::full_replace(previous.sequence, current);
+        }
+
         let mut line_updates = Vec::new();
         let total_rows = previous.surface.lines.len().max(current.surface.lines.len());
 
@@ -114,9 +122,14 @@ mod tests {
 
     use super::ScreenDelta;
 
-    fn snapshot(sequence: u64, title: Option<&str>, lines: &[&str]) -> ScreenSnapshot {
+    fn snapshot(
+        pane_id: PaneId,
+        sequence: u64,
+        title: Option<&str>,
+        lines: &[&str],
+    ) -> ScreenSnapshot {
         ScreenSnapshot {
-            pane_id: PaneId::new(),
+            pane_id,
             sequence,
             rows: 24,
             cols: 80,
@@ -131,8 +144,9 @@ mod tests {
 
     #[test]
     fn computes_line_and_title_patch_between_snapshots() {
-        let previous = snapshot(4, Some("shell"), &["ready", ""]);
-        let current = snapshot(5, Some("logs"), &["ready", "hello"]);
+        let pane_id = PaneId::new();
+        let previous = snapshot(pane_id, 4, Some("shell"), &["ready", ""]);
+        let current = snapshot(pane_id, 5, Some("logs"), &["ready", "hello"]);
         let delta = ScreenDelta::between(&previous, &current);
 
         assert_eq!(delta.from_sequence, 4);
@@ -148,11 +162,26 @@ mod tests {
 
     #[test]
     fn returns_empty_patch_for_identical_snapshots() {
-        let previous = snapshot(7, Some("shell"), &["ready"]);
+        let pane_id = PaneId::new();
+        let previous = snapshot(pane_id, 7, Some("shell"), &["ready"]);
         let current = ScreenSnapshot { sequence: 8, ..previous.clone() };
         let delta = ScreenDelta::between(&previous, &current);
 
         assert!(delta.patch.is_none());
         assert!(delta.full_replace.is_none());
+    }
+
+    #[test]
+    fn falls_back_to_full_replace_for_dimension_change() {
+        let pane_id = PaneId::new();
+        let previous = snapshot(pane_id, 2, Some("shell"), &["ready"]);
+        let mut current = snapshot(pane_id, 3, Some("shell"), &["ready", "hello"]);
+        current.rows = 40;
+
+        let delta = ScreenDelta::between(&previous, &current);
+
+        assert!(delta.patch.is_none());
+        assert!(delta.full_replace.is_some());
+        assert_eq!(delta.rows, 40);
     }
 }

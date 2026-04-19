@@ -278,9 +278,14 @@ impl LocalSocketDaemonClient {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        thread,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
 
-    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec};
+    use terminal_backend_api::{
+        CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SubscriptionSpec,
+    };
     use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
     use terminal_domain::BackendKind;
     use terminal_protocol::SubscriptionEvent;
@@ -295,6 +300,32 @@ mod tests {
         let slug = format!("terminal-platform-{label}-{}-{nanos}.sock", std::process::id());
 
         terminal_protocol::LocalSocketAddress::from_runtime_slug(slug)
+    }
+
+    #[cfg(unix)]
+    fn cat_launch_spec() -> ShellLaunchSpec {
+        ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+    }
+
+    #[cfg(unix)]
+    async fn wait_for_screen_line(
+        client: &LocalSocketDaemonClient,
+        session_id: terminal_domain::SessionId,
+        pane_id: terminal_domain::PaneId,
+        needle: &str,
+    ) {
+        for _ in 0..40 {
+            let screen = client
+                .screen_snapshot(session_id, pane_id)
+                .await
+                .expect("screen_snapshot should succeed");
+            if screen.surface.lines.iter().any(|line| line.text.contains(needle)) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        panic!("screen never contained expected text: {needle}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -575,6 +606,73 @@ mod tests {
         assert_eq!(initial.tabs.len(), 1);
         assert!(result.changed);
         assert_eq!(updated.tabs.len(), 2);
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn streams_live_pane_surface_updates_over_subscription_lane() {
+        let address = unique_address("daemon-client-sub-pane");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    launch: Some(cat_launch_spec()),
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+        let topology = client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        wait_for_screen_line(&client, created.session.session_id, pane_id, "ready").await;
+        let mut subscription = client
+            .open_subscription(
+                created.session.session_id,
+                SubscriptionSpec::PaneSurface { pane_id },
+            )
+            .await
+            .expect("subscription should open");
+
+        let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+        let initial = match initial {
+            SubscriptionEvent::ScreenDelta(delta) => delta,
+            other => panic!("unexpected initial event: {other:?}"),
+        };
+        let result = client
+            .dispatch(
+                created.session.session_id,
+                MuxCommand::SendInput(SendInputSpec {
+                    pane_id,
+                    data: "hello from subscription\r".to_string(),
+                }),
+            )
+            .await
+            .expect("dispatch should succeed");
+        let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+        let updated = match updated {
+            SubscriptionEvent::ScreenDelta(delta) => delta,
+            other => panic!("unexpected screen event: {other:?}"),
+        };
+        let patch = updated.patch.expect("delta patch should exist");
+
+        assert!(!result.changed);
+        assert!(initial.full_replace.is_some());
+        assert!(updated.to_sequence > updated.from_sequence);
+        assert!(
+            patch
+                .line_updates
+                .iter()
+                .any(|line| line.line.text.contains("hello from subscription"))
+        );
+        assert!(updated.full_replace.is_none());
 
         server.shutdown().await.expect("server shutdown should succeed");
     }
