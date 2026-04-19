@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use std::{future::Future, pin::Pin};
 
 use serde::{Deserialize, Serialize};
@@ -19,6 +21,37 @@ pub enum BackendScope {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct CreateSessionSpec {
     pub title: Option<String>,
+    pub launch: Option<ShellLaunchSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellLaunchSpec {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: Option<PathBuf>,
+}
+
+impl ShellLaunchSpec {
+    #[must_use]
+    pub fn new(program: impl Into<String>) -> Self {
+        Self { program: program.into(), args: Vec::new(), cwd: None }
+    }
+
+    #[must_use]
+    pub fn with_args<I, S>(mut self, args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.args = args.into_iter().map(Into::into).collect();
+        self
+    }
+
+    #[must_use]
+    pub fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

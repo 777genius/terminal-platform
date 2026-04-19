@@ -1,3 +1,6 @@
+mod runtime;
+mod transcript;
+
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
@@ -6,36 +9,15 @@ use std::{
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
     BackendSessionSummary, BackendSubscription, BoxFuture, CreateSessionSpec, MuxBackendPort,
-    MuxCommand, MuxCommandResult, NewTabSpec, SubscriptionSpec,
+    SubscriptionSpec,
 };
-use terminal_domain::{
-    BackendKind, DegradedModeReason, PaneId, RouteAuthority, SessionId, SessionRoute, TabId,
-};
-use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
-use terminal_projection::{
-    ProjectionSource, ScreenCursor, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
-};
+use terminal_domain::{BackendKind, DegradedModeReason, RouteAuthority, SessionId, SessionRoute};
+
+use runtime::NativeSessionRuntime;
 
 #[derive(Default)]
 pub struct NativeBackend {
-    sessions: Arc<RwLock<HashMap<SessionId, NativeSessionRecord>>>,
-}
-
-#[derive(Debug, Clone)]
-struct NativeSessionRecord {
-    summary: BackendSessionSummary,
-    tabs: Vec<NativeTabRecord>,
-    focused_tab: TabId,
-    rows: u16,
-    cols: u16,
-    sequence: u64,
-}
-
-#[derive(Debug, Clone)]
-struct NativeTabRecord {
-    tab_id: TabId,
-    title: Option<String>,
-    pane_id: PaneId,
+    sessions: Arc<RwLock<HashMap<SessionId, Arc<NativeSessionRuntime>>>>,
 }
 
 impl NativeBackend {
@@ -56,6 +38,7 @@ impl MuxBackendPort for NativeBackend {
                 tiled_panes: true,
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,
+                rendered_viewport_snapshot: true,
                 ..BackendCapabilities::default()
             })
         })
@@ -72,21 +55,13 @@ impl MuxBackendPort for NativeBackend {
                 authority: RouteAuthority::LocalDaemon,
                 external: None,
             };
-            let tab = make_tab(spec.title.clone());
-            let summary =
-                BackendSessionSummary { session_id, route: route.clone(), title: spec.title };
-            let record = NativeSessionRecord {
-                summary: summary.clone(),
-                focused_tab: tab.tab_id,
-                tabs: vec![tab],
-                rows: 24,
-                cols: 80,
-                sequence: 0,
-            };
+            let runtime = Arc::new(NativeSessionRuntime::spawn(session_id, route.clone(), spec)?);
 
-            let mut sessions =
-                self.sessions.write().expect("native backend write lock should not be poisoned");
-            sessions.insert(session_id, record);
+            let mut sessions = self
+                .sessions
+                .write()
+                .map_err(|_| BackendError::internal("native backend write lock poisoned"))?;
+            sessions.insert(session_id, runtime);
 
             Ok(BackendSessionBinding { session_id, route })
         })
@@ -103,23 +78,22 @@ impl MuxBackendPort for NativeBackend {
                 ));
             }
 
-            let session_id = {
-                let sessions =
-                    self.sessions.read().expect("native backend read lock should not be poisoned");
-                sessions
-                    .keys()
-                    .copied()
-                    .find(|session_id| {
-                        sessions
-                            .get(session_id)
-                            .map(|record| record.summary.route == route)
-                            .unwrap_or(false)
-                    })
-                    .ok_or_else(|| BackendError::not_found("native route is not registered"))?
+            let runtime = {
+                let sessions = self
+                    .sessions
+                    .read()
+                    .map_err(|_| BackendError::internal("native backend read lock poisoned"))?;
+                let mut matched = None;
+                for runtime in sessions.values() {
+                    if runtime.summary()?.route == route {
+                        matched = Some(Arc::clone(runtime));
+                        break;
+                    }
+                }
+                matched.ok_or_else(|| BackendError::not_found("native route is not registered"))?
             };
 
-            Ok(Box::new(NativeAttachedSession { session_id, sessions: Arc::clone(&self.sessions) })
-                as Box<dyn BackendSessionPort>)
+            Ok(Box::new(NativeAttachedSession { runtime }) as Box<dyn BackendSessionPort>)
         })
     }
 
@@ -128,106 +102,43 @@ impl MuxBackendPort for NativeBackend {
         _scope: BackendScope,
     ) -> BoxFuture<'_, Result<Vec<BackendSessionSummary>, BackendError>> {
         Box::pin(async move {
-            let sessions =
-                self.sessions.read().expect("native backend read lock should not be poisoned");
+            let sessions = self
+                .sessions
+                .read()
+                .map_err(|_| BackendError::internal("native backend read lock poisoned"))?;
+            let mut summaries = Vec::with_capacity(sessions.len());
+            for runtime in sessions.values() {
+                summaries.push(runtime.summary()?);
+            }
 
-            Ok(sessions.values().map(|record| record.summary.clone()).collect())
+            Ok(summaries)
         })
     }
 }
 
 struct NativeAttachedSession {
-    session_id: SessionId,
-    sessions: Arc<RwLock<HashMap<SessionId, NativeSessionRecord>>>,
+    runtime: Arc<NativeSessionRuntime>,
 }
 
 impl BackendSessionPort for NativeAttachedSession {
-    fn topology_snapshot(&self) -> BoxFuture<'_, Result<TopologySnapshot, BackendError>> {
-        Box::pin(async move {
-            let record = self.record()?;
-
-            Ok(build_topology_snapshot(self.session_id, &record))
-        })
+    fn topology_snapshot(
+        &self,
+    ) -> BoxFuture<'_, Result<terminal_projection::TopologySnapshot, BackendError>> {
+        Box::pin(async move { self.runtime.topology_snapshot() })
     }
 
     fn screen_snapshot(
         &self,
-        pane_id: PaneId,
-    ) -> BoxFuture<'_, Result<ScreenSnapshot, BackendError>> {
-        Box::pin(async move {
-            let record = self.record()?;
-            let tab = record
-                .tabs
-                .iter()
-                .find(|tab| tab.pane_id == pane_id)
-                .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
-
-            Ok(ScreenSnapshot {
-                pane_id,
-                sequence: record.sequence,
-                rows: record.rows,
-                cols: record.cols,
-                source: ProjectionSource::NativeEmulator,
-                surface: ScreenSurface {
-                    title: tab.title.clone().or_else(|| record.summary.title.clone()),
-                    cursor: Some(ScreenCursor { row: 0, col: 0 }),
-                    lines: vec![
-                        ScreenLine {
-                            text: tab
-                                .title
-                                .clone()
-                                .or_else(|| record.summary.title.clone())
-                                .unwrap_or_else(|| "native-session".to_string()),
-                        },
-                        ScreenLine { text: format!("pane {:?} in stub native session", pane_id) },
-                    ],
-                },
-            })
-        })
+        pane_id: terminal_domain::PaneId,
+    ) -> BoxFuture<'_, Result<terminal_projection::ScreenSnapshot, BackendError>> {
+        Box::pin(async move { self.runtime.screen_snapshot(pane_id) })
     }
 
     fn dispatch(
         &self,
-        command: MuxCommand,
-    ) -> BoxFuture<'_, Result<MuxCommandResult, BackendError>> {
-        Box::pin(async move {
-            let mut sessions = self
-                .sessions
-                .write()
-                .expect("native attached session write lock should not be poisoned");
-            let record = sessions
-                .get_mut(&self.session_id)
-                .ok_or_else(|| BackendError::not_found("native session disappeared"))?;
-
-            let changed = match command {
-                MuxCommand::NewTab(spec) => dispatch_new_tab(record, spec),
-                MuxCommand::FocusTab { tab_id } => dispatch_focus_tab(record, tab_id)?,
-                MuxCommand::RenameTab { tab_id, title } => {
-                    dispatch_rename_tab(record, tab_id, title)?
-                }
-                MuxCommand::FocusPane { pane_id } => dispatch_focus_pane(record, pane_id)?,
-                MuxCommand::CloseTab { tab_id } => dispatch_close_tab(record, tab_id)?,
-                MuxCommand::ClosePane { .. }
-                | MuxCommand::SplitPane(_)
-                | MuxCommand::ResizePane(_)
-                | MuxCommand::SendInput(_)
-                | MuxCommand::SendPaste(_)
-                | MuxCommand::Detach
-                | MuxCommand::SaveSession
-                | MuxCommand::OverrideLayout(_) => {
-                    return Err(BackendError::unsupported(
-                        "native mux command is not wired in v1 start phase",
-                        DegradedModeReason::NotYetImplemented,
-                    ));
-                }
-            };
-
-            if changed {
-                record.sequence += 1;
-            }
-
-            Ok(MuxCommandResult { changed })
-        })
+        command: terminal_backend_api::MuxCommand,
+    ) -> BoxFuture<'_, Result<terminal_backend_api::MuxCommandResult, BackendError>> {
+        Box::pin(async move { self.runtime.dispatch(command) })
     }
 
     fn subscribe(
@@ -243,219 +154,147 @@ impl BackendSessionPort for NativeAttachedSession {
     }
 }
 
-impl NativeAttachedSession {
-    fn record(&self) -> Result<NativeSessionRecord, BackendError> {
-        let sessions =
-            self.sessions.read().expect("native attached session read lock should not be poisoned");
-
-        sessions
-            .get(&self.session_id)
-            .cloned()
-            .ok_or_else(|| BackendError::not_found("native session disappeared"))
-    }
-}
-
-fn make_tab(title: Option<String>) -> NativeTabRecord {
-    NativeTabRecord { tab_id: TabId::new(), title, pane_id: PaneId::new() }
-}
-
-fn build_topology_snapshot(
-    session_id: SessionId,
-    record: &NativeSessionRecord,
-) -> TopologySnapshot {
-    TopologySnapshot {
-        session_id,
-        backend_kind: BackendKind::Native,
-        tabs: record
-            .tabs
-            .iter()
-            .map(|tab| TabSnapshot {
-                tab_id: tab.tab_id,
-                title: tab.title.clone(),
-                root: PaneTreeNode::Leaf { pane_id: tab.pane_id },
-                focused_pane: Some(tab.pane_id),
-            })
-            .collect(),
-        focused_tab: Some(record.focused_tab),
-    }
-}
-
-fn dispatch_new_tab(record: &mut NativeSessionRecord, spec: NewTabSpec) -> bool {
-    let tab = make_tab(spec.title);
-    record.focused_tab = tab.tab_id;
-    record.tabs.push(tab);
-    true
-}
-
-fn dispatch_focus_tab(
-    record: &mut NativeSessionRecord,
-    tab_id: TabId,
-) -> Result<bool, BackendError> {
-    if !record.tabs.iter().any(|tab| tab.tab_id == tab_id) {
-        return Err(BackendError::not_found(format!("unknown tab {tab_id:?}")));
-    }
-
-    if record.focused_tab == tab_id {
-        return Ok(false);
-    }
-
-    record.focused_tab = tab_id;
-    Ok(true)
-}
-
-fn dispatch_rename_tab(
-    record: &mut NativeSessionRecord,
-    tab_id: TabId,
-    title: String,
-) -> Result<bool, BackendError> {
-    let tab = record
-        .tabs
-        .iter_mut()
-        .find(|tab| tab.tab_id == tab_id)
-        .ok_or_else(|| BackendError::not_found(format!("unknown tab {tab_id:?}")))?;
-
-    if tab.title.as_deref() == Some(title.as_str()) {
-        return Ok(false);
-    }
-
-    tab.title = Some(title);
-    Ok(true)
-}
-
-fn dispatch_focus_pane(
-    record: &mut NativeSessionRecord,
-    pane_id: PaneId,
-) -> Result<bool, BackendError> {
-    let tab = record
-        .tabs
-        .iter()
-        .find(|tab| tab.pane_id == pane_id)
-        .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
-
-    if record.focused_tab == tab.tab_id {
-        return Ok(false);
-    }
-
-    record.focused_tab = tab.tab_id;
-    Ok(true)
-}
-
-fn dispatch_close_tab(
-    record: &mut NativeSessionRecord,
-    tab_id: TabId,
-) -> Result<bool, BackendError> {
-    if record.tabs.len() == 1 {
-        return Err(BackendError::unsupported(
-            "cannot close the last tab in v1 start phase",
-            DegradedModeReason::NotYetImplemented,
-        ));
-    }
-
-    let index = record
-        .tabs
-        .iter()
-        .position(|tab| tab.tab_id == tab_id)
-        .ok_or_else(|| BackendError::not_found(format!("unknown tab {tab_id:?}")))?;
-
-    record.tabs.remove(index);
-
-    if record.focused_tab == tab_id {
-        let next_index = index.saturating_sub(1).min(record.tabs.len() - 1);
-        record.focused_tab = record.tabs[next_index].tab_id;
-    }
-
-    Ok(true)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::{thread, time::Duration};
+
     use terminal_backend_api::{
-        BackendScope, CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec,
+        BackendScope, CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, SendInputSpec,
+        ShellLaunchSpec,
     };
+    use terminal_domain::BackendKind;
     use terminal_projection::ProjectionSource;
 
     use super::NativeBackend;
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn creates_and_lists_empty_sessions() {
         let backend = NativeBackend::default();
         let binding = backend
-            .create_session(CreateSessionSpec { title: Some("shell".to_string()) })
+            .create_session(CreateSessionSpec {
+                title: Some("shell".to_string()),
+                ..CreateSessionSpec::default()
+            })
             .await
-            .expect("create_session should succeed");
+            .expect("native session should be created");
         let sessions = backend
             .list_sessions(BackendScope::CurrentUser)
             .await
             .expect("list_sessions should succeed");
 
-        assert_eq!(binding.route.backend, terminal_domain::BackendKind::Native);
+        assert_eq!(backend.kind(), BackendKind::Native);
+        assert_eq!(binding.route.backend, BackendKind::Native);
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, binding.session_id);
         assert_eq!(sessions[0].title.as_deref(), Some("shell"));
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn attaches_and_exposes_stub_topology_and_screen() {
+    #[tokio::test]
+    async fn attaches_and_exposes_topology_and_screen() {
         let backend = NativeBackend::default();
         let binding = backend
-            .create_session(CreateSessionSpec { title: Some("shell".to_string()) })
+            .create_session(CreateSessionSpec {
+                title: Some("shell".to_string()),
+                ..CreateSessionSpec::default()
+            })
             .await
-            .expect("create_session should succeed");
+            .expect("native session should be created");
         let session = backend
             .attach_session(binding.route.clone())
             .await
             .expect("attach_session should succeed");
-        let topology = session.topology_snapshot().await.expect("topology snapshot should succeed");
-        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        let topology = session.topology_snapshot().await.expect("topology should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("tab should expose a focused pane");
         let screen =
             session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
 
         assert_eq!(topology.session_id, binding.session_id);
-        assert_eq!(topology.backend_kind, terminal_domain::BackendKind::Native);
         assert_eq!(topology.tabs.len(), 1);
         assert_eq!(screen.pane_id, pane_id);
-        assert_eq!(screen.source, ProjectionSource::NativeEmulator);
-        assert_eq!(screen.surface.lines.len(), 2);
+        assert_eq!(screen.source, ProjectionSource::NativeTranscript);
+        assert!(!screen.surface.lines.is_empty());
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mutates_topology_through_dispatch() {
         let backend = NativeBackend::default();
         let binding = backend
-            .create_session(CreateSessionSpec { title: Some("shell".to_string()) })
+            .create_session(CreateSessionSpec {
+                title: Some("shell".to_string()),
+                ..CreateSessionSpec::default()
+            })
             .await
-            .expect("create_session should succeed");
-        let session = backend
-            .attach_session(binding.route.clone())
-            .await
-            .expect("attach_session should succeed");
-        let before = session.topology_snapshot().await.expect("topology snapshot should succeed");
+            .expect("native session should be created");
+        let session =
+            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let before = session.topology_snapshot().await.expect("topology should succeed");
+        let focused_pane = before.tabs[0].focused_pane.expect("focused pane should exist");
 
-        let created = session
+        let new_tab = session
             .dispatch(MuxCommand::NewTab(NewTabSpec { title: Some("logs".to_string()) }))
             .await
-            .expect("new tab dispatch should succeed");
-        let after_new_tab =
-            session.topology_snapshot().await.expect("topology snapshot should succeed");
-        let new_tab_id = after_new_tab.focused_tab.expect("focused tab should exist");
-        let renamed = session
-            .dispatch(MuxCommand::RenameTab { tab_id: new_tab_id, title: "console".to_string() })
+            .expect("new tab should succeed");
+        let focus_same_pane = session
+            .dispatch(MuxCommand::FocusPane { pane_id: focused_pane })
             .await
-            .expect("rename tab dispatch should succeed");
-        let after_rename =
-            session.topology_snapshot().await.expect("topology snapshot should succeed");
+            .expect("focus pane should succeed");
+        let after = session.topology_snapshot().await.expect("topology should succeed");
 
-        assert!(created.changed);
-        assert!(renamed.changed);
-        assert_eq!(before.tabs.len(), 1);
-        assert_eq!(after_new_tab.tabs.len(), 2);
-        assert_eq!(
-            after_rename
-                .tabs
-                .iter()
-                .find(|tab| tab.tab_id == new_tab_id)
-                .and_then(|tab| tab.title.as_deref()),
-            Some("console")
-        );
+        assert!(new_tab.changed);
+        assert!(focus_same_pane.changed);
+        assert_eq!(after.tabs.len(), 2);
+        assert_eq!(after.focused_tab, Some(before.tabs[0].tab_id));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn writes_input_into_live_pty_backed_session() {
+        let backend = NativeBackend::default();
+        let binding = backend
+            .create_session(CreateSessionSpec {
+                title: Some("shell".to_string()),
+                launch: Some(cat_launch_spec()),
+            })
+            .await
+            .expect("native session should be created");
+        let session =
+            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let topology = session.topology_snapshot().await.expect("topology should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+        wait_for_screen_line(&*session, pane_id, "ready").await;
+        let result = session
+            .dispatch(MuxCommand::SendInput(SendInputSpec {
+                pane_id,
+                data: "hello from backend test\r".to_string(),
+            }))
+            .await
+            .expect("send input should succeed");
+
+        assert!(!result.changed);
+        wait_for_screen_line(&*session, pane_id, "hello from backend test").await;
+    }
+
+    #[cfg(unix)]
+    fn cat_launch_spec() -> ShellLaunchSpec {
+        ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+    }
+
+    #[cfg(unix)]
+    async fn wait_for_screen_line(
+        session: &dyn terminal_backend_api::BackendSessionPort,
+        pane_id: terminal_domain::PaneId,
+        needle: &str,
+    ) {
+        for _ in 0..40 {
+            let screen =
+                session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
+            if screen.surface.lines.iter().any(|line| line.text.contains(needle)) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        panic!("screen never contained expected text: {needle}");
     }
 }

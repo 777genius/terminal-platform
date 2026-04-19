@@ -108,7 +108,10 @@ mod tests {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
                     backend: terminal_domain::BackendKind::Native,
-                    spec: CreateSessionSpec { title: Some("shell".to_string()) },
+                    spec: CreateSessionSpec {
+                        title: Some("shell".to_string()),
+                        ..CreateSessionSpec::default()
+                    },
                 }),
             })
             .await
@@ -131,7 +134,10 @@ mod tests {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
                     backend: terminal_domain::BackendKind::Native,
-                    spec: CreateSessionSpec { title: Some("shell".to_string()) },
+                    spec: CreateSessionSpec {
+                        title: Some("shell".to_string()),
+                        ..CreateSessionSpec::default()
+                    },
                 }),
             })
             .await
@@ -167,7 +173,10 @@ mod tests {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
                     backend: terminal_domain::BackendKind::Native,
-                    spec: CreateSessionSpec { title: Some("shell".to_string()) },
+                    spec: CreateSessionSpec {
+                        title: Some("shell".to_string()),
+                        ..CreateSessionSpec::default()
+                    },
                 }),
             })
             .await

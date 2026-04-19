@@ -12,6 +12,6 @@ pub use commands::{
 pub use errors::{BackendError, BackendErrorKind};
 pub use ports::{
     BackendScope, BackendSessionBinding, BackendSessionPort, BackendSessionSummary, BoxFuture,
-    CreateSessionSpec, MuxBackendPort,
+    CreateSessionSpec, MuxBackendPort, ShellLaunchSpec,
 };
 pub use subscriptions::{BackendSubscription, SubscriptionSpec};

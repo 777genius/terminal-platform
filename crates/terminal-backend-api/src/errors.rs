@@ -36,6 +36,16 @@ impl BackendError {
     }
 
     #[must_use]
+    pub fn transport(message: impl Into<String>) -> Self {
+        Self::new(BackendErrorKind::Transport, message)
+    }
+
+    #[must_use]
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::new(BackendErrorKind::Internal, message)
+    }
+
+    #[must_use]
     pub fn unsupported(message: impl Into<String>, degraded_reason: DegradedModeReason) -> Self {
         Self {
             kind: BackendErrorKind::Unsupported,

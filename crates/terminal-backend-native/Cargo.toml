@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+portable-pty = { workspace = true }
+strip-ansi-escapes = { workspace = true }
 terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-domain = { path = "../terminal-domain" }
 terminal-mux-domain = { path = "../terminal-mux-domain" }

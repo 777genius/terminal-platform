@@ -1,4 +1,8 @@
-use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec};
+use std::{thread, time::Duration};
+
+use terminal_backend_api::{
+    CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec,
+};
 use terminal_domain::BackendKind;
 use terminal_testing::{daemon_fixture, daemon_state};
 
@@ -18,7 +22,10 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
     let fixture = daemon_fixture("bootstrap-smoke").expect("fixture should start");
     let created = fixture
         .client
-        .create_session(BackendKind::Native, CreateSessionSpec { title: Some("shell".to_string()) })
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), ..CreateSessionSpec::default() },
+        )
         .await
         .expect("create_session should succeed");
     let handshake = fixture.client.handshake().await.expect("handshake should succeed");
@@ -56,9 +63,74 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
     assert_eq!(sessions.sessions[0].session_id, created.session.session_id);
     assert_eq!(topology.session_id, created.session.session_id);
     assert_eq!(screen.pane_id, pane_id);
-    assert_eq!(screen.surface.lines.len(), 2);
+    assert!(!screen.surface.lines.is_empty());
     assert!(dispatch.changed);
     assert_eq!(topology_after_dispatch.tabs.len(), 2);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_roundtrips_live_pty_io() {
+    let fixture = daemon_fixture("bootstrap-pty-smoke").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    let dispatch = fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id,
+                data: "hello from smoke\r".to_string(),
+            }),
+        )
+        .await
+        .expect("dispatch should succeed");
+
+    assert!(!dispatch.changed);
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "hello from smoke").await;
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+fn cat_launch_spec() -> ShellLaunchSpec {
+    ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+}
+
+#[cfg(unix)]
+async fn wait_for_screen_line(
+    fixture: &terminal_testing::DaemonFixture,
+    session_id: terminal_domain::SessionId,
+    pane_id: terminal_domain::PaneId,
+    needle: &str,
+) {
+    for _ in 0..40 {
+        let screen = fixture
+            .client
+            .screen_snapshot(session_id, pane_id)
+            .await
+            .expect("screen_snapshot should succeed");
+        if screen.surface.lines.iter().any(|line| line.text.contains(needle)) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    panic!("screen never contained expected text: {needle}");
 }
