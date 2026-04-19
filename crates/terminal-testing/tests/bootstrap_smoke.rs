@@ -23,6 +23,8 @@ use terminal_backend_zellij::ZellijBackend;
 use terminal_daemon::TerminalDaemonState;
 use terminal_domain::BackendKind;
 #[cfg(unix)]
+use terminal_domain::DegradedModeReason;
+#[cfg(unix)]
 use terminal_projection::ProjectionSource;
 use terminal_protocol::SubscriptionEvent;
 use terminal_testing::{daemon_fixture, daemon_fixture_with_state, daemon_state};
@@ -483,6 +485,7 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
     assert!(delta.full_replace.is_some());
     assert_eq!(dispatch_error.code, "backend_unsupported");
     assert_eq!(close_last_error.code, "backend_unsupported");
+    assert_eq!(close_last_error.degraded_reason, Some(DegradedModeReason::UnsupportedByBackend));
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
@@ -671,6 +674,7 @@ async fn bootstrap_smoke_discovers_zellij_session_and_rejects_import_on_legacy_s
     assert_eq!(candidate.route.backend, BackendKind::Zellij);
     assert_eq!(error.code, "backend_unsupported");
     assert!(error.message.contains("zellij 0.43.1"));
+    assert_eq!(error.degraded_reason, Some(DegradedModeReason::MissingCapability));
     assert!(listed.sessions.is_empty());
 
     fixture.shutdown().await.expect("fixture should stop cleanly");

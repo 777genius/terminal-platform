@@ -122,8 +122,12 @@ fn map_backend_error(error: BackendError) -> ProtocolError {
         BackendErrorKind::Transport => "backend_transport",
         BackendErrorKind::Internal => "backend_internal",
     };
+    let message = error.to_string();
 
-    ProtocolError::new(code, error.to_string())
+    match error.degraded_reason {
+        Some(degraded_reason) => ProtocolError::with_degraded_reason(code, message, degraded_reason),
+        None => ProtocolError::new(code, message),
+    }
 }
 
 #[cfg(test)]
