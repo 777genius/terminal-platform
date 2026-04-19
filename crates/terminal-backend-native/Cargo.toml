@@ -6,6 +6,10 @@ edition = "2024"
 [dependencies]
 terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-domain = { path = "../terminal-domain" }
+terminal-projection = { path = "../terminal-projection" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }

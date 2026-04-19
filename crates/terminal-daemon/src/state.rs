@@ -1,11 +1,21 @@
-use terminal_application::{InMemorySessionRegistry, SessionRegistry};
-use terminal_backend_api::{BackendCapabilities, BackendSessionSummary};
+use std::sync::Arc;
+
+use terminal_application::SessionService;
+use terminal_backend_api::{
+    BackendCapabilities, BackendError, BackendSessionSummary, CreateSessionSpec,
+};
+use terminal_backend_native::NativeBackend;
 use terminal_domain::BackendKind;
 use terminal_protocol::{DaemonPhase, Handshake, ProtocolVersion};
 
-#[derive(Debug, Default)]
 pub struct TerminalDaemonState {
-    registry: InMemorySessionRegistry,
+    sessions: SessionService,
+}
+
+impl Default for TerminalDaemonState {
+    fn default() -> Self {
+        Self { sessions: SessionService::new(Arc::new(NativeBackend::default())) }
+    }
 }
 
 impl TerminalDaemonState {
@@ -23,25 +33,28 @@ impl TerminalDaemonState {
 
     #[must_use]
     pub fn session_count(&self) -> usize {
-        self.registry.list().len()
+        self.sessions.session_count()
     }
 
     #[must_use]
     pub fn list_sessions(&self) -> Vec<BackendSessionSummary> {
-        self.registry
-            .list()
-            .into_iter()
-            .map(|session| BackendSessionSummary {
-                session_id: session.session_id,
-                route: session.route,
-                title: session.title,
-            })
-            .collect()
+        self.sessions.list_sessions()
+    }
+
+    pub async fn create_session(
+        &self,
+        backend: BackendKind,
+        spec: CreateSessionSpec,
+    ) -> Result<BackendSessionSummary, BackendError> {
+        self.sessions.create_session(backend, spec).await
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use terminal_backend_api::CreateSessionSpec;
+    use terminal_domain::BackendKind;
+
     use super::TerminalDaemonState;
 
     #[test]
@@ -53,5 +66,21 @@ mod tests {
         assert_eq!(handshake.protocol_version.minor, 1);
         assert_eq!(handshake.available_backends.len(), 3);
         assert_eq!(state.session_count(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn creates_native_session_summary() {
+        let state = TerminalDaemonState::default();
+        let created = state
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec { title: Some("shell".to_string()) },
+            )
+            .await
+            .expect("native session create should succeed");
+
+        assert_eq!(created.route.backend, BackendKind::Native);
+        assert_eq!(created.title.as_deref(), Some("shell"));
+        assert_eq!(state.session_count(), 1);
     }
 }

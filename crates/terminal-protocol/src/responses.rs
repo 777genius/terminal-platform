@@ -10,9 +10,15 @@ pub struct ListSessionsResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateSessionResponse {
+    pub session: BackendSessionSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResponsePayload {
     Handshake(Handshake),
+    CreateSession(CreateSessionResponse),
     ListSessions(ListSessionsResponse),
     SubscriptionOpened,
 }

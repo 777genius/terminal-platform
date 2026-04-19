@@ -1,12 +1,13 @@
 use futures_util::{SinkExt as _, StreamExt as _};
 use interprocess::local_socket::{tokio::Stream, traits::tokio::Stream as _};
+use terminal_backend_api::CreateSessionSpec;
+use terminal_domain::{BackendKind, OperationId};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
-use terminal_domain::OperationId;
 use terminal_protocol::{
-    Handshake, ListSessionsResponse, LocalSocketAddress, ProtocolError, ProtocolVersion,
-    RequestEnvelope, RequestPayload, ResponsePayload, TransportResponse, decode_json_frame,
-    encode_json_frame,
+    CreateSessionRequest, CreateSessionResponse, Handshake, ListSessionsResponse,
+    LocalSocketAddress, ProtocolError, ProtocolVersion, RequestEnvelope, RequestPayload,
+    ResponsePayload, TransportResponse, decode_json_frame, encode_json_frame,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +61,21 @@ impl LocalSocketDaemonClient {
         }
     }
 
+    pub async fn create_session(
+        &self,
+        backend: BackendKind,
+        spec: CreateSessionSpec,
+    ) -> Result<CreateSessionResponse, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::CreateSession(CreateSessionRequest { backend, spec }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::CreateSession(created) => Ok(created),
+            other => Err(ProtocolError::unexpected_payload("create_session", &other)),
+        }
+    }
+
     async fn send_request(
         &self,
         payload: RequestPayload,
@@ -106,7 +122,9 @@ impl LocalSocketDaemonClient {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use terminal_backend_api::CreateSessionSpec;
     use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+    use terminal_domain::BackendKind;
 
     use super::LocalSocketDaemonClient;
 
@@ -134,6 +152,30 @@ mod tests {
         assert_eq!(handshake.protocol_version.minor, 1);
         assert_eq!(client.info().expected_protocol, handshake.protocol_version);
         assert!(sessions.sessions.is_empty());
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn creates_native_session_and_lists_it_back() {
+        let address = unique_address("daemon-client-create");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec { title: Some("shell".to_string()) },
+            )
+            .await
+            .expect("create_session should succeed");
+        let sessions = client.list_sessions().await.expect("list_sessions should succeed");
+
+        assert_eq!(created.session.route.backend, BackendKind::Native);
+        assert_eq!(created.session.title.as_deref(), Some("shell"));
+        assert_eq!(sessions.sessions.len(), 1);
+        assert_eq!(sessions.sessions[0].session_id, created.session.session_id);
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

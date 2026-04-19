@@ -69,7 +69,7 @@ async fn handle_connection(daemon: Arc<TerminalDaemon>, stream: Stream) -> io::R
     while let Some(frame_result) = framed.next().await {
         let frame = frame_result?;
         let reply = match decode_json_frame::<RequestEnvelope>(&frame) {
-            Ok(request) => TransportResponse::from_result(daemon.handle_request(request)),
+            Ok(request) => TransportResponse::from_result(daemon.handle_request(request).await),
             Err(error) => TransportResponse::Error(error),
         };
         let encoded_reply =

@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-daemon-client = { path = "../terminal-daemon-client" }
 terminal-daemon = { path = "../terminal-daemon" }
+terminal-domain = { path = "../terminal-domain" }
 terminal-protocol = { path = "../terminal-protocol" }
 tokio = { workspace = true }
 

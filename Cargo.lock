@@ -349,6 +349,7 @@ dependencies = [
 name = "terminal-application"
 version = "0.1.0"
 dependencies = [
+ "terminal-backend-api",
  "terminal-domain",
 ]
 
@@ -369,6 +370,8 @@ version = "0.1.0"
 dependencies = [
  "terminal-backend-api",
  "terminal-domain",
+ "terminal-projection",
+ "tokio",
 ]
 
 [[package]]
@@ -400,6 +403,7 @@ dependencies = [
  "interprocess",
  "terminal-application",
  "terminal-backend-api",
+ "terminal-backend-native",
  "terminal-domain",
  "terminal-protocol",
  "tokio",
@@ -412,6 +416,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "interprocess",
+ "terminal-backend-api",
  "terminal-daemon",
  "terminal-domain",
  "terminal-protocol",
@@ -475,8 +480,10 @@ dependencies = [
 name = "terminal-testing"
 version = "0.1.0"
 dependencies = [
+ "terminal-backend-api",
  "terminal-daemon",
  "terminal-daemon-client",
+ "terminal-domain",
  "terminal-protocol",
  "tokio",
 ]

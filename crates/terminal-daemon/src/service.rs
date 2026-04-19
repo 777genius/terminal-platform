@@ -1,11 +1,11 @@
 use terminal_protocol::{
-    ListSessionsResponse, ProtocolError, RequestEnvelope, RequestPayload, ResponseEnvelope,
-    ResponsePayload,
+    CreateSessionResponse, ListSessionsResponse, ProtocolError, RequestEnvelope, RequestPayload,
+    ResponseEnvelope, ResponsePayload,
 };
 
 use crate::TerminalDaemonState;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct TerminalDaemon {
     state: TerminalDaemonState,
 }
@@ -16,12 +16,21 @@ impl TerminalDaemon {
         Self { state }
     }
 
-    pub fn handle_request(
+    pub async fn handle_request(
         &self,
         request: RequestEnvelope,
     ) -> Result<ResponseEnvelope, ProtocolError> {
         let payload = match request.payload {
             RequestPayload::Handshake => ResponsePayload::Handshake(self.state.handshake()),
+            RequestPayload::CreateSession(request) => {
+                let session = self
+                    .state
+                    .create_session(request.backend, request.spec)
+                    .await
+                    .map_err(|error| ProtocolError::new("backend_error", error.to_string()))?;
+
+                ResponsePayload::CreateSession(CreateSessionResponse { session })
+            }
             RequestPayload::ListSessions => ResponsePayload::ListSessions(ListSessionsResponse {
                 sessions: self.state.list_sessions(),
             }),
@@ -34,25 +43,50 @@ impl TerminalDaemon {
 
 #[cfg(test)]
 mod tests {
+    use terminal_backend_api::CreateSessionSpec;
     use terminal_domain::OperationId;
     use terminal_protocol::{RequestEnvelope, RequestPayload, ResponsePayload};
 
     use super::TerminalDaemon;
 
-    #[test]
-    fn routes_handshake_requests() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_handshake_requests() {
         let daemon = TerminalDaemon::default();
         let response = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::Handshake,
             })
+            .await
             .expect("handshake routing should succeed");
 
         match response.payload {
             ResponsePayload::Handshake(handshake) => {
                 assert_eq!(handshake.protocol_version.major, 0);
                 assert_eq!(handshake.available_backends.len(), 3);
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_native_session_creation_requests() {
+        let daemon = TerminalDaemon::default();
+        let response = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
+                    backend: terminal_domain::BackendKind::Native,
+                    spec: CreateSessionSpec { title: Some("shell".to_string()) },
+                }),
+            })
+            .await
+            .expect("create session routing should succeed");
+
+        match response.payload {
+            ResponsePayload::CreateSession(created) => {
+                assert_eq!(created.session.route.backend, terminal_domain::BackendKind::Native);
+                assert_eq!(created.session.title.as_deref(), Some("shell"));
             }
             other => panic!("unexpected response payload: {other:?}"),
         }
