@@ -418,7 +418,9 @@ mod tests {
         CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SubscriptionSpec,
     };
     use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
-    use terminal_domain::BackendKind;
+    use terminal_domain::{
+        BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
+    };
     use terminal_protocol::SubscriptionEvent;
 
     use super::LocalSocketDaemonClient;
@@ -586,6 +588,10 @@ mod tests {
         assert_eq!(saved_summary.tab_count, 1);
         assert_eq!(saved_summary.pane_count, 1);
         assert!(saved_summary.has_launch);
+        assert_eq!(saved_summary.manifest.format_version, 1);
+        assert_eq!(saved_summary.manifest.binary_version, CURRENT_BINARY_VERSION);
+        assert_eq!(saved_summary.manifest.protocol_major, CURRENT_PROTOCOL_MAJOR);
+        assert_eq!(saved_summary.manifest.protocol_minor, CURRENT_PROTOCOL_MINOR);
         assert!(saved_summary.restore_semantics.restores_topology);
         assert!(saved_summary.restore_semantics.uses_saved_launch_spec);
         assert!(!saved_summary.restore_semantics.replays_saved_screen_buffers);
@@ -594,6 +600,7 @@ mod tests {
         assert_eq!(loaded.session.title.as_deref(), Some("shell"));
         assert_eq!(loaded.session.topology.tabs.len(), 1);
         assert_eq!(loaded.session.screens.len(), 1);
+        assert_eq!(loaded.session.manifest.binary_version, CURRENT_BINARY_VERSION);
         assert!(loaded.session.restore_semantics.restores_focus_state);
         assert!(loaded.session.restore_semantics.restores_tab_titles);
         assert!(!loaded.session.restore_semantics.replays_saved_screen_buffers);
@@ -708,6 +715,7 @@ mod tests {
         assert_ne!(restored.session.session_id, created.session.session_id);
         assert_eq!(restored.session.route.backend, BackendKind::Native);
         assert_eq!(restored.session.title.as_deref(), Some("logs"));
+        assert_eq!(restored.manifest.binary_version, CURRENT_BINARY_VERSION);
         assert!(restored.restore_semantics.restores_topology);
         assert!(restored.restore_semantics.uses_saved_launch_spec);
         assert!(!restored.restore_semantics.replays_saved_screen_buffers);

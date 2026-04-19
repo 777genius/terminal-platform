@@ -9,26 +9,32 @@ use rusqlite::{Connection, OptionalExtension, params};
 use rusqlite_migration::{M, Migrations};
 use serde::{Deserialize, Serialize};
 use terminal_backend_api::ShellLaunchSpec;
-use terminal_domain::{SessionId, SessionRoute};
+use terminal_domain::{SavedSessionManifest, SessionId, SessionRoute};
 use terminal_mux_domain::PaneTreeNode;
 use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 use thiserror::Error;
 use uuid::Uuid;
 
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(
-        "
-        CREATE TABLE IF NOT EXISTS native_saved_sessions (
-            session_id TEXT PRIMARY KEY,
-            route_json TEXT NOT NULL,
-            title TEXT,
-            launch_json TEXT,
-            topology_json TEXT NOT NULL,
-            screens_json TEXT NOT NULL,
-            saved_at_ms INTEGER NOT NULL
-        );
-        ",
-    )])
+    Migrations::new(vec![
+        M::up(
+            "
+            CREATE TABLE IF NOT EXISTS native_saved_sessions (
+                session_id TEXT PRIMARY KEY,
+                route_json TEXT NOT NULL,
+                title TEXT,
+                launch_json TEXT,
+                manifest_json TEXT NOT NULL DEFAULT '{\"format_version\":1,\"binary_version\":\"0.1.0-dev\",\"protocol_major\":0,\"protocol_minor\":1}',
+                topology_json TEXT NOT NULL,
+                screens_json TEXT NOT NULL,
+                saved_at_ms INTEGER NOT NULL
+            );
+            ",
+        ),
+        // Keep migration cardinality stable for existing local stores that already advanced
+        // to migration index 2 in earlier development builds.
+        M::up("SELECT 1;"),
+    ])
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,6 +43,7 @@ pub struct SavedNativeSession {
     pub route: SessionRoute,
     pub title: Option<String>,
     pub launch: Option<ShellLaunchSpec>,
+    pub manifest: SavedSessionManifest,
     pub topology: TopologySnapshot,
     pub screens: Vec<ScreenSnapshot>,
     pub saved_at_ms: i64,
@@ -48,6 +55,7 @@ pub struct SavedSessionSummary {
     pub route: SessionRoute,
     pub title: Option<String>,
     pub saved_at_ms: i64,
+    pub manifest: SavedSessionManifest,
     pub has_launch: bool,
     pub tab_count: usize,
     pub pane_count: usize,
@@ -113,14 +121,16 @@ impl SqliteSessionStore {
                 route_json,
                 title,
                 launch_json,
+                manifest_json,
                 topology_json,
                 screens_json,
                 saved_at_ms
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(session_id) DO UPDATE SET
                 route_json = excluded.route_json,
                 title = excluded.title,
                 launch_json = excluded.launch_json,
+                manifest_json = excluded.manifest_json,
                 topology_json = excluded.topology_json,
                 screens_json = excluded.screens_json,
                 saved_at_ms = excluded.saved_at_ms
@@ -130,6 +140,7 @@ impl SqliteSessionStore {
                 serde_json::to_string(&session.route)?,
                 session.title,
                 serde_json::to_string(&session.launch)?,
+                serde_json::to_string(&session.manifest)?,
                 serde_json::to_string(&session.topology)?,
                 serde_json::to_string(&session.screens)?,
                 session.saved_at_ms,
@@ -147,7 +158,7 @@ impl SqliteSessionStore {
         let row = connection
             .query_row(
                 "
-                SELECT route_json, title, launch_json, topology_json, screens_json, saved_at_ms
+                SELECT route_json, title, launch_json, manifest_json, topology_json, screens_json, saved_at_ms
                 FROM native_saved_sessions
                 WHERE session_id = ?1
                 ",
@@ -159,7 +170,8 @@ impl SqliteSessionStore {
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
-                        row.get::<_, i64>(5)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
                     ))
                 },
             )
@@ -167,12 +179,21 @@ impl SqliteSessionStore {
 
         row.map_or(
             Ok(None),
-            |(route_json, title, launch_json, topology_json, screens_json, saved_at_ms)| {
+            |(
+                route_json,
+                title,
+                launch_json,
+                manifest_json,
+                topology_json,
+                screens_json,
+                saved_at_ms,
+            )| {
                 Ok(Some(SavedNativeSession {
                     session_id,
                     route: serde_json::from_str(&route_json)?,
                     title,
                     launch: serde_json::from_str(&launch_json)?,
+                    manifest: serde_json::from_str(&manifest_json)?,
                     topology: serde_json::from_str(&topology_json)?,
                     screens: serde_json::from_str(&screens_json)?,
                     saved_at_ms,
@@ -198,7 +219,7 @@ impl SqliteSessionStore {
         let connection = self.open_connection()?;
         let mut statement = connection.prepare(
             "
-            SELECT session_id, route_json, title, launch_json, topology_json, saved_at_ms
+            SELECT session_id, route_json, title, launch_json, manifest_json, topology_json, saved_at_ms
             FROM native_saved_sessions
             ORDER BY saved_at_ms DESC
             ",
@@ -210,15 +231,25 @@ impl SqliteSessionStore {
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, i64>(6)?,
             ))
         })?;
 
         let mut sessions = Vec::new();
         for row in rows {
-            let (session_id, route_json, title, launch_json, topology_json, saved_at_ms) = row?;
+            let (
+                session_id,
+                route_json,
+                title,
+                launch_json,
+                manifest_json,
+                topology_json,
+                saved_at_ms,
+            ) = row?;
             let route: SessionRoute = serde_json::from_str(&route_json)?;
             let launch: Option<ShellLaunchSpec> = serde_json::from_str(&launch_json)?;
+            let manifest: SavedSessionManifest = serde_json::from_str(&manifest_json)?;
             let topology: TopologySnapshot = serde_json::from_str(&topology_json)?;
             sessions.push(SavedSessionSummary {
                 session_id: SessionId::from(Uuid::parse_str(&session_id).map_err(|error| {
@@ -229,6 +260,7 @@ impl SqliteSessionStore {
                 route,
                 title,
                 saved_at_ms,
+                manifest,
                 has_launch: launch.is_some(),
                 tab_count: topology.tabs.len(),
                 pane_count: topology.tabs.iter().map(|tab| pane_count(&tab.root)).sum(),
@@ -245,6 +277,7 @@ impl SqliteSessionStore {
     fn ensure_schema(&self) -> Result<(), PersistenceError> {
         let mut connection = Connection::open(&self.path)?;
         migrations().to_latest(&mut connection)?;
+        ensure_manifest_column(&connection)?;
         Ok(())
     }
 
@@ -252,6 +285,33 @@ impl SqliteSessionStore {
         self.ensure_schema()?;
         Ok(Connection::open(&self.path)?)
     }
+}
+
+fn ensure_manifest_column(connection: &Connection) -> Result<(), PersistenceError> {
+    let mut statement = connection.prepare("PRAGMA table_info(native_saved_sessions)")?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for column in columns {
+        if column? == "manifest_json" {
+            return Ok(());
+        }
+    }
+
+    let alter = connection.execute(
+        "
+        ALTER TABLE native_saved_sessions
+        ADD COLUMN manifest_json TEXT NOT NULL DEFAULT '{\"format_version\":1,\"binary_version\":\"0.1.0-dev\",\"protocol_major\":0,\"protocol_minor\":1}';
+        ",
+        [],
+    );
+    match alter {
+        Ok(_) => Ok(()),
+        Err(error) if duplicate_column_error(&error) => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn duplicate_column_error(error: &rusqlite::Error) -> bool {
+    matches!(error, rusqlite::Error::SqliteFailure(_, Some(message)) if message.contains("duplicate column name"))
 }
 
 fn pane_count(root: &PaneTreeNode) -> usize {
@@ -263,8 +323,12 @@ fn pane_count(root: &PaneTreeNode) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::Connection;
     use terminal_backend_api::ShellLaunchSpec;
-    use terminal_domain::{BackendKind, PaneId, RouteAuthority, SessionId, SessionRoute, TabId};
+    use terminal_domain::{
+        BackendKind, CURRENT_BINARY_VERSION, PaneId, RouteAuthority, SavedSessionManifest,
+        SessionId, SessionRoute, TabId,
+    };
     use terminal_projection::{
         ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
     };
@@ -281,6 +345,7 @@ mod tests {
             },
             title: Some(title.to_string()),
             launch: Some(ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "exec cat"])),
+            manifest: SavedSessionManifest::current(),
             topology: TopologySnapshot {
                 session_id,
                 backend_kind: BackendKind::Native,
@@ -318,6 +383,7 @@ mod tests {
             .expect("saved session should exist");
 
         assert_eq!(loaded, snapshot);
+        assert_eq!(loaded.manifest.format_version, 1);
 
         let _ = std::fs::remove_file(path);
     }
@@ -391,7 +457,48 @@ mod tests {
         assert_eq!(listed[0].tab_count, 0);
         assert_eq!(listed[0].pane_count, 0);
         assert!(listed[0].has_launch);
+        assert_eq!(listed[0].manifest.format_version, 1);
         assert_eq!(listed[1].session_id, older_session);
+        assert_eq!(listed[1].manifest.format_version, 1);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn upgrades_legacy_saved_session_schema_with_manifest_column() {
+        let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+        let path =
+            std::env::temp_dir().join(format!("terminal-platform-legacy-schema-{nonce}.sqlite3"));
+        let connection = Connection::open(&path).expect("legacy db should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE native_saved_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    route_json TEXT NOT NULL,
+                    title TEXT,
+                    launch_json TEXT,
+                    topology_json TEXT NOT NULL,
+                    screens_json TEXT NOT NULL,
+                    saved_at_ms INTEGER NOT NULL
+                );
+                ",
+            )
+            .expect("legacy schema should be created");
+        drop(connection);
+
+        let store = SqliteSessionStore::open(&path).expect("store should upgrade legacy schema");
+        let session_id = SessionId::new();
+        let snapshot = sample_snapshot(session_id, "shell", "ready");
+
+        store.save_native_session(&snapshot).expect("save should succeed after upgrade");
+        let loaded = store
+            .load_native_session(session_id)
+            .expect("load should succeed")
+            .expect("saved session should exist");
+
+        assert_eq!(loaded.manifest.format_version, 1);
+        assert_eq!(loaded.manifest.binary_version, CURRENT_BINARY_VERSION);
 
         let _ = std::fs::remove_file(path);
     }

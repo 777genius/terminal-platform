@@ -21,11 +21,13 @@ use terminal_backend_tmux::TmuxBackend;
 use terminal_backend_zellij::ZellijBackend;
 #[cfg(unix)]
 use terminal_daemon::TerminalDaemonState;
-use terminal_domain::BackendKind;
 #[cfg(unix)]
 use terminal_domain::DegradedModeReason;
 #[cfg(unix)]
 use terminal_domain::PaneId;
+use terminal_domain::{
+    BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
+};
 #[cfg(unix)]
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection};
 #[cfg(unix)]
@@ -590,6 +592,10 @@ async fn bootstrap_smoke_lists_and_loads_saved_native_sessions_via_daemon_api() 
     assert_eq!(saved_summary.tab_count, 1);
     assert_eq!(saved_summary.pane_count, 1);
     assert!(saved_summary.has_launch);
+    assert_eq!(saved_summary.manifest.format_version, 1);
+    assert_eq!(saved_summary.manifest.binary_version, CURRENT_BINARY_VERSION);
+    assert_eq!(saved_summary.manifest.protocol_major, CURRENT_PROTOCOL_MAJOR);
+    assert_eq!(saved_summary.manifest.protocol_minor, CURRENT_PROTOCOL_MINOR);
     assert!(saved_summary.restore_semantics.restores_topology);
     assert!(saved_summary.restore_semantics.uses_saved_launch_spec);
     assert!(!saved_summary.restore_semantics.replays_saved_screen_buffers);
@@ -599,6 +605,7 @@ async fn bootstrap_smoke_lists_and_loads_saved_native_sessions_via_daemon_api() 
     assert_eq!(loaded.session.topology.tabs.len(), 1);
     assert_eq!(loaded.session.screens.len(), 1);
     assert_eq!(loaded.session.launch, Some(cat_launch_spec()));
+    assert_eq!(loaded.session.manifest.binary_version, CURRENT_BINARY_VERSION);
     assert!(loaded.session.restore_semantics.restores_focus_state);
     assert!(loaded.session.restore_semantics.restores_tab_titles);
     assert!(!loaded.session.restore_semantics.replays_saved_screen_buffers);
@@ -738,6 +745,7 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     assert_ne!(restored.session.session_id, created.session.session_id);
     assert_eq!(restored.session.route.backend, BackendKind::Native);
     assert_eq!(restored.session.title.as_deref(), Some("logs"));
+    assert_eq!(restored.manifest.binary_version, CURRENT_BINARY_VERSION);
     assert!(restored.restore_semantics.restores_topology);
     assert!(restored.restore_semantics.uses_saved_launch_spec);
     assert!(!restored.restore_semantics.replays_saved_screen_buffers);

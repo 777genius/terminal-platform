@@ -9,7 +9,10 @@ use terminal_backend_api::{
 use terminal_backend_native::NativeBackend;
 use terminal_backend_tmux::TmuxBackend;
 use terminal_backend_zellij::ZellijBackend;
-use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
+use terminal_domain::{
+    BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR, PaneId,
+    SessionId, SessionRoute,
+};
 use terminal_persistence::{
     SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary,
 };
@@ -35,8 +38,11 @@ impl TerminalDaemonState {
     #[must_use]
     pub fn handshake(&self) -> Handshake {
         Handshake {
-            protocol_version: ProtocolVersion { major: 0, minor: 1 },
-            binary_version: "0.1.0-dev".to_string(),
+            protocol_version: ProtocolVersion {
+                major: CURRENT_PROTOCOL_MAJOR,
+                minor: CURRENT_PROTOCOL_MINOR,
+            },
+            binary_version: CURRENT_BINARY_VERSION.to_string(),
             daemon_phase: DaemonPhase::Starting,
             capabilities: BackendCapabilities::default(),
             available_backends: vec![BackendKind::Native, BackendKind::Tmux, BackendKind::Zellij],

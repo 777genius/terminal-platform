@@ -101,6 +101,7 @@ impl TerminalDaemon {
                         .await
                         .map_err(map_backend_error)?,
                     saved_session_id: request.session_id,
+                    manifest: saved.manifest.clone(),
                     restore_semantics: saved_session_restore_semantics(saved.launch.is_some()),
                 })
             }
@@ -180,6 +181,7 @@ fn map_saved_session_summary(
         route: session.route,
         title: session.title,
         saved_at_ms: session.saved_at_ms,
+        manifest: session.manifest,
         has_launch: session.has_launch,
         tab_count: session.tab_count,
         pane_count: session.pane_count,
@@ -196,6 +198,7 @@ fn map_saved_session_record(
         route: session.route,
         title: session.title,
         launch: session.launch,
+        manifest: session.manifest,
         topology: session.topology,
         screens: session.screens,
         saved_at_ms: session.saved_at_ms,
@@ -217,7 +220,9 @@ fn saved_session_restore_semantics(has_launch: bool) -> SavedSessionRestoreSeman
 #[cfg(test)]
 mod tests {
     use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec};
-    use terminal_domain::OperationId;
+    use terminal_domain::{
+        CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR, OperationId,
+    };
     use terminal_protocol::{RequestEnvelope, RequestPayload, ResponsePayload};
 
     use super::TerminalDaemon;
@@ -356,6 +361,10 @@ mod tests {
                     .iter()
                     .find(|session| session.session_id == session_id)
                     .expect("saved session should be listed");
+                assert_eq!(session.manifest.format_version, 1);
+                assert_eq!(session.manifest.binary_version, CURRENT_BINARY_VERSION);
+                assert_eq!(session.manifest.protocol_major, CURRENT_PROTOCOL_MAJOR);
+                assert_eq!(session.manifest.protocol_minor, CURRENT_PROTOCOL_MINOR);
                 assert!(session.restore_semantics.restores_topology);
                 assert!(!session.restore_semantics.uses_saved_launch_spec);
                 assert!(!session.restore_semantics.replays_saved_screen_buffers);
@@ -367,6 +376,7 @@ mod tests {
             ResponsePayload::SavedSession(saved) => {
                 assert_eq!(saved.session.session_id, session_id);
                 assert_eq!(saved.session.route.backend, terminal_domain::BackendKind::Native);
+                assert_eq!(saved.session.manifest.binary_version, CURRENT_BINARY_VERSION);
                 assert!(saved.session.restore_semantics.restores_focus_state);
                 assert!(saved.session.restore_semantics.restores_tab_titles);
                 assert!(!saved.session.restore_semantics.replays_saved_screen_buffers);
@@ -486,6 +496,7 @@ mod tests {
                 assert_eq!(restored.saved_session_id, session_id);
                 assert_ne!(restored.session.session_id, session_id);
                 assert_eq!(restored.session.route.backend, terminal_domain::BackendKind::Native);
+                assert_eq!(restored.manifest.binary_version, CURRENT_BINARY_VERSION);
                 assert!(restored.restore_semantics.restores_topology);
                 assert!(!restored.restore_semantics.uses_saved_launch_spec);
                 assert!(!restored.restore_semantics.replays_saved_screen_buffers);

@@ -4,8 +4,8 @@ use terminal_backend_api::{
     NewTabSpec, SplitPaneSpec, SubscriptionSpec,
 };
 use terminal_domain::{
-    BackendKind, DegradedModeReason, PaneId, RouteAuthority, SessionId, SessionRoute, TabId,
-    imported_session_id,
+    BackendKind, DegradedModeReason, PaneId, RouteAuthority, SavedSessionManifest, SessionId,
+    SessionRoute, TabId, imported_session_id,
 };
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
 use terminal_persistence::{
@@ -273,6 +273,7 @@ impl SessionService {
             route: descriptor.route,
             title: saved_session_title(descriptor.title, &topology),
             launch: descriptor.launch,
+            manifest: SavedSessionManifest::current(),
             topology,
             screens,
             saved_at_ms: SqliteSessionStore::save_timestamp_ms().map_err(|error| {
