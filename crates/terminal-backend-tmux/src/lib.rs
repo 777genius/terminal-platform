@@ -9,7 +9,7 @@ use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
     BackendSessionSummary, BackendSubscription, BackendSubscriptionEvent, BoxFuture,
     CreateSessionSpec, DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult,
-    SendInputSpec, SendPasteSpec, SubscriptionSpec,
+    SendInputSpec, SendPasteSpec, SplitPaneSpec, SubscriptionSpec,
 };
 use terminal_domain::{
     BackendKind, DegradedModeReason, ExternalSessionRef, PaneId, RouteAuthority, SessionId,
@@ -90,6 +90,8 @@ impl MuxBackendPort for TmuxBackend {
                 tab_rename: true,
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,
+                pane_split: true,
+                pane_focus: true,
                 pane_input_write: true,
                 pane_paste_write: true,
                 rendered_viewport_stream: true,
@@ -234,14 +236,14 @@ impl TmuxAttachedSession {
     fn dispatch_inner(&self, command: MuxCommand) -> Result<MuxCommandResult, BackendError> {
         match command {
             MuxCommand::NewTab(spec) => self.new_tab(spec),
+            MuxCommand::SplitPane(spec) => self.split_pane(spec),
             MuxCommand::SendInput(spec) => self.send_input(spec),
             MuxCommand::SendPaste(spec) => self.send_paste(spec),
             MuxCommand::CloseTab { tab_id } => self.close_tab(tab_id),
             MuxCommand::FocusTab { tab_id } => self.focus_tab(tab_id),
             MuxCommand::RenameTab { tab_id, title } => self.rename_tab(tab_id, &title),
-            MuxCommand::SplitPane(_)
-            | MuxCommand::ClosePane { .. }
-            | MuxCommand::FocusPane { .. }
+            MuxCommand::FocusPane { pane_id } => self.focus_pane(pane_id),
+            MuxCommand::ClosePane { .. }
             | MuxCommand::ResizePane(_)
             | MuxCommand::Detach
             | MuxCommand::SaveSession
@@ -377,6 +379,17 @@ impl TmuxAttachedSession {
         Ok(MuxCommandResult { changed: true })
     }
 
+    fn focus_pane(&self, pane_id: PaneId) -> Result<MuxCommandResult, BackendError> {
+        let snapshot = self.snapshot()?;
+        let pane_target = snapshot
+            .pane_targets
+            .get(&pane_id)
+            .ok_or_else(|| BackendError::not_found(format!("unknown tmux pane {pane_id:?}")))?;
+        self.backend.run(Some(&self.target), &["select-pane", "-t", &pane_target.target])?;
+
+        Ok(MuxCommandResult { changed: true })
+    }
+
     fn new_tab(
         &self,
         spec: terminal_backend_api::NewTabSpec,
@@ -411,6 +424,19 @@ impl TmuxAttachedSession {
             .get(&tab_id)
             .ok_or_else(|| BackendError::not_found(format!("unknown tmux tab {tab_id:?}")))?;
         self.backend.run(Some(&self.target), &["kill-window", "-t", &tab_target.target])?;
+
+        Ok(MuxCommandResult { changed: true })
+    }
+
+    fn split_pane(&self, spec: SplitPaneSpec) -> Result<MuxCommandResult, BackendError> {
+        let snapshot = self.snapshot()?;
+        let pane_target = snapshot.pane_targets.get(&spec.pane_id).ok_or_else(|| {
+            BackendError::not_found(format!("unknown tmux pane {:?}", spec.pane_id))
+        })?;
+        self.backend.run(
+            Some(&self.target),
+            &["split-window", tmux_split_flag(spec.direction), "-t", &pane_target.target],
+        )?;
 
         Ok(MuxCommandResult { changed: true })
     }
@@ -772,6 +798,13 @@ fn deterministic_uuid<T>(fingerprint: &str, construct: fn(Uuid) -> T) -> T {
     construct(Uuid::new_v5(&Uuid::NAMESPACE_URL, fingerprint.as_bytes()))
 }
 
+fn tmux_split_flag(direction: SplitDirection) -> &'static str {
+    match direction {
+        SplitDirection::Horizontal => "-v",
+        SplitDirection::Vertical => "-h",
+    }
+}
+
 fn parse_tmux_layout(input: &str, pane_ids: &HashMap<u32, PaneId>) -> Option<PaneTreeNode> {
     let mut parser = LayoutParser::new(input)?;
     parser.parse_node(pane_ids)
@@ -921,9 +954,11 @@ mod tests {
     use std::collections::BTreeMap;
 
     use terminal_domain::{RouteAuthority, SessionRoute};
-    use terminal_mux_domain::PaneTreeNode;
+    use terminal_mux_domain::{PaneTreeNode, SplitDirection};
 
-    use super::{TMUX_ROUTE_NAMESPACE, TmuxTarget, fallback_tree, parse_tmux_layout};
+    use super::{
+        TMUX_ROUTE_NAMESPACE, TmuxTarget, fallback_tree, parse_tmux_layout, tmux_split_flag,
+    };
 
     #[test]
     fn roundtrips_tmux_route_target() {
@@ -991,5 +1026,11 @@ mod tests {
     #[test]
     fn exported_namespace_stays_stable() {
         assert_eq!(TMUX_ROUTE_NAMESPACE, "tmux_target");
+    }
+
+    #[test]
+    fn maps_split_direction_to_tmux_flags_consistently() {
+        assert_eq!(tmux_split_flag(SplitDirection::Horizontal), "-v");
+        assert_eq!(tmux_split_flag(SplitDirection::Vertical), "-h");
     }
 }

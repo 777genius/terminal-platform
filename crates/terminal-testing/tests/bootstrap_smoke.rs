@@ -11,7 +11,7 @@ use std::{
 use terminal_application::BackendCatalog;
 use terminal_backend_api::{
     CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec,
-    SubscriptionSpec,
+    SplitPaneSpec, SubscriptionSpec,
 };
 #[cfg(unix)]
 use terminal_backend_native::NativeBackend;
@@ -24,6 +24,10 @@ use terminal_daemon::TerminalDaemonState;
 use terminal_domain::BackendKind;
 #[cfg(unix)]
 use terminal_domain::DegradedModeReason;
+#[cfg(unix)]
+use terminal_domain::PaneId;
+#[cfg(unix)]
+use terminal_mux_domain::{PaneTreeNode, SplitDirection};
 #[cfg(unix)]
 use terminal_projection::ProjectionSource;
 use terminal_protocol::SubscriptionEvent;
@@ -66,6 +70,8 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert!(native.capabilities.tab_close);
     assert!(native.capabilities.tab_focus);
     assert!(native.capabilities.tab_rename);
+    assert!(!native.capabilities.pane_split);
+    assert!(native.capabilities.pane_focus);
     assert!(native.capabilities.pane_input_write);
     assert!(native.capabilities.rendered_viewport_stream);
     assert_eq!(tmux.backend, BackendKind::Tmux);
@@ -74,6 +80,8 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert!(tmux.capabilities.tab_close);
     assert!(tmux.capabilities.tab_focus);
     assert!(tmux.capabilities.tab_rename);
+    assert!(tmux.capabilities.pane_split);
+    assert!(tmux.capabilities.pane_focus);
     assert!(tmux.capabilities.pane_input_write);
     assert!(tmux.capabilities.rendered_viewport_stream);
     assert_eq!(zellij.backend, BackendKind::Zellij);
@@ -81,6 +89,8 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert!(!zellij.capabilities.tab_create);
     assert!(!zellij.capabilities.tab_close);
     assert!(!zellij.capabilities.tab_focus);
+    assert!(!zellij.capabilities.pane_split);
+    assert!(!zellij.capabilities.pane_focus);
     assert!(!zellij.capabilities.rendered_viewport_stream);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
@@ -574,6 +584,94 @@ async fn bootstrap_smoke_controls_tmux_tab_lifecycle_via_dispatch() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_controls_tmux_pane_lifecycle_via_dispatch() {
+    let socket_name = unique_tmux_socket_name("bootstrap-tmux-panes");
+    let session_name = unique_tmux_session_name("workspace");
+    let _tmux =
+        TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
+    let fixture =
+        daemon_fixture_with_state("bootstrap-tmux-pane-control", tmux_daemon_state(&socket_name))
+            .expect("fixture should start");
+
+    let discovered = fixture
+        .client
+        .discover_sessions(BackendKind::Tmux)
+        .await
+        .expect("discover_sessions should succeed");
+    let imported = fixture
+        .client
+        .import_session(discovered.sessions[0].route.clone(), discovered.sessions[0].title.clone())
+        .await
+        .expect("import_session should succeed");
+    let initial = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let focused_tab = initial.focused_tab.expect("focused tab should exist");
+    let focused_tab_snapshot = initial
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id == focused_tab)
+        .expect("focused tab snapshot should exist");
+    let focused_pane = focused_tab_snapshot.focused_pane.expect("focused pane should exist");
+    let initial_panes = collect_pane_ids(&focused_tab_snapshot.root);
+
+    let split = fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::SplitPane(SplitPaneSpec {
+                pane_id: focused_pane,
+                direction: SplitDirection::Vertical,
+            }),
+        )
+        .await
+        .expect("split pane should succeed");
+    let after_split = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let split_tab = after_split
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id == focused_tab)
+        .expect("split tab snapshot should exist");
+    let split_panes = collect_pane_ids(&split_tab.root);
+    let new_pane = split_panes
+        .iter()
+        .copied()
+        .find(|pane_id| !initial_panes.contains(pane_id))
+        .expect("new pane should exist after split");
+
+    let focus = fixture
+        .client
+        .dispatch(imported.session.session_id, MuxCommand::FocusPane { pane_id: focused_pane })
+        .await
+        .expect("focus pane should succeed");
+    let after_focus = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let focused_tab_after_focus = after_focus
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id == focused_tab)
+        .expect("focused tab snapshot should exist");
+
+    assert!(split.changed);
+    assert_eq!(split_panes.len(), initial_panes.len() + 1);
+    assert_eq!(split_tab.focused_pane, Some(new_pane));
+    assert!(focus.changed);
+    assert_eq!(focused_tab_after_focus.focused_pane, Some(focused_pane));
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_streams_tmux_topology_updates() {
     let socket_name = unique_tmux_socket_name("bootstrap-tmux-topology");
     let session_name = unique_tmux_session_name("workspace");
@@ -787,6 +885,24 @@ async fn wait_for_screen_line(
     }
 
     panic!("screen never contained expected text: {needle}");
+}
+
+#[cfg(unix)]
+fn collect_pane_ids(root: &PaneTreeNode) -> Vec<PaneId> {
+    let mut pane_ids = Vec::new();
+    collect_pane_ids_inner(root, &mut pane_ids);
+    pane_ids
+}
+
+#[cfg(unix)]
+fn collect_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
+    match root {
+        PaneTreeNode::Leaf { pane_id } => pane_ids.push(*pane_id),
+        PaneTreeNode::Split(split) => {
+            collect_pane_ids_inner(&split.first, pane_ids);
+            collect_pane_ids_inner(&split.second, pane_ids);
+        }
+    }
 }
 
 #[cfg(unix)]

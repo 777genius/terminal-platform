@@ -44,6 +44,7 @@ impl MuxBackendPort for NativeBackend {
                 tab_rename: true,
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,
+                pane_focus: true,
                 pane_input_write: true,
                 pane_paste_write: true,
                 rendered_viewport_stream: true,

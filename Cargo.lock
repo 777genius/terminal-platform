@@ -873,6 +873,7 @@ dependencies = [
  "terminal-daemon",
  "terminal-daemon-client",
  "terminal-domain",
+ "terminal-mux-domain",
  "terminal-projection",
  "terminal-protocol",
  "tokio",

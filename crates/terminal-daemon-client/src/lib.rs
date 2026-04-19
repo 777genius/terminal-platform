@@ -442,6 +442,8 @@ mod tests {
         assert!(native.capabilities.tab_close);
         assert!(native.capabilities.tab_focus);
         assert!(native.capabilities.tab_rename);
+        assert!(!native.capabilities.pane_split);
+        assert!(native.capabilities.pane_focus);
         assert!(native.capabilities.pane_input_write);
         assert!(native.capabilities.rendered_viewport_stream);
         assert_eq!(zellij.backend, BackendKind::Zellij);

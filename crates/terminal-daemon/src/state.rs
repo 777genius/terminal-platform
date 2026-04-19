@@ -180,6 +180,8 @@ mod tests {
         assert!(native.tab_close);
         assert!(native.tab_focus);
         assert!(native.tab_rename);
+        assert!(!native.pane_split);
+        assert!(native.pane_focus);
         assert!(native.pane_input_write);
         assert!(native.rendered_viewport_stream);
     }

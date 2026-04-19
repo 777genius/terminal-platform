@@ -59,6 +59,8 @@ impl MuxBackendPort for ZellijBackend {
                     tab_close: true,
                     tab_focus: true,
                     tab_rename: true,
+                    pane_split: true,
+                    pane_focus: true,
                     pane_input_write: true,
                     pane_paste_write: true,
                     rendered_viewport_stream: true,
