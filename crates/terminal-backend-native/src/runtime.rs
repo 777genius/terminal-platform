@@ -13,6 +13,7 @@ use terminal_backend_api::{
 use terminal_domain::{PaneId, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
 use terminal_projection::{ProjectionSource, ScreenDelta, ScreenSnapshot, TopologySnapshot};
+use tokio::sync::watch;
 
 use crate::{emulator::EmulatorBuffer, transcript::TranscriptBuffer};
 
@@ -23,6 +24,7 @@ const SNAPSHOT_HISTORY_LIMIT: usize = 64;
 pub(super) struct NativeSessionRuntime {
     session_id: SessionId,
     state: Mutex<NativeSessionState>,
+    topology_tick: watch::Sender<u64>,
 }
 
 struct NativeSessionState {
@@ -45,6 +47,7 @@ struct NativePaneRuntime {
     emulator: Arc<EmulatorBuffer>,
     _transcript: Arc<TranscriptBuffer>,
     projection: Mutex<NativeProjectionState>,
+    surface_tick: watch::Sender<u64>,
     process: Mutex<NativePtyProcess>,
 }
 
@@ -66,6 +69,7 @@ impl NativeSessionRuntime {
         spec: CreateSessionSpec,
     ) -> Result<Self, BackendError> {
         let launch = resolve_launch_spec(spec.launch)?;
+        let (topology_tick, _) = watch::channel(0_u64);
         let first_tab = spawn_tab(spec.title.clone(), &launch, DEFAULT_ROWS, DEFAULT_COLS)?;
         let summary = BackendSessionSummary { session_id, route, title: spec.title };
 
@@ -79,6 +83,7 @@ impl NativeSessionRuntime {
                 rows: DEFAULT_ROWS,
                 cols: DEFAULT_COLS,
             }),
+            topology_tick,
         })
     }
 
@@ -144,17 +149,31 @@ impl NativeSessionRuntime {
     pub(super) fn dispatch(&self, command: MuxCommand) -> Result<MuxCommandResult, BackendError> {
         let mut state = self.lock_state()?;
 
-        let changed = match command {
-            MuxCommand::NewTab(spec) => dispatch_new_tab(&mut state, spec)?,
-            MuxCommand::FocusTab { tab_id } => dispatch_focus_tab(&mut state, tab_id)?,
+        let (changed, surface_updates) = match command {
+            MuxCommand::NewTab(spec) => (dispatch_new_tab(&mut state, spec)?, Vec::new()),
+            MuxCommand::FocusTab { tab_id } => {
+                (dispatch_focus_tab(&mut state, tab_id)?, Vec::new())
+            }
             MuxCommand::RenameTab { tab_id, title } => {
                 dispatch_rename_tab(&mut state, tab_id, title)?
             }
-            MuxCommand::FocusPane { pane_id } => dispatch_focus_pane(&mut state, pane_id)?,
-            MuxCommand::CloseTab { tab_id } => dispatch_close_tab(&mut state, tab_id)?,
-            MuxCommand::ResizePane(spec) => dispatch_resize_pane(&mut state, spec)?,
-            MuxCommand::SendInput(spec) => dispatch_send_input(&state, spec)?,
-            MuxCommand::SendPaste(spec) => dispatch_send_paste(&state, spec)?,
+            MuxCommand::FocusPane { pane_id } => {
+                (dispatch_focus_pane(&mut state, pane_id)?, Vec::new())
+            }
+            MuxCommand::CloseTab { tab_id } => {
+                (dispatch_close_tab(&mut state, tab_id)?, Vec::new())
+            }
+            MuxCommand::ResizePane(spec) => {
+                let changed = dispatch_resize_pane(&mut state, spec)?;
+                let surface_updates = if changed {
+                    state.tabs.iter().map(|tab| tab.pane.pane_id).collect()
+                } else {
+                    Vec::new()
+                };
+                (changed, surface_updates)
+            }
+            MuxCommand::SendInput(spec) => (dispatch_send_input(&state, spec)?, Vec::new()),
+            MuxCommand::SendPaste(spec) => (dispatch_send_paste(&state, spec)?, Vec::new()),
             MuxCommand::ClosePane { .. }
             | MuxCommand::SplitPane(_)
             | MuxCommand::Detach
@@ -166,7 +185,34 @@ impl NativeSessionRuntime {
                 ));
             }
         };
+
+        if changed {
+            bump_watch(&self.topology_tick);
+        }
+        for pane_id in surface_updates {
+            if let Some(tab) = state.tabs.iter().find(|tab| tab.pane.pane_id == pane_id) {
+                tab.pane.mark_surface_dirty();
+            }
+        }
         Ok(MuxCommandResult { changed })
+    }
+
+    pub(super) fn subscribe_topology(&self) -> watch::Receiver<u64> {
+        self.topology_tick.subscribe()
+    }
+
+    pub(super) fn subscribe_pane_surface(
+        &self,
+        pane_id: PaneId,
+    ) -> Result<watch::Receiver<u64>, BackendError> {
+        let state = self.lock_state()?;
+        let tab = state
+            .tabs
+            .iter()
+            .find(|tab| tab.pane.pane_id == pane_id)
+            .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
+
+        Ok(tab.pane.surface_tick.subscribe())
     }
 
     fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, NativeSessionState>, BackendError> {
@@ -236,17 +282,25 @@ fn spawn_tab(
         .map_err(|error| BackendError::transport(format!("failed to take pty writer - {error}")))?;
     let emulator = Arc::new(EmulatorBuffer::new(rows, cols));
     let transcript = Arc::new(TranscriptBuffer::default());
+    let pane_id = PaneId::new();
+    let (surface_tick, _) = watch::channel(0_u64);
 
-    spawn_reader_thread(reader, Arc::clone(&transcript), Arc::clone(&emulator));
+    spawn_reader_thread(
+        reader,
+        Arc::clone(&transcript),
+        Arc::clone(&emulator),
+        surface_tick.clone(),
+    );
 
     Ok(NativeTabRuntime {
         tab_id: TabId::new(),
         title,
         pane: NativePaneRuntime {
-            pane_id: PaneId::new(),
+            pane_id,
             emulator,
             _transcript: transcript,
             projection: Mutex::new(NativeProjectionState::default()),
+            surface_tick,
             process: Mutex::new(NativePtyProcess { master: pty_pair.master, writer, child }),
         },
     })
@@ -267,6 +321,7 @@ fn spawn_reader_thread(
     mut reader: Box<dyn std::io::Read + Send>,
     transcript: Arc<TranscriptBuffer>,
     emulator: Arc<EmulatorBuffer>,
+    surface_tick: watch::Sender<u64>,
 ) {
     thread::spawn(move || {
         let mut chunk = [0_u8; 4096];
@@ -276,6 +331,7 @@ fn spawn_reader_thread(
                 Ok(read) => {
                     transcript.append(&chunk[..read]);
                     emulator.advance(&chunk[..read]);
+                    bump_watch(&surface_tick);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
@@ -285,6 +341,10 @@ fn spawn_reader_thread(
 }
 
 impl NativePaneRuntime {
+    fn mark_surface_dirty(&self) {
+        bump_watch(&self.surface_tick);
+    }
+
     fn render_snapshot(
         &self,
         title: Option<String>,
@@ -377,7 +437,7 @@ fn dispatch_rename_tab(
     state: &mut NativeSessionState,
     tab_id: TabId,
     title: String,
-) -> Result<bool, BackendError> {
+) -> Result<(bool, Vec<PaneId>), BackendError> {
     let tab = state
         .tabs
         .iter_mut()
@@ -385,11 +445,11 @@ fn dispatch_rename_tab(
         .ok_or_else(|| BackendError::not_found(format!("unknown tab {tab_id:?}")))?;
 
     if tab.title.as_deref() == Some(title.as_str()) {
-        return Ok(false);
+        return Ok((false, Vec::new()));
     }
 
     tab.title = Some(title);
-    Ok(true)
+    Ok((true, vec![tab.pane.pane_id]))
 }
 
 fn dispatch_focus_pane(
@@ -503,6 +563,12 @@ impl NativePaneRuntime {
             .map_err(|error| BackendError::transport(format!("failed to resize pty - {error}")))?;
         drop(process);
         self.emulator.resize(rows, cols);
+        self.mark_surface_dirty();
         Ok(())
     }
+}
+
+fn bump_watch(sender: &watch::Sender<u64>) {
+    let next = sender.borrow().wrapping_add(1);
+    let _ = sender.send(next);
 }

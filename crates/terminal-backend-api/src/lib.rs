@@ -14,4 +14,4 @@ pub use ports::{
     BackendScope, BackendSessionBinding, BackendSessionPort, BackendSessionSummary, BoxFuture,
     CreateSessionSpec, MuxBackendPort, ShellLaunchSpec,
 };
-pub use subscriptions::{BackendSubscription, SubscriptionSpec};
+pub use subscriptions::{BackendSubscription, BackendSubscriptionEvent, SubscriptionSpec};

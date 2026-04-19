@@ -725,6 +725,7 @@ dependencies = [
  "terminal-mux-domain",
  "terminal-projection",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

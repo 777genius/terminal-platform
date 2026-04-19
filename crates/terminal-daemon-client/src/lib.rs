@@ -1,6 +1,6 @@
 use futures_util::{SinkExt as _, StreamExt as _};
 use interprocess::local_socket::{tokio::Stream, traits::tokio::Stream as _};
-use terminal_backend_api::{CreateSessionSpec, MuxCommand, MuxCommandResult};
+use terminal_backend_api::{CreateSessionSpec, MuxCommand, MuxCommandResult, SubscriptionSpec};
 use terminal_domain::{BackendKind, OperationId};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
@@ -8,9 +8,12 @@ use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{
     CreateSessionRequest, CreateSessionResponse, DispatchMuxCommandRequest, GetScreenDeltaRequest,
     GetScreenSnapshotRequest, GetTopologySnapshotRequest, Handshake, ListSessionsResponse,
-    LocalSocketAddress, ProtocolError, ProtocolVersion, RequestEnvelope, RequestPayload,
-    ResponsePayload, TransportResponse, decode_json_frame, encode_json_frame,
+    LocalSocketAddress, OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError,
+    ProtocolVersion, RequestEnvelope, RequestPayload, ResponsePayload, SubscriptionEnvelope,
+    SubscriptionEvent, TransportResponse, decode_json_frame, encode_json_frame,
 };
+
+type LocalFramedStream = Framed<Stream, LengthDelimitedCodec>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaemonClientInfo {
@@ -27,6 +30,37 @@ impl Default for DaemonClientInfo {
 pub struct LocalSocketDaemonClient {
     address: LocalSocketAddress,
     info: DaemonClientInfo,
+}
+
+pub struct LocalSocketSubscription {
+    subscription_id: terminal_domain::SubscriptionId,
+    framed: LocalFramedStream,
+}
+
+impl LocalSocketSubscription {
+    #[must_use]
+    pub fn subscription_id(&self) -> terminal_domain::SubscriptionId {
+        self.subscription_id
+    }
+
+    pub async fn recv(&mut self) -> Result<Option<SubscriptionEvent>, ProtocolError> {
+        let Some(frame) = self.framed.next().await else {
+            return Ok(None);
+        };
+        let frame = frame.map_err(|error| ProtocolError::io("receive_failed", &error))?;
+        let envelope = decode_json_frame::<SubscriptionEnvelope>(&frame)?;
+        if envelope.subscription_id != self.subscription_id {
+            return Err(ProtocolError::new(
+                "subscription_mismatch",
+                format!(
+                    "expected subscription {:?}, got {:?}",
+                    self.subscription_id, envelope.subscription_id
+                ),
+            ));
+        }
+
+        Ok(Some(envelope.event))
+    }
 }
 
 impl LocalSocketDaemonClient {
@@ -150,6 +184,56 @@ impl LocalSocketDaemonClient {
         }
     }
 
+    pub async fn open_subscription(
+        &self,
+        session_id: terminal_domain::SessionId,
+        spec: SubscriptionSpec,
+    ) -> Result<LocalSocketSubscription, ProtocolError> {
+        let operation_id = OperationId::new();
+        let request = RequestEnvelope {
+            operation_id,
+            payload: RequestPayload::OpenSubscription(OpenSubscriptionRequest { session_id, spec }),
+        };
+        let encoded_request = encode_json_frame(&request)?;
+        let stream = Stream::connect(
+            self.address
+                .to_name()
+                .map_err(|error| ProtocolError::io("invalid_socket_name", &error))?,
+        )
+        .await
+        .map_err(|error| ProtocolError::io("connect_failed", &error))?;
+        let mut framed = Framed::new(stream, LengthDelimitedCodec::new());
+
+        framed
+            .send(encoded_request)
+            .await
+            .map_err(|error| ProtocolError::io("send_failed", &error))?;
+        let Some(frame) = framed.next().await else {
+            return Err(ProtocolError::new("unexpected_eof", "daemon closed stream"));
+        };
+        let frame = frame.map_err(|error| ProtocolError::io("receive_failed", &error))?;
+        let response = decode_json_frame::<TransportResponse>(&frame)?.into_result()?;
+
+        if response.operation_id != operation_id {
+            return Err(ProtocolError::new(
+                "operation_mismatch",
+                format!(
+                    "expected response for operation {:?}, got {:?}",
+                    operation_id, response.operation_id
+                ),
+            ));
+        }
+
+        let subscription_id = match response.payload {
+            ResponsePayload::SubscriptionOpened(OpenSubscriptionResponse { subscription_id }) => {
+                subscription_id
+            }
+            other => return Err(ProtocolError::unexpected_payload("subscription_opened", &other)),
+        };
+
+        Ok(LocalSocketSubscription { subscription_id, framed })
+    }
+
     async fn send_request(
         &self,
         payload: RequestPayload,
@@ -196,9 +280,10 @@ impl LocalSocketDaemonClient {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec};
+    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec};
     use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
     use terminal_domain::BackendKind;
+    use terminal_protocol::SubscriptionEvent;
 
     use super::LocalSocketDaemonClient;
 
@@ -444,6 +529,52 @@ mod tests {
         assert_eq!(patch.title.as_deref(), Some("renamed"));
         assert!(patch.line_updates.is_empty());
         assert!(delta.full_replace.is_none());
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn streams_topology_updates_over_subscription_lane() {
+        let address = unique_address("daemon-client-sub-topology");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    ..CreateSessionSpec::default()
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+        let mut subscription = client
+            .open_subscription(created.session.session_id, SubscriptionSpec::SessionTopology)
+            .await
+            .expect("subscription should open");
+
+        let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+        let initial = match initial {
+            SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
+            other => panic!("unexpected initial event: {other:?}"),
+        };
+        let result = client
+            .dispatch(
+                created.session.session_id,
+                MuxCommand::NewTab(NewTabSpec { title: Some("logs".to_string()) }),
+            )
+            .await
+            .expect("dispatch should succeed");
+        let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+        let updated = match updated {
+            SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
+            other => panic!("unexpected topology event: {other:?}"),
+        };
+
+        assert_eq!(initial.tabs.len(), 1);
+        assert!(result.changed);
+        assert_eq!(updated.tabs.len(), 2);
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

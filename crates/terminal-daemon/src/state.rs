@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use terminal_application::SessionService;
 use terminal_backend_api::{
-    BackendCapabilities, BackendError, BackendSessionSummary, CreateSessionSpec, MuxCommand,
-    MuxCommandResult,
+    BackendCapabilities, BackendError, BackendSessionSummary, BackendSubscription,
+    CreateSessionSpec, MuxCommand, MuxCommandResult, SubscriptionSpec,
 };
 use terminal_backend_native::NativeBackend;
 use terminal_domain::{BackendKind, PaneId, SessionId};
@@ -81,6 +81,14 @@ impl TerminalDaemonState {
         command: MuxCommand,
     ) -> Result<MuxCommandResult, BackendError> {
         self.sessions.dispatch(session_id, command).await
+    }
+
+    pub async fn open_subscription(
+        &self,
+        session_id: SessionId,
+        spec: SubscriptionSpec,
+    ) -> Result<BackendSubscription, BackendError> {
+        self.sessions.open_subscription(session_id, spec).await
     }
 }
 

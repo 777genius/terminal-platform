@@ -1,9 +1,10 @@
 use std::{thread, time::Duration};
 
 use terminal_backend_api::{
-    CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec,
+    CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SubscriptionSpec,
 };
 use terminal_domain::BackendKind;
+use terminal_protocol::SubscriptionEvent;
 use terminal_testing::{daemon_fixture, daemon_state};
 
 #[test]
@@ -77,6 +78,49 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
     assert!(delta.full_replace.is_none());
     assert!(dispatch.changed);
     assert_eq!(topology_after_dispatch.tabs.len(), 2);
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_streams_topology_updates() {
+    let fixture = daemon_fixture("bootstrap-subscription-smoke").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), ..CreateSessionSpec::default() },
+        )
+        .await
+        .expect("create_session should succeed");
+    let mut subscription = fixture
+        .client
+        .open_subscription(created.session.session_id, SubscriptionSpec::SessionTopology)
+        .await
+        .expect("subscription should open");
+
+    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = match initial {
+        SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
+        other => panic!("unexpected initial event: {other:?}"),
+    };
+    let dispatch = fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::NewTab(NewTabSpec { title: Some("logs".to_string()) }),
+        )
+        .await
+        .expect("dispatch should succeed");
+    let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+    let updated = match updated {
+        SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
+        other => panic!("unexpected topology event: {other:?}"),
+    };
+
+    assert_eq!(initial.tabs.len(), 1);
+    assert!(dispatch.changed);
+    assert_eq!(updated.tabs.len(), 2);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

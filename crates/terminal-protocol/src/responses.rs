@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use terminal_backend_api::{BackendSessionSummary, MuxCommandResult};
+use terminal_domain::SubscriptionId;
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
 use crate::Handshake;
@@ -16,6 +17,11 @@ pub struct CreateSessionResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenSubscriptionResponse {
+    pub subscription_id: SubscriptionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResponsePayload {
     Handshake(Handshake),
@@ -25,5 +31,5 @@ pub enum ResponsePayload {
     ScreenSnapshot(ScreenSnapshot),
     ScreenDelta(ScreenDelta),
     DispatchMuxCommand(MuxCommandResult),
-    SubscriptionOpened,
+    SubscriptionOpened(OpenSubscriptionResponse),
 }

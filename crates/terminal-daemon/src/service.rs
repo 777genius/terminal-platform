@@ -1,7 +1,7 @@
 use terminal_backend_api::{BackendError, BackendErrorKind};
 use terminal_protocol::{
-    CreateSessionResponse, ListSessionsResponse, ProtocolError, RequestEnvelope, RequestPayload,
-    ResponseEnvelope, ResponsePayload,
+    CreateSessionResponse, ListSessionsResponse, OpenSubscriptionRequest, OpenSubscriptionResponse,
+    ProtocolError, RequestEnvelope, RequestPayload, ResponseEnvelope, ResponsePayload,
 };
 
 use crate::TerminalDaemonState;
@@ -59,10 +59,29 @@ impl TerminalDaemon {
                     .await
                     .map_err(map_backend_error)?,
             ),
-            RequestPayload::OpenSubscription(_) => ResponsePayload::SubscriptionOpened,
+            RequestPayload::OpenSubscription(request) => {
+                ResponsePayload::SubscriptionOpened(OpenSubscriptionResponse {
+                    subscription_id: self
+                        .state
+                        .open_subscription(request.session_id, request.spec)
+                        .await
+                        .map_err(map_backend_error)?
+                        .subscription_id,
+                })
+            }
         };
 
         Ok(ResponseEnvelope { operation_id: request.operation_id, payload })
+    }
+
+    pub async fn open_subscription(
+        &self,
+        request: OpenSubscriptionRequest,
+    ) -> Result<terminal_backend_api::BackendSubscription, ProtocolError> {
+        self.state
+            .open_subscription(request.session_id, request.spec)
+            .await
+            .map_err(map_backend_error)
     }
 }
 
@@ -80,7 +99,7 @@ fn map_backend_error(error: BackendError) -> ProtocolError {
 
 #[cfg(test)]
 mod tests {
-    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec};
+    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec};
     use terminal_domain::OperationId;
     use terminal_protocol::{RequestEnvelope, RequestPayload, ResponsePayload};
 
@@ -262,6 +281,47 @@ mod tests {
                 assert_eq!(delta.pane_id, pane_id);
                 assert_eq!(delta.from_sequence, 0);
                 assert!(delta.to_sequence >= delta.from_sequence);
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_open_subscription_requests() {
+        let daemon = TerminalDaemon::default();
+        let created = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
+                    backend: terminal_domain::BackendKind::Native,
+                    spec: CreateSessionSpec {
+                        title: Some("shell".to_string()),
+                        ..CreateSessionSpec::default()
+                    },
+                }),
+            })
+            .await
+            .expect("create session routing should succeed");
+        let session_id = match created.payload {
+            ResponsePayload::CreateSession(created) => created.session.session_id,
+            other => panic!("unexpected response payload: {other:?}"),
+        };
+        let response = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::OpenSubscription(
+                    terminal_protocol::OpenSubscriptionRequest {
+                        session_id,
+                        spec: SubscriptionSpec::SessionTopology,
+                    },
+                ),
+            })
+            .await
+            .expect("subscription routing should succeed");
+
+        match response.payload {
+            ResponsePayload::SubscriptionOpened(opened) => {
+                let _subscription_id = opened.subscription_id;
             }
             other => panic!("unexpected response payload: {other:?}"),
         }

@@ -9,7 +9,8 @@ use tokio::{
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use terminal_protocol::{
-    LocalSocketAddress, RequestEnvelope, TransportResponse, decode_json_frame, encode_json_frame,
+    LocalSocketAddress, RequestEnvelope, ResponseEnvelope, ResponsePayload, SubscriptionEnvelope,
+    SubscriptionEvent, TransportResponse, decode_json_frame, encode_json_frame,
 };
 
 use crate::TerminalDaemon;
@@ -69,7 +70,15 @@ async fn handle_connection(daemon: Arc<TerminalDaemon>, stream: Stream) -> io::R
     while let Some(frame_result) = framed.next().await {
         let frame = frame_result?;
         let reply = match decode_json_frame::<RequestEnvelope>(&frame) {
-            Ok(request) => TransportResponse::from_result(daemon.handle_request(request).await),
+            Ok(request) => {
+                if matches!(
+                    &request.payload,
+                    terminal_protocol::RequestPayload::OpenSubscription(_)
+                ) {
+                    return handle_subscription_connection(daemon, request, framed).await;
+                }
+                TransportResponse::from_result(daemon.handle_request(request).await)
+            }
             Err(error) => TransportResponse::Error(error),
         };
         let encoded_reply =
@@ -79,6 +88,54 @@ async fn handle_connection(daemon: Arc<TerminalDaemon>, stream: Stream) -> io::R
     }
 
     Ok(())
+}
+
+async fn handle_subscription_connection(
+    daemon: Arc<TerminalDaemon>,
+    request: RequestEnvelope,
+    mut framed: Framed<Stream, LengthDelimitedCodec>,
+) -> io::Result<()> {
+    let terminal_protocol::RequestPayload::OpenSubscription(open_request) = request.payload else {
+        return Err(io::Error::other("subscription connection requires open_subscription request"));
+    };
+    let subscription = daemon
+        .open_subscription(open_request)
+        .await
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    let subscription_id = subscription.subscription_id;
+    let opened = ResponseEnvelope {
+        operation_id: request.operation_id,
+        payload: ResponsePayload::SubscriptionOpened(terminal_protocol::OpenSubscriptionResponse {
+            subscription_id,
+        }),
+    };
+    let encoded_opened = encode_json_frame(&TransportResponse::Response(opened))
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    framed.send(encoded_opened).await?;
+
+    let mut events = subscription.events;
+    while let Some(event) = events.recv().await {
+        let envelope =
+            SubscriptionEnvelope { subscription_id, event: map_subscription_event(event) };
+        let encoded_event =
+            encode_json_frame(&envelope).map_err(|error| io::Error::other(error.to_string()))?;
+        framed.send(encoded_event).await?;
+    }
+
+    Ok(())
+}
+
+fn map_subscription_event(
+    event: terminal_backend_api::BackendSubscriptionEvent,
+) -> SubscriptionEvent {
+    match event {
+        terminal_backend_api::BackendSubscriptionEvent::TopologySnapshot(snapshot) => {
+            SubscriptionEvent::TopologySnapshot(snapshot)
+        }
+        terminal_backend_api::BackendSubscriptionEvent::ScreenDelta(delta) => {
+            SubscriptionEvent::ScreenDelta(delta)
+        }
+    }
 }
 
 fn join_error_to_io(error: JoinError) -> io::Error {

@@ -9,6 +9,7 @@ thiserror = { workspace = true }
 terminal-domain = { path = "../terminal-domain" }
 terminal-mux-domain = { path = "../terminal-mux-domain" }
 terminal-projection = { path = "../terminal-projection" }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

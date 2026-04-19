@@ -9,10 +9,11 @@ use std::{
 
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
-    BackendSessionSummary, BackendSubscription, BoxFuture, CreateSessionSpec, MuxBackendPort,
-    SubscriptionSpec,
+    BackendSessionSummary, BackendSubscription, BackendSubscriptionEvent, BoxFuture,
+    CreateSessionSpec, MuxBackendPort, SubscriptionSpec,
 };
-use terminal_domain::{BackendKind, DegradedModeReason, RouteAuthority, SessionId, SessionRoute};
+use terminal_domain::{BackendKind, RouteAuthority, SessionId, SessionRoute};
+use tokio::sync::mpsc;
 
 use runtime::NativeSessionRuntime;
 
@@ -39,7 +40,9 @@ impl MuxBackendPort for NativeBackend {
                 tiled_panes: true,
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,
+                rendered_viewport_stream: true,
                 rendered_viewport_snapshot: true,
+                advisory_metadata_subscriptions: true,
                 ..BackendCapabilities::default()
             })
         })
@@ -152,24 +155,99 @@ impl BackendSessionPort for NativeAttachedSession {
 
     fn subscribe(
         &self,
-        _spec: SubscriptionSpec,
+        spec: SubscriptionSpec,
     ) -> BoxFuture<'_, Result<BackendSubscription, BackendError>> {
-        Box::pin(async {
-            Err(BackendError::unsupported(
-                "native subscriptions are not wired in v1 start phase",
-                DegradedModeReason::NotYetImplemented,
-            ))
-        })
+        let runtime = Arc::clone(&self.runtime);
+        Box::pin(async move { open_native_subscription(runtime, spec) })
     }
+}
+
+fn open_native_subscription(
+    runtime: Arc<NativeSessionRuntime>,
+    spec: SubscriptionSpec,
+) -> Result<BackendSubscription, BackendError> {
+    match spec {
+        SubscriptionSpec::SessionTopology => open_topology_subscription(runtime),
+        SubscriptionSpec::PaneSurface { pane_id } => {
+            open_pane_surface_subscription(runtime, pane_id)
+        }
+    }
+}
+
+fn open_topology_subscription(
+    runtime: Arc<NativeSessionRuntime>,
+) -> Result<BackendSubscription, BackendError> {
+    let subscription_id = terminal_domain::SubscriptionId::new();
+    let initial = runtime.topology_snapshot()?;
+    let mut topology_tick = runtime.subscribe_topology();
+    let (events_tx, events_rx) = mpsc::channel(32);
+
+    tokio::spawn(async move {
+        if events_tx.send(BackendSubscriptionEvent::TopologySnapshot(initial)).await.is_err() {
+            return;
+        }
+
+        while topology_tick.changed().await.is_ok() {
+            let snapshot = match runtime.topology_snapshot() {
+                Ok(snapshot) => snapshot,
+                Err(_) => break,
+            };
+            if events_tx.send(BackendSubscriptionEvent::TopologySnapshot(snapshot)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    Ok(BackendSubscription { subscription_id, events: events_rx })
+}
+
+fn open_pane_surface_subscription(
+    runtime: Arc<NativeSessionRuntime>,
+    pane_id: terminal_domain::PaneId,
+) -> Result<BackendSubscription, BackendError> {
+    let subscription_id = terminal_domain::SubscriptionId::new();
+    let initial = runtime.screen_snapshot(pane_id)?;
+    let mut last_sequence = initial.sequence;
+    let mut surface_tick = runtime.subscribe_pane_surface(pane_id)?;
+    let (events_tx, events_rx) = mpsc::channel(32);
+
+    tokio::spawn(async move {
+        if events_tx
+            .send(BackendSubscriptionEvent::ScreenDelta(
+                terminal_projection::ScreenDelta::full_replace(0, &initial),
+            ))
+            .await
+            .is_err()
+        {
+            return;
+        }
+
+        while surface_tick.changed().await.is_ok() {
+            let delta = match runtime.screen_delta(pane_id, last_sequence) {
+                Ok(delta) => delta,
+                Err(_) => break,
+            };
+            if delta.to_sequence == last_sequence {
+                continue;
+            }
+            last_sequence = delta.to_sequence;
+            if events_tx.send(BackendSubscriptionEvent::ScreenDelta(delta)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    Ok(BackendSubscription { subscription_id, events: events_rx })
 }
 
 #[cfg(test)]
 mod tests {
     use std::{thread, time::Duration};
 
+    use terminal_backend_api::BackendSubscriptionEvent;
     use terminal_backend_api::{
         BackendScope, CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, SendInputSpec,
-        ShellLaunchSpec,
+        ShellLaunchSpec, SubscriptionSpec,
     };
     use terminal_domain::BackendKind;
     use terminal_projection::ProjectionSource;
@@ -347,6 +425,86 @@ mod tests {
         assert!(patch.title_changed);
         assert_eq!(patch.title.as_deref(), Some("renamed"));
         assert!(delta.full_replace.is_none());
+    }
+
+    #[tokio::test]
+    async fn streams_initial_topology_and_new_tab_updates() {
+        let backend = NativeBackend::default();
+        let binding = backend
+            .create_session(CreateSessionSpec {
+                title: Some("shell".to_string()),
+                ..CreateSessionSpec::default()
+            })
+            .await
+            .expect("native session should be created");
+        let session =
+            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let mut subscription = session
+            .subscribe(SubscriptionSpec::SessionTopology)
+            .await
+            .expect("topology subscription should open");
+
+        let initial = subscription.events.recv().await.expect("initial event should arrive");
+        let initial = match initial {
+            BackendSubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
+            other => panic!("unexpected initial event: {other:?}"),
+        };
+        let result = session
+            .dispatch(MuxCommand::NewTab(NewTabSpec { title: Some("logs".to_string()) }))
+            .await
+            .expect("new tab should succeed");
+        let updated = subscription.events.recv().await.expect("topology update should arrive");
+        let updated = match updated {
+            BackendSubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
+            other => panic!("unexpected topology event: {other:?}"),
+        };
+
+        assert_eq!(initial.tabs.len(), 1);
+        assert!(result.changed);
+        assert_eq!(updated.tabs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn streams_initial_surface_and_title_patch_updates() {
+        let backend = NativeBackend::default();
+        let binding = backend
+            .create_session(CreateSessionSpec {
+                title: Some("shell".to_string()),
+                ..CreateSessionSpec::default()
+            })
+            .await
+            .expect("native session should be created");
+        let session =
+            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let topology = session.topology_snapshot().await.expect("topology should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        let tab_id = topology.tabs[0].tab_id;
+        let mut subscription = session
+            .subscribe(SubscriptionSpec::PaneSurface { pane_id })
+            .await
+            .expect("pane subscription should open");
+
+        let initial = subscription.events.recv().await.expect("initial event should arrive");
+        let initial = match initial {
+            BackendSubscriptionEvent::ScreenDelta(delta) => delta,
+            other => panic!("unexpected initial event: {other:?}"),
+        };
+        let result = session
+            .dispatch(MuxCommand::RenameTab { tab_id, title: "renamed".to_string() })
+            .await
+            .expect("rename tab should succeed");
+        let updated = subscription.events.recv().await.expect("surface update should arrive");
+        let updated = match updated {
+            BackendSubscriptionEvent::ScreenDelta(delta) => delta,
+            other => panic!("unexpected surface event: {other:?}"),
+        };
+        let patch = updated.patch.expect("delta patch should exist");
+
+        assert!(initial.full_replace.is_some());
+        assert!(result.changed);
+        assert!(updated.to_sequence > updated.from_sequence);
+        assert!(patch.title_changed);
+        assert_eq!(patch.title.as_deref(), Some("renamed"));
     }
 
     #[cfg(unix)]

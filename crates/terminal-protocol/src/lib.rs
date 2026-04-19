@@ -13,6 +13,8 @@ pub use requests::{
     CreateSessionRequest, DispatchMuxCommandRequest, GetScreenDeltaRequest,
     GetScreenSnapshotRequest, GetTopologySnapshotRequest, OpenSubscriptionRequest, RequestPayload,
 };
-pub use responses::{CreateSessionResponse, ListSessionsResponse, ResponsePayload};
+pub use responses::{
+    CreateSessionResponse, ListSessionsResponse, OpenSubscriptionResponse, ResponsePayload,
+};
 pub use subscriptions::SubscriptionEvent;
 pub use transport::{LocalSocketAddress, TransportResponse, decode_json_frame, encode_json_frame};
