@@ -663,9 +663,11 @@ mod tests {
             .screen_delta(created.session.session_id, pane_id, before.sequence)
             .await
             .expect("screen_delta should succeed");
+        let listed = client.list_sessions().await.expect("list_sessions should succeed");
         let patch = delta.patch.expect("delta patch should exist");
 
         assert!(result.changed);
+        assert_eq!(listed.sessions[0].title.as_deref(), Some("renamed"));
         assert!(delta.to_sequence > before.sequence);
         assert!(patch.title_changed);
         assert_eq!(patch.title.as_deref(), Some("renamed"));

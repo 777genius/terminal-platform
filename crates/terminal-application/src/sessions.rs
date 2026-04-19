@@ -143,7 +143,12 @@ impl SessionService {
             return self.save_session(session_id).await;
         }
         let session = self.attach_session(session_id).await?;
-        session.dispatch(command).await
+        let refresh_summary_title = command_updates_summary_title(&command);
+        let result = session.dispatch(command).await?;
+        if result.changed && refresh_summary_title {
+            self.refresh_session_summary_title(session_id, &*session).await;
+        }
+        Ok(result)
     }
 
     pub async fn open_subscription(
@@ -222,6 +227,20 @@ impl SessionService {
         Ok(MuxCommandResult { changed: false })
     }
 
+    async fn refresh_session_summary_title(
+        &self,
+        session_id: SessionId,
+        session: &dyn BackendSessionPort,
+    ) {
+        let Some(descriptor) = self.registry.get(session_id) else {
+            return;
+        };
+        let Ok(topology) = session.topology_snapshot().await else {
+            return;
+        };
+        self.registry.update_title(session_id, saved_session_title(descriptor.title, &topology));
+    }
+
     fn to_summary(session: SessionDescriptor) -> BackendSessionSummary {
         BackendSessionSummary {
             session_id: session.session_id,
@@ -254,6 +273,16 @@ fn saved_session_title(
         })
         .or_else(|| topology.tabs.iter().find_map(|tab| tab.title.clone()))
         .or(descriptor_title)
+}
+
+fn command_updates_summary_title(command: &MuxCommand) -> bool {
+    matches!(
+        command,
+        MuxCommand::NewTab(_)
+            | MuxCommand::CloseTab { .. }
+            | MuxCommand::FocusTab { .. }
+            | MuxCommand::RenameTab { .. }
+    )
 }
 
 fn collect_pane_ids_from_node(

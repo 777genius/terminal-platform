@@ -186,7 +186,9 @@ impl SqliteSessionStore {
 mod tests {
     use terminal_backend_api::ShellLaunchSpec;
     use terminal_domain::{BackendKind, PaneId, RouteAuthority, SessionId, SessionRoute, TabId};
-    use terminal_projection::{ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot};
+    use terminal_projection::{
+        ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
+    };
 
     use super::{SavedNativeSession, SqliteSessionStore};
 
@@ -244,7 +246,8 @@ mod tests {
     #[test]
     fn upserts_existing_native_session_snapshot() {
         let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
-        let path = std::env::temp_dir().join(format!("terminal-platform-upsert-test-{nonce}.sqlite3"));
+        let path =
+            std::env::temp_dir().join(format!("terminal-platform-upsert-test-{nonce}.sqlite3"));
         let store = SqliteSessionStore::open(&path).expect("store should open");
         let session_id = SessionId::new();
         let first = sample_snapshot(session_id, "shell", "ready");

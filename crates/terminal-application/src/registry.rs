@@ -16,6 +16,7 @@ pub trait SessionRegistry: Send + Sync {
     fn get(&self, session_id: SessionId) -> Option<SessionDescriptor>;
     fn get_by_route(&self, route: &SessionRoute) -> Option<SessionDescriptor>;
     fn list(&self) -> Vec<SessionDescriptor>;
+    fn update_title(&self, session_id: SessionId, title: Option<String>);
 }
 
 #[derive(Debug, Default)]
@@ -47,6 +48,14 @@ impl SessionRegistry for InMemorySessionRegistry {
             self.sessions.read().expect("session registry read lock should not be poisoned");
         sessions.values().cloned().collect()
     }
+
+    fn update_title(&self, session_id: SessionId, title: Option<String>) {
+        let mut sessions =
+            self.sessions.write().expect("session registry write lock should not be poisoned");
+        if let Some(session) = sessions.get_mut(&session_id) {
+            session.title = title;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -77,5 +86,28 @@ mod tests {
 
         let sessions = registry.list();
         assert_eq!(sessions, vec![descriptor]);
+    }
+
+    #[test]
+    fn updates_existing_session_title() {
+        let registry = InMemorySessionRegistry::default();
+        let descriptor = SessionDescriptor {
+            session_id: terminal_domain::SessionId::new(),
+            route: SessionRoute {
+                backend: BackendKind::Native,
+                authority: RouteAuthority::LocalDaemon,
+                external: None,
+            },
+            title: Some("shell".to_string()),
+            launch: Some(ShellLaunchSpec::new("/bin/sh")),
+        };
+
+        registry.insert(descriptor.clone());
+        registry.update_title(descriptor.session_id, Some("logs".to_string()));
+
+        assert_eq!(
+            registry.get(descriptor.session_id).and_then(|session| session.title),
+            Some("logs".to_string())
+        );
     }
 }

@@ -985,6 +985,8 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
         .topology_snapshot(imported.session.session_id)
         .await
         .expect("topology_snapshot should succeed");
+    let listed_after_rename =
+        fixture.client.list_sessions().await.expect("list_sessions should succeed");
     let send_input = fixture
         .client
         .dispatch(
@@ -1053,6 +1055,7 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
             .any(|tab| tab.tab_id == focused_tab
                 && tab.title.as_deref() == Some("workspace-renamed"))
     );
+    assert_eq!(listed_after_rename.sessions[0].title.as_deref(), Some("workspace-renamed"));
     assert!(send_input.changed);
     assert!(close_tab.changed);
     assert_eq!(topology_after_close.tabs.len(), 1);
