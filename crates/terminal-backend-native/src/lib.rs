@@ -38,6 +38,7 @@ impl MuxBackendPort for NativeBackend {
         Box::pin(async {
             Ok(BackendCapabilities {
                 tiled_panes: true,
+                split_resize: true,
                 tab_create: true,
                 tab_close: true,
                 tab_focus: true,

@@ -10,8 +10,8 @@ use std::{
 #[cfg(unix)]
 use terminal_application::BackendCatalog;
 use terminal_backend_api::{
-    CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec,
-    SplitPaneSpec, SubscriptionSpec,
+    CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, ResizePaneSpec, SendInputSpec,
+    ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
 };
 #[cfg(unix)]
 use terminal_backend_native::NativeBackend;
@@ -66,30 +66,36 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
 
     assert_eq!(native.backend, BackendKind::Native);
     assert!(native.capabilities.tiled_panes);
+    assert!(native.capabilities.split_resize);
     assert!(native.capabilities.tab_create);
     assert!(native.capabilities.tab_close);
     assert!(native.capabilities.tab_focus);
     assert!(native.capabilities.tab_rename);
     assert!(!native.capabilities.pane_split);
+    assert!(!native.capabilities.pane_close);
     assert!(native.capabilities.pane_focus);
     assert!(native.capabilities.pane_input_write);
     assert!(native.capabilities.rendered_viewport_stream);
     assert_eq!(tmux.backend, BackendKind::Tmux);
     assert!(tmux.capabilities.read_only_client_mode);
+    assert!(tmux.capabilities.split_resize);
     assert!(tmux.capabilities.tab_create);
     assert!(tmux.capabilities.tab_close);
     assert!(tmux.capabilities.tab_focus);
     assert!(tmux.capabilities.tab_rename);
     assert!(tmux.capabilities.pane_split);
+    assert!(tmux.capabilities.pane_close);
     assert!(tmux.capabilities.pane_focus);
     assert!(tmux.capabilities.pane_input_write);
     assert!(tmux.capabilities.rendered_viewport_stream);
     assert_eq!(zellij.backend, BackendKind::Zellij);
     assert!(zellij.capabilities.read_only_client_mode);
+    assert!(!zellij.capabilities.split_resize);
     assert!(!zellij.capabilities.tab_create);
     assert!(!zellij.capabilities.tab_close);
     assert!(!zellij.capabilities.tab_focus);
     assert!(!zellij.capabilities.pane_split);
+    assert!(!zellij.capabilities.pane_close);
     assert!(!zellij.capabilities.pane_focus);
     assert!(!zellij.capabilities.rendered_viewport_stream);
 
@@ -503,6 +509,49 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_reads_inactive_tmux_tab_pane_snapshot() {
+    let socket_name = unique_tmux_socket_name("bootstrap-tmux-inactive-pane");
+    let session_name = unique_tmux_session_name("workspace");
+    let _tmux =
+        TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
+    let fixture =
+        daemon_fixture_with_state("bootstrap-tmux-inactive-pane", tmux_daemon_state(&socket_name))
+            .expect("fixture should start");
+
+    let discovered = fixture
+        .client
+        .discover_sessions(BackendKind::Tmux)
+        .await
+        .expect("discover_sessions should succeed");
+    let imported = fixture
+        .client
+        .import_session(discovered.sessions[0].route.clone(), discovered.sessions[0].title.clone())
+        .await
+        .expect("import_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let inactive_pane = topology
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id != topology.focused_tab.expect("focused tab should exist"))
+        .and_then(|tab| collect_pane_ids(&tab.root).into_iter().next())
+        .expect("inactive tmux tab pane should exist");
+    let screen = fixture
+        .client
+        .screen_snapshot(imported.session.session_id, inactive_pane)
+        .await
+        .expect("screen_snapshot should succeed for inactive tmux pane");
+
+    assert!(screen.surface.lines.iter().any(|line| line.text.contains("logs ready")));
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_controls_tmux_tab_lifecycle_via_dispatch() {
     let socket_name = unique_tmux_socket_name("bootstrap-tmux-tabs");
     let session_name = unique_tmux_session_name("workspace");
@@ -644,6 +693,28 @@ async fn bootstrap_smoke_controls_tmux_pane_lifecycle_via_dispatch() {
         .copied()
         .find(|pane_id| !initial_panes.contains(pane_id))
         .expect("new pane should exist after split");
+    let before_resize = fixture
+        .client
+        .screen_snapshot(imported.session.session_id, new_pane)
+        .await
+        .expect("screen_snapshot should succeed");
+    let resize = fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::ResizePane(ResizePaneSpec {
+                pane_id: new_pane,
+                rows: before_resize.rows.saturating_sub(4).max(4),
+                cols: before_resize.cols.saturating_sub(6).max(10),
+            }),
+        )
+        .await
+        .expect("resize pane should succeed");
+    let after_resize = fixture
+        .client
+        .screen_snapshot(imported.session.session_id, new_pane)
+        .await
+        .expect("screen_snapshot should succeed");
 
     let focus = fixture
         .client
@@ -660,12 +731,47 @@ async fn bootstrap_smoke_controls_tmux_pane_lifecycle_via_dispatch() {
         .iter()
         .find(|tab| tab.tab_id == focused_tab)
         .expect("focused tab snapshot should exist");
+    let close = fixture
+        .client
+        .dispatch(imported.session.session_id, MuxCommand::ClosePane { pane_id: new_pane })
+        .await
+        .expect("close pane should succeed");
+    let after_close = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let focused_tab_after_close = after_close
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id == focused_tab)
+        .expect("focused tab snapshot should exist");
+    let single_pane = after_close
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id != focused_tab && collect_pane_ids(&tab.root).len() == 1)
+        .and_then(|tab| collect_pane_ids(&tab.root).into_iter().next())
+        .expect("single-pane secondary tab should exist");
+    let close_last_error = fixture
+        .client
+        .dispatch(imported.session.session_id, MuxCommand::ClosePane { pane_id: single_pane })
+        .await
+        .expect_err("closing last pane in tab should be rejected");
 
     assert!(split.changed);
     assert_eq!(split_panes.len(), initial_panes.len() + 1);
     assert_eq!(split_tab.focused_pane, Some(new_pane));
+    assert!(resize.changed);
+    assert!(
+        after_resize.rows != before_resize.rows || after_resize.cols != before_resize.cols,
+        "resize should change at least one pane dimension"
+    );
     assert!(focus.changed);
     assert_eq!(focused_tab_after_focus.focused_pane, Some(focused_pane));
+    assert!(close.changed);
+    assert_eq!(collect_pane_ids(&focused_tab_after_close.root).len(), initial_panes.len());
+    assert_eq!(close_last_error.code, "backend_unsupported");
+    assert_eq!(close_last_error.degraded_reason, Some(DegradedModeReason::UnsupportedByBackend));
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

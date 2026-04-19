@@ -9,7 +9,7 @@ use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
     BackendSessionSummary, BackendSubscription, BackendSubscriptionEvent, BoxFuture,
     CreateSessionSpec, DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult,
-    SendInputSpec, SendPasteSpec, SplitPaneSpec, SubscriptionSpec,
+    ResizePaneSpec, SendInputSpec, SendPasteSpec, SplitPaneSpec, SubscriptionSpec,
 };
 use terminal_domain::{
     BackendKind, DegradedModeReason, ExternalSessionRef, PaneId, RouteAuthority, SessionId,
@@ -84,6 +84,7 @@ impl MuxBackendPort for TmuxBackend {
         Box::pin(async {
             Ok(BackendCapabilities {
                 tiled_panes: true,
+                split_resize: true,
                 tab_create: true,
                 tab_close: true,
                 tab_focus: true,
@@ -91,6 +92,7 @@ impl MuxBackendPort for TmuxBackend {
                 session_scoped_tab_refs: true,
                 session_scoped_pane_refs: true,
                 pane_split: true,
+                pane_close: true,
                 pane_focus: true,
                 pane_input_write: true,
                 pane_paste_write: true,
@@ -239,18 +241,18 @@ impl TmuxAttachedSession {
             MuxCommand::SplitPane(spec) => self.split_pane(spec),
             MuxCommand::SendInput(spec) => self.send_input(spec),
             MuxCommand::SendPaste(spec) => self.send_paste(spec),
+            MuxCommand::ClosePane { pane_id } => self.close_pane(pane_id),
             MuxCommand::CloseTab { tab_id } => self.close_tab(tab_id),
             MuxCommand::FocusTab { tab_id } => self.focus_tab(tab_id),
             MuxCommand::RenameTab { tab_id, title } => self.rename_tab(tab_id, &title),
             MuxCommand::FocusPane { pane_id } => self.focus_pane(pane_id),
-            MuxCommand::ClosePane { .. }
-            | MuxCommand::ResizePane(_)
-            | MuxCommand::Detach
-            | MuxCommand::SaveSession
-            | MuxCommand::OverrideLayout(_) => Err(BackendError::unsupported(
-                "tmux imported routes do not support this command in the current rollout phase",
-                DegradedModeReason::UnsupportedByBackend,
-            )),
+            MuxCommand::ResizePane(spec) => self.resize_pane(spec),
+            MuxCommand::Detach | MuxCommand::SaveSession | MuxCommand::OverrideLayout(_) => {
+                Err(BackendError::unsupported(
+                    "tmux imported routes do not support this command in the current rollout phase",
+                    DegradedModeReason::UnsupportedByBackend,
+                ))
+            }
         }
     }
 
@@ -441,6 +443,45 @@ impl TmuxAttachedSession {
         Ok(MuxCommandResult { changed: true })
     }
 
+    fn close_pane(&self, pane_id: PaneId) -> Result<MuxCommandResult, BackendError> {
+        let snapshot = self.snapshot()?;
+        let pane_target = snapshot
+            .pane_targets
+            .get(&pane_id)
+            .ok_or_else(|| BackendError::not_found(format!("unknown tmux pane {pane_id:?}")))?;
+        let tab =
+            snapshot.topology.tabs.iter().find(|tab| tab_contains_pane(tab, pane_id)).ok_or_else(
+                || BackendError::not_found(format!("tmux pane {pane_id:?} is not bound to a tab")),
+            )?;
+        if collect_pane_ids(&tab.root).len() <= 1 {
+            return Err(BackendError::unsupported(
+                "tmux imported routes refuse to close the last pane in a tab because it would collapse tab lifecycle into tab closure semantics",
+                DegradedModeReason::UnsupportedByBackend,
+            ));
+        }
+        self.backend.run(Some(&self.target), &["kill-pane", "-t", &pane_target.target])?;
+
+        Ok(MuxCommandResult { changed: true })
+    }
+
+    fn resize_pane(&self, spec: ResizePaneSpec) -> Result<MuxCommandResult, BackendError> {
+        let snapshot = self.snapshot()?;
+        let pane_target = snapshot.pane_targets.get(&spec.pane_id).ok_or_else(|| {
+            BackendError::not_found(format!("unknown tmux pane {:?}", spec.pane_id))
+        })?;
+        if pane_target.rows == spec.rows && pane_target.cols == spec.cols {
+            return Ok(MuxCommandResult { changed: false });
+        }
+        let rows = spec.rows.to_string();
+        let cols = spec.cols.to_string();
+        self.backend.run(
+            Some(&self.target),
+            &["resize-pane", "-t", &pane_target.target, "-y", &rows, "-x", &cols],
+        )?;
+
+        Ok(MuxCommandResult { changed: true })
+    }
+
     fn send_input(&self, spec: SendInputSpec) -> Result<MuxCommandResult, BackendError> {
         self.send_text_to_pane(spec.pane_id, &spec.data)
     }
@@ -532,6 +573,7 @@ impl TmuxAttachedSession {
             Some(&self.target),
             &[
                 "list-panes",
+                "-a",
                 "-t",
                 &self.target.session_name,
                 "-F",
@@ -802,6 +844,26 @@ fn tmux_split_flag(direction: SplitDirection) -> &'static str {
     match direction {
         SplitDirection::Horizontal => "-v",
         SplitDirection::Vertical => "-h",
+    }
+}
+
+fn tab_contains_pane(tab: &TabSnapshot, pane_id: PaneId) -> bool {
+    collect_pane_ids(&tab.root).into_iter().any(|candidate| candidate == pane_id)
+}
+
+fn collect_pane_ids(root: &PaneTreeNode) -> Vec<PaneId> {
+    let mut pane_ids = Vec::new();
+    collect_pane_ids_inner(root, &mut pane_ids);
+    pane_ids
+}
+
+fn collect_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
+    match root {
+        PaneTreeNode::Leaf { pane_id } => pane_ids.push(*pane_id),
+        PaneTreeNode::Split(split) => {
+            collect_pane_ids_inner(&split.first, pane_ids);
+            collect_pane_ids_inner(&split.second, pane_ids);
+        }
     }
 }
 

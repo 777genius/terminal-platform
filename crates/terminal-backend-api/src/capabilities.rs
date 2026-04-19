@@ -12,6 +12,7 @@ pub struct BackendCapabilities {
     pub session_scoped_tab_refs: bool,
     pub session_scoped_pane_refs: bool,
     pub pane_split: bool,
+    pub pane_close: bool,
     pub pane_focus: bool,
     pub pane_input_write: bool,
     pub pane_paste_write: bool,
