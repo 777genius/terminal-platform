@@ -1,0 +1,8 @@
+[build]
+target-dir = "target"
+
+[alias]
+xtest = "test --workspace"
+xfmt = "fmt --all"
+xlint = "clippy --workspace --all-targets --all-features"
+

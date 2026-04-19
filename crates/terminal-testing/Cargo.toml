@@ -1,0 +1,10 @@
+[package]
+name = "terminal-testing"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+terminal-daemon = { path = "../terminal-daemon" }
+
+[lints]
+workspace = true

@@ -1,0 +1,14 @@
+[package]
+name = "terminal-backend-api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+terminal-domain = { path = "../terminal-domain" }
+terminal-mux-domain = { path = "../terminal-mux-domain" }
+terminal-projection = { path = "../terminal-projection" }
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "terminal-daemon"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+terminal-application = { path = "../terminal-application" }
+terminal-backend-api = { path = "../terminal-backend-api" }
+terminal-domain = { path = "../terminal-domain" }
+terminal-protocol = { path = "../terminal-protocol" }
+
+[lints]
+workspace = true

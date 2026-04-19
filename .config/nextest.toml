@@ -1,0 +1,5 @@
+[profile.default]
+fail-fast = false
+retries = 0
+status-level = "pass"
+

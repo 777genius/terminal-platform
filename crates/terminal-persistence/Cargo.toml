@@ -1,0 +1,10 @@
+[package]
+name = "terminal-persistence"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+terminal-domain = { path = "../terminal-domain" }
+
+[lints]
+workspace = true

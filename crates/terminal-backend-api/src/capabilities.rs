@@ -1,0 +1,21 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct BackendCapabilities {
+    pub tiled_panes: bool,
+    pub floating_panes: bool,
+    pub split_resize: bool,
+    pub session_scoped_tab_refs: bool,
+    pub session_scoped_pane_refs: bool,
+    pub raw_output_stream: bool,
+    pub rendered_viewport_stream: bool,
+    pub rendered_viewport_snapshot: bool,
+    pub rendered_scrollback_snapshot: bool,
+    pub layout_dump: bool,
+    pub layout_override: bool,
+    pub read_only_client_mode: bool,
+    pub explicit_session_save: bool,
+    pub plugin_panes: bool,
+    pub advisory_metadata_subscriptions: bool,
+    pub independent_resize_authority: bool,
+}
