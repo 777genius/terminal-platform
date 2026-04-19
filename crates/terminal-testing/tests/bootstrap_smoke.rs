@@ -373,6 +373,42 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
         .screen_snapshot(imported.session.session_id, focused_pane)
         .await
         .expect("screen_snapshot should succeed");
+    let rename = fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::RenameTab { tab_id: focused_tab, title: "workspace-renamed".to_string() },
+        )
+        .await
+        .expect("rename tab should succeed");
+    let topology_after_rename = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let send_input = fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id: focused_pane,
+                data: "hello from tmux dispatch\r".to_string(),
+            }),
+        )
+        .await
+        .expect("send input should succeed");
+    wait_for_screen_line(
+        &fixture,
+        imported.session.session_id,
+        focused_pane,
+        "hello from tmux dispatch",
+    )
+    .await;
+    let screen_after_input = fixture
+        .client
+        .screen_snapshot(imported.session.session_id, focused_pane)
+        .await
+        .expect("screen_snapshot should succeed");
     let delta = fixture
         .client
         .screen_delta(imported.session.session_id, focused_pane, screen.sequence)
@@ -392,10 +428,26 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
     assert_eq!(listed.sessions.len(), 1);
     assert_eq!(topology.backend_kind, BackendKind::Tmux);
     assert_eq!(topology.tabs.len(), 2);
+    assert!(rename.changed);
+    assert!(
+        topology_after_rename
+            .tabs
+            .iter()
+            .any(|tab| tab.tab_id == focused_tab
+                && tab.title.as_deref() == Some("workspace-renamed"))
+    );
+    assert!(send_input.changed);
     assert_eq!(screen.source, ProjectionSource::TmuxCapturePane);
     assert!(screen.surface.lines.iter().any(|line| line.text.contains("hello from tmux")));
+    assert!(
+        screen_after_input
+            .surface
+            .lines
+            .iter()
+            .any(|line| line.text.contains("hello from tmux dispatch"))
+    );
     assert!(delta.patch.is_none());
-    assert!(delta.full_replace.is_none());
+    assert!(delta.full_replace.is_some());
     assert_eq!(dispatch_error.code, "backend_unsupported");
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
@@ -508,11 +560,17 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
         other => panic!("unexpected initial event: {other:?}"),
     };
 
-    run_tmux(
-        &socket_name,
-        &["send-keys", "-t", &format!("{session_name}:0.0"), "hello from tmux subscription", "C-m"],
-    )
-    .expect("tmux send-keys should succeed");
+    let dispatch = fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id,
+                data: "hello from tmux subscription\r".to_string(),
+            }),
+        )
+        .await
+        .expect("send input should succeed");
 
     let updated = loop {
         let next = subscription.recv().await.expect("recv should succeed").expect("event");
@@ -533,6 +591,7 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
     };
     let patch = updated.patch.expect("delta patch should exist");
 
+    assert!(dispatch.changed);
     assert!(initial.full_replace.is_some());
     assert_ne!(updated.to_sequence, updated.from_sequence);
     assert!(

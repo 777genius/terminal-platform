@@ -8,7 +8,8 @@ use std::{
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
     BackendSessionSummary, BackendSubscription, BackendSubscriptionEvent, BoxFuture,
-    CreateSessionSpec, DiscoveredSession, MuxBackendPort, SubscriptionSpec,
+    CreateSessionSpec, DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult,
+    SendInputSpec, SendPasteSpec, SubscriptionSpec,
 };
 use terminal_domain::{
     BackendKind, DegradedModeReason, ExternalSessionRef, PaneId, RouteAuthority, SessionId,
@@ -62,6 +63,15 @@ impl TmuxBackend {
 
         String::from_utf8(output.stdout)
             .map_err(|error| BackendError::internal(format!("tmux output is not utf8: {error}")))
+    }
+
+    fn run_owned(
+        &self,
+        target: Option<&TmuxTarget>,
+        args: &[String],
+    ) -> Result<String, BackendError> {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.run(target, &refs)
     }
 }
 
@@ -200,14 +210,9 @@ impl BackendSessionPort for TmuxAttachedSession {
 
     fn dispatch(
         &self,
-        _command: terminal_backend_api::MuxCommand,
-    ) -> BoxFuture<'_, Result<terminal_backend_api::MuxCommandResult, BackendError>> {
-        Box::pin(async {
-            Err(BackendError::unsupported(
-                "tmux imported routes are observe-only in the current rollout phase",
-                DegradedModeReason::ImportedForeignSession,
-            ))
-        })
+        command: MuxCommand,
+    ) -> BoxFuture<'_, Result<MuxCommandResult, BackendError>> {
+        Box::pin(async move { self.dispatch_inner(command) })
     }
 
     fn subscribe(
@@ -220,6 +225,27 @@ impl BackendSessionPort for TmuxAttachedSession {
 }
 
 impl TmuxAttachedSession {
+    fn dispatch_inner(&self, command: MuxCommand) -> Result<MuxCommandResult, BackendError> {
+        match command {
+            MuxCommand::SendInput(spec) => self.send_input(spec),
+            MuxCommand::SendPaste(spec) => self.send_paste(spec),
+            MuxCommand::RenameTab { tab_id, title } => self.rename_tab(tab_id, &title),
+            MuxCommand::NewTab(_)
+            | MuxCommand::SplitPane(_)
+            | MuxCommand::ClosePane { .. }
+            | MuxCommand::FocusPane { .. }
+            | MuxCommand::ResizePane(_)
+            | MuxCommand::CloseTab { .. }
+            | MuxCommand::FocusTab { .. }
+            | MuxCommand::Detach
+            | MuxCommand::SaveSession
+            | MuxCommand::OverrideLayout(_) => Err(BackendError::unsupported(
+                "tmux imported routes do not support this command in the current rollout phase",
+                DegradedModeReason::UnsupportedByBackend,
+            )),
+        }
+    }
+
     fn open_subscription(
         &self,
         spec: SubscriptionSpec,
@@ -322,6 +348,94 @@ impl TmuxAttachedSession {
         Ok(BackendSubscription::new(subscription_id, events_rx, cancel_tx))
     }
 
+    fn rename_tab(&self, tab_id: TabId, title: &str) -> Result<MuxCommandResult, BackendError> {
+        let snapshot = self.snapshot()?;
+        let tab_target = snapshot
+            .tab_targets
+            .get(&tab_id)
+            .ok_or_else(|| BackendError::not_found(format!("unknown tmux tab {tab_id:?}")))?;
+        self.backend
+            .run(Some(&self.target), &["rename-window", "-t", &tab_target.target, title])?;
+
+        Ok(MuxCommandResult { changed: true })
+    }
+
+    fn send_input(&self, spec: SendInputSpec) -> Result<MuxCommandResult, BackendError> {
+        self.send_text_to_pane(spec.pane_id, &spec.data)
+    }
+
+    fn send_paste(&self, spec: SendPasteSpec) -> Result<MuxCommandResult, BackendError> {
+        self.send_text_to_pane(spec.pane_id, &spec.data)
+    }
+
+    fn send_text_to_pane(
+        &self,
+        pane_id: PaneId,
+        data: &str,
+    ) -> Result<MuxCommandResult, BackendError> {
+        if data.is_empty() {
+            return Ok(MuxCommandResult { changed: false });
+        }
+
+        let snapshot = self.snapshot()?;
+        let pane_target = snapshot
+            .pane_targets
+            .get(&pane_id)
+            .ok_or_else(|| BackendError::not_found(format!("unknown tmux pane {pane_id:?}")))?;
+        self.send_tmux_text(&pane_target.target, data)?;
+
+        Ok(MuxCommandResult { changed: true })
+    }
+
+    fn send_tmux_text(&self, pane_target: &str, data: &str) -> Result<(), BackendError> {
+        let mut literal = String::new();
+        for ch in data.chars() {
+            match ch {
+                '\r' | '\n' => {
+                    self.flush_tmux_literal(pane_target, &mut literal)?;
+                    self.backend
+                        .run(Some(&self.target), &["send-keys", "-t", pane_target, "Enter"])?;
+                }
+                '\t' => {
+                    self.flush_tmux_literal(pane_target, &mut literal)?;
+                    self.backend
+                        .run(Some(&self.target), &["send-keys", "-t", pane_target, "Tab"])?;
+                }
+                c if c.is_control() => {
+                    return Err(BackendError::unsupported(
+                        format!("tmux input path does not support control character {:?}", c),
+                        DegradedModeReason::UnsupportedByBackend,
+                    ));
+                }
+                c => literal.push(c),
+            }
+        }
+
+        self.flush_tmux_literal(pane_target, &mut literal)
+    }
+
+    fn flush_tmux_literal(
+        &self,
+        pane_target: &str,
+        literal: &mut String,
+    ) -> Result<(), BackendError> {
+        if literal.is_empty() {
+            return Ok(());
+        }
+
+        let args = vec![
+            "send-keys".to_string(),
+            "-t".to_string(),
+            pane_target.to_string(),
+            "-l".to_string(),
+            literal.clone(),
+        ];
+        self.backend.run_owned(Some(&self.target), &args)?;
+        literal.clear();
+
+        Ok(())
+    }
+
     fn snapshot(&self) -> Result<TmuxSessionSnapshot, BackendError> {
         let windows_output = self.backend.run(
             Some(&self.target),
@@ -353,6 +467,7 @@ impl TmuxAttachedSession {
         let mut focused_tab = None;
         let mut tabs = Vec::new();
         let mut pane_targets = HashMap::new();
+        let mut tab_targets = HashMap::new();
         for line in windows_output.lines().filter(|line| !line.trim().is_empty()) {
             let window = TmuxWindowRow::parse(line)?;
             let mut panes = panes_by_window.remove(&window.window_id).unwrap_or_default();
@@ -382,6 +497,7 @@ impl TmuxAttachedSession {
             }
 
             let tab_id = deterministic_tab_id(&self.target, &window.window_id);
+            tab_targets.insert(tab_id, TmuxTabTarget { target: window.window_id.clone() });
             let focused_pane = panes
                 .iter()
                 .find(|pane| pane.pane_active)
@@ -411,6 +527,7 @@ impl TmuxAttachedSession {
                 focused_tab,
             },
             pane_targets,
+            tab_targets,
         })
     }
 
@@ -448,6 +565,7 @@ impl TmuxAttachedSession {
 struct TmuxSessionSnapshot {
     topology: TopologySnapshot,
     pane_targets: HashMap<PaneId, TmuxPaneTarget>,
+    tab_targets: HashMap<TabId, TmuxTabTarget>,
 }
 
 #[derive(Debug, Clone)]
@@ -568,6 +686,11 @@ struct TmuxPaneTarget {
     title: Option<String>,
     rows: u16,
     cols: u16,
+}
+
+#[derive(Debug, Clone)]
+struct TmuxTabTarget {
+    target: String,
 }
 
 fn deterministic_tab_id(target: &TmuxTarget, window_id: &str) -> TabId {
