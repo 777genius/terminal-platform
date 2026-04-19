@@ -360,6 +360,125 @@ async fn bootstrap_smoke_roundtrips_live_pty_io() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_streams_surface_updates_for_all_native_panes_after_resize() {
+    let fixture = daemon_fixture("bootstrap-native-pane-resize-sub").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let original_pane = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, original_pane, "ready").await;
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SplitPane(SplitPaneSpec {
+                pane_id: original_pane,
+                direction: SplitDirection::Vertical,
+            }),
+        )
+        .await
+        .expect("split pane should succeed");
+    let after_split = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_ids = collect_pane_ids(&after_split.tabs[0].root);
+    let resized_pane = pane_ids
+        .iter()
+        .copied()
+        .find(|candidate| *candidate != original_pane)
+        .expect("new pane should exist");
+    wait_for_screen_line(&fixture, created.session.session_id, resized_pane, "ready").await;
+
+    let mut original_subscription = fixture
+        .client
+        .open_subscription(
+            created.session.session_id,
+            SubscriptionSpec::PaneSurface { pane_id: original_pane },
+        )
+        .await
+        .expect("original subscription should open");
+    let mut resized_subscription = fixture
+        .client
+        .open_subscription(
+            created.session.session_id,
+            SubscriptionSpec::PaneSurface { pane_id: resized_pane },
+        )
+        .await
+        .expect("resized subscription should open");
+
+    let original_initial =
+        match original_subscription.recv().await.expect("recv should succeed").expect("event") {
+            SubscriptionEvent::ScreenDelta(delta) => delta,
+            other => panic!("unexpected original initial event: {other:?}"),
+        };
+    let resized_initial =
+        match resized_subscription.recv().await.expect("recv should succeed").expect("event") {
+            SubscriptionEvent::ScreenDelta(delta) => delta,
+            other => panic!("unexpected resized initial event: {other:?}"),
+        };
+
+    let original_before = fixture
+        .client
+        .screen_snapshot(created.session.session_id, original_pane)
+        .await
+        .expect("screen_snapshot should succeed");
+    let resized_before = fixture
+        .client
+        .screen_snapshot(created.session.session_id, resized_pane)
+        .await
+        .expect("screen_snapshot should succeed");
+    let total_cols = original_before.cols.saturating_add(resized_before.cols);
+    let target_cols = resized_before.cols.saturating_add(10).min(total_cols.saturating_sub(1));
+    let resize = fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::ResizePane(ResizePaneSpec {
+                pane_id: resized_pane,
+                rows: resized_before.rows,
+                cols: target_cols,
+            }),
+        )
+        .await
+        .expect("resize should succeed");
+
+    let original_updated =
+        match original_subscription.recv().await.expect("recv should succeed").expect("event") {
+            SubscriptionEvent::ScreenDelta(delta) => delta,
+            other => panic!("unexpected original updated event: {other:?}"),
+        };
+    let resized_updated =
+        match resized_subscription.recv().await.expect("recv should succeed").expect("event") {
+            SubscriptionEvent::ScreenDelta(delta) => delta,
+            other => panic!("unexpected resized updated event: {other:?}"),
+        };
+
+    assert!(original_initial.full_replace.is_some());
+    assert!(resized_initial.full_replace.is_some());
+    assert!(resize.changed);
+    assert_eq!(original_updated.pane_id, original_pane);
+    assert_eq!(resized_updated.pane_id, resized_pane);
+    assert!(original_updated.full_replace.is_some());
+    assert!(resized_updated.full_replace.is_some());
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_controls_native_pane_lifecycle_via_dispatch() {
     let fixture = daemon_fixture("bootstrap-native-pane-control").expect("fixture should start");
     let created = fixture
@@ -463,6 +582,106 @@ async fn bootstrap_smoke_controls_native_pane_lifecycle_via_dispatch() {
     assert_eq!(restored_screen.rows, initial_screen.rows);
     assert_eq!(restored_screen.cols, initial_screen.cols);
     assert_eq!(close_last.code, "backend_invalid_input");
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_resizes_native_split_panes_through_layout_ratios() {
+    let fixture = daemon_fixture("bootstrap-native-pane-resize").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let initial = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = initial.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SplitPane(SplitPaneSpec { pane_id, direction: SplitDirection::Vertical }),
+        )
+        .await
+        .expect("split pane should succeed");
+    let after_split = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_ids = collect_pane_ids(&after_split.tabs[0].root);
+    let new_pane = pane_ids
+        .iter()
+        .copied()
+        .find(|candidate| *candidate != pane_id)
+        .expect("new pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, new_pane, "ready").await;
+    let original_before = fixture
+        .client
+        .screen_snapshot(created.session.session_id, pane_id)
+        .await
+        .expect("screen_snapshot should succeed");
+    let target_before = fixture
+        .client
+        .screen_snapshot(created.session.session_id, new_pane)
+        .await
+        .expect("screen_snapshot should succeed");
+
+    let resize_row = fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::ResizePane(ResizePaneSpec {
+                pane_id: new_pane,
+                rows: target_before.rows.saturating_sub(4).max(4),
+                cols: target_before.cols,
+            }),
+        )
+        .await
+        .expect_err("row resize should be rejected without horizontal split authority");
+    let total_cols = original_before.cols.saturating_add(target_before.cols);
+    let target_cols = target_before.cols.saturating_add(10).min(total_cols.saturating_sub(1));
+    let resize = fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::ResizePane(ResizePaneSpec {
+                pane_id: new_pane,
+                rows: target_before.rows,
+                cols: target_cols,
+            }),
+        )
+        .await
+        .expect("col resize should succeed");
+    let original_after = fixture
+        .client
+        .screen_snapshot(created.session.session_id, pane_id)
+        .await
+        .expect("screen_snapshot should succeed");
+    let target_after = fixture
+        .client
+        .screen_snapshot(created.session.session_id, new_pane)
+        .await
+        .expect("screen_snapshot should succeed");
+
+    assert_eq!(resize_row.code, "backend_unsupported");
+    assert!(resize.changed);
+    assert_eq!(target_after.rows, target_before.rows);
+    assert_eq!(original_after.rows, original_before.rows);
+    assert!(target_after.cols > target_before.cols);
+    assert!(original_after.cols < original_before.cols);
+    assert_eq!(target_after.cols + original_after.cols, target_before.cols + original_before.cols);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

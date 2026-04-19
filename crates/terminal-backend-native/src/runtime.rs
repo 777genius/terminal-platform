@@ -20,6 +20,8 @@ use crate::{emulator::EmulatorBuffer, transcript::TranscriptBuffer};
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
 const SNAPSHOT_HISTORY_LIMIT: usize = 64;
+const SPLIT_RATIO_SCALE: u16 = 10_000;
+const DEFAULT_SPLIT_RATIO_BPS: u16 = SPLIT_RATIO_SCALE / 2;
 
 pub(super) struct NativeSessionRuntime {
     session_id: SessionId,
@@ -40,8 +42,20 @@ struct NativeTabRuntime {
     tab_id: TabId,
     title: Option<String>,
     focused_pane: PaneId,
-    root: PaneTreeNode,
+    root: NativePaneLayoutNode,
     panes: Vec<NativePaneRuntime>,
+}
+
+enum NativePaneLayoutNode {
+    Leaf { pane_id: PaneId },
+    Split(NativePaneLayoutSplit),
+}
+
+struct NativePaneLayoutSplit {
+    direction: SplitDirection,
+    ratio_bps: u16,
+    first: Box<NativePaneLayoutNode>,
+    second: Box<NativePaneLayoutNode>,
 }
 
 struct NativePaneRuntime {
@@ -63,6 +77,13 @@ struct NativeProjectionState {
 struct PaneGeometry {
     rows: u16,
     cols: u16,
+}
+
+#[derive(Default)]
+struct LayoutResizeOutcome {
+    changed: bool,
+    row_applied: bool,
+    col_applied: bool,
 }
 
 struct NativePtyProcess {
@@ -113,7 +134,7 @@ impl NativeSessionRuntime {
                 .map(|tab| TabSnapshot {
                     tab_id: tab.tab_id,
                     title: tab.title.clone(),
-                    root: tab.root.clone(),
+                    root: tab.root.snapshot(),
                     focused_pane: Some(tab.focused_pane),
                 })
                 .collect(),
@@ -170,7 +191,15 @@ impl NativeSessionRuntime {
             MuxCommand::ResizePane(spec) => {
                 let pane_id = spec.pane_id;
                 let changed = dispatch_resize_pane(&mut state, spec)?;
-                let surface_updates = if changed { vec![pane_id] } else { Vec::new() };
+                let surface_updates = if changed {
+                    state
+                        .tabs
+                        .iter()
+                        .find(|tab| tab.contains_pane(pane_id))
+                        .map_or_else(Vec::new, NativeTabRuntime::pane_ids)
+                } else {
+                    Vec::new()
+                };
                 (changed, surface_updates)
             }
             MuxCommand::SendInput(spec) => (dispatch_send_input(&state, spec)?, Vec::new()),
@@ -266,7 +295,7 @@ fn spawn_tab(
         tab_id: TabId::new(),
         title,
         focused_pane: pane_id,
-        root: PaneTreeNode::Leaf { pane_id },
+        root: NativePaneLayoutNode::Leaf { pane_id },
         panes: vec![pane],
     })
 }
@@ -430,68 +459,273 @@ impl NativeTabRuntime {
     }
 
     fn pane_ids(&self) -> Vec<PaneId> {
-        self.panes.iter().map(|pane| pane.pane_id).collect()
+        self.root.pane_ids()
     }
 
     fn contains_pane(&self, pane_id: PaneId) -> bool {
-        self.panes.iter().any(|pane| pane.pane_id == pane_id)
+        self.root.contains_pane(pane_id)
+    }
+
+    fn first_pane_id(&self) -> Option<PaneId> {
+        self.root.first_pane_id()
     }
 }
 
-fn replace_leaf_with_split(
-    node: &mut PaneTreeNode,
-    target: PaneId,
-    direction: SplitDirection,
-    new_pane: PaneId,
-) -> bool {
-    match node {
-        PaneTreeNode::Leaf { pane_id } if *pane_id == target => {
-            *node = PaneTreeNode::Split(PaneSplit {
-                direction,
-                first: Box::new(PaneTreeNode::Leaf { pane_id: *pane_id }),
-                second: Box::new(PaneTreeNode::Leaf { pane_id: new_pane }),
-            });
-            true
-        }
-        PaneTreeNode::Leaf { .. } => false,
-        PaneTreeNode::Split(split) => {
-            replace_leaf_with_split(&mut split.first, target, direction, new_pane)
-                || replace_leaf_with_split(&mut split.second, target, direction, new_pane)
+impl NativePaneLayoutNode {
+    fn snapshot(&self) -> PaneTreeNode {
+        match self {
+            Self::Leaf { pane_id } => PaneTreeNode::Leaf { pane_id: *pane_id },
+            Self::Split(split) => PaneTreeNode::Split(PaneSplit {
+                direction: split.direction,
+                first: Box::new(split.first.snapshot()),
+                second: Box::new(split.second.snapshot()),
+            }),
         }
     }
-}
 
-fn remove_leaf(node: &PaneTreeNode, target: PaneId) -> Option<PaneTreeNode> {
-    match node {
-        PaneTreeNode::Leaf { pane_id } => (*pane_id != target).then_some(node.clone()),
-        PaneTreeNode::Split(split) => {
-            match (remove_leaf(&split.first, target), remove_leaf(&split.second, target)) {
-                (Some(first), Some(second)) => Some(PaneTreeNode::Split(PaneSplit {
-                    direction: split.direction,
-                    first: Box::new(first),
-                    second: Box::new(second),
-                })),
-                (Some(node), None) | (None, Some(node)) => Some(node),
-                (None, None) => None,
+    fn contains_pane(&self, target: PaneId) -> bool {
+        match self {
+            Self::Leaf { pane_id } => *pane_id == target,
+            Self::Split(split) => {
+                split.first.contains_pane(target) || split.second.contains_pane(target)
+            }
+        }
+    }
+
+    fn pane_ids(&self) -> Vec<PaneId> {
+        let mut pane_ids = Vec::new();
+        self.collect_pane_ids(&mut pane_ids);
+        pane_ids
+    }
+
+    fn path_has_direction(&self, target: PaneId, direction: SplitDirection) -> bool {
+        match self {
+            Self::Leaf { .. } => false,
+            Self::Split(split) => {
+                let first_contains = split.first.contains_pane(target);
+                let second_contains = split.second.contains_pane(target);
+                if !first_contains && !second_contains {
+                    return false;
+                }
+
+                if split.direction == direction {
+                    true
+                } else if first_contains {
+                    split.first.path_has_direction(target, direction)
+                } else {
+                    split.second.path_has_direction(target, direction)
+                }
+            }
+        }
+    }
+
+    fn first_pane_id(&self) -> Option<PaneId> {
+        match self {
+            Self::Leaf { pane_id } => Some(*pane_id),
+            Self::Split(split) => {
+                split.first.first_pane_id().or_else(|| split.second.first_pane_id())
+            }
+        }
+    }
+
+    fn split_leaf(&mut self, target: PaneId, direction: SplitDirection, new_pane: PaneId) -> bool {
+        match self {
+            Self::Leaf { pane_id } if *pane_id == target => {
+                let current_pane = *pane_id;
+                *self = Self::Split(NativePaneLayoutSplit {
+                    direction,
+                    ratio_bps: DEFAULT_SPLIT_RATIO_BPS,
+                    first: Box::new(Self::Leaf { pane_id: current_pane }),
+                    second: Box::new(Self::Leaf { pane_id: new_pane }),
+                });
+                true
+            }
+            Self::Leaf { .. } => false,
+            Self::Split(split) => {
+                split.first.split_leaf(target, direction, new_pane)
+                    || split.second.split_leaf(target, direction, new_pane)
+            }
+        }
+    }
+
+    fn remove_leaf(&self, target: PaneId) -> Option<Self> {
+        match self {
+            Self::Leaf { pane_id } => {
+                (*pane_id != target).then_some(Self::Leaf { pane_id: *pane_id })
+            }
+            Self::Split(split) => {
+                match (split.first.remove_leaf(target), split.second.remove_leaf(target)) {
+                    (Some(first), Some(second)) => Some(Self::Split(NativePaneLayoutSplit {
+                        direction: split.direction,
+                        ratio_bps: split.ratio_bps,
+                        first: Box::new(first),
+                        second: Box::new(second),
+                    })),
+                    (Some(node), None) | (None, Some(node)) => Some(node),
+                    (None, None) => None,
+                }
+            }
+        }
+    }
+
+    fn resize_target(
+        &mut self,
+        target: PaneId,
+        desired: PaneGeometry,
+        rows: u16,
+        cols: u16,
+    ) -> LayoutResizeOutcome {
+        self.resize_target_with_policy(target, desired, rows, cols, true, true)
+    }
+
+    fn resize_target_with_policy(
+        &mut self,
+        target: PaneId,
+        desired: PaneGeometry,
+        rows: u16,
+        cols: u16,
+        allow_row_resize: bool,
+        allow_col_resize: bool,
+    ) -> LayoutResizeOutcome {
+        match self {
+            Self::Leaf { .. } => LayoutResizeOutcome::default(),
+            Self::Split(split) => {
+                let mut outcome = LayoutResizeOutcome::default();
+                let first_contains = split.first.contains_pane(target);
+                let second_contains = split.second.contains_pane(target);
+                if !first_contains && !second_contains {
+                    return outcome;
+                }
+
+                match split.direction {
+                    SplitDirection::Vertical if allow_col_resize && cols > 1 => {
+                        let desired_first_cols =
+                            target_to_first_span(cols, desired.cols, first_contains);
+                        let new_ratio = span_to_ratio_bps(desired_first_cols, cols);
+                        if split.ratio_bps != new_ratio {
+                            split.ratio_bps = new_ratio;
+                            outcome.changed = true;
+                        }
+                        outcome.col_applied = true;
+                    }
+                    SplitDirection::Horizontal if allow_row_resize && rows > 1 => {
+                        let desired_first_rows =
+                            target_to_first_span(rows, desired.rows, first_contains);
+                        let new_ratio = span_to_ratio_bps(desired_first_rows, rows);
+                        if split.ratio_bps != new_ratio {
+                            split.ratio_bps = new_ratio;
+                            outcome.changed = true;
+                        }
+                        outcome.row_applied = true;
+                    }
+                    _ => {}
+                }
+
+                let ((first_rows, first_cols), (second_rows, second_cols)) =
+                    split.partition(rows, cols);
+                let child_allow_row =
+                    allow_row_resize && split.direction != SplitDirection::Horizontal;
+                let child_allow_col =
+                    allow_col_resize && split.direction != SplitDirection::Vertical;
+                let nested = if first_contains {
+                    split.first.resize_target_with_policy(
+                        target,
+                        desired,
+                        first_rows,
+                        first_cols,
+                        child_allow_row,
+                        child_allow_col,
+                    )
+                } else {
+                    split.second.resize_target_with_policy(
+                        target,
+                        desired,
+                        second_rows,
+                        second_cols,
+                        child_allow_row,
+                        child_allow_col,
+                    )
+                };
+                outcome.merge(nested);
+                outcome
+            }
+        }
+    }
+
+    fn collect_pane_ids(&self, pane_ids: &mut Vec<PaneId>) {
+        match self {
+            Self::Leaf { pane_id } => pane_ids.push(*pane_id),
+            Self::Split(split) => {
+                split.first.collect_pane_ids(pane_ids);
+                split.second.collect_pane_ids(pane_ids);
             }
         }
     }
 }
 
-fn collect_pane_ids(root: &PaneTreeNode) -> Vec<PaneId> {
-    let mut pane_ids = Vec::new();
-    collect_pane_ids_inner(root, &mut pane_ids);
-    pane_ids
-}
-
-fn collect_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
-    match root {
-        PaneTreeNode::Leaf { pane_id } => pane_ids.push(*pane_id),
-        PaneTreeNode::Split(split) => {
-            collect_pane_ids_inner(&split.first, pane_ids);
-            collect_pane_ids_inner(&split.second, pane_ids);
+impl NativePaneLayoutSplit {
+    fn partition(&self, rows: u16, cols: u16) -> ((u16, u16), (u16, u16)) {
+        match self.direction {
+            SplitDirection::Vertical => {
+                let (first_cols, second_cols) = partition_dimension_by_ratio(cols, self.ratio_bps);
+                ((rows, first_cols), (rows, second_cols))
+            }
+            SplitDirection::Horizontal => {
+                let (first_rows, second_rows) = partition_dimension_by_ratio(rows, self.ratio_bps);
+                ((first_rows, cols), (second_rows, cols))
+            }
         }
     }
+}
+
+impl LayoutResizeOutcome {
+    fn merge(&mut self, nested: Self) {
+        self.changed |= nested.changed;
+        self.row_applied |= nested.row_applied;
+        self.col_applied |= nested.col_applied;
+    }
+}
+
+fn target_to_first_span(total: u16, desired_target: u16, target_is_first: bool) -> u16 {
+    if total <= 1 {
+        return 1;
+    }
+
+    let clamped_target = desired_target.clamp(1, total.saturating_sub(1));
+    if target_is_first {
+        clamped_target
+    } else {
+        total.saturating_sub(clamped_target).clamp(1, total.saturating_sub(1))
+    }
+}
+
+fn span_to_ratio_bps(first_span: u16, total: u16) -> u16 {
+    if total <= 1 {
+        return DEFAULT_SPLIT_RATIO_BPS;
+    }
+
+    let clamped_first = first_span.clamp(1, total.saturating_sub(1));
+    let ratio = ((u32::from(clamped_first) * u32::from(SPLIT_RATIO_SCALE))
+        + (u32::from(total) / 2))
+        / u32::from(total);
+    ratio
+        .clamp(1, u32::from(SPLIT_RATIO_SCALE.saturating_sub(1)))
+        .try_into()
+        .unwrap_or(DEFAULT_SPLIT_RATIO_BPS)
+}
+
+fn partition_dimension_by_ratio(total: u16, ratio_bps: u16) -> (u16, u16) {
+    if total <= 1 {
+        return (1, 1);
+    }
+
+    let ratio = ratio_bps.clamp(1, SPLIT_RATIO_SCALE.saturating_sub(1));
+    let mut first = ((u32::from(total) * u32::from(ratio)) + (u32::from(SPLIT_RATIO_SCALE) / 2))
+        / u32::from(SPLIT_RATIO_SCALE);
+    first = first.clamp(1, u32::from(total.saturating_sub(1)));
+    let first: u16 = first.try_into().unwrap_or(1);
+    let second = total.saturating_sub(first).max(1);
+    (first, second)
 }
 
 fn reflow_tab_layout(tab: &NativeTabRuntime, rows: u16, cols: u16) -> Result<(), BackendError> {
@@ -499,13 +733,13 @@ fn reflow_tab_layout(tab: &NativeTabRuntime, rows: u16, cols: u16) -> Result<(),
 }
 
 fn apply_pane_layout(
-    node: &PaneTreeNode,
+    node: &NativePaneLayoutNode,
     tab: &NativeTabRuntime,
     rows: u16,
     cols: u16,
 ) -> Result<(), BackendError> {
     match node {
-        PaneTreeNode::Leaf { pane_id } => {
+        NativePaneLayoutNode::Leaf { pane_id } => {
             let pane = tab.pane(*pane_id).ok_or_else(|| {
                 BackendError::internal(format!(
                     "native pane tree references missing pane {pane_id:?}"
@@ -514,29 +748,13 @@ fn apply_pane_layout(
             pane.resize(rows, cols)?;
             Ok(())
         }
-        PaneTreeNode::Split(split) => match split.direction {
-            SplitDirection::Vertical => {
-                let (first_cols, second_cols) = partition_dimension(cols);
-                apply_pane_layout(&split.first, tab, rows, first_cols)?;
-                apply_pane_layout(&split.second, tab, rows, second_cols)
-            }
-            SplitDirection::Horizontal => {
-                let (first_rows, second_rows) = partition_dimension(rows);
-                apply_pane_layout(&split.first, tab, first_rows, cols)?;
-                apply_pane_layout(&split.second, tab, second_rows, cols)
-            }
-        },
+        NativePaneLayoutNode::Split(split) => {
+            let ((first_rows, first_cols), (second_rows, second_cols)) =
+                split.partition(rows, cols);
+            apply_pane_layout(&split.first, tab, first_rows, first_cols)?;
+            apply_pane_layout(&split.second, tab, second_rows, second_cols)
+        }
     }
-}
-
-fn partition_dimension(total: u16) -> (u16, u16) {
-    if total <= 1 {
-        return (1, 1);
-    }
-
-    let first = (total / 2).max(1);
-    let second = total.saturating_sub(first).max(1);
-    (first, second)
 }
 
 fn dispatch_new_tab(
@@ -561,7 +779,7 @@ fn dispatch_split_pane(
 
     let pane = spawn_pane(&state.launch, state.rows, state.cols)?;
     let new_pane_id = pane.pane_id;
-    if !replace_leaf_with_split(&mut tab.root, spec.pane_id, spec.direction, new_pane_id) {
+    if !tab.root.split_leaf(spec.pane_id, spec.direction, new_pane_id) {
         return Err(BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)));
     }
 
@@ -657,15 +875,14 @@ fn dispatch_close_pane(
         return Err(BackendError::invalid_input("native tab must keep at least one pane"));
     }
 
-    let Some(new_root) = remove_leaf(&tab.root, pane_id) else {
+    let Some(new_root) = tab.root.remove_leaf(pane_id) else {
         return Err(BackendError::not_found(format!("unknown pane {pane_id:?}")));
     };
     tab.root = new_root;
     tab.panes.retain(|pane| pane.pane_id != pane_id);
     if tab.focused_pane == pane_id {
-        tab.focused_pane = collect_pane_ids(&tab.root)
-            .into_iter()
-            .next()
+        tab.focused_pane = tab
+            .first_pane_id()
             .ok_or_else(|| BackendError::internal("native tab root lost all panes"))?;
     }
     reflow_tab_layout(tab, state.rows, state.cols)?;
@@ -677,16 +894,47 @@ fn dispatch_resize_pane(
     state: &mut NativeSessionState,
     spec: ResizePaneSpec,
 ) -> Result<bool, BackendError> {
-    let pane = state
+    let tab = state
         .tabs
-        .iter()
-        .find_map(|tab| tab.pane(spec.pane_id))
+        .iter_mut()
+        .find(|tab| tab.contains_pane(spec.pane_id))
         .ok_or_else(|| BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)))?;
+    let pane = tab.pane(spec.pane_id).ok_or_else(|| {
+        BackendError::internal(format!("native tab lost pane {:?}", spec.pane_id))
+    })?;
     let current = pane.geometry()?;
     if current.rows == spec.rows && current.cols == spec.cols {
         return Ok(false);
     }
-    pane.resize(spec.rows, spec.cols)?;
+
+    if tab.panes.len() == 1 {
+        pane.resize(spec.rows, spec.cols)?;
+        return Ok(true);
+    }
+
+    let desired = PaneGeometry { rows: spec.rows.max(1), cols: spec.cols.max(1) };
+    if desired.rows != current.rows
+        && !tab.root.path_has_direction(spec.pane_id, SplitDirection::Horizontal)
+    {
+        return Err(BackendError::unsupported(
+            "native pane resize cannot independently change rows in current layout",
+            terminal_domain::DegradedModeReason::ResizeAuthorityExternal,
+        ));
+    }
+    if desired.cols != current.cols
+        && !tab.root.path_has_direction(spec.pane_id, SplitDirection::Vertical)
+    {
+        return Err(BackendError::unsupported(
+            "native pane resize cannot independently change cols in current layout",
+            terminal_domain::DegradedModeReason::ResizeAuthorityExternal,
+        ));
+    }
+    let outcome = tab.root.resize_target(spec.pane_id, desired, state.rows, state.cols);
+    if !outcome.changed {
+        return Ok(false);
+    }
+
+    reflow_tab_layout(tab, state.rows, state.cols)?;
     Ok(true)
 }
 
