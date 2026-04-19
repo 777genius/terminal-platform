@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use terminal_backend_api::BackendSessionSummary;
+use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 
 use crate::Handshake;
 
@@ -20,5 +21,7 @@ pub enum ResponsePayload {
     Handshake(Handshake),
     CreateSession(CreateSessionResponse),
     ListSessions(ListSessionsResponse),
+    TopologySnapshot(TopologySnapshot),
+    ScreenSnapshot(ScreenSnapshot),
     SubscriptionOpened,
 }

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-domain = { path = "../terminal-domain" }
+terminal-mux-domain = { path = "../terminal-mux-domain" }
 terminal-projection = { path = "../terminal-projection" }
 
 [lints]

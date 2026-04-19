@@ -21,6 +21,21 @@ pub struct BackendError {
 
 impl BackendError {
     #[must_use]
+    pub fn new(kind: BackendErrorKind, message: impl Into<String>) -> Self {
+        Self { kind, message: message.into(), degraded_reason: None }
+    }
+
+    #[must_use]
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new(BackendErrorKind::NotFound, message)
+    }
+
+    #[must_use]
+    pub fn invalid_input(message: impl Into<String>) -> Self {
+        Self::new(BackendErrorKind::InvalidInput, message)
+    }
+
+    #[must_use]
     pub fn unsupported(message: impl Into<String>, degraded_reason: DegradedModeReason) -> Self {
         Self {
             kind: BackendErrorKind::Unsupported,

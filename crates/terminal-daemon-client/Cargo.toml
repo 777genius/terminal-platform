@@ -9,6 +9,7 @@ interprocess = { workspace = true }
 terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-domain = { path = "../terminal-domain" }
 terminal-protocol = { path = "../terminal-protocol" }
+terminal-projection = { path = "../terminal-projection" }
 tokio-util = { workspace = true }
 
 [lints]

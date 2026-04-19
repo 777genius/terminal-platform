@@ -5,7 +5,8 @@ use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendSessionSummary, CreateSessionSpec,
 };
 use terminal_backend_native::NativeBackend;
-use terminal_domain::BackendKind;
+use terminal_domain::{BackendKind, PaneId, SessionId};
+use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{DaemonPhase, Handshake, ProtocolVersion};
 
 pub struct TerminalDaemonState {
@@ -48,6 +49,21 @@ impl TerminalDaemonState {
     ) -> Result<BackendSessionSummary, BackendError> {
         self.sessions.create_session(backend, spec).await
     }
+
+    pub async fn topology_snapshot(
+        &self,
+        session_id: SessionId,
+    ) -> Result<TopologySnapshot, BackendError> {
+        self.sessions.topology_snapshot(session_id).await
+    }
+
+    pub async fn screen_snapshot(
+        &self,
+        session_id: SessionId,
+        pane_id: PaneId,
+    ) -> Result<ScreenSnapshot, BackendError> {
+        self.sessions.screen_snapshot(session_id, pane_id).await
+    }
 }
 
 #[cfg(test)]
@@ -82,5 +98,30 @@ mod tests {
         assert_eq!(created.route.backend, BackendKind::Native);
         assert_eq!(created.title.as_deref(), Some("shell"));
         assert_eq!(state.session_count(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn returns_stub_topology_and_screen_for_native_session() {
+        let state = TerminalDaemonState::default();
+        let created = state
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec { title: Some("shell".to_string()) },
+            )
+            .await
+            .expect("native session create should succeed");
+        let topology = state
+            .topology_snapshot(created.session_id)
+            .await
+            .expect("topology snapshot should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        let screen = state
+            .screen_snapshot(created.session_id, pane_id)
+            .await
+            .expect("screen snapshot should succeed");
+
+        assert_eq!(topology.session_id, created.session_id);
+        assert_eq!(screen.pane_id, pane_id);
+        assert_eq!(screen.surface.lines.len(), 2);
     }
 }

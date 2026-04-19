@@ -23,6 +23,17 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
         .expect("create_session should succeed");
     let handshake = fixture.client.handshake().await.expect("handshake should succeed");
     let sessions = fixture.client.list_sessions().await.expect("list_sessions should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+    let screen = fixture
+        .client
+        .screen_snapshot(created.session.session_id, pane_id)
+        .await
+        .expect("screen_snapshot should succeed");
 
     assert_eq!(handshake.protocol_version.major, 0);
     assert_eq!(handshake.protocol_version.minor, 1);
@@ -30,6 +41,9 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
     assert_eq!(created.session.title.as_deref(), Some("shell"));
     assert_eq!(sessions.sessions.len(), 1);
     assert_eq!(sessions.sessions[0].session_id, created.session.session_id);
+    assert_eq!(topology.session_id, created.session.session_id);
+    assert_eq!(screen.pane_id, pane_id);
+    assert_eq!(screen.surface.lines.len(), 2);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }

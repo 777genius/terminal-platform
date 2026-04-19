@@ -351,6 +351,7 @@ version = "0.1.0"
 dependencies = [
  "terminal-backend-api",
  "terminal-domain",
+ "terminal-projection",
 ]
 
 [[package]]
@@ -370,6 +371,7 @@ version = "0.1.0"
 dependencies = [
  "terminal-backend-api",
  "terminal-domain",
+ "terminal-mux-domain",
  "terminal-projection",
  "tokio",
 ]
@@ -405,6 +407,7 @@ dependencies = [
  "terminal-backend-api",
  "terminal-backend-native",
  "terminal-domain",
+ "terminal-projection",
  "terminal-protocol",
  "tokio",
  "tokio-util",
@@ -419,6 +422,7 @@ dependencies = [
  "terminal-backend-api",
  "terminal-daemon",
  "terminal-domain",
+ "terminal-projection",
  "terminal-protocol",
  "tokio",
  "tokio-util",
@@ -473,6 +477,7 @@ dependencies = [
  "serde_json",
  "terminal-backend-api",
  "terminal-domain",
+ "terminal-projection",
  "thiserror",
 ]
 

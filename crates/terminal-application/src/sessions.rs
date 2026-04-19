@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use terminal_backend_api::{
-    BackendError, BackendSessionSummary, CreateSessionSpec, MuxBackendPort,
+    BackendError, BackendSessionPort, BackendSessionSummary, CreateSessionSpec, MuxBackendPort,
 };
-use terminal_domain::{BackendKind, DegradedModeReason};
+use terminal_domain::{BackendKind, DegradedModeReason, PaneId, SessionId};
+use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 
 use crate::registry::{InMemorySessionRegistry, SessionDescriptor, SessionRegistry};
 
@@ -50,6 +51,23 @@ impl SessionService {
         self.registry.list().len()
     }
 
+    pub async fn topology_snapshot(
+        &self,
+        session_id: SessionId,
+    ) -> Result<TopologySnapshot, BackendError> {
+        let session = self.attach_session(session_id).await?;
+        session.topology_snapshot().await
+    }
+
+    pub async fn screen_snapshot(
+        &self,
+        session_id: SessionId,
+        pane_id: PaneId,
+    ) -> Result<ScreenSnapshot, BackendError> {
+        let session = self.attach_session(session_id).await?;
+        session.screen_snapshot(pane_id).await
+    }
+
     async fn create_native_session(
         &self,
         spec: CreateSessionSpec,
@@ -68,5 +86,23 @@ impl SessionService {
         });
 
         Ok(summary)
+    }
+
+    async fn attach_session(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Box<dyn BackendSessionPort>, BackendError> {
+        let descriptor = self
+            .registry
+            .get(session_id)
+            .ok_or_else(|| BackendError::not_found(format!("unknown session {session_id:?}")))?;
+
+        match descriptor.route.backend {
+            BackendKind::Native => self.native_backend.attach_session(descriptor.route).await,
+            BackendKind::Tmux | BackendKind::Zellij => Err(BackendError::unsupported(
+                "foreign backends are not attachable in v1 start phase",
+                DegradedModeReason::NotYetImplemented,
+            )),
+        }
     }
 }

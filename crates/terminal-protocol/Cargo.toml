@@ -10,6 +10,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-domain = { path = "../terminal-domain" }
+terminal-projection = { path = "../terminal-projection" }
 thiserror = { workspace = true }
 
 [lints]

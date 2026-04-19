@@ -4,10 +4,12 @@ use terminal_backend_api::CreateSessionSpec;
 use terminal_domain::{BackendKind, OperationId};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
+use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{
-    CreateSessionRequest, CreateSessionResponse, Handshake, ListSessionsResponse,
-    LocalSocketAddress, ProtocolError, ProtocolVersion, RequestEnvelope, RequestPayload,
-    ResponsePayload, TransportResponse, decode_json_frame, encode_json_frame,
+    CreateSessionRequest, CreateSessionResponse, GetScreenSnapshotRequest,
+    GetTopologySnapshotRequest, Handshake, ListSessionsResponse, LocalSocketAddress, ProtocolError,
+    ProtocolVersion, RequestEnvelope, RequestPayload, ResponsePayload, TransportResponse,
+    decode_json_frame, encode_json_frame,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +75,40 @@ impl LocalSocketDaemonClient {
         match response.payload {
             ResponsePayload::CreateSession(created) => Ok(created),
             other => Err(ProtocolError::unexpected_payload("create_session", &other)),
+        }
+    }
+
+    pub async fn topology_snapshot(
+        &self,
+        session_id: terminal_domain::SessionId,
+    ) -> Result<TopologySnapshot, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::GetTopologySnapshot(GetTopologySnapshotRequest {
+                session_id,
+            }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::TopologySnapshot(snapshot) => Ok(snapshot),
+            other => Err(ProtocolError::unexpected_payload("topology_snapshot", &other)),
+        }
+    }
+
+    pub async fn screen_snapshot(
+        &self,
+        session_id: terminal_domain::SessionId,
+        pane_id: terminal_domain::PaneId,
+    ) -> Result<ScreenSnapshot, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::GetScreenSnapshot(GetScreenSnapshotRequest {
+                session_id,
+                pane_id,
+            }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::ScreenSnapshot(snapshot) => Ok(snapshot),
+            other => Err(ProtocolError::unexpected_payload("screen_snapshot", &other)),
         }
     }
 
@@ -176,6 +212,36 @@ mod tests {
         assert_eq!(created.session.title.as_deref(), Some("shell"));
         assert_eq!(sessions.sessions.len(), 1);
         assert_eq!(sessions.sessions[0].session_id, created.session.session_id);
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetches_topology_and_screen_for_native_session() {
+        let address = unique_address("daemon-client-topology");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec { title: Some("shell".to_string()) },
+            )
+            .await
+            .expect("create_session should succeed");
+        let topology = client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        let screen = client
+            .screen_snapshot(created.session.session_id, pane_id)
+            .await
+            .expect("screen_snapshot should succeed");
+
+        assert_eq!(topology.session_id, created.session.session_id);
+        assert_eq!(screen.pane_id, pane_id);
+        assert_eq!(screen.surface.lines.len(), 2);
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

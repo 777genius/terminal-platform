@@ -11,6 +11,7 @@ terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-backend-native = { path = "../terminal-backend-native" }
 terminal-domain = { path = "../terminal-domain" }
 terminal-protocol = { path = "../terminal-protocol" }
+terminal-projection = { path = "../terminal-projection" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 
