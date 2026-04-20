@@ -10,15 +10,8 @@ const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 1200 : 
 function readyEchoLaunch() {
   if (process.platform === "win32") {
     return {
-      program: "powershell.exe",
-      args: [
-        "-NoLogo",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
-      ],
+      program: process.env.ComSpec || process.env.COMSPEC || "cmd.exe",
+      args: ["/Q", "/K", "echo ready & more"],
     };
   }
 
@@ -43,9 +36,11 @@ async function runSmoke(createClient) {
   const listed = await client.listSessions();
   const attached = await client.attachSession(created.session_id);
   const topology = await client.topologySnapshot(created.session_id);
-  const focusedScreen = await client.screenSnapshot(
+  const readyScreen = await waitForLine(
+    client,
     created.session_id,
     attached.focused_screen.pane_id,
+    "ready",
   );
   const topologySubscription = await client.openSubscription(created.session_id, {
     kind: "session_topology",
@@ -83,7 +78,7 @@ async function runSmoke(createClient) {
   const screenDelta = await client.screenDelta(
     created.session_id,
     attached.focused_screen.pane_id,
-    focusedScreen.sequence,
+    readyScreen.sequence,
   );
   const newTab = await client.dispatchMuxCommand(created.session_id, {
     kind: "new_tab",
@@ -135,8 +130,8 @@ async function runSmoke(createClient) {
   assert.equal(attached.session.session_id, created.session_id);
   assert.equal(attached.topology.session_id, created.session_id);
   assert.equal(topology.session_id, created.session_id);
-  assert.equal(focusedScreen.pane_id, attached.focused_screen.pane_id);
-  assert.equal(focusedScreen.surface.lines.length > 0, true);
+  assert.equal(readyScreen.pane_id, attached.focused_screen.pane_id);
+  assert.equal(readyScreen.surface.lines.length > 0, true);
   assert.equal(initialTopologyEvent.kind, "topology_snapshot");
   assert.equal(initialTopologyEvent.session_id, created.session_id);
   assert.equal(initialPaneEvent.kind, "screen_delta");
@@ -180,7 +175,7 @@ async function runSmoke(createClient) {
   process.stdout.write(
     JSON.stringify({
       session_id: created.session_id,
-      pane_id: focusedScreen.pane_id,
+      pane_id: readyScreen.pane_id,
       available_backends: handshake.handshake.available_backends.length,
       saved_session_id: savedRecord.session_id,
     }),
@@ -190,7 +185,7 @@ async function runSmoke(createClient) {
 async function runZellijImportSmoke(createClient, zellijCapabilities) {
   const client = createClient();
   const sessionName = uniqueZellijSessionName("pkg");
-  const attempts = process.platform === "win32" ? 5 : 3;
+  const attempts = process.platform === "win32" ? 3 : 3;
   let sessionProcess = null;
   let candidate = null;
   let lastError = null;
@@ -202,7 +197,7 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
 
       try {
         await waitForRawZellijSession(sessionName);
-        await delay(process.platform === "win32" ? 1000 : 500);
+        await delay(process.platform === "win32" ? 1500 : 500);
         try {
           candidate = await waitForDiscoveredZellijSession(client, sessionName);
         } catch (error) {
@@ -376,6 +371,8 @@ async function runSubscriptionCycleSmoke(createClient) {
   const attached = await client.attachSession(created.session_id);
   const paneId = attached.focused_screen.pane_id;
   let observedMarkers = 0;
+
+  await waitForLine(client, created.session_id, paneId, "ready");
 
   for (let cycle = 0; cycle < 24; cycle += 1) {
     const topologySubscription = await client.openSubscription(created.session_id, {

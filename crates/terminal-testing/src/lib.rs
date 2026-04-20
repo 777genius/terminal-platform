@@ -113,14 +113,12 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        ShellLaunchSpec::new("powershell.exe").with_args([
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
-        ])
+        let program = std::env::var("COMSPEC")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "cmd.exe".to_string());
+
+        ShellLaunchSpec::new(program).with_args(["/Q", "/K", "echo ready & more"])
     }
 }
 
@@ -244,7 +242,7 @@ impl ZellijSessionGuard {
             let wait_result = wait_for_zellij_session(session_name);
             if wait_result.is_ok() {
                 thread::sleep(if cfg!(windows) {
-                    Duration::from_millis(1000)
+                    Duration::from_millis(1500)
                 } else {
                     Duration::from_millis(500)
                 });

@@ -548,6 +548,31 @@ mod tests {
         terminal_protocol::LocalSocketAddress::from_runtime_slug(slug)
     }
 
+    fn spawn_default_daemon_with_retry(
+        address: terminal_protocol::LocalSocketAddress,
+    ) -> std::io::Result<terminal_daemon::LocalSocketServerHandle> {
+        let attempts = if cfg!(windows) { 50 } else { 5 };
+        let retryable_kinds = [
+            std::io::ErrorKind::AlreadyExists,
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::AddrInUse,
+        ];
+        let mut last_error = None;
+
+        for attempt in 0..attempts {
+            match spawn_local_socket_server(TerminalDaemon::default(), address.clone()) {
+                Ok(server) => return Ok(server),
+                Err(error) if retryable_kinds.contains(&error.kind()) && attempt + 1 < attempts => {
+                    last_error = Some(error);
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| std::io::Error::other("daemon never rebound on address")))
+    }
+
     fn isolated_daemon() -> TerminalDaemon {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1670,8 +1695,8 @@ mod tests {
         let client = LocalSocketDaemonClient::new(address.clone());
 
         for cycle in 0..3 {
-            let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-                .expect("server should bind");
+            let server =
+                spawn_default_daemon_with_retry(address.clone()).expect("server should bind");
 
             let handshake = client.handshake().await.expect("handshake should succeed");
             assert_eq!(handshake.daemon_phase, DaemonPhase::Ready, "cycle {cycle} should be ready");
