@@ -26,19 +26,23 @@ use terminal_domain::{
 };
 #[cfg(unix)]
 use terminal_domain::{
-    CURRENT_SAVED_SESSION_FORMAT_VERSION, DegradedModeReason, PaneId,
-    SavedSessionCompatibilityStatus, SavedSessionManifest, SessionId, TabId, local_native_route,
+    CURRENT_SAVED_SESSION_FORMAT_VERSION, SavedSessionCompatibilityStatus, SavedSessionManifest,
+    SessionId, TabId, local_native_route,
 };
+#[cfg(any(unix, windows))]
+use terminal_domain::{DegradedModeReason, PaneId};
+#[cfg(any(unix, windows))]
+use terminal_mux_domain::PaneTreeNode;
 #[cfg(unix)]
-use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
+use terminal_mux_domain::{PaneSplit, SplitDirection, TabSnapshot};
 #[cfg(unix)]
 use terminal_persistence::SqliteSessionStore;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use terminal_projection::{ProjectionSource, TopologySnapshot};
 use terminal_protocol::{DaemonPhase, SubscriptionEvent};
 use terminal_testing::{
     ZellijSessionGuard, daemon_fixture, daemon_fixture_with_state, daemon_state,
-    isolated_daemon_state, unique_sqlite_path, unique_zellij_session_name,
+    echo_shell_launch_spec, isolated_daemon_state, unique_sqlite_path, unique_zellij_session_name,
 };
 use tokio::time::sleep;
 
@@ -1873,7 +1877,7 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
     let session_name = unique_zellij_session_name("workspace");
@@ -2141,9 +2145,9 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn cat_launch_spec() -> ShellLaunchSpec {
-    ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+    echo_shell_launch_spec()
 }
 
 #[cfg(unix)]
@@ -2183,7 +2187,7 @@ fn daemon_state_with_incompatible_saved_session(
     (TerminalDaemonState::with_default_persistence(store), session_id)
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 async fn wait_for_screen_line(
     fixture: &terminal_testing::DaemonFixture,
     session_id: terminal_domain::SessionId,
@@ -2207,7 +2211,7 @@ async fn wait_for_screen_line(
     panic!("screen never contained expected text: {needle}; last lines: {last_lines:?}");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 async fn wait_for_topology(
     fixture: &terminal_testing::DaemonFixture,
     session_id: terminal_domain::SessionId,
@@ -2231,14 +2235,14 @@ async fn wait_for_topology(
     panic!("topology never reached expected state: {label}; last snapshot: {last_snapshot:?}");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn collect_pane_ids(root: &PaneTreeNode) -> Vec<PaneId> {
     let mut pane_ids = Vec::new();
     collect_pane_ids_inner(root, &mut pane_ids);
     pane_ids
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn collect_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
     match root {
         PaneTreeNode::Leaf { pane_id } => pane_ids.push(*pane_id),

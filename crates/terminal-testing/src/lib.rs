@@ -6,12 +6,15 @@ use std::{
 };
 
 #[cfg(unix)]
-use std::{process::Command, sync::Arc, thread, time::Duration};
+use std::sync::Arc;
+#[cfg(any(unix, windows))]
+use std::{process::Command, thread, time::Duration};
 
 #[cfg(unix)]
 use terminal_application::BackendCatalog;
 #[cfg(unix)]
 use terminal_backend_api::MuxBackendPort;
+use terminal_backend_api::ShellLaunchSpec;
 #[cfg(unix)]
 use terminal_backend_native::NativeBackend;
 #[cfg(unix)]
@@ -95,6 +98,24 @@ pub async fn wait_for_daemon_ready(client: &LocalSocketDaemonClient) {
     panic!("daemon fixture never became ready for handshake");
 }
 
+#[must_use]
+pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
+    #[cfg(unix)]
+    {
+        ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+    }
+
+    #[cfg(windows)]
+    {
+        let program = std::env::var("COMSPEC")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "cmd.exe".to_string());
+
+        ShellLaunchSpec::new(program).with_args(["/Q", "/K", "echo ready & more"])
+    }
+}
+
 #[cfg(unix)]
 #[must_use]
 pub fn tmux_daemon_state(socket_name: &str) -> TerminalDaemonState {
@@ -172,7 +193,7 @@ impl Drop for TmuxServerGuard {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[must_use]
 pub fn unique_zellij_session_name(label: &str) -> String {
     let nanos = SystemTime::now()
@@ -183,13 +204,13 @@ pub fn unique_zellij_session_name(label: &str) -> String {
     format!("tp-{}-{:x}", label.chars().take(8).collect::<String>(), entropy)
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[derive(Debug)]
 pub struct ZellijSessionGuard {
     session_name: String,
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl ZellijSessionGuard {
     pub fn spawn(session_name: &str) -> Result<Self, String> {
         let output = Command::new("zellij")
@@ -207,7 +228,7 @@ impl ZellijSessionGuard {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl Drop for ZellijSessionGuard {
     fn drop(&mut self) {
         let _ = run_zellij(&["kill-session", &self.session_name]);
@@ -229,7 +250,7 @@ fn run_tmux(socket_name: &str, args: &[&str]) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|error| format!("invalid tmux utf8 output: {error}"))
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn run_zellij(args: &[&str]) -> Result<String, String> {
     let output = Command::new("zellij")
         .args(args)
@@ -242,7 +263,7 @@ fn run_zellij(args: &[&str]) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|error| format!("invalid zellij utf8 output: {error}"))
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn wait_for_zellij_session(session_name: &str) -> Result<(), String> {
     for _ in 0..40 {
         let sessions = run_zellij(&["list-sessions", "--short", "--no-formatting"])?;

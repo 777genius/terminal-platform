@@ -2,6 +2,20 @@ const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
+function readyEchoLaunch() {
+  if (process.platform === "win32") {
+    return {
+      program: process.env.COMSPEC || "cmd.exe",
+      args: ["/Q", "/K", "echo ready & more"],
+    };
+  }
+
+  return {
+    program: "/bin/sh",
+    args: ["-lc", "printf 'ready\\n'; exec cat"],
+  };
+}
+
 async function runSmoke(createClient) {
   const client = createClient();
 
@@ -12,10 +26,7 @@ async function runSmoke(createClient) {
   const zellijCapabilities = await client.backendCapabilities("zellij");
   const created = await client.createNativeSession({
     title: "node-smoke",
-    launch: {
-      program: "/bin/sh",
-      args: ["-lc", "printf 'ready\\n'; exec cat"],
-    },
+    launch: readyEchoLaunch(),
   });
   const listed = await client.listSessions();
   const attached = await client.attachSession(created.session_id);
@@ -283,10 +294,7 @@ async function runSubscriptionBackpressureSmoke(createClient) {
   const client = createClient();
   const created = await client.createNativeSession({
     title: "node-backpressure-close",
-    launch: {
-      program: "/bin/sh",
-      args: ["-lc", "printf 'ready\\n'; exec cat"],
-    },
+    launch: readyEchoLaunch(),
   });
   const attached = await client.attachSession(created.session_id);
   const tabId =
@@ -322,10 +330,7 @@ async function runPackageWatchSmoke(createClient, sdk) {
   const client = createClient();
   const created = await client.createNativeSession({
     title: "node-package-watch",
-    launch: {
-      program: "/bin/sh",
-      args: ["-lc", "printf 'ready\\n'; exec cat"],
-    },
+    launch: readyEchoLaunch(),
   });
   const attached = await client.attachSession(created.session_id);
   const paneId = attached.focused_screen.pane_id;
@@ -425,10 +430,7 @@ async function runPackageWatchSmoke(createClient, sdk) {
 
   const sessionCreated = await client.createNativeSession({
     title: "node-package-session-watch",
-    launch: {
-      program: "/bin/sh",
-      args: ["-lc", "printf 'ready\\n'; exec cat"],
-    },
+    launch: readyEchoLaunch(),
   });
   const sessionAttached = await client.attachSession(sessionCreated.session_id);
   const sessionPaneId = sessionAttached.focused_screen.pane_id;
@@ -508,10 +510,7 @@ async function runShutdownSmoke(createClient, options = {}) {
   const client = createClient();
   const created = await client.createNativeSession({
     title: "node-package-shutdown",
-    launch: {
-      program: "/bin/sh",
-      args: ["-lc", "printf 'ready\\n'; exec cat"],
-    },
+    launch: readyEchoLaunch(),
   });
   const attached = await client.attachSession(created.session_id);
   const paneId = attached.focused_screen.pane_id;
@@ -585,10 +584,7 @@ async function runRestartRecoverySmoke(createClient, options = {}) {
   const initialHandshake = await client.handshakeInfo();
   const initial = await client.createNativeSession({
     title: "node-package-restart-before",
-    launch: {
-      program: "/bin/sh",
-      args: ["-lc", "printf 'ready\\n'; exec cat"],
-    },
+    launch: readyEchoLaunch(),
   });
 
   if (typeof onInitialReady === "function") {
@@ -631,10 +627,7 @@ async function runRestartRecoverySmoke(createClient, options = {}) {
       const handshake = await client.handshakeInfo();
       const created = await client.createNativeSession({
         title: "node-package-restart-after",
-        launch: {
-          program: "/bin/sh",
-          args: ["-lc", "printf 'ready\\n'; exec cat"],
-        },
+        launch: readyEchoLaunch(),
       });
       if (handshake.assessment.can_use && created.session_id) {
         recoveredSessionId = created.session_id;
@@ -803,10 +796,7 @@ async function runElectronBridgeSmoke(createClient, sdk) {
   const handshake = await rendererClient.handshakeInfo();
   const created = await rendererClient.createNativeSession({
     title: "electron-bridge-smoke",
-    launch: {
-      program: "/bin/sh",
-      args: ["-lc", "printf 'ready\\n'; exec cat"],
-    },
+    launch: readyEchoLaunch(),
   });
   const attached = await rendererClient.attachSession(created.session_id);
   const paneId = attached.focused_screen.pane_id;
@@ -952,10 +942,7 @@ async function runElectronPreloadSmoke(createClient, sdk) {
 
   const created = await exposed.terminalPlatform.createNativeSession({
     title: "electron-preload-smoke",
-    launch: {
-      program: "/bin/sh",
-      args: ["-lc", "printf 'ready\\n'; exec cat"],
-    },
+    launch: readyEchoLaunch(),
   });
   const attached = await exposed.terminalPlatform.attachSession(created.session_id);
   const paneId = attached.focused_screen.pane_id;
@@ -1026,10 +1013,7 @@ async function runElectronBridgeDisposeSmoke(createClient, sdk) {
   });
   const created = await rendererClient.createNativeSession({
     title: "electron-bridge-dispose-smoke",
-    launch: {
-      program: "/bin/sh",
-      args: ["-lc", "printf 'ready\\n'; exec cat"],
-    },
+    launch: readyEchoLaunch(),
   });
 
   let observedStates = 0;
@@ -1146,10 +1130,7 @@ async function runElectronPreloadDisposeSmoke(createClient, sdk) {
   });
   const created = await preloadApi.createNativeSession({
     title: "electron-preload-dispose-smoke",
-    launch: {
-      program: "/bin/sh",
-      args: ["-lc", "printf 'ready\\n'; exec cat"],
-    },
+    launch: readyEchoLaunch(),
   });
 
   const readyResolvers = new Map();

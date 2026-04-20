@@ -1183,6 +1183,32 @@ fn collect_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
     }
 }
 
+#[doc(hidden)]
+pub mod __fuzz {
+    use terminal_backend_api::BackendError;
+
+    #[must_use]
+    pub fn probe_surface_code(
+        version_output: &str,
+        root_help: Option<&str>,
+        action_help: Option<&str>,
+    ) -> u8 {
+        match super::ZellijProbe::parse(version_output, root_help, action_help).surface {
+            super::ZellijSurface::LegacyCli043 => 1,
+            super::ZellijSurface::RichCli044Plus => 2,
+            super::ZellijSurface::Unknown => 0,
+        }
+    }
+
+    pub fn parse_tabs_json_len(output: &str) -> Result<usize, BackendError> {
+        Ok(super::parse_tabs_json(output)?.len())
+    }
+
+    pub fn parse_panes_json_len(output: &str) -> Result<usize, BackendError> {
+        Ok(super::parse_panes_json(output)?.len())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

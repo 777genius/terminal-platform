@@ -649,8 +649,7 @@ mod tests {
                     "{not-json",
                     serde_json::to_string::<Vec<terminal_projection::ScreenSnapshot>>(&Vec::new())
                         .expect("screens should serialize"),
-                    SqliteSessionStore::save_timestamp_ms()
-                        .expect("save timestamp should resolve")
+                    SqliteSessionStore::save_timestamp_ms().expect("save timestamp should resolve")
                         + 1,
                 ],
             )
@@ -665,12 +664,23 @@ mod tests {
         )
     }
 
-    #[cfg(unix)]
     fn cat_launch_spec() -> ShellLaunchSpec {
-        ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+        #[cfg(unix)]
+        {
+            ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+        }
+
+        #[cfg(windows)]
+        {
+            let program = std::env::var("COMSPEC")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "cmd.exe".to_string());
+
+            ShellLaunchSpec::new(program).with_args(["/Q", "/K", "echo ready & more"])
+        }
     }
 
-    #[cfg(unix)]
     async fn wait_for_screen_line(
         client: &LocalSocketDaemonClient,
         session_id: terminal_domain::SessionId,
@@ -1532,6 +1542,57 @@ mod tests {
                 .any(|line| line.line.text.contains("hello from subscription"))
         );
         assert!(updated.full_replace.is_none());
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn restarts_server_on_same_address_across_multiple_cycles() {
+        let address = unique_address("daemon-client-restart-cycles");
+        let client = LocalSocketDaemonClient::new(address.clone());
+
+        for cycle in 0..3 {
+            let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+                .expect("server should bind");
+
+            let handshake = client.handshake().await.expect("handshake should succeed");
+            assert_eq!(handshake.daemon_phase, DaemonPhase::Ready, "cycle {cycle} should be ready");
+
+            server.shutdown().await.expect("server shutdown should succeed");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn repeatedly_opens_and_closes_topology_subscriptions() {
+        let address = unique_address("daemon-client-subscribe-cycles");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("subscribe-cycles".to_string()),
+                    ..CreateSessionSpec::default()
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+
+        for cycle in 0..24 {
+            let mut subscription = client
+                .open_subscription(created.session.session_id, SubscriptionSpec::SessionTopology)
+                .await
+                .expect("subscription should open");
+            let initial = subscription.recv().await.expect("recv should succeed");
+
+            assert!(
+                matches!(initial, Some(SubscriptionEvent::TopologySnapshot(_))),
+                "cycle {cycle} should receive initial topology snapshot"
+            );
+
+            subscription.close().await.expect("subscription should close cleanly");
+        }
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

@@ -426,10 +426,13 @@ mod tests {
     use std::{path::PathBuf, time::Duration};
 
     use terminal_domain::DegradedModeReason;
+    #[cfg(unix)]
     use terminal_testing::{
-        TmuxServerGuard, ZellijSessionGuard, daemon_fixture, daemon_fixture_with_state,
-        tmux_daemon_state, unique_tmux_session_name, unique_tmux_socket_name,
-        unique_zellij_session_name,
+        TmuxServerGuard, daemon_fixture_with_state, tmux_daemon_state, unique_tmux_session_name,
+        unique_tmux_socket_name,
+    };
+    use terminal_testing::{
+        ZellijSessionGuard, daemon_fixture, echo_shell_launch_spec, unique_zellij_session_name,
     };
     use tokio::time::{sleep, timeout};
 
@@ -572,7 +575,12 @@ mod tests {
         assert!(saved.iter().any(|session| session.session_id == created.session_id));
         assert_eq!(loaded.session_id, created.session_id);
         assert!(loaded.compatibility.can_restore);
-        assert_eq!(loaded.launch.as_ref().map(|launch| launch.program.as_str()), Some("/bin/sh"));
+        let expected_launch =
+            cat_launch_request("shell").launch.expect("cat launch request should include launch");
+        assert_eq!(
+            loaded.launch.as_ref().map(|launch| launch.program.as_str()),
+            Some(expected_launch.program.as_str())
+        );
         assert!(after_input.sequence >= ready_screen.sequence);
         assert!(after_input.surface.lines.iter().any(|line| line.text.contains("node host input")));
         assert_eq!(delta.pane_id, focused_pane_id);
@@ -632,7 +640,7 @@ mod tests {
         fixture.shutdown().await.expect("fixture should stop cleanly");
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[tokio::test(flavor = "multi_thread")]
     async fn discovers_zellij_sessions_and_handles_import_surface_through_node_surface() {
         let session_name = unique_zellij_session_name("workspace");
@@ -1076,12 +1084,13 @@ mod tests {
     }
 
     fn cat_launch_request(title: &str) -> NodeCreateSessionRequest {
+        let launch = echo_shell_launch_spec();
         NodeCreateSessionRequest {
             title: Some(title.to_string()),
             launch: Some(super::NodeShellLaunchSpec {
-                program: "/bin/sh".to_string(),
-                args: vec!["-lc".to_string(), "printf 'ready\\n'; exec cat".to_string()],
-                cwd: None,
+                program: launch.program,
+                args: launch.args,
+                cwd: launch.cwd.map(|cwd| cwd.display().to_string()),
             }),
         }
     }

@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import platform
+import shutil
+import stat
+import sys
+import tarfile
+import tempfile
+import urllib.request
+import zipfile
+
+
+def download_json(url: str) -> dict:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "terminal-platform-ci",
+        },
+    )
+    with urllib.request.urlopen(request) as response:
+        return json.load(response)
+
+
+def download_file(url: str, destination: pathlib.Path) -> None:
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "terminal-platform-ci"},
+    )
+    with urllib.request.urlopen(request) as response, destination.open("wb") as output:
+        shutil.copyfileobj(response, output)
+
+
+def candidate_suffixes() -> tuple[str, ...]:
+    runner_os = os.environ.get("RUNNER_OS")
+    runner_arch = os.environ.get("RUNNER_ARCH")
+
+    if runner_os is None:
+        runner_os = {
+            "Darwin": "macOS",
+            "Linux": "Linux",
+            "Windows": "Windows",
+        }.get(platform.system(), platform.system())
+    if runner_arch is None:
+        runner_arch = {
+            "x86_64": "X64",
+            "AMD64": "X64",
+            "arm64": "ARM64",
+            "aarch64": "ARM64",
+        }.get(platform.machine(), platform.machine())
+
+    arch = {
+        "X64": "x86_64",
+        "ARM64": "aarch64",
+    }.get(runner_arch, runner_arch.lower())
+
+    if runner_os == "Linux":
+        return (f"{arch}-unknown-linux-musl.tar.gz",)
+    if runner_os == "macOS":
+        return (f"{arch}-apple-darwin.tar.gz",)
+    if runner_os == "Windows":
+        return (f"{arch}-pc-windows-msvc.zip",)
+
+    raise RuntimeError(f"unsupported runner os: {runner_os}")
+
+
+def select_asset(release: dict) -> dict:
+    assets = release.get("assets", [])
+    suffixes = candidate_suffixes()
+
+    for suffix in suffixes:
+        for asset in assets:
+            name = asset.get("name", "")
+            if name.endswith(suffix):
+                return asset
+
+    names = ", ".join(asset.get("name", "<unnamed>") for asset in assets)
+    raise RuntimeError(f"failed to locate zellij asset for {suffixes}: {names}")
+
+
+def extract_binary(archive_path: pathlib.Path, out_dir: pathlib.Path) -> pathlib.Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if archive_path.suffix == ".zip":
+        with zipfile.ZipFile(archive_path) as archive:
+            for member in archive.namelist():
+                if member.endswith("/"):
+                    continue
+                filename = pathlib.Path(member).name
+                if filename not in {"zellij", "zellij.exe"}:
+                    continue
+                archive.extract(member, out_dir)
+                extracted = out_dir / member
+                target = out_dir / filename
+                if extracted != target:
+                    if target.exists():
+                        target.unlink()
+                    shutil.move(str(extracted), str(target))
+                return target
+        raise RuntimeError("zellij executable not found in zip archive")
+
+    with tarfile.open(archive_path) as archive:
+        for member in archive.getmembers():
+            filename = pathlib.Path(member.name).name
+            if filename != "zellij":
+                continue
+            archive.extract(member, out_dir)
+            extracted = out_dir / member.name
+            target = out_dir / filename
+            if extracted != target:
+                if target.exists():
+                    target.unlink()
+                shutil.move(str(extracted), str(target))
+            target.chmod(target.stat().st_mode | stat.S_IEXEC)
+            return target
+
+    raise RuntimeError("zellij executable not found in tar archive")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", required=True, help="directory where the zellij binary should land")
+    args = parser.parse_args()
+
+    release = download_json("https://api.github.com/repos/zellij-org/zellij/releases/latest")
+    asset = select_asset(release)
+
+    out_dir = pathlib.Path(args.out).resolve()
+    with tempfile.TemporaryDirectory(prefix="terminal-platform-zellij-") as temp_dir:
+        archive_path = pathlib.Path(temp_dir) / asset["name"]
+        download_file(asset["browser_download_url"], archive_path)
+        binary_path = extract_binary(archive_path, out_dir)
+
+    print(binary_path.parent)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

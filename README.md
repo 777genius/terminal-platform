@@ -7,6 +7,12 @@ Reusable Rust terminal platform with:
 - conservative foreign backend adapters for `tmux` and `Zellij`
 - Node/Electron as the first consumer, not the architectural center
 
+## V1 Support Matrix
+
+- `macOS + Linux` - `Native + tmux + Zellij`
+- `Windows` - `Native + Zellij`
+- `tmux` stays Unix-only in v1 docs, tests, CI, and acceptance
+
 ## Start here
 
 Read in this order:
@@ -74,5 +80,12 @@ Bootstrap target:
 - `cargo fmt --all --check`
 - `cargo clippy --workspace --all-targets --all-features`
 - `cargo nextest run --workspace`
+
+Ship-ready closeout also keeps:
+
+- `fuzz/` parser and screen-delta targets for short baseline runs
+- manual QA capture under `crates/terminal-testing/manual/`
+- GitHub Actions matrix for `ubuntu-latest`, `macos-latest`, and `windows-latest`
+- release governance via `cargo-deny`, `cargo-public-api`, `cargo-semver-checks`, and `release-plz` config
 
 If `cargo nextest` is not installed yet, bootstrap work may temporarily use `cargo test --workspace` until the tool is installed.

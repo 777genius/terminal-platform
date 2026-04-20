@@ -8,6 +8,12 @@ This package is intentionally a leaf adapter:
 - native transport semantics stay daemon-first
 - JS receives a stable loader and typed client surface
 
+v1 runtime support promise:
+
+- `macOS + Linux` - `Native + tmux + Zellij`
+- `Windows` - `Native + Zellij`
+- `tmux` stays Unix-only in v1 acceptance and docs
+
 Current client surface includes:
 
 - handshake and backend capability queries

@@ -1,0 +1,49 @@
+[package]
+name = "terminal-platform-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.cargo-fuzz]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1.4.2", features = ["derive"] }
+libfuzzer-sys = "0.4.12"
+terminal-backend-tmux = { path = "../crates/terminal-backend-tmux" }
+terminal-backend-zellij = { path = "../crates/terminal-backend-zellij" }
+terminal-domain = { path = "../crates/terminal-domain" }
+terminal-projection = { path = "../crates/terminal-projection" }
+terminal-protocol = { path = "../crates/terminal-protocol" }
+uuid = "1.23.1"
+
+[[bin]]
+name = "protocol_frames"
+path = "fuzz_targets/protocol_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tmux_layout"
+path = "fuzz_targets/tmux_layout.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zellij_surface"
+path = "fuzz_targets/zellij_surface.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "screen_delta"
+path = "fuzz_targets/screen_delta.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

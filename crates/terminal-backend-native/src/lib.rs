@@ -870,12 +870,23 @@ mod tests {
         assert!(resized_updated.full_replace.is_some());
     }
 
-    #[cfg(unix)]
     fn cat_launch_spec() -> ShellLaunchSpec {
-        ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+        #[cfg(unix)]
+        {
+            ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+        }
+
+        #[cfg(windows)]
+        {
+            let program = std::env::var("COMSPEC")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "cmd.exe".to_string());
+
+            ShellLaunchSpec::new(program).with_args(["/Q", "/K", "echo ready & more"])
+        }
     }
 
-    #[cfg(unix)]
     async fn wait_for_screen_line(
         session: &dyn terminal_backend_api::BackendSessionPort,
         pane_id: terminal_domain::PaneId,
