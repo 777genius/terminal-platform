@@ -4,7 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+serde = { workspace = true }
+terminal-backend-api = { path = "../terminal-backend-api" }
+terminal-daemon-client = { path = "../terminal-daemon-client" }
+terminal-domain = { path = "../terminal-domain" }
+terminal-mux-domain = { path = "../terminal-mux-domain" }
+terminal-projection = { path = "../terminal-projection" }
 terminal-protocol = { path = "../terminal-protocol" }
+ts-rs = "12.0.1"
+uuid = { workspace = true }
+
+[dev-dependencies]
+terminal-testing = { path = "../terminal-testing" }
+tokio = { workspace = true }
 
 [lints]
 workspace = true
