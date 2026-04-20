@@ -7,12 +7,13 @@ use std::{path::PathBuf, process::Command};
 #[cfg(unix)]
 use terminal_protocol::LocalSocketAddress;
 #[cfg(unix)]
-use terminal_testing::daemon_fixture;
+use terminal_testing::{daemon_fixture, wait_for_daemon_ready};
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn installs_terminal_capi_package_into_prefix_layout() {
     let fixture = daemon_fixture("capi-install").expect("daemon fixture should start");
+    wait_for_daemon_ready(&fixture.client).await;
     let stage_dir = support::unique_temp_dir("terminal-capi-package");
     let prefix_dir = support::unique_temp_dir("terminal-capi-prefix");
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

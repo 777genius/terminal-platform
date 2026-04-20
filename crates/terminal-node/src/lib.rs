@@ -374,16 +374,18 @@ fn first_pane_id(root: &PaneTreeNode) -> Option<PaneId> {
 mod tests {
     use std::{path::PathBuf, time::Duration};
 
+    use terminal_domain::DegradedModeReason;
     use terminal_testing::{
-        TmuxServerGuard, daemon_fixture, daemon_fixture_with_state, tmux_daemon_state,
-        unique_tmux_session_name, unique_tmux_socket_name,
+        TmuxServerGuard, ZellijSessionGuard, daemon_fixture, daemon_fixture_with_state,
+        tmux_daemon_state, unique_tmux_session_name, unique_tmux_socket_name,
+        unique_zellij_session_name,
     };
     use tokio::time::{sleep, timeout};
 
     use super::{
         NodeBackendKind, NodeCreateSessionRequest, NodeHostClient, NodeMuxCommand,
-        NodeNewTabCommand, NodeSendInputCommand, NodeSubscriptionEvent, NodeSubscriptionSpec,
-        export_typescript_bindings,
+        NodeNewTabCommand, NodePaneTreeNode, NodeProjectionSource, NodeSendInputCommand,
+        NodeSubscriptionEvent, NodeSubscriptionSpec, export_typescript_bindings,
     };
 
     #[test]
@@ -483,6 +485,16 @@ mod tests {
         assert!(tmux_capabilities.capabilities.read_only_client_mode);
         assert_eq!(zellij_capabilities.backend, NodeBackendKind::Zellij);
         assert!(!zellij_capabilities.capabilities.tab_create);
+        if zellij_capabilities.capabilities.rendered_viewport_snapshot {
+            assert!(zellij_capabilities.capabilities.rendered_viewport_stream);
+            assert!(zellij_capabilities.capabilities.session_scoped_tab_refs);
+            assert!(zellij_capabilities.capabilities.session_scoped_pane_refs);
+            assert!(zellij_capabilities.capabilities.plugin_panes);
+            assert!(zellij_capabilities.capabilities.advisory_metadata_subscriptions);
+            assert!(zellij_capabilities.capabilities.read_only_client_mode);
+        } else {
+            assert!(!zellij_capabilities.capabilities.rendered_viewport_stream);
+        }
         assert!(listed.iter().any(|session| session.session_id == created.session_id));
         assert_eq!(attached.session.session_id, created.session_id);
         assert_eq!(attached.topology.session_id, created.session_id);
@@ -549,6 +561,137 @@ mod tests {
         assert_eq!(topology.backend_kind, NodeBackendKind::Tmux);
         assert_eq!(topology.tabs.len(), 2);
         assert!(screen.surface.lines.iter().any(|line| line.text.contains("hello from tmux")));
+
+        fixture.shutdown().await.expect("fixture should stop cleanly");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn discovers_zellij_sessions_and_handles_import_surface_through_node_surface() {
+        let session_name = unique_zellij_session_name("workspace");
+        let _zellij =
+            ZellijSessionGuard::spawn(&session_name).expect("zellij session should start");
+        let fixture = daemon_fixture("terminal-node-zellij").expect("fixture should start");
+        let node = NodeHostClient::new(fixture.client.address().clone());
+        let zellij_capabilities = node
+            .backend_capabilities(NodeBackendKind::Zellij)
+            .await
+            .expect("zellij capabilities should succeed");
+
+        let discovered =
+            timeout(Duration::from_secs(10), node.discover_sessions(NodeBackendKind::Zellij))
+                .await
+                .expect("discover_sessions should not hang")
+                .expect("discover_sessions should succeed");
+        let candidate = discovered
+            .iter()
+            .find(|session| session.title.as_deref() == Some(session_name.as_str()))
+            .cloned()
+            .expect("zellij session should be discoverable");
+
+        assert_eq!(candidate.route.backend, NodeBackendKind::Zellij);
+
+        if !zellij_capabilities.capabilities.rendered_viewport_snapshot {
+            let error = timeout(
+                Duration::from_secs(10),
+                node.import_session(&candidate.route, candidate.title.clone()),
+            )
+            .await
+            .expect("import_session should not hang")
+            .expect_err("legacy zellij surface should reject imported attach");
+
+            assert_eq!(error.code, "backend_unsupported");
+            assert_eq!(error.degraded_reason, Some(DegradedModeReason::MissingCapability));
+            assert!(error.message.contains("zellij"));
+        } else {
+            let imported = timeout(
+                Duration::from_secs(10),
+                node.import_session(&candidate.route, candidate.title.clone()),
+            )
+            .await
+            .expect("import_session should not hang")
+            .expect("rich zellij surface should import successfully");
+            let topology =
+                timeout(Duration::from_secs(10), node.topology_snapshot(&imported.session_id))
+                    .await
+                    .expect("topology_snapshot should not hang")
+                    .expect("topology_snapshot should succeed");
+            let focused_tab = topology
+                .tabs
+                .iter()
+                .find(|tab| Some(tab.tab_id.as_str()) == topology.focused_tab.as_deref())
+                .or_else(|| topology.tabs.first())
+                .expect("zellij topology should have tabs");
+            let focused_pane = focused_tab
+                .focused_pane
+                .clone()
+                .or_else(|| first_node_pane_id(&focused_tab.root))
+                .expect("focused zellij pane should exist");
+            let screen = timeout(
+                Duration::from_secs(10),
+                node.screen_snapshot(&imported.session_id, &focused_pane),
+            )
+            .await
+            .expect("screen_snapshot should not hang")
+            .expect("screen_snapshot should succeed");
+            let delta = timeout(
+                Duration::from_secs(10),
+                node.screen_delta(&imported.session_id, &focused_pane, screen.sequence),
+            )
+            .await
+            .expect("screen_delta should not hang")
+            .expect("screen_delta should succeed");
+            let topology_subscription = node
+                .open_subscription(&imported.session_id, &NodeSubscriptionSpec::SessionTopology)
+                .await
+                .expect("zellij topology subscription should open");
+            let pane_subscription = node
+                .open_subscription(
+                    &imported.session_id,
+                    &NodeSubscriptionSpec::PaneSurface { pane_id: focused_pane.clone() },
+                )
+                .await
+                .expect("zellij pane subscription should open");
+            let initial_topology =
+                timeout(Duration::from_secs(10), topology_subscription.next_event())
+                    .await
+                    .expect("zellij topology subscription should not hang")
+                    .expect("zellij topology subscription should stay healthy")
+                    .expect("zellij topology subscription should emit initial event");
+            let initial_pane = timeout(Duration::from_secs(10), pane_subscription.next_event())
+                .await
+                .expect("zellij pane subscription should not hang")
+                .expect("zellij pane subscription should stay healthy")
+                .expect("zellij pane subscription should emit initial event");
+
+            assert_eq!(imported.route.backend, NodeBackendKind::Zellij);
+            assert_eq!(topology.backend_kind, NodeBackendKind::Zellij);
+            assert!(!topology.tabs.is_empty());
+            assert_eq!(screen.pane_id, focused_pane);
+            assert_eq!(screen.source, NodeProjectionSource::ZellijDumpSnapshot);
+            assert_eq!(delta.from_sequence, screen.sequence);
+            assert_eq!(delta.to_sequence, screen.sequence);
+            assert!(delta.patch.is_none());
+            assert!(delta.full_replace.is_none());
+            match initial_topology {
+                NodeSubscriptionEvent::TopologySnapshot(snapshot) => {
+                    assert_eq!(snapshot.session_id, imported.session_id);
+                    assert_eq!(snapshot.backend_kind, NodeBackendKind::Zellij);
+                }
+                other => panic!("unexpected initial zellij topology event: {other:?}"),
+            }
+            match initial_pane {
+                NodeSubscriptionEvent::ScreenDelta(delta) => {
+                    assert_eq!(delta.pane_id, focused_pane);
+                    assert_eq!(delta.source, NodeProjectionSource::ZellijDumpSnapshot);
+                    assert!(delta.full_replace.is_some());
+                }
+                other => panic!("unexpected initial zellij pane event: {other:?}"),
+            }
+
+            topology_subscription.close().await;
+            pane_subscription.close().await;
+        }
 
         fixture.shutdown().await.expect("fixture should stop cleanly");
     }
@@ -764,6 +907,15 @@ mod tests {
         })
         .await
         .unwrap_or(false)
+    }
+
+    fn first_node_pane_id(root: &NodePaneTreeNode) -> Option<String> {
+        match root {
+            NodePaneTreeNode::Leaf { pane_id } => Some(pane_id.clone()),
+            NodePaneTreeNode::Split(split) => {
+                first_node_pane_id(&split.first).or_else(|| first_node_pane_id(&split.second))
+            }
+        }
     }
 
     fn subscription_delta_contains(delta: &super::NodeScreenDelta, needle: &str) -> bool {

@@ -9,7 +9,7 @@ use terminal_protocol::LocalSocketAddress;
 #[cfg(unix)]
 use terminal_testing::{
     DaemonFixture, TmuxServerGuard, daemon_fixture, daemon_fixture_with_state, tmux_daemon_state,
-    unique_tmux_session_name, unique_tmux_socket_name,
+    unique_tmux_session_name, unique_tmux_socket_name, wait_for_daemon_ready,
 };
 
 #[cfg(unix)]
@@ -17,6 +17,7 @@ use terminal_testing::{
 async fn external_c_consumer_roundtrips_against_terminal_capi_cdylib() {
     let fixture =
         daemon_fixture("capi-ext").expect("daemon fixture should start for external c consumer");
+    wait_for_daemon_ready(&fixture.client).await;
     run_reference_consumer(&fixture, "native");
 
     fixture.shutdown().await.expect("daemon fixture should stop cleanly after external c consumer");
@@ -31,6 +32,7 @@ async fn external_c_consumer_discovers_and_imports_tmux_sessions() {
         TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux server should start");
     let fixture = daemon_fixture_with_state("capi-ext-tmux", tmux_daemon_state(&socket_name))
         .expect("daemon fixture should start for external tmux c consumer");
+    wait_for_daemon_ready(&fixture.client).await;
     run_reference_consumer(&fixture, "tmux");
 
     fixture

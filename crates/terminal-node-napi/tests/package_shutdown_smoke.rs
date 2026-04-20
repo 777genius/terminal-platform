@@ -5,7 +5,7 @@ use std::{
 };
 
 use terminal_protocol::LocalSocketAddress;
-use terminal_testing::daemon_fixture;
+use terminal_testing::{daemon_fixture, wait_for_daemon_ready};
 use tokio::time::{Duration, sleep};
 
 mod support;
@@ -22,6 +22,7 @@ async fn closes_staged_package_subscriptions_when_daemon_stops() {
         ("package_shutdown_smoke.mjs", "node-pkg-close-mjs"),
     ] {
         let fixture = daemon_fixture(fixture_label).expect("fixture should start");
+        wait_for_daemon_ready(&fixture.client).await;
         let (address_kind, address_value) = match fixture.client.address() {
             LocalSocketAddress::Namespaced(value) => ("namespaced", value.clone()),
             LocalSocketAddress::Filesystem(path) => ("filesystem", path.display().to_string()),

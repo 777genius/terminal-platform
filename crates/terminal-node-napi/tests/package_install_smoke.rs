@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf, process::Command};
 
 use terminal_protocol::LocalSocketAddress;
-use terminal_testing::daemon_fixture;
+use terminal_testing::{daemon_fixture, wait_for_daemon_ready};
 
 mod support;
 
@@ -69,6 +69,7 @@ main().catch((error) => {
 #[tokio::test(flavor = "multi_thread")]
 async fn roundtrips_installed_tarball_through_cjs_and_esm() {
     let fixture = daemon_fixture("node-npm-install").expect("fixture should start");
+    wait_for_daemon_ready(&fixture.client).await;
     let addon_path = support::locate_cdylib().expect("node addon should be built");
     let package_dir =
         support::stage_node_package(&addon_path).expect("package should stage successfully");

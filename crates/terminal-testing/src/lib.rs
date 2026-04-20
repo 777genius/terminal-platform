@@ -6,7 +6,7 @@ use std::{
 };
 
 #[cfg(unix)]
-use std::{process::Command, sync::Arc};
+use std::{process::Command, sync::Arc, thread, time::Duration};
 
 #[cfg(unix)]
 use terminal_application::BackendCatalog;
@@ -82,6 +82,17 @@ pub fn daemon_fixture_with_state(
     let client = LocalSocketDaemonClient::new(address);
 
     Ok(DaemonFixture { client, server })
+}
+
+pub async fn wait_for_daemon_ready(client: &LocalSocketDaemonClient) {
+    for _ in 0..100 {
+        if client.handshake().await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    panic!("daemon fixture never became ready for handshake");
 }
 
 #[cfg(unix)]
@@ -162,6 +173,48 @@ impl Drop for TmuxServerGuard {
 }
 
 #[cfg(unix)]
+#[must_use]
+pub fn unique_zellij_session_name(label: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let entropy = (nanos & 0xffff_ffff) as u64;
+    format!("tp-{}-{:x}", label.chars().take(8).collect::<String>(), entropy)
+}
+
+#[cfg(unix)]
+#[derive(Debug)]
+pub struct ZellijSessionGuard {
+    session_name: String,
+}
+
+#[cfg(unix)]
+impl ZellijSessionGuard {
+    pub fn spawn(session_name: &str) -> Result<Self, String> {
+        let output = Command::new("zellij")
+            .args(["--session", session_name, "--new-session-with-layout", "default"])
+            .output()
+            .map_err(|error| format!("failed to spawn zellij: {error}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.contains("could not get terminal attribute: ENODEV") {
+                return Err(stderr.trim().to_string());
+            }
+        }
+        wait_for_zellij_session(session_name)?;
+        Ok(Self { session_name: session_name.to_string() })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ZellijSessionGuard {
+    fn drop(&mut self) {
+        let _ = run_zellij(&["kill-session", &self.session_name]);
+    }
+}
+
+#[cfg(unix)]
 fn run_tmux(socket_name: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new("tmux")
         .arg("-L")
@@ -174,4 +227,30 @@ fn run_tmux(socket_name: &str, args: &[&str]) -> Result<String, String> {
     }
 
     String::from_utf8(output.stdout).map_err(|error| format!("invalid tmux utf8 output: {error}"))
+}
+
+#[cfg(unix)]
+fn run_zellij(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("zellij")
+        .args(args)
+        .output()
+        .map_err(|error| format!("failed to spawn zellij: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    String::from_utf8(output.stdout).map_err(|error| format!("invalid zellij utf8 output: {error}"))
+}
+
+#[cfg(unix)]
+fn wait_for_zellij_session(session_name: &str) -> Result<(), String> {
+    for _ in 0..40 {
+        let sessions = run_zellij(&["list-sessions", "--short", "--no-formatting"])?;
+        if sessions.lines().map(str::trim).any(|line| line == session_name) {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    Err(format!("zellij session never appeared: {session_name}"))
 }

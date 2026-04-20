@@ -1,13 +1,14 @@
 use std::{path::PathBuf, process::Command};
 
 use terminal_protocol::LocalSocketAddress;
-use terminal_testing::daemon_fixture;
+use terminal_testing::{daemon_fixture, wait_for_daemon_ready};
 
 mod support;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn roundtrips_node_addon_against_daemon_fixture() {
     let fixture = daemon_fixture("terminal-node-napi-smoke").expect("fixture should start");
+    wait_for_daemon_ready(&fixture.client).await;
     let addon_path = support::materialize_node_addon().expect("node addon should be materialized");
     let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/node_smoke.cjs");
     let (address_kind, address_value) = match fixture.client.address() {

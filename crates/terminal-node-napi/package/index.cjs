@@ -317,6 +317,12 @@ function reduceSessionWatchEvent(state, event) {
         focusedScreen: cloneScreenSnapshot(event.screen),
       };
     case "screen_delta":
+      if (
+        !state.focusedScreen ||
+        state.focusedScreen.pane_id !== event.delta.pane_id
+      ) {
+        return cloneSessionState(state);
+      }
       return {
         ...cloneSessionState(state),
         focusedScreen: applyScreenDelta(state.focusedScreen, event.delta),

@@ -82,6 +82,16 @@ async function runSmoke(createClient) {
   assert.equal(tmuxCapabilities.capabilities.read_only_client_mode, true);
   assert.equal(zellijCapabilities.backend, "zellij");
   assert.equal(zellijCapabilities.capabilities.tab_create, false);
+  if (zellijCapabilities.capabilities.rendered_viewport_snapshot) {
+    assert.equal(zellijCapabilities.capabilities.rendered_viewport_stream, true);
+    assert.equal(zellijCapabilities.capabilities.session_scoped_tab_refs, true);
+    assert.equal(zellijCapabilities.capabilities.session_scoped_pane_refs, true);
+    assert.equal(zellijCapabilities.capabilities.plugin_panes, true);
+    assert.equal(zellijCapabilities.capabilities.advisory_metadata_subscriptions, true);
+    assert.equal(zellijCapabilities.capabilities.read_only_client_mode, true);
+  } else {
+    assert.equal(zellijCapabilities.capabilities.rendered_viewport_stream, false);
+  }
   assert.equal(listed.some((session) => session.session_id === created.session_id), true);
   assert.equal(attached.session.session_id, created.session_id);
   assert.equal(attached.topology.session_id, created.session_id);
