@@ -37,6 +37,7 @@ cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
 1. Push `main` to the canonical GitHub remote.
 2. Wait for the hosted CI matrix to go green.
 3. Add recorded manual pass files under `crates/terminal-testing/manual/runs/`.
+   You can scaffold them with `cargo run -p xtask -- scaffold-manual-run --kind <kind> --date YYYY-MM-DD`.
 4. Re-run the readiness audit in strict mode.
 5. Trigger `.github/workflows/release-readiness.yml`.
 6. Trigger `.github/workflows/release-plz.yml` or let the `main` push update the release PR.

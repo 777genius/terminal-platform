@@ -1,6 +1,7 @@
 use std::{
     env, fs,
     path::{Path, PathBuf},
+    process::Command as ProcessCommand,
 };
 
 const CAPI_PACKAGE_NAME: &str = "terminal-capi";
@@ -12,6 +13,7 @@ const CAPI_SCHEMA_VERSION: u64 = 1;
 const LICENSE_PATH: &str = "LICENSE";
 const CONTRIBUTING_PATH: &str = "CONTRIBUTING.md";
 const SECURITY_PATH: &str = "SECURITY.md";
+const CODE_OF_CONDUCT_PATH: &str = "CODE_OF_CONDUCT.md";
 const ROOT_README_PATH: &str = "README.md";
 const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README.md";
 const MANUAL_DIR: &str = "crates/terminal-testing/manual";
@@ -84,15 +86,59 @@ fn run() -> Result<(), String> {
             println!("v1 readiness audit passed");
             Ok(())
         }
+        Command::ScaffoldManualRun { kind, date, output, os, rust, node, tmux, zellij, force } => {
+            let output_path = scaffold_manual_run(
+                kind,
+                &date,
+                output.as_deref(),
+                os,
+                rust,
+                node,
+                tmux,
+                zellij,
+                force,
+            )?;
+            println!("{}", output_path.display());
+            Ok(())
+        }
     }
 }
 
 enum Command {
-    StageCapiPackage { out_dir: PathBuf },
-    VerifyCapiPackage { package_dir: PathBuf },
-    InstallCapiPackage { package_dir: PathBuf, prefix: PathBuf },
-    VerifyCapiInstall { prefix: PathBuf },
-    VerifyV1Readiness { require_recorded_passes: bool },
+    StageCapiPackage {
+        out_dir: PathBuf,
+    },
+    VerifyCapiPackage {
+        package_dir: PathBuf,
+    },
+    InstallCapiPackage {
+        package_dir: PathBuf,
+        prefix: PathBuf,
+    },
+    VerifyCapiInstall {
+        prefix: PathBuf,
+    },
+    VerifyV1Readiness {
+        require_recorded_passes: bool,
+    },
+    ScaffoldManualRun {
+        kind: ManualRunKind,
+        date: String,
+        output: Option<PathBuf>,
+        os: Option<String>,
+        rust: Option<String>,
+        node: Option<String>,
+        tmux: Option<String>,
+        zellij: Option<String>,
+        force: bool,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum ManualRunKind {
+    Electron,
+    UnixTmux,
+    WindowsNativeZellij,
 }
 
 fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
@@ -197,6 +243,81 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
 
             Ok(Command::VerifyV1Readiness { require_recorded_passes })
         }
+        "scaffold-manual-run" => {
+            let mut kind = None;
+            let mut date = None;
+            let mut output = None;
+            let mut os = None;
+            let mut rust = None;
+            let mut node = None;
+            let mut tmux = None;
+            let mut zellij = None;
+            let mut force = false;
+
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--kind" => {
+                        let value =
+                            args.next().ok_or_else(|| "missing value for --kind".to_string())?;
+                        kind = Some(parse_manual_run_kind(&value)?);
+                    }
+                    "--date" => {
+                        let value =
+                            args.next().ok_or_else(|| "missing value for --date".to_string())?;
+                        date = Some(value);
+                    }
+                    "--out" => {
+                        let value =
+                            args.next().ok_or_else(|| "missing value for --out".to_string())?;
+                        output = Some(PathBuf::from(value));
+                    }
+                    "--os" => {
+                        os = Some(args.next().ok_or_else(|| "missing value for --os".to_string())?);
+                    }
+                    "--rust" => {
+                        rust = Some(
+                            args.next().ok_or_else(|| "missing value for --rust".to_string())?,
+                        );
+                    }
+                    "--node" => {
+                        node = Some(
+                            args.next().ok_or_else(|| "missing value for --node".to_string())?,
+                        );
+                    }
+                    "--tmux" => {
+                        tmux = Some(
+                            args.next().ok_or_else(|| "missing value for --tmux".to_string())?,
+                        );
+                    }
+                    "--zellij" => {
+                        zellij = Some(
+                            args.next().ok_or_else(|| "missing value for --zellij".to_string())?,
+                        );
+                    }
+                    "--force" => {
+                        force = true;
+                    }
+                    other => {
+                        return Err(format!("unsupported scaffold-manual-run argument: {other}"));
+                    }
+                }
+            }
+
+            let kind = kind.ok_or_else(|| "missing required --kind".to_string())?;
+            let date = date.ok_or_else(|| "missing required --date".to_string())?;
+
+            Ok(Command::ScaffoldManualRun {
+                kind,
+                date,
+                output,
+                os,
+                rust,
+                node,
+                tmux,
+                zellij,
+                force,
+            })
+        }
         other => Err(format!("unsupported xtask command: {other}")),
     }
 }
@@ -206,6 +327,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let license = workspace_root.join(LICENSE_PATH);
     let contributing = workspace_root.join(CONTRIBUTING_PATH);
     let security = workspace_root.join(SECURITY_PATH);
+    let code_of_conduct = workspace_root.join(CODE_OF_CONDUCT_PATH);
     let root_readme = workspace_root.join(ROOT_README_PATH);
     let node_package_readme = workspace_root.join(NODE_PACKAGE_README_PATH);
     let manual_dir = workspace_root.join(MANUAL_DIR);
@@ -216,6 +338,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(license.is_file(), "root LICENSE is missing")?;
     assert_value(contributing.is_file(), "root CONTRIBUTING.md is missing")?;
     assert_value(security.is_file(), "root SECURITY.md is missing")?;
+    assert_value(code_of_conduct.is_file(), "root CODE_OF_CONDUCT.md is missing")?;
     assert_value(root_readme.is_file(), "root README is missing")?;
     assert_value(node_package_readme.is_file(), "Node package README is missing")?;
     assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
@@ -329,6 +452,127 @@ fn verify_recorded_passes(manual_runs_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn parse_manual_run_kind(value: &str) -> Result<ManualRunKind, String> {
+    match value {
+        "electron" => Ok(ManualRunKind::Electron),
+        "unix-tmux" => Ok(ManualRunKind::UnixTmux),
+        "windows-native-zellij" => Ok(ManualRunKind::WindowsNativeZellij),
+        other => Err(format!("unsupported manual run kind: {other}")),
+    }
+}
+
+impl ManualRunKind {
+    fn file_prefix(self) -> &'static str {
+        match self {
+            Self::Electron => "electron-",
+            Self::UnixTmux => "unix-tmux-",
+            Self::WindowsNativeZellij => "windows-native-zellij-",
+        }
+    }
+
+    fn checklist_path(self) -> &'static str {
+        match self {
+            Self::Electron => "crates/terminal-testing/manual/electron.md",
+            Self::UnixTmux => "crates/terminal-testing/manual/tmux.md",
+            Self::WindowsNativeZellij => "crates/terminal-testing/manual/windows-native-zellij.md",
+        }
+    }
+
+    fn default_tmux_value(self) -> &'static str {
+        match self {
+            Self::UnixTmux => "",
+            Self::Electron | Self::WindowsNativeZellij => "n/a",
+        }
+    }
+
+    fn default_zellij_value(self) -> &'static str {
+        match self {
+            Self::WindowsNativeZellij => "",
+            Self::Electron | Self::UnixTmux => "n/a",
+        }
+    }
+}
+
+fn scaffold_manual_run(
+    kind: ManualRunKind,
+    date: &str,
+    output: Option<&Path>,
+    os: Option<String>,
+    rust: Option<String>,
+    node: Option<String>,
+    tmux: Option<String>,
+    zellij: Option<String>,
+    force: bool,
+) -> Result<PathBuf, String> {
+    let workspace_root = workspace_root();
+    let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
+    let template_path = manual_runs_dir.join("_template.md");
+    let template = fs::read_to_string(&template_path)
+        .map_err(|error| format!("failed to read {} - {error}", template_path.display()))?;
+    let output_path = output
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| manual_runs_dir.join(format!("{}{date}.md", kind.file_prefix())));
+
+    if output_path.exists() && !force {
+        return Err(format!(
+            "{} already exists - pass --force to overwrite",
+            output_path.display()
+        ));
+    }
+
+    let resolved_os = os.unwrap_or_else(detect_os_label);
+    let resolved_rust = rust.unwrap_or_else(|| {
+        probe_command(&["rustc", "--version"]).unwrap_or_else(|| "n/a".to_string())
+    });
+    let resolved_node = node.unwrap_or_else(|| {
+        probe_command(&["node", "--version"]).unwrap_or_else(|| "n/a".to_string())
+    });
+    let resolved_tmux = match tmux {
+        Some(value) => value,
+        None => {
+            if kind.default_tmux_value().is_empty() {
+                probe_command(&["tmux", "-V"]).ok_or_else(|| {
+                    "failed to detect tmux version - pass --tmux explicitly".to_string()
+                })?
+            } else {
+                kind.default_tmux_value().to_string()
+            }
+        }
+    };
+    let resolved_zellij = match zellij {
+        Some(value) => value,
+        None => {
+            if kind.default_zellij_value().is_empty() {
+                probe_command(&["zellij", "--version"]).ok_or_else(|| {
+                    "failed to detect Zellij version - pass --zellij explicitly".to_string()
+                })?
+            } else {
+                kind.default_zellij_value().to_string()
+            }
+        }
+    };
+
+    let payload = template
+        .replace(MANUAL_RUN_TEMPLATE_DATE_PLACEHOLDER, &format!("Date: {date}"))
+        .replace(MANUAL_RUN_TEMPLATE_OS_PLACEHOLDER, &format!("OS: {resolved_os}"))
+        .replace(
+            MANUAL_RUN_TEMPLATE_CHECKLIST_PLACEHOLDER,
+            &format!("Checklist: {}", kind.checklist_path()),
+        )
+        .replace(MANUAL_RUN_TEMPLATE_RUST_PLACEHOLDER, &format!("Rust: {resolved_rust}"))
+        .replace(MANUAL_RUN_TEMPLATE_NODE_PLACEHOLDER, &format!("Node: {resolved_node}"))
+        .replace("tmux: 3.x or n/a", &format!("tmux: {resolved_tmux}"))
+        .replace("Zellij: 0.44.x or n/a", &format!("Zellij: {resolved_zellij}"));
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {} - {error}", parent.display()))?;
+    }
+    fs::write(&output_path, payload)
+        .map_err(|error| format!("failed to write {} - {error}", output_path.display()))?;
+    Ok(output_path)
+}
+
 fn verify_recorded_pass(
     path: &Path,
     file_name: &str,
@@ -395,11 +639,18 @@ fn verify_recorded_pass(
     )?;
 
     if let Some((runtime_marker, runtime_placeholder)) = expectation.required_runtime_marker {
-        let _ = require_line_value(contents, runtime_marker, path)?;
+        let runtime_value = require_line_value(contents, runtime_marker, path)?;
         assert_value(
             !contents.contains(runtime_placeholder),
             &format!(
                 "manual run artifact {} still contains template placeholder: {runtime_placeholder}",
+                path.display()
+            ),
+        )?;
+        assert_value(
+            runtime_value != "n/a",
+            &format!(
+                "manual run artifact {} must record a real value for {runtime_marker}",
                 path.display()
             ),
         )?;
@@ -823,6 +1074,25 @@ fn current_libc_descriptor() -> Option<String> {
     }
 }
 
+fn detect_os_label() -> String {
+    match env::consts::OS {
+        "macos" => "macOS".to_string(),
+        "linux" => "Linux".to_string(),
+        "windows" => "Windows".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn probe_command(command: &[&str]) -> Option<String> {
+    let (program, args) = command.split_first()?;
+    let output = ProcessCommand::new(program).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() { None } else { Some(value) }
+}
+
 #[cfg(target_os = "linux")]
 fn detect_linux_libc() -> Option<String> {
     if cfg!(target_env = "musl") { Some("musl".to_string()) } else { Some("gnu".to_string()) }
@@ -1079,6 +1349,100 @@ none
         assert!(
             error.contains("missing ## Findings"),
             "expected findings section error, got: {error}"
+        );
+    }
+
+    #[test]
+    fn verify_recorded_passes_rejects_missing_runtime_value_for_required_pass() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "electron-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: macOS 15.4
+Checklist: crates/terminal-testing/manual/electron.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+Electron embed lifecycle and resize churn.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+        dir.write_file(
+            "unix-tmux-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: Ubuntu 24.04
+Checklist: crates/terminal-testing/manual/tmux.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+tmux import and detach or reattach.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+        dir.write_file(
+            "windows-native-zellij-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: Windows 11 24H2
+Checklist: crates/terminal-testing/manual/windows-native-zellij.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: 0.44.1
+
+## Scope
+
+Native create or attach plus imported zellij mutation lane.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+
+        let error = match verify_recorded_passes(dir.path()) {
+            Ok(()) => panic!("expected runtime-specific n/a marker to fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("must record a real value"),
+            "expected runtime value error, got: {error}"
         );
     }
 }

@@ -29,3 +29,15 @@ The readiness audit command enforces the required structure:
 ```bash
 cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
 ```
+
+You can scaffold a recorded pass file from the template with detected local tool versions:
+
+```bash
+cargo run -p xtask -- scaffold-manual-run --kind electron --date 2026-04-20
+```
+
+Supported kinds:
+
+- `electron`
+- `unix-tmux`
+- `windows-native-zellij`
