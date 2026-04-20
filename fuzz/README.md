@@ -19,3 +19,5 @@ cargo +nightly fuzz run --fuzz-dir fuzz screen_delta
 ```
 
 CI uses a short baseline run to ensure the targets stay buildable and executable.
+On Linux CI we pass `--target x86_64-unknown-linux-gnu` explicitly so ASan does
+not inherit a `musl` default target from the prebuilt `cargo-fuzz` binary.
