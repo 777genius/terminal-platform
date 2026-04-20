@@ -1,0 +1,35 @@
+name: release-plz
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-plz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: release-plz@0.3.157
+
+      - name: Open or update release PR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: release-plz release-pr --git-token "$GITHUB_TOKEN"

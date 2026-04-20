@@ -11,6 +11,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -52,6 +55,8 @@ jobs:
 
       - name: Install Zellij
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           ZELLIJ_BIN_DIR="$(python .github/scripts/install_zellij.py --out "$RUNNER_TEMP/zellij-bin")"
           echo "$ZELLIJ_BIN_DIR" >> "$GITHUB_PATH"
@@ -92,6 +97,8 @@ jobs:
 
       - name: Install Zellij
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $binDir = python .github/scripts/install_zellij.py --out "$env:RUNNER_TEMP\zellij-bin"
           $binDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append

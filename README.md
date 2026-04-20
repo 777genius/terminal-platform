@@ -87,5 +87,6 @@ Ship-ready closeout also keeps:
 - manual QA capture under `crates/terminal-testing/manual/`
 - GitHub Actions matrix for `ubuntu-latest`, `macos-latest`, and `windows-latest`
 - release governance via `cargo-deny`, `cargo-public-api`, `cargo-semver-checks`, and `release-plz` config
+- release PR automation via `.github/workflows/release-plz.yml`
 
 If `cargo nextest` is not installed yet, bootstrap work may temporarily use `cargo test --workspace` until the tool is installed.

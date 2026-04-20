@@ -16,14 +16,19 @@ import urllib.request
 import zipfile
 
 
+def request_headers(accept: str = "application/vnd.github+json") -> dict[str, str]:
+    headers = {
+        "Accept": accept,
+        "User-Agent": "terminal-platform-ci",
+    }
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def download_json(url: str) -> dict:
-    request = urllib.request.Request(
-        url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "terminal-platform-ci",
-        },
-    )
+    request = urllib.request.Request(url, headers=request_headers())
     with urllib.request.urlopen(request) as response:
         return json.load(response)
 
@@ -31,7 +36,7 @@ def download_json(url: str) -> dict:
 def download_file(url: str, destination: pathlib.Path) -> None:
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "terminal-platform-ci"},
+        headers=request_headers(accept="application/octet-stream"),
     )
     with urllib.request.urlopen(request) as response, destination.open("wb") as output:
         shutil.copyfileobj(response, output)
@@ -74,11 +79,12 @@ def select_asset(release: dict) -> dict:
     assets = release.get("assets", [])
     suffixes = candidate_suffixes()
 
-    for suffix in suffixes:
-        for asset in assets:
-            name = asset.get("name", "")
-            if name.endswith(suffix):
-                return asset
+    for prefix in ("zellij-no-web-", "zellij-"):
+        for suffix in suffixes:
+            for asset in assets:
+                name = asset.get("name", "")
+                if name.startswith(prefix) and name.endswith(suffix):
+                    return asset
 
     names = ", ".join(asset.get("name", "<unnamed>") for asset in assets)
     raise RuntimeError(f"failed to locate zellij asset for {suffixes}: {names}")
