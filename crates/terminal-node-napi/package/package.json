@@ -13,6 +13,10 @@
       "import": "./index.mjs"
     }
   },
+  "scripts": {
+    "stage": "node ./scripts/stage-package.mjs",
+    "build:local": "node ./scripts/build-local-package.mjs"
+  },
   "files": [
     "README.md",
     "index.cjs",

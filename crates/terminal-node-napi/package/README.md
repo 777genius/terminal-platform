@@ -18,6 +18,12 @@ node ./scripts/stage-package.mjs \
   --addon /path/to/libterminal_node_napi.so
 ```
 
+Build the addon and stage a local package in one command:
+
+```bash
+node ./scripts/build-local-package.mjs --out /tmp/terminal-platform-node
+```
+
 The staged directory contains:
 
 - `index.cjs`
