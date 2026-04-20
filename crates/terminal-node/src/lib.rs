@@ -425,6 +425,8 @@ fn first_pane_id(root: &PaneTreeNode) -> Option<PaneId> {
 mod tests {
     use std::{path::PathBuf, time::Duration};
 
+    use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+    use terminal_daemon_client::LocalSocketDaemonClient;
     use terminal_domain::DegradedModeReason;
     #[cfg(unix)]
     use terminal_testing::{
@@ -432,7 +434,8 @@ mod tests {
         unique_tmux_socket_name,
     };
     use terminal_testing::{
-        ZellijSessionGuard, daemon_fixture, echo_shell_launch_spec, unique_zellij_session_name,
+        ZellijSessionGuard, daemon_fixture, daemon_state, echo_shell_launch_spec,
+        unique_socket_address, unique_zellij_session_name, wait_for_daemon_ready,
     };
     use tokio::time::{sleep, timeout};
 
@@ -1062,6 +1065,75 @@ mod tests {
             .await
             .expect("fixture shutdown should not hang after backpressure close")
             .expect("fixture should stop cleanly");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn recovers_node_host_client_after_daemon_restart() {
+        let address = unique_socket_address("terminal-node-restart");
+        let readiness_client = LocalSocketDaemonClient::new(address.clone());
+        let node = NodeHostClient::new(address.clone());
+        let server = spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
+            .expect("initial daemon should bind");
+        wait_for_daemon_ready(&readiness_client).await;
+
+        let initial_list = timeout(Duration::from_secs(5), node.list_sessions())
+            .await
+            .expect("initial list_sessions should not hang")
+            .expect("initial list_sessions should succeed");
+        assert!(initial_list.is_empty());
+
+        server.shutdown().await.expect("initial daemon should stop cleanly");
+
+        let stale_result = timeout(Duration::from_secs(5), node.list_sessions())
+            .await
+            .expect("stale list_sessions should not hang");
+        assert!(stale_result.is_err(), "stale daemon request should fail");
+
+        let restarted_readiness_client = LocalSocketDaemonClient::new(address.clone());
+        let replacement =
+            spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
+                .expect("replacement daemon should bind");
+        wait_for_daemon_ready(&restarted_readiness_client).await;
+
+        let created = timeout(Duration::from_secs(5), node.create_native_session(&cat_launch_request("restart")))
+            .await
+            .expect("post-restart create_native_session should not hang")
+            .expect("post-restart create_native_session should succeed");
+        let attached = timeout(Duration::from_secs(5), node.attach_session(&created.session_id))
+            .await
+            .expect("post-restart attach_session should not hang")
+            .expect("post-restart attach_session should succeed");
+        let pane_id = attached
+            .focused_screen
+            .as_ref()
+            .expect("focused screen should exist after restart")
+            .pane_id
+            .clone();
+        let subscription = timeout(
+            Duration::from_secs(5),
+            node.open_subscription(
+                &created.session_id,
+                &NodeSubscriptionSpec::PaneSurface { pane_id: pane_id.clone() },
+            ),
+        )
+        .await
+        .expect("post-restart subscription open should not hang")
+        .expect("post-restart subscription should open");
+        let initial_event = timeout(Duration::from_secs(5), subscription.next_event())
+            .await
+            .expect("post-restart subscription next_event should not hang")
+            .expect("post-restart subscription should stay healthy")
+            .expect("post-restart subscription should yield an event");
+
+        assert!(matches!(
+            initial_event,
+            NodeSubscriptionEvent::ScreenDelta(delta) if delta.full_replace.is_some()
+        ));
+
+        timeout(Duration::from_secs(5), subscription.close())
+            .await
+            .expect("post-restart subscription close should not hang");
+        replacement.shutdown().await.expect("replacement daemon should stop cleanly");
     }
 
     #[test]

@@ -1482,6 +1482,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "terminal-backend-api",
+ "terminal-daemon",
  "terminal-daemon-client",
  "terminal-domain",
  "terminal-mux-domain",

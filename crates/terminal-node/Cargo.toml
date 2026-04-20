@@ -16,6 +16,7 @@ ts-rs = "12.0.1"
 uuid = { workspace = true }
 
 [dev-dependencies]
+terminal-daemon = { path = "../terminal-daemon" }
 terminal-testing = { path = "../terminal-testing" }
 
 [lints]
