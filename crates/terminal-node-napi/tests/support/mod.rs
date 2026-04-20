@@ -134,6 +134,21 @@ pub fn read_json(path: &Path) -> std::io::Result<serde_json::Value> {
     })
 }
 
+pub fn write_json(path: &Path, value: &serde_json::Value) -> std::io::Result<()> {
+    fs::write(
+        path,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(value).map_err(|error| {
+                std::io::Error::other(format!(
+                    "failed to serialize json {} - {error}",
+                    path.display()
+                ))
+            })?
+        ),
+    )
+}
+
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     unique_temp_path(prefix, "dir")
 }
