@@ -129,17 +129,26 @@ impl LocalSocketSubscription {
             .send(encoded_request)
             .await
             .map_err(|error| ProtocolError::io("send_failed", &error))?;
-        let closed = self
-            .framed
-            .next()
-            .await
-            .transpose()
-            .map_err(|error| ProtocolError::io("receive_failed", &error))?;
-        if closed.is_some() {
-            return Err(ProtocolError::new(
-                "unexpected_payload",
-                "expected subscription stream to close after close request",
-            ));
+        loop {
+            let Some(frame) = self
+                .framed
+                .next()
+                .await
+                .transpose()
+                .map_err(|error| ProtocolError::io("receive_failed", &error))?
+            else {
+                break;
+            };
+            let envelope = decode_json_frame::<SubscriptionEnvelope>(&frame)?;
+            if envelope.subscription_id != self.subscription_id {
+                return Err(ProtocolError::new(
+                    "subscription_mismatch",
+                    format!(
+                        "expected subscription {:?}, got {:?}",
+                        self.subscription_id, envelope.subscription_id
+                    ),
+                ));
+            }
         }
 
         Ok(())
@@ -1437,6 +1446,51 @@ mod tests {
             SubscriptionEvent::TopologySnapshot(_) => {}
             other => panic!("unexpected initial event: {other:?}"),
         }
+        subscription.close().await.expect("close should succeed");
+        assert!(subscription.recv().await.expect("recv should succeed").is_none());
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn closes_topology_subscription_lane_with_buffered_events() {
+        let address = unique_address("daemon-client-sub-close-backlog");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    ..CreateSessionSpec::default()
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+        let topology = client
+            .topology_snapshot(created.session.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let tab_id = topology.focused_tab.expect("focused tab should exist");
+        let mut subscription = client
+            .open_subscription(created.session.session_id, SubscriptionSpec::SessionTopology)
+            .await
+            .expect("subscription should open");
+
+        let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+        assert!(matches!(initial, SubscriptionEvent::TopologySnapshot(_)));
+
+        for revision in 0..24 {
+            client
+                .dispatch(
+                    created.session.session_id,
+                    MuxCommand::RenameTab { tab_id, title: format!("close-backlog-{revision}") },
+                )
+                .await
+                .expect("rename tab should succeed");
+        }
+
         subscription.close().await.expect("close should succeed");
         assert!(subscription.recv().await.expect("recv should succeed").is_none());
 

@@ -501,8 +501,99 @@ async function runPackageWatchSmoke(createClient, sdk) {
     }),
     true,
   );
+  await runSessionStateFocusChurnSmoke(createClient);
 
   await runElectronBridgeSmoke(createClient, sdk);
+}
+
+async function runSessionStateFocusChurnSmoke(createClient) {
+  const client = createClient();
+  const created = await client.createNativeSession({
+    title: "node-package-focus-churn",
+    launch: readyEchoLaunch(),
+  });
+  const initialAttached = await client.attachSession(created.session_id);
+  const initialPaneId = initialAttached.focused_screen.pane_id;
+
+  assert.equal(typeof initialPaneId, "string");
+
+  for (const title of ["focus-a", "focus-b"]) {
+    const newTab = await client.dispatchMuxCommand(created.session_id, {
+      kind: "new_tab",
+      title,
+    });
+    assert.equal(newTab.changed, true);
+  }
+
+  const initialTopology = await waitForTopologyState(
+    client,
+    created.session_id,
+    (snapshot) => snapshot.tabs.length === 3,
+    "session state focus churn setup",
+  );
+  const tabIds = initialTopology.tabs.map((tab) => tab.tab_id);
+  const focusSequence = [
+    tabIds[1],
+    tabIds[2],
+    tabIds[0],
+    tabIds[2],
+    tabIds[1],
+    tabIds[0],
+    tabIds[2],
+    tabIds[1],
+    tabIds[0],
+    tabIds[2],
+  ];
+  const expectedFinalTab = focusSequence[focusSequence.length - 1];
+  const observedStates = [];
+  const focusAbort = new AbortController();
+  const watchPromise = client.watchSessionState(created.session_id, {
+    signal: focusAbort.signal,
+    onState: async (state) => {
+      observedStates.push(state);
+      if (
+        state.topology.focused_tab === expectedFinalTab &&
+        state.focusedScreen?.pane_id === focusedPaneIdFromTopology(state.topology)
+      ) {
+        focusAbort.abort();
+      }
+    },
+  });
+
+  for (const tabId of focusSequence) {
+    const focused = await client.dispatchMuxCommand(created.session_id, {
+      kind: "focus_tab",
+      tab_id: tabId,
+    });
+    assert.equal(focused.changed, true);
+  }
+
+  await withTimeout(
+    watchPromise,
+    5000,
+    "Timed out waiting for watchSessionState focus churn to finish",
+  );
+
+  const finalTopology = await waitForTopologyState(
+    client,
+    created.session_id,
+    (snapshot) => snapshot.focused_tab === expectedFinalTab,
+    "session state focus churn final focus",
+  );
+
+  assert.equal(finalTopology.focused_tab, expectedFinalTab);
+  assert.equal(observedStates.length > 0, true);
+  assert.equal(
+    observedStates.every((state) => {
+      const expectedPaneId = focusedPaneIdFromTopology(state.topology);
+      return expectedPaneId ? state.focusedScreen?.pane_id === expectedPaneId : true;
+    }),
+    true,
+  );
+  assert.equal(
+    observedStates.some((state) => state.topology.focused_tab === expectedFinalTab),
+    true,
+  );
 }
 
 async function runShutdownSmoke(createClient, options = {}) {
