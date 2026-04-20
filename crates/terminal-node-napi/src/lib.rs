@@ -53,11 +53,66 @@ impl TerminalNodeBinding {
         client.list_sessions().await.map_err(protocol_error).and_then(to_json)
     }
 
+    #[napi(js_name = "listSavedSessions")]
+    pub async fn list_saved_sessions(&self) -> Result<Value> {
+        let client = self.inner.clone();
+        client.list_saved_sessions().await.map_err(protocol_error).and_then(to_json)
+    }
+
+    #[napi(js_name = "discoverSessions")]
+    pub async fn discover_sessions(&self, backend: Value) -> Result<Value> {
+        let client = self.inner.clone();
+        let backend = from_json(backend, "invalid_backend_kind")?;
+        client.discover_sessions(backend).await.map_err(protocol_error).and_then(to_json)
+    }
+
+    #[napi(js_name = "backendCapabilities")]
+    pub async fn backend_capabilities(&self, backend: Value) -> Result<Value> {
+        let client = self.inner.clone();
+        let backend = from_json(backend, "invalid_backend_kind")?;
+        client.backend_capabilities(backend).await.map_err(protocol_error).and_then(to_json)
+    }
+
     #[napi(js_name = "createNativeSession")]
     pub async fn create_native_session(&self, request: Value) -> Result<Value> {
         let client = self.inner.clone();
         let request = from_json(request, "invalid_create_session_request")?;
         client.create_native_session(&request).await.map_err(protocol_error).and_then(to_json)
+    }
+
+    #[napi(js_name = "importSession")]
+    pub async fn import_session(&self, route: Value, title: Option<String>) -> Result<Value> {
+        let client = self.inner.clone();
+        let route = from_json(route, "invalid_session_route")?;
+        client.import_session(&route, title).await.map_err(protocol_error).and_then(to_json)
+    }
+
+    #[napi(js_name = "savedSession")]
+    pub async fn saved_session(&self, session_id: String) -> Result<Value> {
+        let client = self.inner.clone();
+        client.saved_session(&session_id).await.map_err(protocol_error).and_then(to_json)
+    }
+
+    #[napi(js_name = "deleteSavedSession")]
+    pub async fn delete_saved_session(&self, session_id: String) -> Result<Value> {
+        let client = self.inner.clone();
+        client.delete_saved_session(&session_id).await.map_err(protocol_error).and_then(to_json)
+    }
+
+    #[napi(js_name = "pruneSavedSessions")]
+    pub async fn prune_saved_sessions(&self, keep_latest: u32) -> Result<Value> {
+        let client = self.inner.clone();
+        client
+            .prune_saved_sessions(keep_latest as usize)
+            .await
+            .map_err(protocol_error)
+            .and_then(to_json)
+    }
+
+    #[napi(js_name = "restoreSavedSession")]
+    pub async fn restore_saved_session(&self, session_id: String) -> Result<Value> {
+        let client = self.inner.clone();
+        client.restore_saved_session(&session_id).await.map_err(protocol_error).and_then(to_json)
     }
 
     #[napi(js_name = "attachSession")]
@@ -77,6 +132,32 @@ impl TerminalNodeBinding {
         let client = self.inner.clone();
         client
             .screen_snapshot(&session_id, &pane_id)
+            .await
+            .map_err(protocol_error)
+            .and_then(to_json)
+    }
+
+    #[napi(js_name = "screenDelta")]
+    pub async fn screen_delta(
+        &self,
+        session_id: String,
+        pane_id: String,
+        from_sequence: u32,
+    ) -> Result<Value> {
+        let client = self.inner.clone();
+        client
+            .screen_delta(&session_id, &pane_id, u64::from(from_sequence))
+            .await
+            .map_err(protocol_error)
+            .and_then(to_json)
+    }
+
+    #[napi(js_name = "dispatchMuxCommand")]
+    pub async fn dispatch_mux_command(&self, session_id: String, command: Value) -> Result<Value> {
+        let client = self.inner.clone();
+        let command = from_json(command, "invalid_mux_command")?;
+        client
+            .dispatch_mux_command(&session_id, &command)
             .await
             .map_err(protocol_error)
             .and_then(to_json)

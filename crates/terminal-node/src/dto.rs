@@ -1,15 +1,28 @@
 use serde::{Deserialize, Serialize};
-use terminal_backend_api::{BackendSessionSummary, CreateSessionSpec, ShellLaunchSpec};
+use terminal_backend_api::{
+    BackendCapabilities, BackendSessionSummary, CreateSessionSpec, DiscoveredSession, MuxCommand,
+    MuxCommandResult, NewTabSpec, OverrideLayoutSpec, ResizePaneSpec, SendInputSpec, SendPasteSpec,
+    ShellLaunchSpec, SplitPaneSpec,
+};
 use terminal_daemon_client::{HandshakeAssessment, HandshakeAssessmentStatus};
 use terminal_domain::{
-    BackendKind, ProtocolCompatibility, ProtocolCompatibilityStatus, RouteAuthority, SessionRoute,
+    BackendKind, PaneId, ProtocolCompatibility, ProtocolCompatibilityStatus, RouteAuthority,
+    SavedSessionCompatibility, SavedSessionCompatibilityStatus, SavedSessionManifest, SessionRoute,
+    TabId,
 };
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 use terminal_projection::{
-    ProjectionSource, ScreenCursor, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
+    ProjectionSource, ScreenCursor, ScreenDelta, ScreenLine, ScreenLinePatch, ScreenPatch,
+    ScreenSnapshot, ScreenSurface, TopologySnapshot,
 };
-use terminal_protocol::{DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion};
+use terminal_protocol::{
+    BackendCapabilitiesResponse, DaemonCapabilities, DaemonPhase, DeleteSavedSessionResponse,
+    Handshake, ProtocolError, ProtocolVersion, PruneSavedSessionsResponse,
+    RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionRestoreSemantics,
+    SavedSessionSummary,
+};
 use ts_rs::TS;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -156,6 +169,142 @@ pub struct NodeSessionSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeDiscoveredSession {
+    pub route: NodeSessionRoute,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeBackendCapabilities {
+    pub tiled_panes: bool,
+    pub floating_panes: bool,
+    pub split_resize: bool,
+    pub tab_create: bool,
+    pub tab_close: bool,
+    pub tab_focus: bool,
+    pub tab_rename: bool,
+    pub session_scoped_tab_refs: bool,
+    pub session_scoped_pane_refs: bool,
+    pub pane_split: bool,
+    pub pane_close: bool,
+    pub pane_focus: bool,
+    pub pane_input_write: bool,
+    pub pane_paste_write: bool,
+    pub raw_output_stream: bool,
+    pub rendered_viewport_stream: bool,
+    pub rendered_viewport_snapshot: bool,
+    pub rendered_scrollback_snapshot: bool,
+    pub layout_dump: bool,
+    pub layout_override: bool,
+    pub read_only_client_mode: bool,
+    pub explicit_session_save: bool,
+    pub explicit_session_restore: bool,
+    pub plugin_panes: bool,
+    pub advisory_metadata_subscriptions: bool,
+    pub independent_resize_authority: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeBackendCapabilitiesInfo {
+    pub backend: NodeBackendKind,
+    pub capabilities: NodeBackendCapabilities,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodeSavedSessionCompatibilityStatus {
+    Compatible,
+    BinarySkew,
+    FormatVersionUnsupported,
+    ProtocolMajorUnsupported,
+    ProtocolMinorAhead,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSavedSessionManifest {
+    pub format_version: u32,
+    pub binary_version: String,
+    pub protocol_major: u16,
+    pub protocol_minor: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSavedSessionCompatibility {
+    pub can_restore: bool,
+    pub status: NodeSavedSessionCompatibilityStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSavedSessionRestoreSemantics {
+    pub restores_topology: bool,
+    pub restores_focus_state: bool,
+    pub restores_tab_titles: bool,
+    pub uses_saved_launch_spec: bool,
+    pub replays_saved_screen_buffers: bool,
+    pub preserves_process_state: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSavedSessionSummary {
+    pub session_id: String,
+    pub route: NodeSessionRoute,
+    pub title: Option<String>,
+    pub saved_at_ms: i64,
+    pub manifest: NodeSavedSessionManifest,
+    pub compatibility: NodeSavedSessionCompatibility,
+    pub has_launch: bool,
+    pub tab_count: usize,
+    pub pane_count: usize,
+    pub restore_semantics: NodeSavedSessionRestoreSemantics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSavedSessionRecord {
+    pub session_id: String,
+    pub route: NodeSessionRoute,
+    pub title: Option<String>,
+    pub launch: Option<NodeShellLaunchSpec>,
+    pub manifest: NodeSavedSessionManifest,
+    pub compatibility: NodeSavedSessionCompatibility,
+    pub topology: NodeTopologySnapshot,
+    pub screens: Vec<NodeScreenSnapshot>,
+    pub saved_at_ms: i64,
+    pub restore_semantics: NodeSavedSessionRestoreSemantics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeRestoredSession {
+    pub saved_session_id: String,
+    pub manifest: NodeSavedSessionManifest,
+    pub compatibility: NodeSavedSessionCompatibility,
+    pub session: NodeSessionSummary,
+    pub restore_semantics: NodeSavedSessionRestoreSemantics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeDeleteSavedSessionResult {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodePruneSavedSessionsResult {
+    pub deleted_count: usize,
+    pub kept_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum NodeProjectionSource {
@@ -200,6 +349,36 @@ pub struct NodeScreenSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeScreenLinePatch {
+    pub row: u16,
+    pub line: NodeScreenLine,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeScreenPatch {
+    pub title_changed: bool,
+    pub title: Option<String>,
+    pub cursor_changed: bool,
+    pub cursor: Option<NodeScreenCursor>,
+    pub line_updates: Vec<NodeScreenLinePatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeScreenDelta {
+    pub pane_id: String,
+    pub from_sequence: u64,
+    pub to_sequence: u64,
+    pub rows: u16,
+    pub cols: u16,
+    pub source: NodeProjectionSource,
+    pub patch: Option<NodeScreenPatch>,
+    pub full_replace: Option<NodeScreenSurface>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum NodeSplitDirection {
@@ -221,6 +400,80 @@ pub struct NodePaneSplit {
 pub enum NodePaneTreeNode {
     Leaf { pane_id: String },
     Split(NodePaneSplit),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSplitPaneCommand {
+    pub pane_id: String,
+    pub direction: NodeSplitDirection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeResizePaneCommand {
+    pub pane_id: String,
+    pub rows: u16,
+    pub cols: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeNewTabCommand {
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeRenameTabCommand {
+    pub tab_id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSendInputCommand {
+    pub pane_id: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSendPasteCommand {
+    pub pane_id: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeOverrideLayoutCommand {
+    pub tab_id: String,
+    pub root: NodePaneTreeNode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodeMuxCommand {
+    SplitPane(NodeSplitPaneCommand),
+    ClosePane { pane_id: String },
+    FocusPane { pane_id: String },
+    ResizePane(NodeResizePaneCommand),
+    NewTab(NodeNewTabCommand),
+    CloseTab { tab_id: String },
+    FocusTab { tab_id: String },
+    RenameTab(NodeRenameTabCommand),
+    SendInput(NodeSendInputCommand),
+    SendPaste(NodeSendPasteCommand),
+    Detach,
+    SaveSession,
+    OverrideLayout(NodeOverrideLayoutCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeMuxCommandResult {
+    pub changed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -409,6 +662,155 @@ impl From<&BackendSessionSummary> for NodeSessionSummary {
     }
 }
 
+impl From<&DiscoveredSession> for NodeDiscoveredSession {
+    fn from(value: &DiscoveredSession) -> Self {
+        Self { route: (&value.route).into(), title: value.title.clone() }
+    }
+}
+
+impl From<&BackendCapabilities> for NodeBackendCapabilities {
+    fn from(value: &BackendCapabilities) -> Self {
+        Self {
+            tiled_panes: value.tiled_panes,
+            floating_panes: value.floating_panes,
+            split_resize: value.split_resize,
+            tab_create: value.tab_create,
+            tab_close: value.tab_close,
+            tab_focus: value.tab_focus,
+            tab_rename: value.tab_rename,
+            session_scoped_tab_refs: value.session_scoped_tab_refs,
+            session_scoped_pane_refs: value.session_scoped_pane_refs,
+            pane_split: value.pane_split,
+            pane_close: value.pane_close,
+            pane_focus: value.pane_focus,
+            pane_input_write: value.pane_input_write,
+            pane_paste_write: value.pane_paste_write,
+            raw_output_stream: value.raw_output_stream,
+            rendered_viewport_stream: value.rendered_viewport_stream,
+            rendered_viewport_snapshot: value.rendered_viewport_snapshot,
+            rendered_scrollback_snapshot: value.rendered_scrollback_snapshot,
+            layout_dump: value.layout_dump,
+            layout_override: value.layout_override,
+            read_only_client_mode: value.read_only_client_mode,
+            explicit_session_save: value.explicit_session_save,
+            explicit_session_restore: value.explicit_session_restore,
+            plugin_panes: value.plugin_panes,
+            advisory_metadata_subscriptions: value.advisory_metadata_subscriptions,
+            independent_resize_authority: value.independent_resize_authority,
+        }
+    }
+}
+
+impl From<&BackendCapabilitiesResponse> for NodeBackendCapabilitiesInfo {
+    fn from(value: &BackendCapabilitiesResponse) -> Self {
+        Self { backend: (&value.backend).into(), capabilities: (&value.capabilities).into() }
+    }
+}
+
+impl From<&SavedSessionManifest> for NodeSavedSessionManifest {
+    fn from(value: &SavedSessionManifest) -> Self {
+        Self {
+            format_version: value.format_version,
+            binary_version: value.binary_version.clone(),
+            protocol_major: value.protocol_major,
+            protocol_minor: value.protocol_minor,
+        }
+    }
+}
+
+impl From<&SavedSessionCompatibilityStatus> for NodeSavedSessionCompatibilityStatus {
+    fn from(value: &SavedSessionCompatibilityStatus) -> Self {
+        match value {
+            SavedSessionCompatibilityStatus::Compatible => Self::Compatible,
+            SavedSessionCompatibilityStatus::BinarySkew => Self::BinarySkew,
+            SavedSessionCompatibilityStatus::FormatVersionUnsupported => {
+                Self::FormatVersionUnsupported
+            }
+            SavedSessionCompatibilityStatus::ProtocolMajorUnsupported => {
+                Self::ProtocolMajorUnsupported
+            }
+            SavedSessionCompatibilityStatus::ProtocolMinorAhead => Self::ProtocolMinorAhead,
+        }
+    }
+}
+
+impl From<&SavedSessionCompatibility> for NodeSavedSessionCompatibility {
+    fn from(value: &SavedSessionCompatibility) -> Self {
+        Self { can_restore: value.can_restore, status: (&value.status).into() }
+    }
+}
+
+impl From<&SavedSessionRestoreSemantics> for NodeSavedSessionRestoreSemantics {
+    fn from(value: &SavedSessionRestoreSemantics) -> Self {
+        Self {
+            restores_topology: value.restores_topology,
+            restores_focus_state: value.restores_focus_state,
+            restores_tab_titles: value.restores_tab_titles,
+            uses_saved_launch_spec: value.uses_saved_launch_spec,
+            replays_saved_screen_buffers: value.replays_saved_screen_buffers,
+            preserves_process_state: value.preserves_process_state,
+        }
+    }
+}
+
+impl From<&SavedSessionSummary> for NodeSavedSessionSummary {
+    fn from(value: &SavedSessionSummary) -> Self {
+        Self {
+            session_id: value.session_id.0.to_string(),
+            route: (&value.route).into(),
+            title: value.title.clone(),
+            saved_at_ms: value.saved_at_ms,
+            manifest: (&value.manifest).into(),
+            compatibility: (&value.compatibility).into(),
+            has_launch: value.has_launch,
+            tab_count: value.tab_count,
+            pane_count: value.pane_count,
+            restore_semantics: (&value.restore_semantics).into(),
+        }
+    }
+}
+
+impl From<&SavedSessionRecord> for NodeSavedSessionRecord {
+    fn from(value: &SavedSessionRecord) -> Self {
+        Self {
+            session_id: value.session_id.0.to_string(),
+            route: (&value.route).into(),
+            title: value.title.clone(),
+            launch: value.launch.as_ref().map(Into::into),
+            manifest: (&value.manifest).into(),
+            compatibility: (&value.compatibility).into(),
+            topology: (&value.topology).into(),
+            screens: value.screens.iter().map(Into::into).collect(),
+            saved_at_ms: value.saved_at_ms,
+            restore_semantics: (&value.restore_semantics).into(),
+        }
+    }
+}
+
+impl From<&RestoreSavedSessionResponse> for NodeRestoredSession {
+    fn from(value: &RestoreSavedSessionResponse) -> Self {
+        Self {
+            saved_session_id: value.saved_session_id.0.to_string(),
+            manifest: (&value.manifest).into(),
+            compatibility: (&value.compatibility).into(),
+            session: (&value.session).into(),
+            restore_semantics: (&value.restore_semantics).into(),
+        }
+    }
+}
+
+impl From<&DeleteSavedSessionResponse> for NodeDeleteSavedSessionResult {
+    fn from(value: &DeleteSavedSessionResponse) -> Self {
+        Self { session_id: value.session_id.0.to_string() }
+    }
+}
+
+impl From<&PruneSavedSessionsResponse> for NodePruneSavedSessionsResult {
+    fn from(value: &PruneSavedSessionsResponse) -> Self {
+        Self { deleted_count: value.deleted_count, kept_count: value.kept_count }
+    }
+}
+
 impl From<&ProjectionSource> for NodeProjectionSource {
     fn from(value: &ProjectionSource) -> Self {
         match value {
@@ -457,11 +859,53 @@ impl From<&ScreenSnapshot> for NodeScreenSnapshot {
     }
 }
 
+impl From<&ScreenLinePatch> for NodeScreenLinePatch {
+    fn from(value: &ScreenLinePatch) -> Self {
+        Self { row: value.row, line: (&value.line).into() }
+    }
+}
+
+impl From<&ScreenPatch> for NodeScreenPatch {
+    fn from(value: &ScreenPatch) -> Self {
+        Self {
+            title_changed: value.title_changed,
+            title: value.title.clone(),
+            cursor_changed: value.cursor_changed,
+            cursor: value.cursor.as_ref().map(Into::into),
+            line_updates: value.line_updates.iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<&ScreenDelta> for NodeScreenDelta {
+    fn from(value: &ScreenDelta) -> Self {
+        Self {
+            pane_id: value.pane_id.0.to_string(),
+            from_sequence: value.from_sequence,
+            to_sequence: value.to_sequence,
+            rows: value.rows,
+            cols: value.cols,
+            source: (&value.source).into(),
+            patch: value.patch.as_ref().map(Into::into),
+            full_replace: value.full_replace.as_ref().map(Into::into),
+        }
+    }
+}
+
 impl From<&SplitDirection> for NodeSplitDirection {
     fn from(value: &SplitDirection) -> Self {
         match value {
             SplitDirection::Horizontal => Self::Horizontal,
             SplitDirection::Vertical => Self::Vertical,
+        }
+    }
+}
+
+impl From<&NodeSplitDirection> for SplitDirection {
+    fn from(value: &NodeSplitDirection) -> Self {
+        match value {
+            NodeSplitDirection::Horizontal => Self::Horizontal,
+            NodeSplitDirection::Vertical => Self::Vertical,
         }
     }
 }
@@ -505,4 +949,122 @@ impl From<&TopologySnapshot> for NodeTopologySnapshot {
             focused_tab: value.focused_tab.map(|tab_id| tab_id.0.to_string()),
         }
     }
+}
+
+impl From<&MuxCommandResult> for NodeMuxCommandResult {
+    fn from(value: &MuxCommandResult) -> Self {
+        Self { changed: value.changed }
+    }
+}
+
+impl TryFrom<&NodeSessionRoute> for SessionRoute {
+    type Error = ProtocolError;
+
+    fn try_from(value: &NodeSessionRoute) -> Result<Self, Self::Error> {
+        Ok(Self {
+            backend: (&value.backend).into(),
+            authority: (&value.authority).into(),
+            external: value.external.as_ref().map(|external| terminal_domain::ExternalSessionRef {
+                namespace: external.namespace.clone(),
+                value: external.value.clone(),
+            }),
+        })
+    }
+}
+
+impl From<&NodeBackendKind> for BackendKind {
+    fn from(value: &NodeBackendKind) -> Self {
+        match value {
+            NodeBackendKind::Native => Self::Native,
+            NodeBackendKind::Tmux => Self::Tmux,
+            NodeBackendKind::Zellij => Self::Zellij,
+        }
+    }
+}
+
+impl From<&NodeRouteAuthority> for RouteAuthority {
+    fn from(value: &NodeRouteAuthority) -> Self {
+        match value {
+            NodeRouteAuthority::LocalDaemon => Self::LocalDaemon,
+            NodeRouteAuthority::ImportedForeign => Self::ImportedForeign,
+        }
+    }
+}
+
+impl TryFrom<&NodePaneTreeNode> for PaneTreeNode {
+    type Error = ProtocolError;
+
+    fn try_from(value: &NodePaneTreeNode) -> Result<Self, Self::Error> {
+        match value {
+            NodePaneTreeNode::Leaf { pane_id } => {
+                Ok(Self::Leaf { pane_id: parse_pane_id(pane_id)? })
+            }
+            NodePaneTreeNode::Split(split) => Ok(Self::Split(PaneSplit {
+                direction: (&split.direction).into(),
+                first: Box::new((&*split.first).try_into()?),
+                second: Box::new((&*split.second).try_into()?),
+            })),
+        }
+    }
+}
+
+impl TryFrom<&NodeMuxCommand> for MuxCommand {
+    type Error = ProtocolError;
+
+    fn try_from(value: &NodeMuxCommand) -> Result<Self, Self::Error> {
+        Ok(match value {
+            NodeMuxCommand::SplitPane(command) => Self::SplitPane(SplitPaneSpec {
+                pane_id: parse_pane_id(&command.pane_id)?,
+                direction: (&command.direction).into(),
+            }),
+            NodeMuxCommand::ClosePane { pane_id } => {
+                Self::ClosePane { pane_id: parse_pane_id(pane_id)? }
+            }
+            NodeMuxCommand::FocusPane { pane_id } => {
+                Self::FocusPane { pane_id: parse_pane_id(pane_id)? }
+            }
+            NodeMuxCommand::ResizePane(command) => Self::ResizePane(ResizePaneSpec {
+                pane_id: parse_pane_id(&command.pane_id)?,
+                rows: command.rows,
+                cols: command.cols,
+            }),
+            NodeMuxCommand::NewTab(command) => {
+                Self::NewTab(NewTabSpec { title: command.title.clone() })
+            }
+            NodeMuxCommand::CloseTab { tab_id } => Self::CloseTab { tab_id: parse_tab_id(tab_id)? },
+            NodeMuxCommand::FocusTab { tab_id } => Self::FocusTab { tab_id: parse_tab_id(tab_id)? },
+            NodeMuxCommand::RenameTab(command) => Self::RenameTab {
+                tab_id: parse_tab_id(&command.tab_id)?,
+                title: command.title.clone(),
+            },
+            NodeMuxCommand::SendInput(command) => Self::SendInput(SendInputSpec {
+                pane_id: parse_pane_id(&command.pane_id)?,
+                data: command.data.clone(),
+            }),
+            NodeMuxCommand::SendPaste(command) => Self::SendPaste(SendPasteSpec {
+                pane_id: parse_pane_id(&command.pane_id)?,
+                data: command.data.clone(),
+            }),
+            NodeMuxCommand::Detach => Self::Detach,
+            NodeMuxCommand::SaveSession => Self::SaveSession,
+            NodeMuxCommand::OverrideLayout(command) => Self::OverrideLayout(OverrideLayoutSpec {
+                tab_id: parse_tab_id(&command.tab_id)?,
+                root: (&command.root).try_into()?,
+            }),
+        })
+    }
+}
+
+fn parse_pane_id(value: &str) -> Result<PaneId, ProtocolError> {
+    parse_uuid(value, "invalid_pane_id", "pane").map(PaneId::from)
+}
+
+fn parse_tab_id(value: &str) -> Result<TabId, ProtocolError> {
+    parse_uuid(value, "invalid_tab_id", "tab").map(TabId::from)
+}
+
+fn parse_uuid(value: &str, code: &str, label: &str) -> Result<Uuid, ProtocolError> {
+    Uuid::parse_str(value).map_err(|error| {
+        ProtocolError::new(code, format!("failed to parse {label} id '{value}' - {error}"))
+    })
 }

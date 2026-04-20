@@ -152,8 +152,40 @@ class TerminalNodeClient {
     return this.#inner.listSessions();
   }
 
+  listSavedSessions() {
+    return this.#inner.listSavedSessions();
+  }
+
+  discoverSessions(backend) {
+    return this.#inner.discoverSessions(backend);
+  }
+
+  backendCapabilities(backend) {
+    return this.#inner.backendCapabilities(backend);
+  }
+
   createNativeSession(request = {}) {
     return this.#inner.createNativeSession(request);
+  }
+
+  importSession(route, title = null) {
+    return this.#inner.importSession(route, title);
+  }
+
+  savedSession(sessionId) {
+    return this.#inner.savedSession(sessionId);
+  }
+
+  deleteSavedSession(sessionId) {
+    return this.#inner.deleteSavedSession(sessionId);
+  }
+
+  pruneSavedSessions(keepLatest) {
+    return this.#inner.pruneSavedSessions(keepLatest);
+  }
+
+  restoreSavedSession(sessionId) {
+    return this.#inner.restoreSavedSession(sessionId);
   }
 
   attachSession(sessionId) {
@@ -166,6 +198,14 @@ class TerminalNodeClient {
 
   screenSnapshot(sessionId, paneId) {
     return this.#inner.screenSnapshot(sessionId, paneId);
+  }
+
+  screenDelta(sessionId, paneId, fromSequence) {
+    return this.#inner.screenDelta(sessionId, paneId, fromSequence);
+  }
+
+  dispatchMuxCommand(sessionId, command) {
+    return this.#inner.dispatchMuxCommand(sessionId, command);
   }
 }
 

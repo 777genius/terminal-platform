@@ -5,7 +5,16 @@ async function runSmoke(createClient) {
 
   const version = client.bindingVersion();
   const handshake = await client.handshakeInfo();
-  const created = await client.createNativeSession({ title: "node-smoke" });
+  const nativeCapabilities = await client.backendCapabilities("native");
+  const tmuxCapabilities = await client.backendCapabilities("tmux");
+  const zellijCapabilities = await client.backendCapabilities("zellij");
+  const created = await client.createNativeSession({
+    title: "node-smoke",
+    launch: {
+      program: "/bin/sh",
+      args: ["-lc", "printf 'ready\\n'; exec cat"],
+    },
+  });
   const listed = await client.listSessions();
   const attached = await client.attachSession(created.session_id);
   const topology = await client.topologySnapshot(created.session_id);
@@ -13,18 +22,72 @@ async function runSmoke(createClient) {
     created.session_id,
     attached.focused_screen.pane_id,
   );
+  const save = await client.dispatchMuxCommand(created.session_id, {
+    kind: "save_session",
+  });
+  const saved = await client.listSavedSessions();
+  const savedRecord = await client.savedSession(created.session_id);
+  const sendInput = await client.dispatchMuxCommand(created.session_id, {
+    kind: "send_input",
+    pane_id: attached.focused_screen.pane_id,
+    data: "hello from node smoke\r",
+  });
+  const screenAfterInput = await waitForLine(
+    client,
+    created.session_id,
+    attached.focused_screen.pane_id,
+    "hello from node smoke",
+  );
+  const screenDelta = await client.screenDelta(
+    created.session_id,
+    attached.focused_screen.pane_id,
+    focusedScreen.sequence,
+  );
+  const newTab = await client.dispatchMuxCommand(created.session_id, {
+    kind: "new_tab",
+    title: "logs",
+  });
+  const topologyAfterDispatch = await client.topologySnapshot(created.session_id);
+  const restored = await client.restoreSavedSession(created.session_id);
+  const deleted = await client.deleteSavedSession(created.session_id);
+  const savedAfterDelete = await client.listSavedSessions();
 
   assert.equal(typeof client.address, "string");
   assert.equal(version.protocol.major, 0);
   assert.equal(version.protocol.minor, 1);
   assert.equal(handshake.assessment.can_use, true);
   assert.equal(Array.isArray(handshake.handshake.available_backends), true);
+  assert.equal(nativeCapabilities.backend, "native");
+  assert.equal(nativeCapabilities.capabilities.explicit_session_save, true);
+  assert.equal(tmuxCapabilities.backend, "tmux");
+  assert.equal(tmuxCapabilities.capabilities.read_only_client_mode, true);
+  assert.equal(zellijCapabilities.backend, "zellij");
+  assert.equal(zellijCapabilities.capabilities.tab_create, false);
   assert.equal(listed.some((session) => session.session_id === created.session_id), true);
   assert.equal(attached.session.session_id, created.session_id);
   assert.equal(attached.topology.session_id, created.session_id);
   assert.equal(topology.session_id, created.session_id);
   assert.equal(focusedScreen.pane_id, attached.focused_screen.pane_id);
   assert.equal(focusedScreen.surface.lines.length > 0, true);
+  assert.equal(save.changed, false);
+  assert.equal(saved.some((session) => session.session_id === created.session_id), true);
+  assert.equal(savedRecord.session_id, created.session_id);
+  assert.equal(savedRecord.compatibility.can_restore, true);
+  assert.equal(
+    screenAfterInput.surface.lines.some((line) =>
+      line.text.includes("hello from node smoke"),
+    ),
+    true,
+  );
+  assert.equal(screenDelta.pane_id, attached.focused_screen.pane_id);
+  assert.equal(screenDelta.to_sequence >= screenDelta.from_sequence, true);
+  assert.equal(screenDelta.patch !== null || screenDelta.full_replace !== null, true);
+  assert.equal(newTab.changed, true);
+  assert.equal(topologyAfterDispatch.tabs.length, 2);
+  assert.equal(restored.saved_session_id, created.session_id);
+  assert.equal(restored.session.session_id === created.session_id, false);
+  assert.equal(deleted.session_id, created.session_id);
+  assert.equal(savedAfterDelete.some((session) => session.session_id === created.session_id), false);
 
   let invalidSessionFailed = false;
   try {
@@ -39,8 +102,21 @@ async function runSmoke(createClient) {
       session_id: created.session_id,
       pane_id: focusedScreen.pane_id,
       available_backends: handshake.handshake.available_backends.length,
+      saved_session_id: savedRecord.session_id,
     }),
   );
+}
+
+async function waitForLine(client, sessionId, paneId, needle) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const snapshot = await client.screenSnapshot(sessionId, paneId);
+    if (snapshot.surface.lines.some((line) => line.text.includes(needle))) {
+      return snapshot;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for screen line: ${needle}`);
 }
 
 module.exports = {

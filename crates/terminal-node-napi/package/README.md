@@ -8,6 +8,14 @@ This package is intentionally a leaf adapter:
 - native transport semantics stay daemon-first
 - JS receives a stable loader and typed client surface
 
+Current client surface includes:
+
+- handshake and backend capability queries
+- native session create, list, attach and restore flows
+- foreign backend discovery and import for `tmux` and `Zellij`
+- topology snapshots, screen snapshots and screen deltas
+- mux command dispatch for tabs, panes, input and save operations
+
 ## Local staging
 
 Stage a publishable package directory from a compiled addon:
