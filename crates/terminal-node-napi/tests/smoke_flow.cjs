@@ -26,12 +26,20 @@ async function runSmoke(createClient) {
   const topologySubscription = await client.openSubscription(created.session_id, {
     kind: "session_topology",
   });
-  const initialTopologyEvent = await topologySubscription.nextEvent();
+  const initialTopologyEvent = await withTimeout(
+    topologySubscription.nextEvent(),
+    5000,
+    "Timed out waiting for initial topology subscription event",
+  );
   const paneSubscription = await client.openSubscription(created.session_id, {
     kind: "pane_surface",
     pane_id: attached.focused_screen.pane_id,
   });
-  const initialPaneEvent = await paneSubscription.nextEvent();
+  const initialPaneEvent = await withTimeout(
+    paneSubscription.nextEvent(),
+    5000,
+    "Timed out waiting for initial pane subscription event",
+  );
   const save = await client.dispatchMuxCommand(created.session_id, {
     kind: "save_session",
   });
@@ -142,24 +150,28 @@ async function runPackageWatchSmoke(createClient, sdk) {
   let dispatchedTopology = false;
   const topologyEvents = [];
   const topologyAbort = new AbortController();
-  await client.watchTopology(created.session_id, {
-    signal: topologyAbort.signal,
-    onEvent: async (event) => {
-      topologyEvents.push(event);
-      if (!dispatchedTopology && event.kind === "topology_snapshot") {
-        dispatchedTopology = true;
-        await client.dispatchMuxCommand(created.session_id, {
-          kind: "new_tab",
-          title: "watch",
-        });
-        return;
-      }
+  await withTimeout(
+    client.watchTopology(created.session_id, {
+      signal: topologyAbort.signal,
+      onEvent: async (event) => {
+        topologyEvents.push(event);
+        if (!dispatchedTopology && event.kind === "topology_snapshot") {
+          dispatchedTopology = true;
+          await client.dispatchMuxCommand(created.session_id, {
+            kind: "new_tab",
+            title: "watch",
+          });
+          return;
+        }
 
-      if (event.kind === "topology_snapshot" && event.tabs.length === 2) {
-        topologyAbort.abort();
-      }
-    },
-  });
+        if (event.kind === "topology_snapshot" && event.tabs.length === 2) {
+          topologyAbort.abort();
+        }
+      },
+    }),
+    5000,
+    "Timed out waiting for watchTopology helper to finish",
+  );
 
   const paneSubscription = await client.subscribePane(created.session_id, paneId);
   const paneEvents = [];
@@ -181,7 +193,11 @@ async function runPackageWatchSmoke(createClient, sdk) {
     pane_id: paneId,
     data: "package watch input\r",
   });
-  await panePump;
+  await withTimeout(
+    panePump,
+    5000,
+    "Timed out waiting for pane subscription pump to finish",
+  );
 
   assert.equal(
     topologyEvents.some(
@@ -237,44 +253,48 @@ async function runPackageWatchSmoke(createClient, sdk) {
   let sessionDispatched = false;
   let sessionOpenedTab = false;
   const sessionAbort = new AbortController();
-  await client.watchSessionState(sessionCreated.session_id, {
-    signal: sessionAbort.signal,
-    onState: async (state) => {
-      sessionStates.push(state);
+  await withTimeout(
+    client.watchSessionState(sessionCreated.session_id, {
+      signal: sessionAbort.signal,
+      onState: async (state) => {
+        sessionStates.push(state);
 
-      if (
-        !sessionDispatched &&
-        state.focusedScreen &&
-        state.topology.tabs.length === 1
-      ) {
-        sessionDispatched = true;
-        await client.dispatchMuxCommand(sessionCreated.session_id, {
-          kind: "send_input",
-          pane_id: sessionPaneId,
-          data: "package session watch input\r",
-        });
-        return;
-      }
+        if (
+          !sessionDispatched &&
+          state.focusedScreen &&
+          state.topology.tabs.length === 1
+        ) {
+          sessionDispatched = true;
+          await client.dispatchMuxCommand(sessionCreated.session_id, {
+            kind: "send_input",
+            pane_id: sessionPaneId,
+            data: "package session watch input\r",
+          });
+          return;
+        }
 
-      if (
-        !sessionOpenedTab &&
-        state.focusedScreen?.surface.lines.some((line) =>
-          line.text.includes("package session watch input"),
-        )
-      ) {
-        sessionOpenedTab = true;
-        await client.dispatchMuxCommand(sessionCreated.session_id, {
-          kind: "new_tab",
-          title: "watch-state",
-        });
-        return;
-      }
+        if (
+          !sessionOpenedTab &&
+          state.focusedScreen?.surface.lines.some((line) =>
+            line.text.includes("package session watch input"),
+          )
+        ) {
+          sessionOpenedTab = true;
+          await client.dispatchMuxCommand(sessionCreated.session_id, {
+            kind: "new_tab",
+            title: "watch-state",
+          });
+          return;
+        }
 
-      if (sessionOpenedTab && state.topology.tabs.length === 2) {
-        sessionAbort.abort();
-      }
-    },
-  });
+        if (sessionOpenedTab && state.topology.tabs.length === 2) {
+          sessionAbort.abort();
+        }
+      },
+    }),
+    5000,
+    "Timed out waiting for watchSessionState helper to finish",
+  );
 
   assert.equal(sessionStates.length > 0, true);
   assert.equal(
@@ -390,7 +410,11 @@ async function waitForLine(client, sessionId, paneId, needle) {
 
 async function waitForTopologyTabs(subscription, tabCount) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    const event = await subscription.nextEvent();
+    const event = await withTimeout(
+      subscription.nextEvent(),
+      5000,
+      `Timed out waiting for topology event while expecting ${tabCount} tabs`,
+    );
     if (event == null) {
       break;
     }
