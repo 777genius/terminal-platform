@@ -78,6 +78,17 @@ export interface TerminalNodeSubscriptionPumpOptions {
   onEvent(event: NodeSubscriptionEvent): void | Promise<void>;
 }
 
+export type TerminalNodeSessionWatchEvent =
+  | { kind: "attached"; attached: NodeAttachedSession }
+  | { kind: "topology_snapshot"; topology: NodeTopologySnapshot }
+  | { kind: "focused_screen"; screen: NodeScreenSnapshot }
+  | { kind: "screen_delta"; delta: NodeScreenDelta };
+
+export interface TerminalNodeSessionWatchOptions {
+  signal?: AbortSignal | null | undefined;
+  onEvent(event: TerminalNodeSessionWatchEvent): void | Promise<void>;
+}
+
 export interface NativeTargetDescriptor {
   platform: string;
   arch: string;
@@ -227,6 +238,10 @@ export declare class TerminalNodeClient
     sessionId: string,
     paneId: string,
     options: TerminalNodeSubscriptionPumpOptions,
+  ): Promise<void>;
+  watchSession(
+    sessionId: string,
+    options: TerminalNodeSessionWatchOptions,
   ): Promise<void>;
 }
 

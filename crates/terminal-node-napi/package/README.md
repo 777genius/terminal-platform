@@ -16,6 +16,7 @@ Current client surface includes:
 - topology snapshots, screen snapshots and screen deltas
 - live topology and pane subscriptions via async stream handles
 - `watchTopology` and `watchPane` helpers with `AbortSignal` cancellation
+- `watchSession` helper that follows topology plus focused pane updates
 - mux command dispatch for tabs, panes, input and save operations
 
 ## Local staging

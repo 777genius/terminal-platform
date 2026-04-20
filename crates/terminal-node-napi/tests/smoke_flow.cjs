@@ -196,6 +196,46 @@ async function runPackageWatchSmoke(createClient) {
     ),
     true,
   );
+
+  const sessionCreated = await client.createNativeSession({
+    title: "node-package-session-watch",
+    launch: {
+      program: "/bin/sh",
+      args: ["-lc", "printf 'ready\\n'; exec cat"],
+    },
+  });
+  const sessionAttached = await client.attachSession(sessionCreated.session_id);
+  const sessionPaneId = sessionAttached.focused_screen.pane_id;
+  const sessionEvents = [];
+  let sessionDispatched = false;
+  const sessionAbort = new AbortController();
+  await client.watchSession(sessionCreated.session_id, {
+    signal: sessionAbort.signal,
+    onEvent: async (event) => {
+      sessionEvents.push(event.kind);
+
+      if (!sessionDispatched && event.kind === "topology_snapshot") {
+        sessionDispatched = true;
+        await client.dispatchMuxCommand(sessionCreated.session_id, {
+          kind: "send_input",
+          pane_id: sessionPaneId,
+          data: "package session watch input\r",
+        });
+        return;
+      }
+
+      if (
+        event.kind === "screen_delta" &&
+        deltaContainsText(event.delta, "package session watch input")
+      ) {
+        sessionAbort.abort();
+      }
+    },
+  });
+
+  assert.equal(sessionEvents.includes("attached"), true);
+  assert.equal(sessionEvents.includes("topology_snapshot"), true);
+  assert.equal(sessionEvents.includes("screen_delta"), true);
 }
 
 async function waitForLine(client, sessionId, paneId, needle) {

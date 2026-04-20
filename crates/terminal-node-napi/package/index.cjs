@@ -110,6 +110,28 @@ function loadNativeBinding(options = {}) {
   return binding;
 }
 
+function firstPaneId(node) {
+  if (!node) {
+    return null;
+  }
+
+  if (node.kind === "leaf") {
+    return node.pane_id;
+  }
+
+  return firstPaneId(node.first) ?? firstPaneId(node.second);
+}
+
+function focusedPaneId(topology) {
+  const focusedTab =
+    topology.tabs.find((tab) => tab.tab_id === topology.focused_tab) ?? topology.tabs[0];
+  if (!focusedTab) {
+    return null;
+  }
+
+  return focusedTab.focused_pane ?? firstPaneId(focusedTab.root);
+}
+
 class TerminalNodeSubscription {
   #inner;
   #closed;
@@ -309,6 +331,95 @@ class TerminalNodeClient {
   async watchPane(sessionId, paneId, options) {
     const subscription = await this.subscribePane(sessionId, paneId);
     return subscription.pump(options);
+  }
+
+  async watchSession(sessionId, options = {}) {
+    const { signal, onEvent } = options;
+
+    if (typeof onEvent !== "function") {
+      throw new TypeError("TerminalNodeClient.watchSession requires an onEvent callback");
+    }
+
+    if (signal?.aborted) {
+      return;
+    }
+
+    const bridgeAbort = new AbortController();
+    const bridgeAbortListener = () => {
+      bridgeAbort.abort();
+    };
+    if (signal) {
+      signal.addEventListener("abort", bridgeAbortListener, { once: true });
+    }
+
+    let paneSubscription = null;
+    let panePump = Promise.resolve();
+    let paneError = null;
+
+    const stopPane = async () => {
+      if (paneSubscription) {
+        await paneSubscription.close().catch(() => {});
+        paneSubscription = null;
+      }
+      await panePump.catch(() => {});
+    };
+
+    const startPane = async (paneId, emitFocusedScreen) => {
+      await stopPane();
+      paneSubscription = await this.subscribePane(sessionId, paneId);
+
+      if (emitFocusedScreen) {
+        const screen = await this.screenSnapshot(sessionId, paneId);
+        await onEvent({ kind: "focused_screen", screen });
+      }
+
+      panePump = paneSubscription
+        .pump({
+          signal: bridgeAbort.signal,
+          onEvent: async (event) => {
+            await onEvent({ kind: "screen_delta", delta: event });
+          },
+        })
+        .catch((error) => {
+          paneError = error;
+          bridgeAbort.abort();
+        });
+    };
+
+    try {
+      const attached = await this.attachSession(sessionId);
+      await onEvent({ kind: "attached", attached });
+
+      let currentPaneId =
+        attached.focused_screen?.pane_id ?? focusedPaneId(attached.topology);
+      if (currentPaneId) {
+        await startPane(currentPaneId, false);
+      }
+
+      await this.watchTopology(sessionId, {
+        signal: bridgeAbort.signal,
+        onEvent: async (event) => {
+          await onEvent({ kind: "topology_snapshot", topology: event });
+
+          const nextPaneId = focusedPaneId(event);
+          if (nextPaneId && nextPaneId !== currentPaneId) {
+            currentPaneId = nextPaneId;
+            await startPane(nextPaneId, true);
+          }
+        },
+      });
+
+      await panePump;
+      if (paneError) {
+        throw paneError;
+      }
+    } finally {
+      if (signal) {
+        signal.removeEventListener("abort", bridgeAbortListener);
+      }
+      bridgeAbort.abort();
+      await stopPane();
+    }
   }
 }
 
