@@ -3,8 +3,23 @@ name = "terminal-capi"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+terminal-node = { path = "../terminal-node" }
 terminal-protocol = { path = "../terminal-protocol" }
 
-[lints]
-workspace = true
+[dev-dependencies]
+terminal-testing = { path = "../terminal-testing" }
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"

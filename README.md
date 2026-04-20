@@ -49,6 +49,16 @@ Current workspace shape:
 - `index.cjs` and `index.mjs` loader entrypoints
 - `index.d.ts` plus generated `bindings/*.d.ts`
 
+## C ABI surface
+
+`terminal-capi` is the secondary host leaf for non-Node embedders.
+
+Current shape:
+
+- opaque client handle constructors for runtime slug, namespaced address and filesystem path
+- JSON request/reply functions for handshake, session listing, native session create, attach, topology, screen snapshot, screen delta and mux dispatch
+- Rust-owned C string carriers plus explicit free functions
+
 ## Quality gates
 
 Bootstrap target:
