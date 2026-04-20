@@ -214,7 +214,14 @@ pub struct ZellijSessionGuard {
 impl ZellijSessionGuard {
     pub fn spawn(session_name: &str) -> Result<Self, String> {
         let output = Command::new("zellij")
-            .args(["--session", session_name, "--new-session-with-layout", "default"])
+            .args([
+                "attach",
+                "--create-background",
+                session_name,
+                "options",
+                "--default-layout",
+                "default",
+            ])
             .output()
             .map_err(|error| format!("failed to spawn zellij: {error}"))?;
         if !output.status.success() {

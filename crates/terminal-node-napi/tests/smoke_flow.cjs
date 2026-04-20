@@ -996,7 +996,14 @@ function uniqueZellijSessionName(label) {
 function spawnZellijSession(sessionName) {
   const output = spawnSync(
     "zellij",
-    ["--session", sessionName, "--new-session-with-layout", "default"],
+    [
+      "attach",
+      "--create-background",
+      sessionName,
+      "options",
+      "--default-layout",
+      "default",
+    ],
     { encoding: "utf8" },
   );
   if (output.status !== 0 && !isHeadlessZellijSpawnError(`${output.stderr ?? ""}`)) {
