@@ -179,7 +179,7 @@ jobs:
 
       - name: Run fuzz baseline
         run: |
-          cargo fuzz run --fuzz-dir fuzz protocol_frames -- -max_total_time=2
-          cargo fuzz run --fuzz-dir fuzz tmux_layout -- -max_total_time=2
-          cargo fuzz run --fuzz-dir fuzz zellij_surface -- -max_total_time=2
-          cargo fuzz run --fuzz-dir fuzz screen_delta -- -max_total_time=2
+          cargo +nightly fuzz run --fuzz-dir fuzz protocol_frames -- -max_total_time=2
+          cargo +nightly fuzz run --fuzz-dir fuzz tmux_layout -- -max_total_time=2
+          cargo +nightly fuzz run --fuzz-dir fuzz zellij_surface -- -max_total_time=2
+          cargo +nightly fuzz run --fuzz-dir fuzz screen_delta -- -max_total_time=2

@@ -12,10 +12,10 @@ Current first-class targets cover:
 Local usage:
 
 ```bash
-cargo fuzz run --fuzz-dir fuzz protocol_frames
-cargo fuzz run --fuzz-dir fuzz tmux_layout
-cargo fuzz run --fuzz-dir fuzz zellij_surface
-cargo fuzz run --fuzz-dir fuzz screen_delta
+cargo +nightly fuzz run --fuzz-dir fuzz protocol_frames
+cargo +nightly fuzz run --fuzz-dir fuzz tmux_layout
+cargo +nightly fuzz run --fuzz-dir fuzz zellij_surface
+cargo +nightly fuzz run --fuzz-dir fuzz screen_delta
 ```
 
 CI uses a short baseline run to ensure the targets stay buildable and executable.
