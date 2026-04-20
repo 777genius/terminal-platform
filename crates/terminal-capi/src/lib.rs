@@ -6,7 +6,9 @@ use std::{
 };
 
 use serde::de::DeserializeOwned;
-use terminal_node::{NodeCreateSessionRequest, NodeMuxCommand};
+use terminal_node::{
+    NodeBackendKind, NodeCreateSessionRequest, NodeMuxCommand, NodeSessionRoute,
+};
 
 pub use ffi_types::{TerminalCapiClientResult, TerminalCapiStatus, TerminalCapiStringResult};
 use handles::TerminalCapiClientHandle;
@@ -66,6 +68,26 @@ where
 {
     let json = read_required_string(value, name)?;
     serde_json::from_str(&json).map_err(|error| TerminalCapiStringResult::invalid_json(name, error))
+}
+
+fn read_optional_string(
+    value: *const c_char,
+    name: &str,
+) -> Result<Option<String>, TerminalCapiStringResult> {
+    if value.is_null() {
+        return Ok(None);
+    }
+
+    read_required_string(value, name).map(Some)
+}
+
+fn read_backend_kind(
+    value: *const c_char,
+    name: &str,
+) -> Result<NodeBackendKind, TerminalCapiStringResult> {
+    let value = read_required_string(value, name)?;
+    serde_json::from_value(serde_json::Value::String(value))
+        .map_err(|error| TerminalCapiStringResult::invalid_json(name, error))
 }
 
 #[unsafe(no_mangle)]
@@ -146,6 +168,57 @@ pub extern "C" fn terminal_capi_client_list_sessions_json(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_client_list_saved_sessions_json(
+    client: *mut TerminalCapiClientHandle,
+) -> TerminalCapiStringResult {
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.list_saved_sessions())
+    }) {
+        Ok(Ok(listed)) => TerminalCapiStringResult::ok_json(&listed),
+        Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_client_discover_sessions_json(
+    client: *mut TerminalCapiClientHandle,
+    backend: *const c_char,
+) -> TerminalCapiStringResult {
+    let backend = match read_backend_kind(backend, "backend") {
+        Ok(backend) => backend,
+        Err(error) => return error,
+    };
+
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.discover_sessions(backend))
+    }) {
+        Ok(Ok(discovered)) => TerminalCapiStringResult::ok_json(&discovered),
+        Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_client_backend_capabilities_json(
+    client: *mut TerminalCapiClientHandle,
+    backend: *const c_char,
+) -> TerminalCapiStringResult {
+    let backend = match read_backend_kind(backend, "backend") {
+        Ok(backend) => backend,
+        Err(error) => return error,
+    };
+
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.backend_capabilities(backend))
+    }) {
+        Ok(Ok(capabilities)) => TerminalCapiStringResult::ok_json(&capabilities),
+        Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn terminal_capi_client_create_native_session_json(
     client: *mut TerminalCapiClientHandle,
     request_json: *const c_char,
@@ -159,6 +232,101 @@ pub extern "C" fn terminal_capi_client_create_native_session_json(
         client.runtime.block_on(client.client.create_native_session(&request))
     }) {
         Ok(Ok(created)) => TerminalCapiStringResult::ok_json(&created),
+        Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_client_import_session_json(
+    client: *mut TerminalCapiClientHandle,
+    route_json: *const c_char,
+    title: *const c_char,
+) -> TerminalCapiStringResult {
+    let route = match read_required_json::<NodeSessionRoute>(route_json, "route_json") {
+        Ok(route) => route,
+        Err(error) => return error,
+    };
+    let title = match read_optional_string(title, "title") {
+        Ok(title) => title,
+        Err(error) => return error,
+    };
+
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.import_session(&route, title))
+    }) {
+        Ok(Ok(imported)) => TerminalCapiStringResult::ok_json(&imported),
+        Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_client_saved_session_json(
+    client: *mut TerminalCapiClientHandle,
+    session_id: *const c_char,
+) -> TerminalCapiStringResult {
+    let session_id = match read_required_string(session_id, "session_id") {
+        Ok(session_id) => session_id,
+        Err(error) => return error,
+    };
+
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.saved_session(&session_id))
+    }) {
+        Ok(Ok(saved)) => TerminalCapiStringResult::ok_json(&saved),
+        Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_client_delete_saved_session_json(
+    client: *mut TerminalCapiClientHandle,
+    session_id: *const c_char,
+) -> TerminalCapiStringResult {
+    let session_id = match read_required_string(session_id, "session_id") {
+        Ok(session_id) => session_id,
+        Err(error) => return error,
+    };
+
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.delete_saved_session(&session_id))
+    }) {
+        Ok(Ok(deleted)) => TerminalCapiStringResult::ok_json(&deleted),
+        Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_client_prune_saved_sessions_json(
+    client: *mut TerminalCapiClientHandle,
+    keep_latest: usize,
+) -> TerminalCapiStringResult {
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.prune_saved_sessions(keep_latest))
+    }) {
+        Ok(Ok(pruned)) => TerminalCapiStringResult::ok_json(&pruned),
+        Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_client_restore_saved_session_json(
+    client: *mut TerminalCapiClientHandle,
+    session_id: *const c_char,
+) -> TerminalCapiStringResult {
+    let session_id = match read_required_string(session_id, "session_id") {
+        Ok(session_id) => session_id,
+        Err(error) => return error,
+    };
+
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.restore_saved_session(&session_id))
+    }) {
+        Ok(Ok(restored)) => TerminalCapiStringResult::ok_json(&restored),
         Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
         Err(error) => error,
     }
@@ -343,6 +511,13 @@ mod tests {
 
             let handshake = read_json_result(terminal_capi_client_handshake_info_json(handle));
             assert_eq!(handshake["assessment"]["can_use"], true);
+            let backend = c_string("native");
+            let capabilities = read_json_result(terminal_capi_client_backend_capabilities_json(
+                handle,
+                backend.as_ptr(),
+            ));
+            assert_eq!(capabilities["backend"], "native");
+            assert_eq!(capabilities["capabilities"]["explicit_session_save"], true);
 
             let create_request = c_string(
                 r#"{
@@ -403,11 +578,50 @@ mod tests {
             ));
             assert_eq!(dispatch["changed"], true);
 
+            let save_command = c_string(r#"{"kind":"save_session"}"#);
+            let save = read_json_result(terminal_capi_client_dispatch_mux_command_json(
+                handle,
+                session_id_c.as_ptr(),
+                save_command.as_ptr(),
+            ));
+            assert_eq!(save["changed"], false);
+
+            let saved_sessions = read_json_result(terminal_capi_client_list_saved_sessions_json(handle));
+            assert!(
+                saved_sessions
+                    .as_array()
+                    .map(|sessions| {
+                        sessions.iter().any(|session| {
+                            session["session_id"].as_str() == Some(session_id.as_str())
+                        })
+                    })
+                    .unwrap_or(false),
+            );
+
+            let saved = read_json_result(terminal_capi_client_saved_session_json(
+                handle,
+                session_id_c.as_ptr(),
+            ));
+            assert_eq!(saved["session_id"], session_id);
+            assert_eq!(saved["compatibility"]["can_restore"], true);
+
+            let restored = read_json_result(terminal_capi_client_restore_saved_session_json(
+                handle,
+                session_id_c.as_ptr(),
+            ));
+            assert_eq!(restored["saved_session_id"], session_id);
+
             let topology = read_json_result(terminal_capi_client_topology_snapshot_json(
                 handle,
                 session_id_c.as_ptr(),
             ));
             assert_eq!(topology["tabs"].as_array().map_or(0, Vec::len), 2);
+
+            let deleted = read_json_result(terminal_capi_client_delete_saved_session_json(
+                handle,
+                session_id_c.as_ptr(),
+            ));
+            assert_eq!(deleted["session_id"], session_id);
 
             // SAFETY: handle was returned by this crate and is freed exactly once here.
             unsafe { terminal_capi_client_free(handle) };
