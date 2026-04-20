@@ -140,6 +140,7 @@ async function runSmoke(createClient) {
   assert.equal(deleted.session_id, created.session_id);
   assert.equal(savedAfterDelete.some((session) => session.session_id === created.session_id), false);
 
+  await runSubscriptionBackpressureSmoke(createClient);
   await runZellijImportSmoke(createClient, zellijCapabilities);
 
   await topologySubscription.close();
@@ -276,6 +277,45 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
   } finally {
     stopZellijSession(sessionName);
   }
+}
+
+async function runSubscriptionBackpressureSmoke(createClient) {
+  const client = createClient();
+  const created = await client.createNativeSession({
+    title: "node-backpressure-close",
+    launch: {
+      program: "/bin/sh",
+      args: ["-lc", "printf 'ready\\n'; exec cat"],
+    },
+  });
+  const attached = await client.attachSession(created.session_id);
+  const tabId =
+    attached.topology.focused_tab ?? attached.topology.tabs[0]?.tab_id ?? null;
+  const subscription = await client.openSubscription(created.session_id, {
+    kind: "session_topology",
+  });
+  const initialEvent = await withTimeout(
+    subscription.nextEvent(),
+    5000,
+    "Timed out waiting for initial topology event before backpressure test",
+  );
+
+  assert.equal(initialEvent?.kind, "topology_snapshot");
+  assert.equal(typeof tabId, "string");
+
+  for (let revision = 0; revision < 96; revision += 1) {
+    await client.dispatchMuxCommand(created.session_id, {
+      kind: "rename_tab",
+      tab_id: tabId,
+      title: `backpressure-${revision}`,
+    });
+  }
+
+  await withTimeout(
+    subscription.close(),
+    5000,
+    "Timed out closing topology subscription under backpressure",
+  );
 }
 
 async function runPackageWatchSmoke(createClient, sdk) {

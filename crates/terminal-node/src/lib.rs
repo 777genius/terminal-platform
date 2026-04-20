@@ -6,7 +6,7 @@ use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_domain::{PaneId, SessionId};
 use terminal_mux_domain::PaneTreeNode;
 use terminal_protocol::{LocalSocketAddress, ProtocolError};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use ts_rs::{Config, TS};
 use uuid::Uuid;
 
@@ -38,6 +38,7 @@ struct NodeSubscriptionInner {
     subscription_id: terminal_domain::SubscriptionId,
     events: Mutex<mpsc::Receiver<Result<NodeSubscriptionEvent, ProtocolError>>>,
     close_tx: Mutex<Option<oneshot::Sender<()>>>,
+    done_rx: Mutex<watch::Receiver<bool>>,
 }
 
 impl Drop for NodeSubscriptionInner {
@@ -58,6 +59,7 @@ impl NodeSubscriptionHandle {
         let subscription_id = subscription.subscription_id();
         let (events_tx, events_rx) = mpsc::channel(32);
         let (close_tx, mut close_rx) = oneshot::channel();
+        let (done_tx, done_rx) = watch::channel(false);
 
         tokio::spawn(async move {
             loop {
@@ -69,20 +71,37 @@ impl NodeSubscriptionHandle {
                     next = subscription.recv() => {
                         match next {
                             Ok(Some(event)) => {
-                                if events_tx.send(Ok((&event).into())).await.is_err() {
-                                    let _ = subscription.close().await;
-                                    break;
+                                match forward_subscription_event(
+                                    &events_tx,
+                                    &mut close_rx,
+                                    Ok((&event).into()),
+                                )
+                                .await
+                                {
+                                    NodeSubscriptionForward::Forwarded => {}
+                                    NodeSubscriptionForward::CloseRequested
+                                    | NodeSubscriptionForward::ReceiverDropped => {
+                                        let _ = subscription.close().await;
+                                        break;
+                                    }
                                 }
                             }
                             Ok(None) => break,
                             Err(error) => {
-                                let _ = events_tx.send(Err(error)).await;
+                                let _ = forward_subscription_event(
+                                    &events_tx,
+                                    &mut close_rx,
+                                    Err(error),
+                                )
+                                .await;
                                 break;
                             }
                         }
                     }
                 }
             }
+
+            let _ = done_tx.send(true);
         });
 
         Ok(Self {
@@ -90,6 +109,7 @@ impl NodeSubscriptionHandle {
                 subscription_id,
                 events: Mutex::new(events_rx),
                 close_tx: Mutex::new(Some(close_tx)),
+                done_rx: Mutex::new(done_rx),
             }),
         })
     }
@@ -112,6 +132,37 @@ impl NodeSubscriptionHandle {
         let mut close_tx = self.inner.close_tx.lock().await;
         if let Some(close_tx) = close_tx.take() {
             let _ = close_tx.send(());
+        }
+        drop(close_tx);
+
+        let mut done_rx = self.inner.done_rx.lock().await;
+        while !*done_rx.borrow() {
+            if done_rx.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
+
+enum NodeSubscriptionForward {
+    Forwarded,
+    CloseRequested,
+    ReceiverDropped,
+}
+
+async fn forward_subscription_event(
+    events_tx: &mpsc::Sender<Result<NodeSubscriptionEvent, ProtocolError>>,
+    close_rx: &mut oneshot::Receiver<()>,
+    event: Result<NodeSubscriptionEvent, ProtocolError>,
+) -> NodeSubscriptionForward {
+    tokio::select! {
+        _ = close_rx => NodeSubscriptionForward::CloseRequested,
+        send_result = events_tx.send(event) => {
+            if send_result.is_err() {
+                NodeSubscriptionForward::ReceiverDropped
+            } else {
+                NodeSubscriptionForward::Forwarded
+            }
         }
     }
 }
@@ -957,6 +1008,52 @@ mod tests {
         fixture.shutdown().await.expect("fixture should stop cleanly");
 
         assert!(wait_for_subscription_close(&pane_subscription).await);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn closes_subscription_bridge_under_backpressure() {
+        let fixture = daemon_fixture("terminal-node-backpressure").expect("fixture should start");
+        let node = NodeHostClient::new(fixture.client.address().clone());
+        let created = node
+            .create_native_session(&cat_launch_request("backpressure"))
+            .await
+            .expect("create_native_session should succeed");
+        let topology = node
+            .topology_snapshot(&created.session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        let tab_id = topology.focused_tab.clone().expect("focused tab should exist");
+        let subscription = node
+            .open_subscription(&created.session_id, &NodeSubscriptionSpec::SessionTopology)
+            .await
+            .expect("topology subscription should open");
+
+        let initial = subscription
+            .next_event()
+            .await
+            .expect("initial topology event should arrive")
+            .expect("initial topology event should exist");
+        assert!(matches!(initial, NodeSubscriptionEvent::TopologySnapshot(_)));
+
+        for revision in 0..96 {
+            node.dispatch_mux_command(
+                &created.session_id,
+                &NodeMuxCommand::RenameTab(NodeRenameTabCommand {
+                    tab_id: tab_id.clone(),
+                    title: format!("backpressure-{revision}"),
+                }),
+            )
+            .await
+            .expect("rename tab should succeed");
+        }
+
+        timeout(Duration::from_secs(5), subscription.close())
+            .await
+            .expect("subscription close should not hang under backpressure");
+        timeout(Duration::from_secs(5), fixture.shutdown())
+            .await
+            .expect("fixture shutdown should not hang after backpressure close")
+            .expect("fixture should stop cleanly");
     }
 
     #[test]
