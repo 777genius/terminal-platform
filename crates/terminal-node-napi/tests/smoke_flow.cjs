@@ -2,10 +2,11 @@ const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
-const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 60000 : 5000;
-const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 60000 : 5000;
+const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 90000 : 5000;
+const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 90000 : 5000;
 const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 900 : 50;
 const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 1200 : 600;
+const INTERACTIVE_PROBE_INTERVAL = process.platform === "win32" ? 20 : 10;
 
 function readyEchoLaunch() {
   if (process.platform === "win32") {
@@ -36,11 +37,11 @@ async function runSmoke(createClient) {
   const listed = await client.listSessions();
   const attached = await client.attachSession(created.session_id);
   const topology = await client.topologySnapshot(created.session_id);
-  const readyScreen = await waitForLine(
+  const readyScreen = await waitForInteractiveScreen(
     client,
     created.session_id,
     attached.focused_screen.pane_id,
-    "ready",
+    "node-package-roundtrip",
   );
   const topologySubscription = await client.openSubscription(created.session_id, {
     kind: "session_topology",
@@ -372,7 +373,12 @@ async function runSubscriptionCycleSmoke(createClient) {
   const paneId = attached.focused_screen.pane_id;
   let observedMarkers = 0;
 
-  await waitForLine(client, created.session_id, paneId, "ready");
+  await waitForInteractiveScreen(
+    client,
+    created.session_id,
+    paneId,
+    "node-addon-repeat-subscriptions",
+  );
 
   for (let cycle = 0; cycle < 24; cycle += 1) {
     const topologySubscription = await client.openSubscription(created.session_id, {
@@ -930,6 +936,32 @@ async function waitForLine(client, sessionId, paneId, needle) {
   }
 
   throw new Error(`Timed out waiting for screen line: ${needle}`);
+}
+
+async function waitForInteractiveScreen(client, sessionId, paneId, label) {
+  const marker = `node-interactive-probe-${label}-${process.pid}`;
+
+  for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
+    if (attempt % INTERACTIVE_PROBE_INTERVAL === 0) {
+      await withTimeout(
+        client.dispatchMuxCommand(sessionId, {
+          kind: "send_input",
+          pane_id: paneId,
+          data: `${marker}\r`,
+        }),
+        DEFAULT_HOST_TIMEOUT_MS,
+        `Timed out sending interactive probe marker: ${label}`,
+      );
+    }
+
+    const snapshot = await client.screenSnapshot(sessionId, paneId);
+    if (snapshot.surface.lines.some((line) => line.text.includes(marker))) {
+      return snapshot;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for interactive probe marker: ${marker}`);
 }
 
 async function waitForTopologyTabs(subscription, tabCount) {

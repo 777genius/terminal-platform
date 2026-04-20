@@ -214,6 +214,7 @@ pub fn unique_zellij_session_name(label: &str) -> String {
 #[derive(Debug)]
 pub struct ZellijSessionGuard {
     session_name: String,
+    spawn_child: Option<Child>,
     _lock: ZellijTestLock,
 }
 
@@ -246,8 +247,11 @@ impl ZellijSessionGuard {
                 } else {
                     Duration::from_millis(500)
                 });
-                drain_zellij_spawn_child(child);
-                return Ok(Self { session_name: session_name.to_string(), _lock: lock });
+                return Ok(Self {
+                    session_name: session_name.to_string(),
+                    spawn_child: Some(child),
+                    _lock: lock,
+                });
             }
 
             let output = collect_zellij_spawn_output(child)
@@ -278,6 +282,9 @@ impl ZellijSessionGuard {
 impl Drop for ZellijSessionGuard {
     fn drop(&mut self) {
         let _ = run_zellij(&["kill-session", &self.session_name]);
+        if let Some(child) = self.spawn_child.take() {
+            let _ = collect_zellij_spawn_output(child);
+        }
     }
 }
 
@@ -315,11 +322,6 @@ fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
         || stderr.contains("could not enable raw mode")
         || stderr.contains("No such device or address")
         || stderr.contains("The handle is invalid")
-}
-
-#[cfg(any(unix, windows))]
-fn drain_zellij_spawn_child(child: Child) {
-    let _ = collect_zellij_spawn_output(child);
 }
 
 #[cfg(any(unix, windows))]

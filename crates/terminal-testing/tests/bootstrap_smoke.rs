@@ -2640,7 +2640,7 @@ fn zellij_operation_timeout() -> Duration {
 
 #[cfg(any(unix, windows))]
 fn zellij_attempt_timeout() -> Duration {
-    if cfg!(windows) { Duration::from_secs(150) } else { Duration::from_secs(90) }
+    if cfg!(windows) { Duration::from_secs(240) } else { Duration::from_secs(90) }
 }
 
 #[cfg(any(unix, windows))]

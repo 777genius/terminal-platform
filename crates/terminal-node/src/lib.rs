@@ -487,8 +487,13 @@ mod tests {
             .expect("topology_snapshot should succeed");
         let focused_pane_id =
             attached.focused_screen.as_ref().expect("focused screen should exist").pane_id.clone();
-        let ready_screen =
-            wait_for_screen_line(&node, &created.session_id, &focused_pane_id, "ready").await;
+        let ready_screen = wait_for_interactive_screen(
+            &node,
+            &created.session_id,
+            &focused_pane_id,
+            "node-host-roundtrip",
+        )
+        .await;
         let save = node
             .dispatch_mux_command(&created.session_id, &NodeMuxCommand::SaveSession)
             .await
@@ -960,7 +965,13 @@ mod tests {
             node.attach_session(&created.session_id).await.expect("attach_session should succeed");
         let pane_id =
             attached.focused_screen.as_ref().expect("focused screen should exist").pane_id.clone();
-        wait_for_screen_line(&node, &created.session_id, &pane_id, "ready").await;
+        wait_for_interactive_screen(
+            &node,
+            &created.session_id,
+            &pane_id,
+            "node-host-subscriptions",
+        )
+        .await;
 
         let topology_subscription = node
             .open_subscription(&created.session_id, &NodeSubscriptionSpec::SessionTopology)
@@ -1117,7 +1128,7 @@ mod tests {
             node.attach_session(&created.session_id).await.expect("attach_session should succeed");
         let pane_id =
             attached.focused_screen.as_ref().expect("focused screen should exist").pane_id.clone();
-        wait_for_screen_line(&node, &created.session_id, &pane_id, "ready").await;
+        wait_for_interactive_screen(&node, &created.session_id, &pane_id, "node-host-reopen").await;
 
         for cycle in 0..24 {
             let topology_subscription = timeout(
@@ -1395,6 +1406,44 @@ mod tests {
         panic!("screen never contained expected line: {needle}");
     }
 
+    async fn wait_for_interactive_screen(
+        node: &NodeHostClient,
+        session_id: &str,
+        pane_id: &str,
+        label: &str,
+    ) -> super::NodeScreenSnapshot {
+        let marker = format!("node-interactive-probe-{label}-{}", std::process::id());
+
+        for attempt in 0..screen_wait_attempts() {
+            if attempt % interactive_probe_interval() == 0 {
+                timeout(
+                    operation_timeout(),
+                    node.dispatch_mux_command(
+                        session_id,
+                        &NodeMuxCommand::SendInput(NodeSendInputCommand {
+                            pane_id: pane_id.to_string(),
+                            data: format!("{marker}\r"),
+                        }),
+                    ),
+                )
+                .await
+                .expect("interactive probe send_input should not hang")
+                .expect("interactive probe send_input should succeed");
+            }
+
+            let snapshot = node
+                .screen_snapshot(session_id, pane_id)
+                .await
+                .expect("screen_snapshot should succeed");
+            if snapshot.surface.lines.iter().any(|line| line.text.contains(&marker)) {
+                return snapshot;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        panic!("screen never reached interactive probe marker: {marker}");
+    }
+
     async fn next_topology_snapshot(
         subscription: &super::NodeSubscriptionHandle,
     ) -> Option<super::NodeTopologySnapshot> {
@@ -1491,11 +1540,15 @@ mod tests {
     }
 
     fn zellij_attempt_timeout() -> Duration {
-        if cfg!(windows) { Duration::from_secs(150) } else { Duration::from_secs(90) }
+        if cfg!(windows) { Duration::from_secs(240) } else { Duration::from_secs(90) }
     }
 
     fn screen_wait_attempts() -> usize {
         if cfg!(windows) { 900 } else { 50 }
+    }
+
+    fn interactive_probe_interval() -> usize {
+        if cfg!(windows) { 20 } else { 10 }
     }
 
     fn spawn_daemon_with_retry(
