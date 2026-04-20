@@ -1,11 +1,14 @@
 use std::{
     collections::{HashMap, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
-    process::Command,
-    sync::Arc,
+    process::{Command, Stdio},
+    sync::{Arc, Mutex as StdMutex},
+    thread,
+    time::Instant,
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, de::DeserializeOwned};
+use serde_json::Value;
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
     BackendSessionSummary, BackendSubscription, BackendSubscriptionEvent, BoxFuture,
@@ -30,6 +33,10 @@ use uuid::Uuid;
 
 const ZELLIJ_ROUTE_NAMESPACE: &str = "zellij_session";
 const ZELLIJ_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const ZELLIJ_TRANSIENT_RETRY_ATTEMPTS: usize = 4;
+const ZELLIJ_ACTION_SETTLE_ATTEMPTS: usize = 200;
+const ZELLIJ_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+const ZELLIJ_COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone, Default)]
 pub struct ZellijBackend;
@@ -41,25 +48,71 @@ impl ZellijBackend {
     }
 
     fn run(&self, target: Option<&ZellijTarget>, args: &[&str]) -> Result<String, BackendError> {
-        let mut command = Command::new("zellij");
-        if let Some(target) = target {
-            command.arg("--session").arg(&target.session_name);
-        }
-        command.args(args);
+        let mut last_error = None;
+        'attempts: for attempt in 0..ZELLIJ_TRANSIENT_RETRY_ATTEMPTS {
+            let mut command = Command::new("zellij");
+            if let Some(target) = target {
+                command.arg("--session").arg(&target.session_name);
+            }
+            command.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
 
-        let output = command.output().map_err(|error| {
-            BackendError::transport(format!("zellij command failed to spawn: {error}"))
-        })?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(BackendError::transport(format!(
-                "zellij command failed: {}",
-                stderr.trim()
-            )));
+            let mut child = command.spawn().map_err(|error| {
+                BackendError::transport(format!("zellij command failed to spawn: {error}"))
+            })?;
+            let started = Instant::now();
+
+            let output = loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => {
+                        break child.wait_with_output().map_err(|error| {
+                            BackendError::transport(format!(
+                                "zellij command output collection failed: {error}"
+                            ))
+                        })?;
+                    }
+                    Ok(None) => {
+                        if started.elapsed() >= ZELLIJ_COMMAND_TIMEOUT {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            let error = BackendError::transport(format!(
+                                "zellij command timed out after {} ms",
+                                ZELLIJ_COMMAND_TIMEOUT.as_millis()
+                            ));
+                            if attempt + 1 < ZELLIJ_TRANSIENT_RETRY_ATTEMPTS {
+                                last_error = Some(error);
+                                thread::sleep(ZELLIJ_POLL_INTERVAL);
+                                continue 'attempts;
+                            }
+                            return Err(error);
+                        }
+                        thread::sleep(ZELLIJ_COMMAND_POLL_INTERVAL);
+                    }
+                    Err(error) => {
+                        return Err(BackendError::transport(format!(
+                            "zellij command wait failed: {error}"
+                        )));
+                    }
+                }
+            };
+            if output.status.success() {
+                return String::from_utf8(output.stdout).map_err(|error| {
+                    BackendError::internal(format!("zellij output is not utf8: {error}"))
+                });
+            }
+
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let error = BackendError::transport(format!("zellij command failed: {stderr}"));
+            if attempt + 1 < ZELLIJ_TRANSIENT_RETRY_ATTEMPTS && is_transient_zellij_error(&stderr) {
+                last_error = Some(error);
+                thread::sleep(ZELLIJ_POLL_INTERVAL);
+                continue;
+            }
+            return Err(error);
         }
 
-        String::from_utf8(output.stdout)
-            .map_err(|error| BackendError::internal(format!("zellij output is not utf8: {error}")))
+        Err(last_error.unwrap_or_else(|| {
+            BackendError::transport("zellij command never reached a stable result")
+        }))
     }
 
     fn run_owned(
@@ -144,7 +197,11 @@ impl MuxBackendPort for ZellijBackend {
         _scope: BackendScope,
     ) -> BoxFuture<'_, Result<Vec<DiscoveredSession>, BackendError>> {
         Box::pin(async move {
-            let output = self.run(None, &["list-sessions", "--short", "--no-formatting"])?;
+            let output = match self.run(None, &["list-sessions", "--short", "--no-formatting"]) {
+                Ok(output) => output,
+                Err(error) if is_transient_zellij_backend_error(&error) => return Ok(Vec::new()),
+                Err(error) => return Err(error),
+            };
             let sessions = output
                 .lines()
                 .map(str::trim)
@@ -204,6 +261,7 @@ impl MuxBackendPort for ZellijBackend {
                         backend: Arc::new(backend),
                         session_id,
                         target,
+                        io_lane: Arc::new(StdMutex::new(())),
                         command_lane: Arc::new(Mutex::new(())),
                     };
                     attached.snapshot()?;
@@ -246,6 +304,7 @@ struct ZellijAttachedSession {
     backend: Arc<ZellijBackend>,
     session_id: SessionId,
     target: ZellijTarget,
+    io_lane: Arc<StdMutex<()>>,
     command_lane: Arc<Mutex<()>>,
 }
 
@@ -302,8 +361,14 @@ impl ZellijAttachedSession {
         }
 
         let _permit = self.command_lane.lock().await;
+        let mut settled_snapshot = snapshot.clone();
         for action in actions {
+            let _io_permit = self.io_lane.lock().expect("zellij io lane should not be poisoned");
             self.backend.run_owned(Some(&self.target), &action.args())?;
+            drop(_io_permit);
+            if action.requires_settle() {
+                settled_snapshot = self.wait_for_action_settle(&settled_snapshot, &action).await?;
+            }
         }
 
         Ok(MuxCommandResult { changed: true })
@@ -345,6 +410,10 @@ impl ZellijAttachedSession {
                 tokio::select! {
                     _ = &mut cancel_rx => break,
                     _ = ticker.tick() => {
+                        let Ok(command_idle) = session.command_lane.try_lock() else {
+                            continue;
+                        };
+                        drop(command_idle);
                         let current = match session.snapshot() {
                             Ok(snapshot) => snapshot.topology,
                             Err(_) => break,
@@ -454,14 +523,62 @@ impl ZellijAttachedSession {
     }
 
     fn snapshot(&self) -> Result<ZellijSessionSnapshot, BackendError> {
-        let tabs = parse_tabs_json(
-            &self.backend.run(Some(&self.target), &["action", "list-tabs", "--json"])?,
-        )?;
-        let panes = parse_panes_json(
-            &self.backend.run(Some(&self.target), &["action", "list-panes", "--json"])?,
-        )?;
+        let mut last_error = None;
+        for attempt in 0..ZELLIJ_TRANSIENT_RETRY_ATTEMPTS {
+            let snapshot_outputs: Result<(String, String), BackendError> = (|| {
+                let _io_permit =
+                    self.io_lane.lock().expect("zellij io lane should not be poisoned");
+                let tabs_output =
+                    self.backend.run(Some(&self.target), &["action", "list-tabs", "--json"])?;
+                let panes_output =
+                    self.backend.run(Some(&self.target), &["action", "list-panes", "--json"])?;
+                Ok((tabs_output, panes_output))
+            })();
+            let (tabs_output, panes_output) = match snapshot_outputs {
+                Ok(outputs) => outputs,
+                Err(error) if is_transient_zellij_backend_error(&error) => {
+                    last_error = Some(error);
+                    thread::sleep(ZELLIJ_POLL_INTERVAL);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
 
-        build_session_snapshot(self.session_id, &self.target, &tabs, &panes)
+            if tabs_output.trim().is_empty() || panes_output.trim().is_empty() {
+                last_error = Some(BackendError::internal(
+                    "zellij snapshot commands returned empty output while the session was still settling",
+                ));
+                if attempt + 1 < ZELLIJ_TRANSIENT_RETRY_ATTEMPTS {
+                    thread::sleep(ZELLIJ_POLL_INTERVAL);
+                    continue;
+                }
+            }
+
+            let tabs = match parse_tabs_json(&tabs_output) {
+                Ok(tabs) => tabs,
+                Err(error) if is_transient_zellij_backend_error(&error) => {
+                    last_error = Some(error);
+                    thread::sleep(ZELLIJ_POLL_INTERVAL);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let panes = match parse_panes_json(&panes_output) {
+                Ok(panes) => panes,
+                Err(error) if is_transient_zellij_backend_error(&error) => {
+                    last_error = Some(error);
+                    thread::sleep(ZELLIJ_POLL_INTERVAL);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+
+            return build_session_snapshot(self.session_id, &self.target, &tabs, &panes);
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            BackendError::transport("zellij snapshot never stabilized after retries")
+        }))
     }
 
     fn pane_target(&self, pane_id: PaneId) -> Result<ZellijPaneTarget, BackendError> {
@@ -671,6 +788,7 @@ impl ZellijAttachedSession {
 
     fn screen_snapshot_inner(&self, pane_id: PaneId) -> Result<ScreenSnapshot, BackendError> {
         let pane_target = self.pane_target(pane_id)?;
+        let _io_permit = self.io_lane.lock().expect("zellij io lane should not be poisoned");
         let output = self.backend.run_owned(
             Some(&self.target),
             &[
@@ -700,12 +818,56 @@ impl ZellijAttachedSession {
 
         Ok(screen_snapshot_from_lines(pane_id, &pane_target, lines, source))
     }
+
+    async fn wait_for_action_settle(
+        &self,
+        previous: &ZellijSessionSnapshot,
+        action: &ZellijAction,
+    ) -> Result<ZellijSessionSnapshot, BackendError> {
+        let mut last_error = None;
+        for _ in 0..ZELLIJ_ACTION_SETTLE_ATTEMPTS {
+            match self.snapshot() {
+                Ok(snapshot) if action.settled(previous, &snapshot) => return Ok(snapshot),
+                Ok(_) => {}
+                Err(error) if is_transient_zellij_backend_error(&error) => {
+                    last_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+            time::sleep(ZELLIJ_POLL_INTERVAL).await;
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            BackendError::transport("zellij action did not settle within the retry window")
+        }))
+    }
 }
 
+#[derive(Clone)]
 struct ZellijSessionSnapshot {
     topology: TopologySnapshot,
     tab_targets: HashMap<TabId, ZellijTabTarget>,
     pane_targets: HashMap<PaneId, ZellijPaneTarget>,
+}
+
+impl ZellijSessionSnapshot {
+    fn focused_backend_tab_id(&self) -> Option<u32> {
+        self.topology
+            .focused_tab
+            .and_then(|tab_id| self.tab_targets.get(&tab_id))
+            .map(|tab| tab.backend_tab_id)
+    }
+
+    fn tab_exists(&self, backend_tab_id: u32) -> bool {
+        self.tab_targets.values().any(|tab| tab.backend_tab_id == backend_tab_id)
+    }
+
+    fn tab_title(&self, backend_tab_id: u32) -> Option<&str> {
+        self.tab_targets
+            .values()
+            .find(|tab| tab.backend_tab_id == backend_tab_id)
+            .and_then(|tab| tab.title.as_deref())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -759,6 +921,7 @@ enum ZellijSurface {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 struct ZellijTabRow {
     tab_id: u32,
+    #[serde(default)]
     position: u32,
     #[serde(default)]
     name: String,
@@ -828,6 +991,53 @@ enum ZellijAction {
 }
 
 impl ZellijAction {
+    fn requires_settle(&self) -> bool {
+        matches!(
+            self,
+            Self::NewTab { .. }
+                | Self::FocusTab { .. }
+                | Self::CloseTab { .. }
+                | Self::RenameTab { .. }
+                | Self::FocusPane { .. }
+                | Self::ClosePane { .. }
+        )
+    }
+
+    fn settled(&self, previous: &ZellijSessionSnapshot, current: &ZellijSessionSnapshot) -> bool {
+        match self {
+            Self::NewTab { title } => {
+                current.topology.tabs.len() > previous.topology.tabs.len()
+                    && title.as_ref().is_none_or(|title| {
+                        current
+                            .topology
+                            .tabs
+                            .iter()
+                            .any(|tab| tab.title.as_deref() == Some(title.as_str()))
+                    })
+            }
+            Self::FocusTab { backend_tab_id } => {
+                current.focused_backend_tab_id() == Some(*backend_tab_id)
+            }
+            Self::CloseTab { backend_tab_id } => !current.tab_exists(*backend_tab_id),
+            Self::RenameTab { backend_tab_id, title } => {
+                current.tab_title(*backend_tab_id) == Some(title.as_str())
+            }
+            Self::FocusPane { pane_ref } => current
+                .topology
+                .tabs
+                .iter()
+                .find(|tab| Some(tab.tab_id) == current.topology.focused_tab)
+                .and_then(|tab| tab.focused_pane)
+                .and_then(|pane_id| current.pane_targets.get(&pane_id))
+                .map(|pane| pane.backend_ref == *pane_ref)
+                .unwrap_or(false),
+            Self::ClosePane { pane_ref } => {
+                !current.pane_targets.values().any(|pane| pane.backend_ref == *pane_ref)
+            }
+            Self::WriteChars { .. } | Self::Paste { .. } | Self::SendKeys { .. } => true,
+        }
+    }
+
     fn args(&self) -> Vec<String> {
         match self {
             Self::NewTab { title } => {
@@ -910,13 +1120,62 @@ enum ZellijSubscribeEvent {
 }
 
 fn parse_tabs_json(output: &str) -> Result<Vec<ZellijTabRow>, BackendError> {
-    serde_json::from_str(output)
-        .map_err(|error| BackendError::internal(format!("invalid zellij list-tabs json: {error}")))
+    parse_json_array(output, "list-tabs")
 }
 
 fn parse_panes_json(output: &str) -> Result<Vec<ZellijPaneRow>, BackendError> {
-    serde_json::from_str(output)
-        .map_err(|error| BackendError::internal(format!("invalid zellij list-panes json: {error}")))
+    parse_json_array(output, "list-panes")
+}
+
+fn parse_json_array<T>(output: &str, command: &str) -> Result<Vec<T>, BackendError>
+where
+    T: DeserializeOwned,
+{
+    let payload: Value = serde_json::from_str(output).map_err(|error| {
+        BackendError::internal(format!("invalid zellij {command} json: {error}"))
+    })?;
+    match payload {
+        Value::Array(items) => serde_json::from_value(Value::Array(items)).map_err(|error| {
+            BackendError::internal(format!("invalid zellij {command} json: {error}"))
+        }),
+        other => Err(BackendError::internal(format!(
+            "unexpected zellij {command} payload while the session was settling: {}",
+            summarize_payload(&other)
+        ))),
+    }
+}
+
+fn summarize_payload(payload: &Value) -> String {
+    let rendered = payload.to_string();
+    if rendered.chars().count() > 160 {
+        format!("{}...", rendered.chars().take(160).collect::<String>())
+    } else {
+        rendered
+    }
+}
+
+fn is_transient_zellij_error(message: &str) -> bool {
+    message.contains("No active zellij sessions found")
+        || message.contains("There is no active session")
+        || message.contains("Session '") && message.contains("' not found")
+}
+
+fn is_transient_zellij_backend_error(error: &BackendError) -> bool {
+    is_transient_zellij_error(&error.message)
+        || error.message.contains("invalid zellij list-tabs json: EOF while parsing a value")
+        || error.message.contains("invalid zellij list-tabs json: expected value")
+        || error.message.contains("invalid zellij list-panes json: EOF while parsing a value")
+        || error.message.contains("invalid zellij list-panes json: expected value")
+        || error
+            .message
+            .contains("unexpected zellij list-tabs payload while the session was settling")
+        || error
+            .message
+            .contains("unexpected zellij list-panes payload while the session was settling")
+        || error.message.contains(
+            "zellij snapshot commands returned empty output while the session was still settling",
+        )
+        || error.message.contains("exposed no importable panes")
 }
 
 fn build_session_snapshot(
@@ -926,7 +1185,7 @@ fn build_session_snapshot(
     panes: &[ZellijPaneRow],
 ) -> Result<ZellijSessionSnapshot, BackendError> {
     let mut tabs = tabs.to_vec();
-    tabs.sort_by_key(|tab| tab.position);
+    tabs.sort_by_key(|tab| if tab.position == 0 { tab.tab_id } else { tab.position });
 
     let mut tab_targets = HashMap::new();
     let mut pane_targets = HashMap::new();
@@ -934,7 +1193,8 @@ fn build_session_snapshot(
     let mut focused_tab = None;
     let focused_tab_from_pane = panes.iter().find(|pane| pane.is_focused).map(|pane| pane.tab_id);
 
-    for tab in tabs {
+    for (ordinal, tab) in tabs.into_iter().enumerate() {
+        let position = if tab.position == 0 { ordinal as u32 + 1 } else { tab.position };
         let mut tab_panes: Vec<ZellijPaneRow> = panes
             .iter()
             .filter(|pane| pane.tab_id == tab.tab_id && !pane.is_floating)
@@ -945,7 +1205,7 @@ fn build_session_snapshot(
         }
 
         tab_panes.sort_by_key(|pane| (pane.pane_y, pane.pane_x, pane.id));
-        let tab_id = deterministic_tab_id(target, tab.tab_id, tab.position);
+        let tab_id = deterministic_tab_id(target, tab.tab_id, position);
         let pane_ids: Vec<PaneId> = tab_panes
             .iter()
             .map(|pane| {
@@ -975,11 +1235,7 @@ fn build_session_snapshot(
 
         tab_targets.insert(
             tab_id,
-            ZellijTabTarget {
-                backend_tab_id: tab.tab_id,
-                position: tab.position,
-                title: non_empty(&tab.name),
-            },
+            ZellijTabTarget { backend_tab_id: tab.tab_id, position, title: non_empty(&tab.name) },
         );
 
         if focused_tab.is_none() && (tab.active || focused_tab_from_pane == Some(tab.tab_id)) {
@@ -987,7 +1243,7 @@ fn build_session_snapshot(
         }
 
         topology_tabs.push((
-            tab.position,
+            position,
             TabSnapshot {
                 tab_id,
                 title: non_empty(&tab.name),
@@ -1211,7 +1467,7 @@ pub mod __fuzz {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex as StdMutex};
 
     use terminal_backend_api::{
         BackendErrorKind, MuxCommand, NewTabSpec, SendInputSpec, SendPasteSpec,
@@ -1631,6 +1887,7 @@ mod tests {
             backend: Arc::new(ZellijBackend),
             session_id,
             target,
+            io_lane: Arc::new(StdMutex::new(())),
             command_lane: Arc::new(Mutex::new(())),
         };
 
@@ -1668,6 +1925,7 @@ mod tests {
             backend: Arc::new(ZellijBackend),
             session_id,
             target,
+            io_lane: Arc::new(StdMutex::new(())),
             command_lane: Arc::new(Mutex::new(())),
         };
 

@@ -84,7 +84,7 @@ pub fn verify_node_package(package_dir: &Path) -> std::io::Result<()> {
 }
 
 pub fn pack_node_package(package_dir: &Path) -> std::io::Result<PathBuf> {
-    let output = Command::new("npm")
+    let output = Command::new(node_package_manager())
         .arg("pack")
         .arg("--json")
         .current_dir(package_dir)
@@ -125,7 +125,7 @@ pub fn install_node_package_tarball(tarball_path: &Path) -> std::io::Result<Path
         ),
     )?;
 
-    let output = Command::new("npm")
+    let output = Command::new(node_package_manager())
         .args(["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock"])
         .arg(tarball_path)
         .current_dir(&project_dir)
@@ -191,6 +191,18 @@ fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
         .unwrap_or_default();
 
     std::env::temp_dir().join(format!("{prefix}-{}-{nanos}.{suffix}", std::process::id()))
+}
+
+fn node_package_manager() -> &'static str {
+    #[cfg(windows)]
+    {
+        "npm.cmd"
+    }
+
+    #[cfg(not(windows))]
+    {
+        "npm"
+    }
 }
 
 fn candidate_cdylib_names() -> &'static [&'static str] {

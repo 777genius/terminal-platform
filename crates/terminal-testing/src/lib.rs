@@ -1,6 +1,7 @@
 //! Shared testing helpers and fixtures for daemon transport smoke coverage.
 
 use std::{
+    fs::{self, OpenOptions},
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -8,7 +9,11 @@ use std::{
 #[cfg(unix)]
 use std::sync::Arc;
 #[cfg(any(unix, windows))]
-use std::{process::Command, thread, time::Duration};
+use std::{
+    process::{Command, Stdio},
+    thread,
+    time::Duration,
+};
 
 #[cfg(unix)]
 use terminal_application::BackendCatalog;
@@ -208,12 +213,14 @@ pub fn unique_zellij_session_name(label: &str) -> String {
 #[derive(Debug)]
 pub struct ZellijSessionGuard {
     session_name: String,
+    _lock: ZellijTestLock,
 }
 
 #[cfg(any(unix, windows))]
 impl ZellijSessionGuard {
     pub fn spawn(session_name: &str) -> Result<Self, String> {
-        let output = Command::new("zellij")
+        let lock = ZellijTestLock::acquire()?;
+        let mut child = Command::new("zellij")
             .args([
                 "attach",
                 "--create-background",
@@ -222,16 +229,38 @@ impl ZellijSessionGuard {
                 "--default-layout",
                 "default",
             ])
-            .output()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|error| format!("failed to spawn zellij: {error}"))?;
+        let wait_result = wait_for_zellij_session(session_name);
+        if wait_result.is_ok() {
+            thread::spawn(move || {
+                thread::sleep(Duration::from_secs(3));
+                if let Ok(None) = child.try_wait() {
+                    let _ = child.kill();
+                }
+                let _ = child.wait_with_output();
+            });
+            return Ok(Self { session_name: session_name.to_string(), _lock: lock });
+        }
+
+        if let Ok(None) = child.try_wait() {
+            let _ = child.kill();
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|error| format!("failed to collect zellij spawn output: {error}"))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if !is_headless_zellij_spawn_error(&stderr) {
                 return Err(stderr.trim().to_string());
             }
         }
-        wait_for_zellij_session(session_name)?;
-        Ok(Self { session_name: session_name.to_string() })
+
+        Err(wait_result
+            .expect_err("wait_result should be an error once zellij session discovery fails"))
     }
 }
 
@@ -280,13 +309,60 @@ fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
 
 #[cfg(any(unix, windows))]
 fn wait_for_zellij_session(session_name: &str) -> Result<(), String> {
-    for _ in 0..40 {
-        let sessions = run_zellij(&["list-sessions", "--short", "--no-formatting"])?;
-        if sessions.lines().map(str::trim).any(|line| line == session_name) {
-            return Ok(());
+    let attempts = if cfg!(windows) { 600 } else { 200 };
+    for _ in 0..attempts {
+        match run_zellij(&["list-sessions", "--short", "--no-formatting"]) {
+            Ok(sessions) => {
+                if sessions.lines().map(str::trim).any(|line| line == session_name) {
+                    return Ok(());
+                }
+            }
+            Err(error) if is_transient_zellij_session_wait_error(&error) => {}
+            Err(error) => return Err(error),
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(100));
     }
 
     Err(format!("zellij session never appeared: {session_name}"))
+}
+
+#[cfg(any(unix, windows))]
+fn is_transient_zellij_session_wait_error(error: &str) -> bool {
+    error.contains("No active zellij sessions found")
+        || error.contains("There is no active session")
+        || error.contains("Session '") && error.contains("' not found")
+}
+
+#[cfg(any(unix, windows))]
+#[derive(Debug)]
+pub struct ZellijTestLock {
+    path: PathBuf,
+}
+
+#[cfg(any(unix, windows))]
+impl ZellijTestLock {
+    pub fn acquire() -> Result<Self, String> {
+        let path = std::env::temp_dir().join("terminal-platform-zellij-test.lock");
+        for _ in 0..9000 {
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => {
+                    drop(file);
+                    return Ok(Self { path });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(error) => return Err(format!("failed to acquire zellij test lock: {error}")),
+            }
+        }
+
+        Err(format!("timed out acquiring zellij test lock at {}", path.display()))
+    }
+}
+
+#[cfg(any(unix, windows))]
+impl Drop for ZellijTestLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }

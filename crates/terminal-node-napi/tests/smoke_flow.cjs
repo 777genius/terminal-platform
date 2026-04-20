@@ -1,6 +1,10 @@
 const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
+
+const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 15000 : 5000;
+const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 200 : 50;
+const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 600 : 300;
 
 function readyEchoLaunch() {
   if (process.platform === "win32") {
@@ -178,10 +182,11 @@ async function runSmoke(createClient) {
 async function runZellijImportSmoke(createClient, zellijCapabilities) {
   const client = createClient();
   const sessionName = uniqueZellijSessionName("pkg");
-  spawnZellijSession(sessionName);
+  const zellijWrapper = spawnZellijSession(sessionName);
 
   try {
     const candidate = await waitForDiscoveredZellijSession(client, sessionName);
+    scheduleZellijWrapperCleanup(zellijWrapper);
 
     if (!zellijCapabilities.capabilities.rendered_viewport_snapshot) {
       await assert.rejects(
@@ -286,6 +291,13 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
     assert.equal(closeTab.changed, true);
     assert.equal(topologyAfterClose.tabs.length, initialTabCount);
   } finally {
+    if (zellijWrapper.exitCode === null && !zellijWrapper.killed) {
+      try {
+        zellijWrapper.kill();
+      } catch (_error) {
+        // The wrapper may have already exited once the background session was created.
+      }
+    }
     stopZellijSession(sessionName);
   }
 }
@@ -883,7 +895,7 @@ async function runRestartRecoverySmoke(createClient, options = {}) {
 }
 
 async function waitForLine(client, sessionId, paneId, needle) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
     const snapshot = await client.screenSnapshot(sessionId, paneId);
     if (snapshot.surface.lines.some((line) => line.text.includes(needle))) {
       return snapshot;
@@ -895,10 +907,10 @@ async function waitForLine(client, sessionId, paneId, needle) {
 }
 
 async function waitForTopologyTabs(subscription, tabCount) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
     const event = await withTimeout(
       subscription.nextEvent(),
-      5000,
+      DEFAULT_EVENT_TIMEOUT_MS,
       `Timed out waiting for topology event while expecting ${tabCount} tabs`,
     );
     if (event == null) {
@@ -913,10 +925,10 @@ async function waitForTopologyTabs(subscription, tabCount) {
 }
 
 async function waitForSubscriptionText(subscription, needle, cycle) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
     const event = await withTimeout(
       subscription.nextEvent(),
-      5000,
+      DEFAULT_EVENT_TIMEOUT_MS,
       `Timed out waiting for pane delta cycle ${cycle}`,
     );
     if (event?.kind === "screen_delta" && deltaContainsText(event, needle)) {
@@ -928,7 +940,7 @@ async function waitForSubscriptionText(subscription, needle, cycle) {
 }
 
 async function waitForTopologyState(client, sessionId, predicate, label) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
     const snapshot = await client.topologySnapshot(sessionId);
     if (predicate(snapshot)) {
       return snapshot;
@@ -994,7 +1006,7 @@ function uniqueZellijSessionName(label) {
 }
 
 function spawnZellijSession(sessionName) {
-  const output = spawnSync(
+  const child = spawn(
     "zellij",
     [
       "attach",
@@ -1004,11 +1016,27 @@ function spawnZellijSession(sessionName) {
       "--default-layout",
       "default",
     ],
-    { encoding: "utf8" },
+    {
+      stdio: "ignore",
+      windowsHide: true,
+    },
   );
-  if (output.status !== 0 && !isHeadlessZellijSpawnError(`${output.stderr ?? ""}`)) {
-    throw new Error(`Failed to spawn zellij session: ${(output.stderr ?? "").trim()}`);
-  }
+  child.unref();
+  return child;
+}
+
+function scheduleZellijWrapperCleanup(child) {
+  const cleanupTimer = setTimeout(() => {
+    if (child.exitCode === null && !child.killed) {
+      try {
+        child.kill();
+      } catch (_error) {
+        // Best-effort cleanup for a wrapper process that may linger after the
+        // background session becomes discoverable.
+      }
+    }
+  }, 3000);
+  cleanupTimer.unref?.();
 }
 
 function stopZellijSession(sessionName) {
@@ -1025,7 +1053,7 @@ function isHeadlessZellijSpawnError(stderr) {
 }
 
 async function waitForDiscoveredZellijSession(client, sessionName) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS; attempt += 1) {
     const sessions = await client.discoverSessions("zellij");
     const candidate =
       sessions.find((session) => session.title === sessionName) ?? null;

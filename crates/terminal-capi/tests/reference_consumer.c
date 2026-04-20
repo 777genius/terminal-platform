@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,11 +7,23 @@
 #if defined(_WIN32)
 #include <windows.h>
 #else
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 #endif
 
 #include "terminal-platform-capi.h"
+
+static void sleep_millis(long milliseconds) {
+#if defined(_WIN32)
+  Sleep((DWORD)milliseconds);
+#else
+  struct timespec delay;
+  delay.tv_sec = milliseconds / 1000;
+  delay.tv_nsec = (milliseconds % 1000) * 1000000L;
+  nanosleep(&delay, NULL);
+#endif
+}
 
 static int expect_string_ok(const char *label, TerminalCapiStringResult result, char **out_json) {
   if (result.status != 0 || result.value == NULL) {
@@ -99,14 +113,7 @@ static int wait_for_file(const char *path, const char *label) {
       fclose(file);
       return 1;
     }
-#if defined(_WIN32)
-    Sleep(100);
-#else
-    {
-      struct timespec delay = {0, 100000000L};
-      nanosleep(&delay, NULL);
-    }
-#endif
+    sleep_millis(100);
   }
 
   fprintf(stderr, "timed out waiting for %s at %s\n", label, path);
@@ -296,6 +303,10 @@ int main(int argc, char **argv) {
   if (argc == 4) {
     mode = argv[3];
   }
+
+#if !defined(_WIN32)
+  signal(SIGPIPE, SIG_IGN);
+#endif
 
   if (strcmp(argv[1], "namespaced") == 0) {
     if (!expect_client_ok("new_from_namespaced_address",
@@ -526,7 +537,7 @@ int main(int argc, char **argv) {
             terminal_capi_client_handshake_info_json(client);
         if (handshake_result.status == 0 && handshake_result.value != NULL) {
           terminal_capi_string_free(handshake_result.value);
-          usleep(100000);
+          sleep_millis(100);
           continue;
         }
 
@@ -550,7 +561,7 @@ int main(int argc, char **argv) {
           if (handshake_result.value != NULL) {
             terminal_capi_string_free(handshake_result.value);
           }
-          usleep(100000);
+          sleep_millis(100);
           continue;
         }
 

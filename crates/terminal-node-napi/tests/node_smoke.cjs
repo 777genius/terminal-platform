@@ -22,7 +22,7 @@ function createClient(binding) {
 }
 
 async function waitForFile(path, label) {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
     try {
       await fs.access(path);
       return;

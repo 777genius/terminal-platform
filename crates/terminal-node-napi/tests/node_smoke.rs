@@ -7,13 +7,16 @@ use std::{
 use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
 use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_protocol::LocalSocketAddress;
-use terminal_testing::{daemon_fixture, unique_socket_address, wait_for_daemon_ready};
+use terminal_testing::{
+    ZellijTestLock, daemon_fixture, unique_socket_address, wait_for_daemon_ready,
+};
 use tokio::time::{Duration, sleep};
 
 mod support;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn roundtrips_node_addon_against_daemon_fixture() {
+    let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
     let fixture = daemon_fixture("terminal-node-napi-smoke").expect("fixture should start");
     wait_for_daemon_ready(&fixture.client).await;
     let addon_path = support::materialize_node_addon().expect("node addon should be materialized");

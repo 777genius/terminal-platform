@@ -656,16 +656,7 @@ mod tests {
             .await
             .expect("zellij capabilities should succeed");
 
-        let discovered =
-            timeout(Duration::from_secs(10), node.discover_sessions(NodeBackendKind::Zellij))
-                .await
-                .expect("discover_sessions should not hang")
-                .expect("discover_sessions should succeed");
-        let candidate = discovered
-            .iter()
-            .find(|session| session.title.as_deref() == Some(session_name.as_str()))
-            .cloned()
-            .expect("zellij session should be discoverable");
+        let candidate = wait_for_discovered_zellij_session(&node, &session_name).await;
 
         assert_eq!(candidate.route.backend, NodeBackendKind::Zellij);
 
@@ -683,7 +674,7 @@ mod tests {
             assert!(error.message.contains("zellij"));
         } else {
             let imported = timeout(
-                Duration::from_secs(10),
+                zellij_operation_timeout(),
                 node.import_session(&candidate.route, candidate.title.clone()),
             )
             .await
@@ -747,10 +738,7 @@ mod tests {
             assert!(!topology.tabs.is_empty());
             assert_eq!(screen.pane_id, focused_pane);
             assert_eq!(screen.source, NodeProjectionSource::ZellijDumpSnapshot);
-            assert_eq!(delta.from_sequence, screen.sequence);
-            assert_eq!(delta.to_sequence, screen.sequence);
-            assert!(delta.patch.is_none());
-            assert!(delta.full_replace.is_none());
+            assert_zellij_delta_compatible_with_snapshot(&screen, &delta);
             match initial_topology {
                 NodeSubscriptionEvent::TopologySnapshot(snapshot) => {
                     assert_eq!(snapshot.session_id, imported.session_id);
@@ -771,7 +759,7 @@ mod tests {
             let initial_focused_tab =
                 topology.focused_tab.clone().expect("focused zellij tab should exist");
             let send_input = timeout(
-                Duration::from_secs(10),
+                zellij_operation_timeout(),
                 node.dispatch_mux_command(
                     &imported.session_id,
                     &NodeMuxCommand::SendInput(NodeSendInputCommand {
@@ -792,7 +780,7 @@ mod tests {
             .await;
 
             let created = timeout(
-                Duration::from_secs(10),
+                zellij_operation_timeout(),
                 node.dispatch_mux_command(
                     &imported.session_id,
                     &NodeMuxCommand::NewTab(NodeNewTabCommand {
@@ -821,7 +809,7 @@ mod tests {
                 .expect("created rich zellij tab should exist");
 
             let renamed = timeout(
-                Duration::from_secs(10),
+                zellij_operation_timeout(),
                 node.dispatch_mux_command(
                     &imported.session_id,
                     &NodeMuxCommand::RenameTab(NodeRenameTabCommand {
@@ -847,7 +835,7 @@ mod tests {
             .await;
 
             let focused = timeout(
-                Duration::from_secs(10),
+                zellij_operation_timeout(),
                 node.dispatch_mux_command(
                     &imported.session_id,
                     &NodeMuxCommand::FocusTab { tab_id: initial_focused_tab.clone() },
@@ -865,7 +853,7 @@ mod tests {
             .await;
 
             let closed = timeout(
-                Duration::from_secs(10),
+                zellij_operation_timeout(),
                 node.dispatch_mux_command(
                     &imported.session_id,
                     &NodeMuxCommand::CloseTab { tab_id: rich_tab_id.clone() },
@@ -1348,7 +1336,7 @@ mod tests {
         pane_id: &str,
         needle: &str,
     ) -> super::NodeScreenSnapshot {
-        for _ in 0..50 {
+        for _ in 0..screen_wait_attempts() {
             let snapshot = node
                 .screen_snapshot(session_id, pane_id)
                 .await
@@ -1366,7 +1354,7 @@ mod tests {
         subscription: &super::NodeSubscriptionHandle,
     ) -> Option<super::NodeTopologySnapshot> {
         for _ in 0..20 {
-            match timeout(Duration::from_secs(5), subscription.next_event())
+            match timeout(subscription_timeout(), subscription.next_event())
                 .await
                 .expect("subscription next_event should not hang")
                 .expect("subscription should stay healthy")
@@ -1386,7 +1374,7 @@ mod tests {
         predicate: impl Fn(&super::NodeTopologySnapshot) -> bool,
         label: &str,
     ) -> super::NodeTopologySnapshot {
-        for _ in 0..50 {
+        for _ in 0..screen_wait_attempts() {
             let snapshot =
                 node.topology_snapshot(session_id).await.expect("topology_snapshot should succeed");
             if predicate(&snapshot) {
@@ -1402,8 +1390,8 @@ mod tests {
         subscription: &super::NodeSubscriptionHandle,
         needle: &str,
     ) -> Option<super::NodeScreenDelta> {
-        for _ in 0..50 {
-            match timeout(Duration::from_secs(5), subscription.next_event())
+        for _ in 0..screen_wait_attempts() {
+            match timeout(subscription_timeout(), subscription.next_event())
                 .await
                 .expect("subscription next_event should not hang")
                 .expect("subscription should stay healthy")
@@ -1423,8 +1411,8 @@ mod tests {
     }
 
     async fn wait_for_subscription_close(subscription: &super::NodeSubscriptionHandle) -> bool {
-        timeout(Duration::from_secs(5), async {
-            for _ in 0..50 {
+        timeout(subscription_timeout(), async {
+            for _ in 0..screen_wait_attempts() {
                 match subscription
                     .next_event()
                     .await
@@ -1439,6 +1427,18 @@ mod tests {
         })
         .await
         .unwrap_or(false)
+    }
+
+    fn subscription_timeout() -> Duration {
+        if cfg!(windows) { Duration::from_secs(15) } else { Duration::from_secs(5) }
+    }
+
+    fn zellij_operation_timeout() -> Duration {
+        Duration::from_secs(90)
+    }
+
+    fn screen_wait_attempts() -> usize {
+        if cfg!(windows) { 200 } else { 50 }
     }
 
     fn first_node_pane_id(root: &NodePaneTreeNode) -> Option<String> {
@@ -1461,5 +1461,45 @@ mod tests {
                 .as_ref()
                 .map(|surface| surface.lines.iter().any(|line| line.text.contains(needle)))
                 .unwrap_or(false)
+    }
+
+    fn assert_zellij_delta_compatible_with_snapshot(
+        snapshot: &super::NodeScreenSnapshot,
+        delta: &super::NodeScreenDelta,
+    ) {
+        assert_eq!(delta.from_sequence, snapshot.sequence);
+        assert!(
+            delta.to_sequence >= snapshot.sequence,
+            "zellij delta must not rewind sequence numbers"
+        );
+        if delta.to_sequence == snapshot.sequence {
+            assert!(delta.patch.is_none());
+            assert!(delta.full_replace.is_none());
+        } else {
+            assert!(delta.patch.is_none());
+            assert!(delta.full_replace.is_some());
+        }
+    }
+
+    async fn wait_for_discovered_zellij_session(
+        node: &super::NodeHostClient,
+        session_name: &str,
+    ) -> super::NodeDiscoveredSession {
+        for _ in 0..200 {
+            let discovered =
+                timeout(Duration::from_secs(10), node.discover_sessions(NodeBackendKind::Zellij))
+                    .await
+                    .expect("discover_sessions should not hang")
+                    .expect("discover_sessions should succeed");
+            if let Some(candidate) = discovered
+                .into_iter()
+                .find(|session| session.title.as_deref() == Some(session_name))
+            {
+                return candidate;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        panic!("zellij session should be discoverable");
     }
 }

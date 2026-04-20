@@ -1,12 +1,13 @@
 use std::{path::PathBuf, process::Command};
 
 use terminal_protocol::LocalSocketAddress;
-use terminal_testing::{daemon_fixture, wait_for_daemon_ready};
+use terminal_testing::{ZellijTestLock, daemon_fixture, wait_for_daemon_ready};
 
 mod support;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn roundtrips_staged_package_through_cjs_and_esm() {
+    let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
     let fixture = daemon_fixture("terminal-node-package-smoke").expect("fixture should start");
     wait_for_daemon_ready(&fixture.client).await;
     let addon_path = support::locate_cdylib().expect("node addon should be built");
