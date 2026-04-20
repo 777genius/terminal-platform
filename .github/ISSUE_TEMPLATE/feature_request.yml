@@ -1,0 +1,42 @@
+name: Feature request
+description: Propose a new capability or improvement
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      placeholder: What are you trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      placeholder: Describe the change you want.
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Likely affected area
+      options:
+        - Native runtime
+        - tmux adapter
+        - Zellij adapter
+        - Daemon or transport
+        - Node or Electron package
+        - C ABI
+        - Docs or DX
+        - Not sure
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints or non-goals
+      description: Mention platform limits, backend limits, or parity assumptions to avoid
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
