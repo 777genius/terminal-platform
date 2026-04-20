@@ -83,6 +83,9 @@ Build, verify and pack a local tarball:
 node ./scripts/pack-local-package.mjs --out /tmp/terminal-platform-node
 ```
 
+The publish smoke lane also installs the packed tarball into a temporary Node project
+and exercises both the CJS and ESM entrypoints through normal package resolution.
+
 The staged directory contains:
 
 - `index.cjs`

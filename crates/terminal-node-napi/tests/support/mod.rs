@@ -112,6 +112,37 @@ pub fn pack_node_package(package_dir: &Path) -> std::io::Result<PathBuf> {
     Ok(package_dir.join(filename))
 }
 
+pub fn install_node_package_tarball(tarball_path: &Path) -> std::io::Result<PathBuf> {
+    let project_dir = unique_temp_dir("terminal-node-install");
+    fs::create_dir_all(&project_dir)?;
+    fs::write(
+        project_dir.join("package.json"),
+        concat!(
+            "{\n",
+            "  \"name\": \"terminal-node-install-smoke\",\n",
+            "  \"private\": true\n",
+            "}\n"
+        ),
+    )?;
+
+    let output = Command::new("npm")
+        .args(["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock"])
+        .arg(tarball_path)
+        .current_dir(&project_dir)
+        .output()
+        .expect("npm install should launch");
+
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "npm install failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    Ok(project_dir)
+}
+
 pub fn tar_list(archive_path: &Path) -> std::io::Result<Vec<String>> {
     let output =
         Command::new("tar").arg("-tf").arg(archive_path).output().expect("tar should launch");

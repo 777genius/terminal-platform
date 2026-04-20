@@ -48,6 +48,7 @@ Current workspace shape:
 - staged package surface in `crates/terminal-node-napi/package`
 - `index.cjs` and `index.mjs` loader entrypoints
 - `index.d.ts` plus generated `bindings/*.d.ts`
+- publish/install smoke through a packed local tarball in a temp Node project
 
 ## C ABI surface
 
