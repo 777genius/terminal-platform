@@ -1,7 +1,15 @@
-use std::{fs, path::PathBuf, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
+use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_protocol::LocalSocketAddress;
-use terminal_testing::{daemon_fixture, wait_for_daemon_ready};
+use terminal_testing::{daemon_fixture, unique_socket_address, wait_for_daemon_ready};
+use tokio::time::{Duration, sleep};
 
 mod support;
 
@@ -58,6 +66,192 @@ function createClient(binding) {
 async function main() {
   await runSmoke(() => createClient(sdk));
   await runPackageWatchSmoke(() => createClient(sdk), sdk);
+}
+
+main().catch((error) => {
+  process.stderr.write(`${error.stack ?? error}\n`);
+  process.exit(1);
+});
+"#;
+
+const INSTALL_SHUTDOWN_SMOKE_CJS: &str = r#"const fs = require("node:fs/promises");
+const { runShutdownSmoke } = require(process.env.TERMINAL_NODE_SMOKE_FLOW);
+const sdk = require("terminal-platform-node");
+
+function createClient() {
+  const kind = process.env.TERMINAL_NODE_ADDRESS_KIND;
+  const value = process.env.TERMINAL_NODE_ADDRESS_VALUE;
+
+  if (kind === "namespaced") {
+    return sdk.TerminalNodeClient.fromNamespacedAddress(value);
+  }
+
+  if (kind === "filesystem") {
+    return sdk.TerminalNodeClient.fromFilesystemPath(value);
+  }
+
+  throw new Error(`Unsupported address kind: ${kind}`);
+}
+
+async function main() {
+  const result = await runShutdownSmoke(() => createClient(), {
+    onReady: async () => {
+      await fs.writeFile(process.env.TERMINAL_NODE_READY_FILE, "ready\n");
+    },
+  });
+  process.stdout.write(JSON.stringify(result));
+}
+
+main().catch((error) => {
+  process.stderr.write(`${error.stack ?? error}\n`);
+  process.exit(1);
+});
+"#;
+
+const INSTALL_SHUTDOWN_SMOKE_MJS: &str = r#"import fs from "node:fs/promises";
+import sdk from "terminal-platform-node";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { runShutdownSmoke } = require(process.env.TERMINAL_NODE_SMOKE_FLOW);
+
+function createClient() {
+  const kind = process.env.TERMINAL_NODE_ADDRESS_KIND;
+  const value = process.env.TERMINAL_NODE_ADDRESS_VALUE;
+
+  if (kind === "namespaced") {
+    return sdk.TerminalNodeClient.fromNamespacedAddress(value);
+  }
+
+  if (kind === "filesystem") {
+    return sdk.TerminalNodeClient.fromFilesystemPath(value);
+  }
+
+  throw new Error(`Unsupported address kind: ${kind}`);
+}
+
+async function main() {
+  const result = await runShutdownSmoke(() => createClient(), {
+    onReady: async () => {
+      await fs.writeFile(process.env.TERMINAL_NODE_READY_FILE, "ready\n");
+    },
+  });
+  process.stdout.write(JSON.stringify(result));
+}
+
+main().catch((error) => {
+  process.stderr.write(`${error.stack ?? error}\n`);
+  process.exit(1);
+});
+"#;
+
+const INSTALL_RESTART_SMOKE_CJS: &str = r#"const fs = require("node:fs/promises");
+const { runRestartRecoverySmoke } = require(process.env.TERMINAL_NODE_SMOKE_FLOW);
+const sdk = require("terminal-platform-node");
+
+function createClient() {
+  const kind = process.env.TERMINAL_NODE_ADDRESS_KIND;
+  const value = process.env.TERMINAL_NODE_ADDRESS_VALUE;
+
+  if (kind === "namespaced") {
+    return sdk.TerminalNodeClient.fromNamespacedAddress(value);
+  }
+
+  if (kind === "filesystem") {
+    return sdk.TerminalNodeClient.fromFilesystemPath(value);
+  }
+
+  throw new Error(`Unsupported address kind: ${kind}`);
+}
+
+async function waitForFile(path, label) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try {
+      await fs.access(path);
+      return;
+    } catch (_error) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  throw new Error(`Timed out waiting for ${label}: ${path}`);
+}
+
+async function main() {
+  const result = await runRestartRecoverySmoke(() => createClient(), {
+    onInitialReady: async () => {
+      await fs.writeFile(process.env.TERMINAL_NODE_INITIAL_READY_FILE, "ready\n");
+    },
+    waitForStop: async () => {
+      await waitForFile(process.env.TERMINAL_NODE_STOP_FILE, "daemon stop signal");
+    },
+    onStaleObserved: async () => {
+      await fs.writeFile(process.env.TERMINAL_NODE_STALE_READY_FILE, "stale\n");
+    },
+    waitForRestart: async () => {
+      await waitForFile(process.env.TERMINAL_NODE_RESTART_FILE, "daemon restart signal");
+    },
+  });
+  process.stdout.write(JSON.stringify(result));
+}
+
+main().catch((error) => {
+  process.stderr.write(`${error.stack ?? error}\n`);
+  process.exit(1);
+});
+"#;
+
+const INSTALL_RESTART_SMOKE_MJS: &str = r#"import fs from "node:fs/promises";
+import sdk from "terminal-platform-node";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { runRestartRecoverySmoke } = require(process.env.TERMINAL_NODE_SMOKE_FLOW);
+
+function createClient() {
+  const kind = process.env.TERMINAL_NODE_ADDRESS_KIND;
+  const value = process.env.TERMINAL_NODE_ADDRESS_VALUE;
+
+  if (kind === "namespaced") {
+    return sdk.TerminalNodeClient.fromNamespacedAddress(value);
+  }
+
+  if (kind === "filesystem") {
+    return sdk.TerminalNodeClient.fromFilesystemPath(value);
+  }
+
+  throw new Error(`Unsupported address kind: ${kind}`);
+}
+
+async function waitForFile(path, label) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try {
+      await fs.access(path);
+      return;
+    } catch (_error) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  throw new Error(`Timed out waiting for ${label}: ${path}`);
+}
+
+async function main() {
+  const result = await runRestartRecoverySmoke(() => createClient(), {
+    onInitialReady: async () => {
+      await fs.writeFile(process.env.TERMINAL_NODE_INITIAL_READY_FILE, "ready\n");
+    },
+    waitForStop: async () => {
+      await waitForFile(process.env.TERMINAL_NODE_STOP_FILE, "daemon stop signal");
+    },
+    onStaleObserved: async () => {
+      await fs.writeFile(process.env.TERMINAL_NODE_STALE_READY_FILE, "stale\n");
+    },
+    waitForRestart: async () => {
+      await waitForFile(process.env.TERMINAL_NODE_RESTART_FILE, "daemon restart signal");
+    },
+  });
+  process.stdout.write(JSON.stringify(result));
 }
 
 main().catch((error) => {
@@ -131,4 +325,192 @@ async fn roundtrips_installed_tarball_through_cjs_and_esm() {
     }
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn installed_tarball_handles_shutdown_and_restart_flows() {
+    let addon_path = support::locate_cdylib().expect("node addon should be built");
+    let package_dir =
+        support::stage_node_package(&addon_path).expect("package should stage successfully");
+    support::verify_node_package(&package_dir).expect("package should verify successfully");
+    let tarball_path = support::pack_node_package(&package_dir).expect("package should pack");
+    let install_dir = support::install_node_package_tarball(&tarball_path)
+        .expect("packed tarball should install into temp project");
+    let smoke_flow_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/smoke_flow.cjs");
+
+    fs::write(
+        install_dir.join("install_shutdown_smoke.cjs"),
+        INSTALL_SHUTDOWN_SMOKE_CJS,
+    )
+    .expect("cjs install shutdown smoke should write");
+    fs::write(
+        install_dir.join("install_shutdown_smoke.mjs"),
+        INSTALL_SHUTDOWN_SMOKE_MJS,
+    )
+    .expect("esm install shutdown smoke should write");
+    fs::write(
+        install_dir.join("install_restart_smoke.cjs"),
+        INSTALL_RESTART_SMOKE_CJS,
+    )
+    .expect("cjs install restart smoke should write");
+    fs::write(
+        install_dir.join("install_restart_smoke.mjs"),
+        INSTALL_RESTART_SMOKE_MJS,
+    )
+    .expect("esm install restart smoke should write");
+
+    for (script, fixture_label) in [
+        ("install_shutdown_smoke.cjs", "node-install-close-cjs"),
+        ("install_shutdown_smoke.mjs", "node-install-close-mjs"),
+    ] {
+        let fixture = daemon_fixture(fixture_label).expect("fixture should start");
+        wait_for_daemon_ready(&fixture.client).await;
+        let (address_kind, address_value) = match fixture.client.address() {
+            LocalSocketAddress::Namespaced(value) => ("namespaced", value.clone()),
+            LocalSocketAddress::Filesystem(path) => ("filesystem", path.display().to_string()),
+        };
+        let ready_file = unique_temp_path("terminal-node-install-close", "ready");
+        let child = spawn_install_script(
+            &install_dir,
+            script,
+            &[
+                ("TERMINAL_NODE_SMOKE_FLOW", smoke_flow_path.as_path()),
+                ("TERMINAL_NODE_READY_FILE", ready_file.as_path()),
+                ("TERMINAL_NODE_ADDRESS_KIND", Path::new(address_kind)),
+                ("TERMINAL_NODE_ADDRESS_VALUE", Path::new(&address_value)),
+            ],
+        );
+        wait_for_file(&ready_file).await;
+        fixture.shutdown().await.expect("fixture should stop cleanly");
+        let output = child
+            .wait_with_output()
+            .expect("installed shutdown smoke should collect output");
+
+        assert!(
+            output.status.success(),
+            "installed package shutdown smoke {script} failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("\"subscription_closed\":true"),
+            "installed package shutdown smoke {script} should confirm subscription closure"
+        );
+        assert!(
+            stdout.contains("\"watch_closed\":true"),
+            "installed package shutdown smoke {script} should confirm watch closure"
+        );
+
+        let _ = std::fs::remove_file(&ready_file);
+    }
+
+    for (script, label) in [
+        ("install_restart_smoke.cjs", "node-install-restart-cjs"),
+        ("install_restart_smoke.mjs", "node-install-restart-mjs"),
+    ] {
+        let address = unique_socket_address(label);
+        let initial_client = LocalSocketDaemonClient::new(address.clone());
+        let mut server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("initial daemon should bind");
+        wait_for_daemon_ready(&initial_client).await;
+
+        let (address_kind, address_value) = match &address {
+            LocalSocketAddress::Namespaced(value) => ("namespaced", value.clone()),
+            LocalSocketAddress::Filesystem(path) => ("filesystem", path.display().to_string()),
+        };
+        let initial_ready_file = unique_temp_path("terminal-node-install-restart", "ready");
+        let stop_file = unique_temp_path("terminal-node-install-restart", "stop");
+        let stale_ready_file = unique_temp_path("terminal-node-install-restart", "stale");
+        let restart_file = unique_temp_path("terminal-node-install-restart", "restart");
+
+        let child = spawn_install_script(
+            &install_dir,
+            script,
+            &[
+                ("TERMINAL_NODE_SMOKE_FLOW", smoke_flow_path.as_path()),
+                ("TERMINAL_NODE_INITIAL_READY_FILE", initial_ready_file.as_path()),
+                ("TERMINAL_NODE_STOP_FILE", stop_file.as_path()),
+                ("TERMINAL_NODE_STALE_READY_FILE", stale_ready_file.as_path()),
+                ("TERMINAL_NODE_RESTART_FILE", restart_file.as_path()),
+                ("TERMINAL_NODE_ADDRESS_KIND", Path::new(address_kind)),
+                ("TERMINAL_NODE_ADDRESS_VALUE", Path::new(&address_value)),
+            ],
+        );
+
+        wait_for_file(&initial_ready_file).await;
+        server.shutdown().await.expect("initial daemon should stop cleanly");
+        std::fs::write(&stop_file, "stopped\n").expect("stop signal file should write");
+        wait_for_file(&stale_ready_file).await;
+
+        let restarted_client = LocalSocketDaemonClient::new(address.clone());
+        server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("replacement daemon should bind");
+        wait_for_daemon_ready(&restarted_client).await;
+        std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");
+
+        let output = child
+            .wait_with_output()
+            .expect("installed restart smoke should collect output");
+        server.shutdown().await.expect("replacement daemon should stop cleanly");
+
+        assert!(
+            output.status.success(),
+            "installed package restart smoke {script} failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("\"stale_error_observed\":true"),
+            "installed package restart smoke {script} should confirm stale daemon failure"
+        );
+        assert!(
+            stdout.contains("\"recovered\":true"),
+            "installed package restart smoke {script} should confirm recovery against restarted daemon"
+        );
+
+        let _ = std::fs::remove_file(&initial_ready_file);
+        let _ = std::fs::remove_file(&stop_file);
+        let _ = std::fs::remove_file(&stale_ready_file);
+        let _ = std::fs::remove_file(&restart_file);
+    }
+}
+
+fn spawn_install_script(
+    install_dir: &Path,
+    script: &str,
+    envs: &[(&str, &Path)],
+) -> std::process::Child {
+    let mut command = Command::new("node");
+    command.arg(install_dir.join(script)).current_dir(install_dir);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+
+    command
+        .spawn()
+        .expect("installed package smoke script should launch")
+}
+
+async fn wait_for_file(path: &Path) {
+    for _ in 0..200 {
+        if path.is_file() {
+            return;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!("installed package smoke never observed file: {}", path.display());
+}
+
+fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+
+    std::env::temp_dir().join(format!("{prefix}-{}-{nanos}.{suffix}", std::process::id()))
 }
