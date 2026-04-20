@@ -40,6 +40,7 @@ use terminal_testing::{
     daemon_fixture, daemon_fixture_with_state, daemon_state, isolated_daemon_state,
     unique_sqlite_path,
 };
+use tokio::time::sleep;
 
 #[test]
 fn bootstrap_smoke_exposes_empty_daemon_state() {
@@ -1932,7 +1933,8 @@ async fn wait_for_screen_line(
     pane_id: terminal_domain::PaneId,
     needle: &str,
 ) {
-    for _ in 0..40 {
+    let mut last_lines = Vec::new();
+    for _ in 0..120 {
         let screen = fixture
             .client
             .screen_snapshot(session_id, pane_id)
@@ -1941,10 +1943,11 @@ async fn wait_for_screen_line(
         if screen.surface.lines.iter().any(|line| line.text.contains(needle)) {
             return;
         }
-        thread::sleep(Duration::from_millis(50));
+        last_lines = screen.surface.lines.iter().map(|line| line.text.clone()).take(12).collect();
+        sleep(Duration::from_millis(50)).await;
     }
 
-    panic!("screen never contained expected text: {needle}");
+    panic!("screen never contained expected text: {needle}; last lines: {last_lines:?}");
 }
 
 #[cfg(unix)]

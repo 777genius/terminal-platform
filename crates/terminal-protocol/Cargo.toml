@@ -13,5 +13,8 @@ terminal-domain = { path = "../terminal-domain" }
 terminal-projection = { path = "../terminal-projection" }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [lints]
 workspace = true

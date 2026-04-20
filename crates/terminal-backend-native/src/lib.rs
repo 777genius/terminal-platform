@@ -295,7 +295,7 @@ fn open_pane_surface_subscription(
 
 #[cfg(test)]
 mod tests {
-    use std::{thread, time::Duration};
+    use std::time::Duration;
 
     use terminal_backend_api::BackendSubscriptionEvent;
     use terminal_backend_api::{
@@ -306,6 +306,7 @@ mod tests {
     use terminal_domain::BackendKind;
     use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection};
     use terminal_projection::ProjectionSource;
+    use tokio::time::sleep;
 
     use super::NativeBackend;
 
@@ -880,16 +881,19 @@ mod tests {
         pane_id: terminal_domain::PaneId,
         needle: &str,
     ) {
-        for _ in 0..40 {
+        let mut last_lines = Vec::new();
+        for _ in 0..120 {
             let screen =
                 session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
             if screen.surface.lines.iter().any(|line| line.text.contains(needle)) {
                 return;
             }
-            thread::sleep(Duration::from_millis(50));
+            last_lines =
+                screen.surface.lines.iter().map(|line| line.text.clone()).take(12).collect();
+            sleep(Duration::from_millis(50)).await;
         }
 
-        panic!("screen never contained expected text: {needle}");
+        panic!("screen never contained expected text: {needle}; last lines: {last_lines:?}");
     }
 
     fn collect_pane_ids(root: &terminal_mux_domain::PaneTreeNode) -> Vec<terminal_domain::PaneId> {

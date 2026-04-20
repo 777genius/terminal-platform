@@ -503,6 +503,7 @@ mod tests {
     use terminal_protocol::{
         DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion, SubscriptionEvent,
     };
+    use tokio::time::sleep;
 
     use super::{HandshakeAssessmentStatus, LocalSocketDaemonClient};
 
@@ -591,7 +592,8 @@ mod tests {
         pane_id: terminal_domain::PaneId,
         needle: &str,
     ) {
-        for _ in 0..40 {
+        let mut last_lines = Vec::new();
+        for _ in 0..120 {
             let screen = client
                 .screen_snapshot(session_id, pane_id)
                 .await
@@ -599,10 +601,12 @@ mod tests {
             if screen.surface.lines.iter().any(|line| line.text.contains(needle)) {
                 return;
             }
-            thread::sleep(Duration::from_millis(50));
+            last_lines =
+                screen.surface.lines.iter().map(|line| line.text.clone()).take(12).collect();
+            sleep(Duration::from_millis(50)).await;
         }
 
-        panic!("screen never contained expected text: {needle}");
+        panic!("screen never contained expected text: {needle}; last lines: {last_lines:?}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
