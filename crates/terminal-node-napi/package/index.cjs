@@ -774,10 +774,14 @@ class TerminalNodeClient {
       signal,
       onEvent: async (event) => {
         state = reduceSessionWatchEvent(state, event);
+        const expectedFocusedPaneId = focusedPaneId(state.topology);
+        // Do not surface a session state until the focused screen matches the
+        // focused pane implied by topology. Topology can advance before the new
+        // pane watcher is attached, and exposing that gap leaks stale/null
+        // focusedScreen values to JS/Electron callers.
         if (
-          event.kind === "topology_snapshot" &&
-          focusedPaneId(event.topology) &&
-          !state.focusedScreen
+          expectedFocusedPaneId &&
+          (!state.focusedScreen || state.focusedScreen.pane_id !== expectedFocusedPaneId)
         ) {
           return;
         }
