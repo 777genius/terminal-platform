@@ -85,8 +85,10 @@ Ship-ready closeout also keeps:
 
 - `fuzz/` parser and screen-delta targets for short baseline runs
 - manual QA capture under `crates/terminal-testing/manual/`
+- recorded manual pass artifacts under `crates/terminal-testing/manual/runs/`
 - GitHub Actions matrix for `ubuntu-latest`, `macos-latest`, and `windows-latest`
 - release governance via `cargo-deny`, `cargo-public-api`, `cargo-semver-checks`, and `release-plz` config
 - release PR automation via `.github/workflows/release-plz.yml`
+- final readiness audit via `cargo run -p xtask -- verify-v1-readiness`
 
 If `cargo nextest` is not installed yet, bootstrap work may temporarily use `cargo test --workspace` until the tool is installed.

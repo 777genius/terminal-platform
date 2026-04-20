@@ -338,26 +338,14 @@ async fn installed_tarball_handles_shutdown_and_restart_flows() {
         .expect("packed tarball should install into temp project");
     let smoke_flow_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/smoke_flow.cjs");
 
-    fs::write(
-        install_dir.join("install_shutdown_smoke.cjs"),
-        INSTALL_SHUTDOWN_SMOKE_CJS,
-    )
-    .expect("cjs install shutdown smoke should write");
-    fs::write(
-        install_dir.join("install_shutdown_smoke.mjs"),
-        INSTALL_SHUTDOWN_SMOKE_MJS,
-    )
-    .expect("esm install shutdown smoke should write");
-    fs::write(
-        install_dir.join("install_restart_smoke.cjs"),
-        INSTALL_RESTART_SMOKE_CJS,
-    )
-    .expect("cjs install restart smoke should write");
-    fs::write(
-        install_dir.join("install_restart_smoke.mjs"),
-        INSTALL_RESTART_SMOKE_MJS,
-    )
-    .expect("esm install restart smoke should write");
+    fs::write(install_dir.join("install_shutdown_smoke.cjs"), INSTALL_SHUTDOWN_SMOKE_CJS)
+        .expect("cjs install shutdown smoke should write");
+    fs::write(install_dir.join("install_shutdown_smoke.mjs"), INSTALL_SHUTDOWN_SMOKE_MJS)
+        .expect("esm install shutdown smoke should write");
+    fs::write(install_dir.join("install_restart_smoke.cjs"), INSTALL_RESTART_SMOKE_CJS)
+        .expect("cjs install restart smoke should write");
+    fs::write(install_dir.join("install_restart_smoke.mjs"), INSTALL_RESTART_SMOKE_MJS)
+        .expect("esm install restart smoke should write");
 
     for (script, fixture_label) in [
         ("install_shutdown_smoke.cjs", "node-install-close-cjs"),
@@ -382,9 +370,8 @@ async fn installed_tarball_handles_shutdown_and_restart_flows() {
         );
         wait_for_file(&ready_file).await;
         fixture.shutdown().await.expect("fixture should stop cleanly");
-        let output = child
-            .wait_with_output()
-            .expect("installed shutdown smoke should collect output");
+        let output =
+            child.wait_with_output().expect("installed shutdown smoke should collect output");
 
         assert!(
             output.status.success(),
@@ -449,9 +436,8 @@ async fn installed_tarball_handles_shutdown_and_restart_flows() {
         wait_for_daemon_ready(&restarted_client).await;
         std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");
 
-        let output = child
-            .wait_with_output()
-            .expect("installed restart smoke should collect output");
+        let output =
+            child.wait_with_output().expect("installed restart smoke should collect output");
         server.shutdown().await.expect("replacement daemon should stop cleanly");
 
         assert!(
@@ -490,9 +476,7 @@ fn spawn_install_script(
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
-    command
-        .spawn()
-        .expect("installed package smoke script should launch")
+    command.spawn().expect("installed package smoke script should launch")
 }
 
 async fn wait_for_file(path: &Path) {

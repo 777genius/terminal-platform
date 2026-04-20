@@ -10,3 +10,5 @@ Required recorded passes before v1 acceptance:
 
 Use the platform/backend-specific checklists in this directory and turn every real failure
 into an automated regression test where practical.
+
+Store recorded pass artifacts in [`runs/`](./runs/README.md).

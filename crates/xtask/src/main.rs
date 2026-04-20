@@ -9,6 +9,11 @@ const CAPI_LIBRARY_BASENAME: &str = "terminal_capi";
 const CAPI_PKGCONFIG_NAME: &str = "terminal-platform-capi";
 const CAPI_INSTALL_SHARE_DIR: &str = "share/terminal-capi";
 const CAPI_SCHEMA_VERSION: u64 = 1;
+const ROOT_README_PATH: &str = "README.md";
+const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README.md";
+const MANUAL_DIR: &str = "crates/terminal-testing/manual";
+const MANUAL_RUNS_DIR: &str = "crates/terminal-testing/manual/runs";
+const RELEASE_READINESS_WORKFLOW_PATH: &str = ".github/workflows/release-readiness.yml";
 
 fn main() {
     if let Err(error) = run() {
@@ -39,6 +44,11 @@ fn run() -> Result<(), String> {
             println!("{}", prefix.display());
             Ok(())
         }
+        Command::VerifyV1Readiness { require_recorded_passes } => {
+            verify_v1_readiness(require_recorded_passes)?;
+            println!("v1 readiness audit passed");
+            Ok(())
+        }
     }
 }
 
@@ -47,6 +57,7 @@ enum Command {
     VerifyCapiPackage { package_dir: PathBuf },
     InstallCapiPackage { package_dir: PathBuf, prefix: PathBuf },
     VerifyCapiInstall { prefix: PathBuf },
+    VerifyV1Readiness { require_recorded_passes: bool },
 }
 
 fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
@@ -135,8 +146,164 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
 
             Ok(Command::VerifyCapiInstall { prefix })
         }
+        "verify-v1-readiness" => {
+            let mut require_recorded_passes = false;
+
+            for arg in args {
+                match arg.as_str() {
+                    "--require-recorded-passes" => {
+                        require_recorded_passes = true;
+                    }
+                    other => {
+                        return Err(format!("unsupported verify-v1-readiness argument: {other}"));
+                    }
+                }
+            }
+
+            Ok(Command::VerifyV1Readiness { require_recorded_passes })
+        }
         other => Err(format!("unsupported xtask command: {other}")),
     }
+}
+
+fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
+    let workspace_root = workspace_root();
+    let root_readme = workspace_root.join(ROOT_README_PATH);
+    let node_package_readme = workspace_root.join(NODE_PACKAGE_README_PATH);
+    let manual_dir = workspace_root.join(MANUAL_DIR);
+    let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
+    let release_readiness_workflow = workspace_root.join(RELEASE_READINESS_WORKFLOW_PATH);
+
+    assert_value(root_readme.is_file(), "root README is missing")?;
+    assert_value(node_package_readme.is_file(), "Node package README is missing")?;
+    assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
+    assert_value(manual_runs_dir.is_dir(), "manual run capture directory is missing")?;
+    assert_value(release_readiness_workflow.is_file(), "release readiness workflow is missing")?;
+
+    let root_readme_contents = fs::read_to_string(&root_readme)
+        .map_err(|error| format!("failed to read {} - {error}", root_readme.display()))?;
+    let node_package_readme_contents = fs::read_to_string(&node_package_readme)
+        .map_err(|error| format!("failed to read {} - {error}", node_package_readme.display()))?;
+
+    for expected_line in [
+        "- `macOS + Linux` - `Native + tmux + Zellij`",
+        "- `Windows` - `Native + Zellij`",
+        "- `tmux` stays Unix-only in v1 docs, tests, CI, and acceptance",
+    ] {
+        assert_value(
+            root_readme_contents.contains(expected_line),
+            &format!("root README is missing support matrix line: {expected_line}"),
+        )?;
+    }
+
+    for expected_line in [
+        "- `macOS + Linux` - `Native + tmux + Zellij`",
+        "- `Windows` - `Native + Zellij`",
+        "- `tmux` stays Unix-only in v1 acceptance and docs",
+    ] {
+        assert_value(
+            node_package_readme_contents.contains(expected_line),
+            &format!("Node package README is missing support matrix line: {expected_line}"),
+        )?;
+    }
+
+    for relative_path in [
+        "README.md",
+        "electron.md",
+        "native.md",
+        "tmux.md",
+        "windows-native-zellij.md",
+        "zellij.md",
+    ] {
+        let path = manual_dir.join(relative_path);
+        assert_value(path.is_file(), &format!("manual checklist is missing: {}", path.display()))?;
+    }
+
+    for relative_path in ["README.md", "_template.md"] {
+        let path = manual_runs_dir.join(relative_path);
+        assert_value(
+            path.is_file(),
+            &format!("manual run artifact helper is missing: {}", path.display()),
+        )?;
+    }
+
+    if require_recorded_passes {
+        verify_recorded_passes(&manual_runs_dir)?;
+    }
+
+    Ok(())
+}
+
+fn verify_recorded_passes(manual_runs_dir: &Path) -> Result<(), String> {
+    let mut has_electron_pass = false;
+    let mut has_tmux_pass = false;
+    let mut has_windows_zellij_pass = false;
+
+    for entry in fs::read_dir(manual_runs_dir)
+        .map_err(|error| format!("failed to read {} - {error}", manual_runs_dir.display()))?
+    {
+        let entry = entry
+            .map_err(|error| format!("failed to read manual run directory entry - {error}"))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+
+        if matches!(name, "README.md" | "_template.md") {
+            continue;
+        }
+
+        let contents = fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {} - {error}", path.display()))?;
+
+        for required_marker in
+            ["Date:", "OS:", "Checklist:", "Result: pass", "Rust:", "Node:", "Findings:"]
+        {
+            assert_value(
+                contents.contains(required_marker),
+                &format!(
+                    "manual run artifact {} is missing required marker: {required_marker}",
+                    path.display()
+                ),
+            )?;
+        }
+
+        if name.starts_with("electron-") {
+            has_electron_pass = true;
+        }
+
+        if name.starts_with("unix-tmux-") {
+            assert_value(
+                contents.contains("tmux:"),
+                &format!("manual tmux artifact {} is missing tmux version", path.display()),
+            )?;
+            has_tmux_pass = true;
+        }
+
+        if name.starts_with("windows-native-zellij-") {
+            assert_value(
+                contents.contains("Zellij:"),
+                &format!(
+                    "manual Windows Zellij artifact {} is missing Zellij version",
+                    path.display()
+                ),
+            )?;
+            has_windows_zellij_pass = true;
+        }
+    }
+
+    assert_value(has_electron_pass, "missing recorded Electron embed pass in manual/runs")?;
+    assert_value(has_tmux_pass, "missing recorded Unix tmux pass in manual/runs")?;
+    assert_value(
+        has_windows_zellij_pass,
+        "missing recorded Windows Native + Zellij pass in manual/runs",
+    )?;
+
+    Ok(())
 }
 
 fn stage_capi_package(out_dir: &Path) -> Result<PathBuf, String> {

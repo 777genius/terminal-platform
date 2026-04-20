@@ -1,0 +1,39 @@
+name: release-readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-readiness:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install readiness tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api@0.51.0,cargo-semver-checks@0.47.0,release-plz@0.3.157
+
+      - name: Readiness audit
+        run: cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
+
+      - name: Tooling smoke
+        run: |
+          cargo public-api --version
+          cargo semver-checks --version
+          release-plz --version
