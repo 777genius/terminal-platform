@@ -1068,12 +1068,110 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn repeatedly_reopens_subscriptions_through_node_surface() {
+        let fixture = daemon_fixture("terminal-node-reopen").expect("fixture should start");
+        let node = NodeHostClient::new(fixture.client.address().clone());
+        let created = node
+            .create_native_session(&cat_launch_request("reopen"))
+            .await
+            .expect("create_native_session should succeed");
+        let attached =
+            node.attach_session(&created.session_id).await.expect("attach_session should succeed");
+        let pane_id =
+            attached.focused_screen.as_ref().expect("focused screen should exist").pane_id.clone();
+
+        for cycle in 0..24 {
+            let topology_subscription = timeout(
+                Duration::from_secs(5),
+                node.open_subscription(&created.session_id, &NodeSubscriptionSpec::SessionTopology),
+            )
+            .await
+            .expect("topology subscription open should not hang")
+            .expect("topology subscription should open");
+            let initial_topology =
+                timeout(Duration::from_secs(5), topology_subscription.next_event())
+                    .await
+                    .expect("topology subscription next_event should not hang")
+                    .expect("topology subscription should stay healthy")
+                    .expect("topology subscription should yield initial event");
+            assert!(
+                matches!(
+                    initial_topology,
+                    NodeSubscriptionEvent::TopologySnapshot(snapshot)
+                        if snapshot.session_id == created.session_id
+                ),
+                "cycle {cycle} should receive an initial topology snapshot"
+            );
+            timeout(Duration::from_secs(5), topology_subscription.close())
+                .await
+                .expect("topology subscription close should not hang");
+
+            let pane_subscription = timeout(
+                Duration::from_secs(5),
+                node.open_subscription(
+                    &created.session_id,
+                    &NodeSubscriptionSpec::PaneSurface { pane_id: pane_id.clone() },
+                ),
+            )
+            .await
+            .expect("pane subscription open should not hang")
+            .expect("pane subscription should open");
+            let initial_pane = timeout(Duration::from_secs(5), pane_subscription.next_event())
+                .await
+                .expect("pane subscription next_event should not hang")
+                .expect("pane subscription should stay healthy")
+                .expect("pane subscription should yield initial event");
+            assert!(
+                matches!(
+                    initial_pane,
+                    NodeSubscriptionEvent::ScreenDelta(delta) if delta.full_replace.is_some()
+                ),
+                "cycle {cycle} should receive an initial pane delta"
+            );
+
+            if cycle % 6 == 5 {
+                let marker = format!("node reopen cycle {cycle}");
+                node.dispatch_mux_command(
+                    &created.session_id,
+                    &NodeMuxCommand::SendInput(NodeSendInputCommand {
+                        pane_id: pane_id.clone(),
+                        data: format!("{marker}\r"),
+                    }),
+                )
+                .await
+                .expect("send input should succeed during reopen stress");
+                let update = timeout(
+                    Duration::from_secs(5),
+                    wait_for_subscription_line(&pane_subscription, &marker),
+                )
+                .await
+                .expect("pane update wait should not hang")
+                .expect("pane update should arrive");
+                assert!(
+                    subscription_delta_contains(&update, &marker),
+                    "cycle {cycle} should receive the live pane update"
+                );
+            }
+
+            timeout(Duration::from_secs(5), pane_subscription.close())
+                .await
+                .expect("pane subscription close should not hang");
+        }
+
+        let final_list = node.list_sessions().await.expect("list_sessions should succeed");
+        assert!(final_list.iter().any(|session| session.session_id == created.session_id));
+
+        fixture.shutdown().await.expect("fixture should stop cleanly");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn recovers_node_host_client_after_daemon_restart() {
         let address = unique_socket_address("terminal-node-restart");
         let readiness_client = LocalSocketDaemonClient::new(address.clone());
         let node = NodeHostClient::new(address.clone());
-        let server = spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
-            .expect("initial daemon should bind");
+        let server =
+            spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
+                .expect("initial daemon should bind");
         wait_for_daemon_ready(&readiness_client).await;
 
         let initial_list = timeout(Duration::from_secs(5), node.list_sessions())
@@ -1095,10 +1193,13 @@ mod tests {
                 .expect("replacement daemon should bind");
         wait_for_daemon_ready(&restarted_readiness_client).await;
 
-        let created = timeout(Duration::from_secs(5), node.create_native_session(&cat_launch_request("restart")))
-            .await
-            .expect("post-restart create_native_session should not hang")
-            .expect("post-restart create_native_session should succeed");
+        let created = timeout(
+            Duration::from_secs(5),
+            node.create_native_session(&cat_launch_request("restart")),
+        )
+        .await
+        .expect("post-restart create_native_session should not hang")
+        .expect("post-restart create_native_session should succeed");
         let attached = timeout(Duration::from_secs(5), node.attach_session(&created.session_id))
             .await
             .expect("post-restart attach_session should not hang")
@@ -1134,6 +1235,80 @@ mod tests {
             .await
             .expect("post-restart subscription close should not hang");
         replacement.shutdown().await.expect("replacement daemon should stop cleanly");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn recovers_node_host_client_across_multiple_daemon_restart_cycles() {
+        let address = unique_socket_address("terminal-node-restart-cycles");
+        let node = NodeHostClient::new(address.clone());
+
+        for cycle in 0..3 {
+            let readiness_client = LocalSocketDaemonClient::new(address.clone());
+            let server =
+                spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
+                    .expect("daemon should bind for restart cycle");
+            wait_for_daemon_ready(&readiness_client).await;
+
+            let listed = timeout(Duration::from_secs(5), node.list_sessions())
+                .await
+                .expect("list_sessions should not hang")
+                .expect("list_sessions should succeed");
+            assert!(listed.is_empty(), "cycle {cycle} should start with a fresh daemon state");
+
+            let created = timeout(
+                Duration::from_secs(5),
+                node.create_native_session(&cat_launch_request(&format!("restart-cycle-{cycle}"))),
+            )
+            .await
+            .expect("create_native_session should not hang")
+            .expect("create_native_session should succeed");
+            let attached =
+                timeout(Duration::from_secs(5), node.attach_session(&created.session_id))
+                    .await
+                    .expect("attach_session should not hang")
+                    .expect("attach_session should succeed");
+            let pane_id = attached
+                .focused_screen
+                .as_ref()
+                .expect("focused screen should exist after restart cycle")
+                .pane_id
+                .clone();
+            let subscription = timeout(
+                Duration::from_secs(5),
+                node.open_subscription(
+                    &created.session_id,
+                    &NodeSubscriptionSpec::PaneSurface { pane_id: pane_id.clone() },
+                ),
+            )
+            .await
+            .expect("subscription open should not hang")
+            .expect("subscription should open");
+            let initial_event = timeout(Duration::from_secs(5), subscription.next_event())
+                .await
+                .expect("subscription next_event should not hang")
+                .expect("subscription should stay healthy")
+                .expect("subscription should yield an event");
+            assert!(
+                matches!(
+                    initial_event,
+                    NodeSubscriptionEvent::ScreenDelta(delta) if delta.full_replace.is_some()
+                ),
+                "cycle {cycle} should receive an initial pane delta"
+            );
+            timeout(Duration::from_secs(5), subscription.close())
+                .await
+                .expect("subscription close should not hang");
+
+            timeout(Duration::from_secs(5), server.shutdown())
+                .await
+                .expect("daemon shutdown should not hang")
+                .expect("daemon should stop cleanly");
+
+            let stale_result = timeout(Duration::from_secs(5), node.list_sessions())
+                .await
+                .expect("stale list_sessions should not hang");
+            assert!(stale_result.is_err(), "cycle {cycle} stale request should fail");
+        }
     }
 
     #[test]
