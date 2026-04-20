@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "terminal-platform-capi.h"
 
@@ -49,6 +50,55 @@ static int expect_subscription_ok(const char *label, TerminalCapiSubscriptionRes
 }
 
 static int json_contains(const char *json, const char *needle) { return strstr(json, needle) != NULL; }
+
+static int write_text_file(const char *path, const char *content) {
+  FILE *file = NULL;
+
+  if (path == NULL || path[0] == '\0') {
+    fprintf(stderr, "missing file path for write_text_file\n");
+    return 0;
+  }
+
+  file = fopen(path, "w");
+  if (file == NULL) {
+    fprintf(stderr, "failed to open file for write: %s\n", path);
+    return 0;
+  }
+
+  if (fputs(content, file) == EOF) {
+    fprintf(stderr, "failed to write file: %s\n", path);
+    fclose(file);
+    return 0;
+  }
+
+  if (fclose(file) != 0) {
+    fprintf(stderr, "failed to close file after write: %s\n", path);
+    return 0;
+  }
+
+  return 1;
+}
+
+static int wait_for_file(const char *path, const char *label) {
+  int attempt = 0;
+
+  if (path == NULL || path[0] == '\0') {
+    fprintf(stderr, "missing path while waiting for %s\n", label);
+    return 0;
+  }
+
+  for (attempt = 0; attempt < 600; ++attempt) {
+    FILE *file = fopen(path, "r");
+    if (file != NULL) {
+      fclose(file);
+      return 1;
+    }
+    usleep(100000);
+  }
+
+  fprintf(stderr, "timed out waiting for %s at %s\n", label, path);
+  return 0;
+}
 
 static int extract_json_string(const char *json, const char *key, char *out, size_t out_len) {
   char pattern[128];
@@ -189,6 +239,28 @@ static int wait_for_event_with_substring(const char *label,
   return 0;
 }
 
+static int wait_for_subscription_close(const char *label,
+                                       TerminalCapiSubscriptionHandle *subscription) {
+  int attempt = 0;
+
+  for (attempt = 0; attempt < 32; ++attempt) {
+    char *json = NULL;
+    if (!expect_string_ok(label, terminal_capi_subscription_next_event_json(subscription), &json)) {
+      return 0;
+    }
+
+    if (strcmp(json, "null") == 0) {
+      terminal_capi_string_free(json);
+      return 1;
+    }
+
+    terminal_capi_string_free(json);
+  }
+
+  fprintf(stderr, "%s never observed null subscription close\n", label);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   TerminalCapiClientHandle *client = NULL;
   TerminalCapiSubscriptionHandle *topology_subscription = NULL;
@@ -203,7 +275,8 @@ int main(int argc, char **argv) {
   int ok = 0;
 
   if (argc != 3 && argc != 4) {
-    fprintf(stderr, "usage: %s <namespaced|filesystem> <address> [native|tmux]\n", argv[0]);
+    fprintf(stderr, "usage: %s <namespaced|filesystem> <address> [native|tmux|shutdown|restart]\n",
+            argv[0]);
     return 1;
   }
 
@@ -246,7 +319,8 @@ int main(int argc, char **argv) {
   terminal_capi_string_free(json);
   json = NULL;
 
-  if (strcmp(mode, "native") == 0) {
+  if (strcmp(mode, "native") == 0 || strcmp(mode, "shutdown") == 0 ||
+      strcmp(mode, "restart") == 0) {
     if (!expect_string_ok("backend_capabilities",
                           terminal_capi_client_backend_capabilities_json(client, "native"),
                           &json)) {
@@ -405,6 +479,95 @@ int main(int argc, char **argv) {
     }
     terminal_capi_string_free(event);
     event = NULL;
+
+    if (strcmp(mode, "shutdown") == 0) {
+      const char *ready_file = getenv("TERMINAL_CAPI_READY_FILE");
+
+      if (!write_text_file(ready_file, "ready\n")) {
+        goto cleanup;
+      }
+
+      if (!wait_for_subscription_close("topology_subscription_shutdown", topology_subscription)) {
+        goto cleanup;
+      }
+      if (!wait_for_subscription_close("pane_subscription_shutdown", pane_subscription)) {
+        goto cleanup;
+      }
+
+      ok = 1;
+      goto cleanup;
+    }
+
+    if (strcmp(mode, "restart") == 0) {
+      const char *initial_ready_file = getenv("TERMINAL_CAPI_INITIAL_READY_FILE");
+      const char *stale_ready_file = getenv("TERMINAL_CAPI_STALE_READY_FILE");
+      const char *restart_file = getenv("TERMINAL_CAPI_RESTART_FILE");
+      int stale_error_observed = 0;
+
+      if (!write_text_file(initial_ready_file, "ready\n")) {
+        goto cleanup;
+      }
+
+      while (!stale_error_observed) {
+        TerminalCapiStringResult handshake_result =
+            terminal_capi_client_handshake_info_json(client);
+        if (handshake_result.status == 0 && handshake_result.value != NULL) {
+          terminal_capi_string_free(handshake_result.value);
+          usleep(100000);
+          continue;
+        }
+
+        stale_error_observed = 1;
+        if (handshake_result.value != NULL) {
+          terminal_capi_string_free(handshake_result.value);
+        }
+      }
+
+      if (!write_text_file(stale_ready_file, "stale\n")) {
+        goto cleanup;
+      }
+      if (!wait_for_file(restart_file, "daemon restart signal")) {
+        goto cleanup;
+      }
+
+      while (1) {
+        TerminalCapiStringResult handshake_result =
+            terminal_capi_client_handshake_info_json(client);
+        if (handshake_result.status != 0 || handshake_result.value == NULL) {
+          if (handshake_result.value != NULL) {
+            terminal_capi_string_free(handshake_result.value);
+          }
+          usleep(100000);
+          continue;
+        }
+
+        if (!json_contains(handshake_result.value, "\"can_use\":true")) {
+          fprintf(stderr, "restarted handshake did not report can_use=true: %s\n",
+                  handshake_result.value);
+          terminal_capi_string_free(handshake_result.value);
+          goto cleanup;
+        }
+        terminal_capi_string_free(handshake_result.value);
+        break;
+      }
+
+      if (!expect_string_ok(
+              "create_native_session_after_restart",
+              terminal_capi_client_create_native_session_json(
+                  client,
+                  "{\"title\":\"c-consumer-restart\",\"launch\":{\"program\":\"/bin/sh\","
+                  "\"args\":[\"-lc\",\"printf 'restart-ready\\\\n'; exec cat\"]}}"),
+              &json)) {
+        goto cleanup;
+      }
+      terminal_capi_string_free(json);
+      json = NULL;
+
+      printf("{\"stale_error_observed\":true,\"recovered\":true}\n");
+      fflush(stdout);
+      ok = 1;
+      goto cleanup;
+    }
 
     if (!expect_string_ok("close_topology_subscription",
                           terminal_capi_subscription_close(topology_subscription), &json)) {

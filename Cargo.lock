@@ -1412,6 +1412,8 @@ dependencies = [
  "cbindgen",
  "serde",
  "serde_json",
+ "terminal-daemon",
+ "terminal-daemon-client",
  "terminal-node",
  "terminal-protocol",
  "terminal-testing",
