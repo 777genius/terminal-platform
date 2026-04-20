@@ -4,7 +4,9 @@ const require = createRequire(import.meta.url);
 const cjs = require("./index.cjs");
 
 export const applyScreenDelta = cjs.applyScreenDelta;
+export const createElectronMainBridge = cjs.createElectronMainBridge;
 export const createSessionState = cjs.createSessionState;
+export const ElectronTerminalNodeClient = cjs.ElectronTerminalNodeClient;
 export const loadNativeBinding = cjs.loadNativeBinding;
 export const reduceSessionWatchEvent = cjs.reduceSessionWatchEvent;
 export const resolveNativeBindingPath = cjs.resolveNativeBindingPath;

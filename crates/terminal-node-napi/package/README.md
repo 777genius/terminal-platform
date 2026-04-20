@@ -18,6 +18,7 @@ Current client surface includes:
 - `watchTopology` and `watchPane` helpers with `AbortSignal` cancellation
 - `watchSession` helper that follows topology plus focused pane updates
 - `watchSessionState` plus pure state reducers for render-ready session state
+- Electron main/renderer bridge helpers over explicit IPC channels
 - mux command dispatch for tabs, panes, input and save operations
 
 ## Local staging

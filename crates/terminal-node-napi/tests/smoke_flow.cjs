@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 
 async function runSmoke(createClient) {
   const client = createClient();
@@ -295,6 +296,8 @@ async function runPackageWatchSmoke(createClient, sdk) {
     }),
     true,
   );
+
+  await runElectronBridgeSmoke(createClient, sdk);
 }
 
 async function waitForLine(client, sessionId, paneId, needle) {
@@ -352,6 +355,137 @@ function focusedPaneIdFromTopology(topology) {
   }
 
   return focusedTab.focused_pane ?? firstPaneId(focusedTab.root);
+}
+
+async function runElectronBridgeSmoke(createClient, sdk) {
+  const client = createClient();
+  const { ipcMain, ipcRenderer } = createFakeElectronIpc();
+  const bridge = sdk.createElectronMainBridge({
+    channelPrefix: "terminal-platform-smoke",
+    client,
+    ipcMain,
+  });
+  const rendererClient = new sdk.ElectronTerminalNodeClient({
+    channelPrefix: "terminal-platform-smoke",
+    ipcRenderer,
+  });
+
+  const version = await rendererClient.bindingVersion();
+  const handshake = await rendererClient.handshakeInfo();
+  const created = await rendererClient.createNativeSession({
+    title: "electron-bridge-smoke",
+    launch: {
+      program: "/bin/sh",
+      args: ["-lc", "printf 'ready\\n'; exec cat"],
+    },
+  });
+  const attached = await rendererClient.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+  const stateEvents = [];
+  let sentInput = false;
+  let openedTab = false;
+  const watchAbort = new AbortController();
+
+  await rendererClient.watchSessionState(created.session_id, {
+    signal: watchAbort.signal,
+    onState: async (state) => {
+      stateEvents.push(state);
+
+      if (!sentInput && state.focusedScreen) {
+        sentInput = true;
+        await rendererClient.dispatchMuxCommand(created.session_id, {
+          kind: "send_input",
+          pane_id: paneId,
+          data: "electron bridge input\r",
+        });
+        return;
+      }
+
+      if (
+        !openedTab &&
+        state.focusedScreen?.surface.lines.some((line) =>
+          line.text.includes("electron bridge input"),
+        )
+      ) {
+        openedTab = true;
+        await rendererClient.dispatchMuxCommand(created.session_id, {
+          kind: "new_tab",
+          title: "electron",
+        });
+        return;
+      }
+
+      if (openedTab && state.topology.tabs.length === 2) {
+        watchAbort.abort();
+      }
+    },
+  });
+
+  const topology = await rendererClient.topologySnapshot(created.session_id);
+  const screen = await rendererClient.screenSnapshot(created.session_id, paneId);
+
+  assert.equal(version.protocol.major, 0);
+  assert.equal(handshake.assessment.can_use, true);
+  assert.equal(topology.session_id, created.session_id);
+  assert.equal(screen.pane_id, paneId);
+  assert.equal(
+    stateEvents.some((state) =>
+      state.focusedScreen?.surface.lines.some((line) =>
+        line.text.includes("electron bridge input"),
+      ),
+    ),
+    true,
+  );
+  assert.equal(
+    stateEvents.every((state) => {
+      const expectedPaneId = focusedPaneIdFromTopology(state.topology);
+      return expectedPaneId ? state.focusedScreen?.pane_id === expectedPaneId : true;
+    }),
+    true,
+  );
+
+  bridge.dispose();
+}
+
+function createFakeElectronIpc() {
+  const handlers = new Map();
+  const events = new EventEmitter();
+  const sender = {
+    send(channel, payload) {
+      setImmediate(() => {
+        events.emit(channel, { sender }, payload);
+      });
+    },
+    isDestroyed() {
+      return false;
+    },
+  };
+
+  return {
+    ipcMain: {
+      handle(channel, listener) {
+        handlers.set(channel, listener);
+      },
+      removeHandler(channel) {
+        handlers.delete(channel);
+      },
+    },
+    ipcRenderer: {
+      invoke(channel, payload) {
+        const handler = handlers.get(channel);
+        if (!handler) {
+          return Promise.reject(new Error(`Missing fake Electron handler for ${channel}`));
+        }
+        return Promise.resolve(handler({ sender }, payload));
+      },
+      on(channel, listener) {
+        events.on(channel, listener);
+      },
+      off(channel, listener) {
+        events.off(channel, listener);
+      },
+    },
+  };
 }
 
 module.exports = {

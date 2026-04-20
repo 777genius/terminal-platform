@@ -1,5 +1,6 @@
 "use strict";
 
+const { randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -325,6 +326,106 @@ function reduceSessionWatchEvent(state, event) {
   }
 }
 
+const electronInvokeMethodNames = new Set([
+  "attachSession",
+  "backendCapabilities",
+  "bindingVersion",
+  "createNativeSession",
+  "deleteSavedSession",
+  "discoverSessions",
+  "dispatchMuxCommand",
+  "handshakeInfo",
+  "importSession",
+  "listSavedSessions",
+  "listSessions",
+  "pruneSavedSessions",
+  "restoreSavedSession",
+  "savedSession",
+  "screenDelta",
+  "screenSnapshot",
+  "topologySnapshot",
+]);
+
+function buildElectronBridgeChannels(channelPrefix) {
+  const prefix = channelPrefix || "terminal-platform";
+
+  return {
+    invoke: `${prefix}:invoke`,
+    sessionStateEvent: `${prefix}:session-state:event`,
+    sessionStateStart: `${prefix}:session-state:start`,
+    sessionStateStop: `${prefix}:session-state:stop`,
+  };
+}
+
+function assertElectronIpcMainLike(ipcMain) {
+  if (!ipcMain || typeof ipcMain.handle !== "function" || typeof ipcMain.removeHandler !== "function") {
+    throw new TypeError(
+      "terminal-node electron main bridge requires ipcMain.handle/removeHandler",
+    );
+  }
+}
+
+function assertElectronIpcRendererLike(ipcRenderer) {
+  if (
+    !ipcRenderer ||
+    typeof ipcRenderer.invoke !== "function" ||
+    typeof ipcRenderer.on !== "function" ||
+    typeof ipcRenderer.off !== "function"
+  ) {
+    throw new TypeError(
+      "terminal-node electron renderer client requires ipcRenderer.invoke/on/off",
+    );
+  }
+}
+
+function canSendElectronBridgeEnvelope(sender) {
+  return (
+    sender &&
+    typeof sender.send === "function" &&
+    !(typeof sender.isDestroyed === "function" && sender.isDestroyed())
+  );
+}
+
+function serializeBridgeError(error) {
+  if (error && typeof error === "object") {
+    const payload = {
+      message:
+        typeof error.message === "string" ? error.message : String(error),
+    };
+    if (typeof error.code === "string") {
+      payload.code = error.code;
+    }
+    return payload;
+  }
+
+  return { message: String(error) };
+}
+
+function deserializeBridgeError(payload) {
+  const error = new Error(
+    payload?.message ?? "terminal-node electron bridge request failed",
+  );
+
+  if (payload?.code) {
+    error.code = payload.code;
+  }
+
+  return error;
+}
+
+async function invokeElectronClientMethod(client, method, args) {
+  if (!electronInvokeMethodNames.has(method)) {
+    throw new Error(`terminal-node electron bridge does not support method ${method}`);
+  }
+
+  const fn = client?.[method];
+  if (typeof fn !== "function") {
+    throw new Error(`terminal-node electron bridge client is missing method ${method}`);
+  }
+
+  return await fn.apply(client, args);
+}
+
 class TerminalNodeSubscription {
   #inner;
   #closed;
@@ -641,9 +742,338 @@ class TerminalNodeClient {
   }
 }
 
+class ElectronTerminalNodeClient {
+  #channels;
+  #ipcRenderer;
+
+  constructor(options = {}) {
+    const { ipcRenderer, channelPrefix } = options;
+
+    assertElectronIpcRendererLike(ipcRenderer);
+
+    this.#ipcRenderer = ipcRenderer;
+    this.#channels = buildElectronBridgeChannels(channelPrefix);
+  }
+
+  #invoke(method, ...args) {
+    return this.#ipcRenderer.invoke(this.#channels.invoke, { method, args });
+  }
+
+  bindingVersion() {
+    return this.#invoke("bindingVersion");
+  }
+
+  handshakeInfo() {
+    return this.#invoke("handshakeInfo");
+  }
+
+  listSessions() {
+    return this.#invoke("listSessions");
+  }
+
+  listSavedSessions() {
+    return this.#invoke("listSavedSessions");
+  }
+
+  discoverSessions(backend) {
+    return this.#invoke("discoverSessions", backend);
+  }
+
+  backendCapabilities(backend) {
+    return this.#invoke("backendCapabilities", backend);
+  }
+
+  createNativeSession(request) {
+    return this.#invoke("createNativeSession", request);
+  }
+
+  importSession(route, title = null) {
+    return this.#invoke("importSession", route, title);
+  }
+
+  savedSession(sessionId) {
+    return this.#invoke("savedSession", sessionId);
+  }
+
+  deleteSavedSession(sessionId) {
+    return this.#invoke("deleteSavedSession", sessionId);
+  }
+
+  pruneSavedSessions(keepLatest) {
+    return this.#invoke("pruneSavedSessions", keepLatest);
+  }
+
+  restoreSavedSession(sessionId) {
+    return this.#invoke("restoreSavedSession", sessionId);
+  }
+
+  attachSession(sessionId) {
+    return this.#invoke("attachSession", sessionId);
+  }
+
+  topologySnapshot(sessionId) {
+    return this.#invoke("topologySnapshot", sessionId);
+  }
+
+  screenSnapshot(sessionId, paneId) {
+    return this.#invoke("screenSnapshot", sessionId, paneId);
+  }
+
+  screenDelta(sessionId, paneId, fromSequence) {
+    return this.#invoke("screenDelta", sessionId, paneId, fromSequence);
+  }
+
+  dispatchMuxCommand(sessionId, command) {
+    return this.#invoke("dispatchMuxCommand", sessionId, command);
+  }
+
+  async watchSessionState(sessionId, options = {}) {
+    const { signal, onState } = options;
+
+    if (typeof onState !== "function") {
+      throw new TypeError("ElectronTerminalNodeClient.watchSessionState requires an onState callback");
+    }
+
+    if (signal?.aborted) {
+      return;
+    }
+
+    const subscriptionId = randomUUID();
+    let finished = false;
+    let resolveDone = () => {};
+    let rejectDone = () => {};
+    const done = new Promise((resolve, reject) => {
+      resolveDone = resolve;
+      rejectDone = reject;
+    });
+
+    const cleanup = () => {
+      this.#ipcRenderer.off(this.#channels.sessionStateEvent, listener);
+      if (signal) {
+        signal.removeEventListener("abort", abortListener);
+      }
+    };
+
+    const finishResolve = () => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      cleanup();
+      resolveDone();
+    };
+
+    const finishReject = (error) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      cleanup();
+      rejectDone(error);
+    };
+
+    const stop = async () => {
+      await this.#ipcRenderer
+        .invoke(this.#channels.sessionStateStop, { subscriptionId })
+        .catch(() => {});
+    };
+
+    const abortListener = () => {
+      void stop().finally(() => {
+        finishResolve();
+      });
+    };
+
+    const listener = (_event, envelope) => {
+      if (!envelope || envelope.subscriptionId !== subscriptionId) {
+        return;
+      }
+
+      if (envelope.kind === "state") {
+        void Promise.resolve(onState(envelope.state)).catch((error) => {
+          void stop();
+          finishReject(error);
+        });
+        return;
+      }
+
+      if (envelope.kind === "error") {
+        finishReject(deserializeBridgeError(envelope.error));
+        return;
+      }
+
+      if (envelope.kind === "closed") {
+        finishResolve();
+      }
+    };
+
+    this.#ipcRenderer.on(this.#channels.sessionStateEvent, listener);
+    if (signal) {
+      signal.addEventListener("abort", abortListener, { once: true });
+    }
+
+    try {
+      await this.#ipcRenderer.invoke(this.#channels.sessionStateStart, {
+        sessionId,
+        subscriptionId,
+      });
+    } catch (error) {
+      finishReject(error);
+    }
+
+    if (signal?.aborted) {
+      void stop().finally(() => {
+        finishResolve();
+      });
+    }
+
+    return done;
+  }
+}
+
+function createElectronMainBridge(options = {}) {
+  const { ipcMain, client, channelPrefix } = options;
+
+  assertElectronIpcMainLike(ipcMain);
+
+  if (!client || typeof client.watchSessionState !== "function") {
+    throw new TypeError(
+      "terminal-node electron main bridge requires a TerminalNodeClient-compatible instance",
+    );
+  }
+
+  const channels = buildElectronBridgeChannels(channelPrefix);
+  const subscriptionsBySender = new Map();
+
+  const ensureSenderSubscriptions = (sender) => {
+    let senderSubscriptions = subscriptionsBySender.get(sender);
+    if (!senderSubscriptions) {
+      senderSubscriptions = new Map();
+      subscriptionsBySender.set(sender, senderSubscriptions);
+    }
+    return senderSubscriptions;
+  };
+
+  const releaseSenderSubscription = (sender, subscriptionId) => {
+    const senderSubscriptions = subscriptionsBySender.get(sender);
+    if (!senderSubscriptions) {
+      return;
+    }
+
+    senderSubscriptions.delete(subscriptionId);
+    if (senderSubscriptions.size === 0) {
+      subscriptionsBySender.delete(sender);
+    }
+  };
+
+  const handleInvoke = async (_event, payload = {}) => {
+    const { method } = payload;
+    const args = Array.isArray(payload.args) ? payload.args : [];
+    return await invokeElectronClientMethod(client, method, args);
+  };
+
+  const handleSessionStateStart = async (event, payload = {}) => {
+    const { sessionId, subscriptionId } = payload;
+
+    if (typeof sessionId !== "string" || sessionId.length === 0) {
+      throw new TypeError("terminal-node electron bridge requires a non-empty sessionId");
+    }
+    if (typeof subscriptionId !== "string" || subscriptionId.length === 0) {
+      throw new TypeError("terminal-node electron bridge requires a non-empty subscriptionId");
+    }
+
+    const sender = event?.sender;
+    if (!sender || typeof sender.send !== "function") {
+      throw new TypeError("terminal-node electron bridge requires an event sender with send()");
+    }
+
+    const senderSubscriptions = ensureSenderSubscriptions(sender);
+    if (senderSubscriptions.has(subscriptionId)) {
+      throw new Error(
+        `terminal-node electron bridge already tracks subscription ${subscriptionId}`,
+      );
+    }
+
+    const abortController = new AbortController();
+    senderSubscriptions.set(subscriptionId, abortController);
+
+    const sendEnvelope = (envelope) => {
+      if (!canSendElectronBridgeEnvelope(sender)) {
+        abortController.abort();
+        return false;
+      }
+
+      sender.send(channels.sessionStateEvent, envelope);
+      return true;
+    };
+
+    void client
+      .watchSessionState(sessionId, {
+        signal: abortController.signal,
+        onState: async (state) => {
+          sendEnvelope({ subscriptionId, kind: "state", state });
+        },
+      })
+      .catch((error) => {
+        if (!abortController.signal.aborted) {
+          sendEnvelope({
+            subscriptionId,
+            kind: "error",
+            error: serializeBridgeError(error),
+          });
+        }
+      })
+      .finally(() => {
+        sendEnvelope({ subscriptionId, kind: "closed" });
+        releaseSenderSubscription(sender, subscriptionId);
+      });
+
+    return { subscriptionId };
+  };
+
+  const handleSessionStateStop = async (event, payload = {}) => {
+    const { subscriptionId } = payload;
+
+    if (typeof subscriptionId !== "string" || subscriptionId.length === 0) {
+      throw new TypeError("terminal-node electron bridge requires a non-empty subscriptionId");
+    }
+
+    const senderSubscriptions = subscriptionsBySender.get(event?.sender);
+    const abortController = senderSubscriptions?.get(subscriptionId);
+    if (!abortController) {
+      return { stopped: false, subscriptionId };
+    }
+
+    abortController.abort();
+    return { stopped: true, subscriptionId };
+  };
+
+  ipcMain.handle(channels.invoke, handleInvoke);
+  ipcMain.handle(channels.sessionStateStart, handleSessionStateStart);
+  ipcMain.handle(channels.sessionStateStop, handleSessionStateStop);
+
+  return {
+    channels,
+    dispose() {
+      ipcMain.removeHandler(channels.invoke);
+      ipcMain.removeHandler(channels.sessionStateStart);
+      ipcMain.removeHandler(channels.sessionStateStop);
+
+      for (const senderSubscriptions of subscriptionsBySender.values()) {
+        for (const abortController of senderSubscriptions.values()) {
+          abortController.abort();
+        }
+      }
+      subscriptionsBySender.clear();
+    },
+  };
+}
+
 module.exports = {
   applyScreenDelta,
+  createElectronMainBridge,
   createSessionState,
+  ElectronTerminalNodeClient,
   loadNativeBinding,
   reduceSessionWatchEvent,
   resolveNativeBindingPath,
