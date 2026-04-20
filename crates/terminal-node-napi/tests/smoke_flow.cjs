@@ -326,6 +326,76 @@ async function runSubscriptionBackpressureSmoke(createClient) {
   );
 }
 
+async function runSubscriptionCycleSmoke(createClient) {
+  const client = createClient();
+  const created = await client.createNativeSession({
+    title: "node-addon-repeat-subscriptions",
+    launch: readyEchoLaunch(),
+  });
+  const attached = await client.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+  let observedMarkers = 0;
+
+  for (let cycle = 0; cycle < 24; cycle += 1) {
+    const topologySubscription = await client.openSubscription(created.session_id, {
+      kind: "session_topology",
+    });
+    const initialTopology = await withTimeout(
+      topologySubscription.nextEvent(),
+      5000,
+      `Timed out waiting for topology subscription cycle ${cycle}`,
+    );
+    assert.equal(initialTopology?.kind, "topology_snapshot");
+    assert.equal(initialTopology?.session_id, created.session_id);
+    await withTimeout(
+      topologySubscription.close(),
+      5000,
+      `Timed out closing topology subscription cycle ${cycle}`,
+    );
+
+    const paneSubscription = await client.openSubscription(created.session_id, {
+      kind: "pane_surface",
+      pane_id: paneId,
+    });
+    const initialPane = await withTimeout(
+      paneSubscription.nextEvent(),
+      5000,
+      `Timed out waiting for pane subscription cycle ${cycle}`,
+    );
+    assert.equal(initialPane?.kind, "screen_delta");
+    assert.equal(initialPane?.pane_id, paneId);
+
+    if (cycle % 6 === 5) {
+      const marker = `node addon repeat ${cycle}`;
+      await client.dispatchMuxCommand(created.session_id, {
+        kind: "send_input",
+        pane_id: paneId,
+        data: `${marker}\r`,
+      });
+      const paneUpdate = await waitForSubscriptionText(
+        paneSubscription,
+        marker,
+        cycle,
+      );
+      assert.equal(deltaContainsText(paneUpdate, marker), true);
+      observedMarkers += 1;
+    }
+
+    await withTimeout(
+      paneSubscription.close(),
+      5000,
+      `Timed out closing pane subscription cycle ${cycle}`,
+    );
+  }
+
+  return {
+    session_id: created.session_id,
+    pane_id: paneId,
+    cycles: 24,
+    observed_markers: observedMarkers,
+  };
+}
+
 async function runPackageWatchSmoke(createClient, sdk) {
   const client = createClient();
   const created = await client.createNativeSession({
@@ -770,6 +840,21 @@ async function waitForTopologyTabs(subscription, tabCount) {
   }
 
   throw new Error(`Timed out waiting for topology with ${tabCount} tabs`);
+}
+
+async function waitForSubscriptionText(subscription, needle, cycle) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const event = await withTimeout(
+      subscription.nextEvent(),
+      5000,
+      `Timed out waiting for pane delta cycle ${cycle}`,
+    );
+    if (event?.kind === "screen_delta" && deltaContainsText(event, needle)) {
+      return event;
+    }
+  }
+
+  throw new Error(`Timed out waiting for pane delta text: ${needle}`);
 }
 
 async function waitForTopologyState(client, sessionId, predicate, label) {
@@ -1412,4 +1497,5 @@ module.exports = {
   runRestartRecoverySmoke,
   runShutdownSmoke,
   runSmoke,
+  runSubscriptionCycleSmoke,
 };
