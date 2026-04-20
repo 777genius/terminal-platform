@@ -713,6 +713,21 @@ mod tests {
         panic!("screen never contained expected text: {needle}; last lines: {last_lines:?}");
     }
 
+    async fn recv_subscription_event(
+        subscription: &mut super::LocalSocketSubscription,
+    ) -> Option<SubscriptionEvent> {
+        timeout(Duration::from_secs(5), subscription.recv())
+            .await
+            .expect("subscription recv should not hang")
+            .expect("subscription recv should succeed")
+    }
+
+    async fn must_recv_subscription_event(
+        subscription: &mut super::LocalSocketSubscription,
+    ) -> SubscriptionEvent {
+        recv_subscription_event(subscription).await.expect("subscription should emit an event")
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn roundtrips_handshake_and_empty_list_sessions() {
         let address = unique_address("daemon-client");
@@ -1395,7 +1410,7 @@ mod tests {
             .await
             .expect("subscription should open");
 
-        let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+        let initial = must_recv_subscription_event(&mut subscription).await;
         let initial = match initial {
             SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
             other => panic!("unexpected initial event: {other:?}"),
@@ -1407,7 +1422,7 @@ mod tests {
             )
             .await
             .expect("dispatch should succeed");
-        let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+        let updated = must_recv_subscription_event(&mut subscription).await;
         let updated = match updated {
             SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
             other => panic!("unexpected topology event: {other:?}"),
@@ -1441,13 +1456,13 @@ mod tests {
             .await
             .expect("subscription should open");
 
-        let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+        let initial = must_recv_subscription_event(&mut subscription).await;
         match initial {
             SubscriptionEvent::TopologySnapshot(_) => {}
             other => panic!("unexpected initial event: {other:?}"),
         }
         subscription.close().await.expect("close should succeed");
-        assert!(subscription.recv().await.expect("recv should succeed").is_none());
+        assert!(recv_subscription_event(&mut subscription).await.is_none());
 
         server.shutdown().await.expect("server shutdown should succeed");
     }
@@ -1478,7 +1493,7 @@ mod tests {
             .await
             .expect("subscription should open");
 
-        let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+        let initial = must_recv_subscription_event(&mut subscription).await;
         assert!(matches!(initial, SubscriptionEvent::TopologySnapshot(_)));
 
         for revision in 0..24 {
@@ -1492,7 +1507,7 @@ mod tests {
         }
 
         subscription.close().await.expect("close should succeed");
-        assert!(subscription.recv().await.expect("recv should succeed").is_none());
+        assert!(recv_subscription_event(&mut subscription).await.is_none());
 
         server.shutdown().await.expect("server shutdown should succeed");
     }
@@ -1518,7 +1533,7 @@ mod tests {
             .await
             .expect("subscription should open");
 
-        let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+        let initial = must_recv_subscription_event(&mut subscription).await;
         match initial {
             SubscriptionEvent::TopologySnapshot(_) => {}
             other => panic!("unexpected initial event: {other:?}"),
@@ -1564,7 +1579,7 @@ mod tests {
             .await
             .expect("subscription should open");
 
-        let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+        let initial = must_recv_subscription_event(&mut subscription).await;
         let initial = match initial {
             SubscriptionEvent::ScreenDelta(delta) => delta,
             other => panic!("unexpected initial event: {other:?}"),
@@ -1579,7 +1594,7 @@ mod tests {
             )
             .await
             .expect("dispatch should succeed");
-        let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+        let updated = must_recv_subscription_event(&mut subscription).await;
         let updated = match updated {
             SubscriptionEvent::ScreenDelta(delta) => delta,
             other => panic!("unexpected screen event: {other:?}"),
@@ -1638,7 +1653,7 @@ mod tests {
                 .open_subscription(created.session.session_id, SubscriptionSpec::SessionTopology)
                 .await
                 .expect("subscription should open");
-            let initial = subscription.recv().await.expect("recv should succeed");
+            let initial = recv_subscription_event(&mut subscription).await;
 
             assert!(
                 matches!(initial, Some(SubscriptionEvent::TopologySnapshot(_))),

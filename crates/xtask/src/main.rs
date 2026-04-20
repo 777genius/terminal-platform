@@ -90,13 +90,7 @@ fn run() -> Result<(), String> {
             let output_path = scaffold_manual_run(
                 kind,
                 &date,
-                output.as_deref(),
-                os,
-                rust,
-                node,
-                tmux,
-                zellij,
-                force,
+                ManualRunScaffoldOptions { output, os, rust, node, tmux, zellij, force },
             )?;
             println!("{}", output_path.display());
             Ok(())
@@ -139,6 +133,16 @@ enum ManualRunKind {
     Electron,
     UnixTmux,
     WindowsNativeZellij,
+}
+
+struct ManualRunScaffoldOptions {
+    output: Option<PathBuf>,
+    os: Option<String>,
+    rust: Option<String>,
+    node: Option<String>,
+    tmux: Option<String>,
+    zellij: Option<String>,
+    force: bool,
 }
 
 fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
@@ -496,22 +500,16 @@ impl ManualRunKind {
 fn scaffold_manual_run(
     kind: ManualRunKind,
     date: &str,
-    output: Option<&Path>,
-    os: Option<String>,
-    rust: Option<String>,
-    node: Option<String>,
-    tmux: Option<String>,
-    zellij: Option<String>,
-    force: bool,
+    options: ManualRunScaffoldOptions,
 ) -> Result<PathBuf, String> {
+    let ManualRunScaffoldOptions { output, os, rust, node, tmux, zellij, force } = options;
     let workspace_root = workspace_root();
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
     let template_path = manual_runs_dir.join("_template.md");
     let template = fs::read_to_string(&template_path)
         .map_err(|error| format!("failed to read {} - {error}", template_path.display()))?;
-    let output_path = output
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| manual_runs_dir.join(format!("{}{date}.md", kind.file_prefix())));
+    let output_path =
+        output.unwrap_or_else(|| manual_runs_dir.join(format!("{}{date}.md", kind.file_prefix())));
 
     if output_path.exists() && !force {
         return Err(format!(

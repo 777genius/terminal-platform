@@ -480,7 +480,7 @@ fn spawn_install_script(
 }
 
 async fn wait_for_file(path: &Path) {
-    for _ in 0..200 {
+    for _ in 0..600 {
         if path.is_file() {
             return;
         }

@@ -21,6 +21,7 @@ jobs:
   unix-matrix:
     name: unix-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -75,11 +76,12 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features
 
       - name: Nextest
-        run: cargo nextest run --workspace
+        run: cargo nextest run --profile ci --workspace
 
   windows-v1:
     name: windows-v1
     runs-on: windows-latest
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v6
@@ -119,6 +121,7 @@ jobs:
       - name: Nextest
         run: >
           cargo nextest run
+          --profile ci
           -p terminal-backend-native
           -p terminal-daemon
           -p terminal-daemon-client
@@ -130,6 +133,7 @@ jobs:
   governance:
     name: governance
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v6
@@ -172,6 +176,7 @@ jobs:
   fuzz-baseline:
     name: fuzz-baseline
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v6

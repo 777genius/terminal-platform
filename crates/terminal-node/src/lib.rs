@@ -1366,7 +1366,11 @@ mod tests {
         subscription: &super::NodeSubscriptionHandle,
     ) -> Option<super::NodeTopologySnapshot> {
         for _ in 0..20 {
-            match subscription.next_event().await.expect("subscription should stay healthy") {
+            match timeout(Duration::from_secs(5), subscription.next_event())
+                .await
+                .expect("subscription next_event should not hang")
+                .expect("subscription should stay healthy")
+            {
                 Some(NodeSubscriptionEvent::TopologySnapshot(snapshot)) => return Some(snapshot),
                 Some(NodeSubscriptionEvent::ScreenDelta(_)) => continue,
                 None => return None,
@@ -1399,7 +1403,11 @@ mod tests {
         needle: &str,
     ) -> Option<super::NodeScreenDelta> {
         for _ in 0..50 {
-            match subscription.next_event().await.expect("subscription should stay healthy") {
+            match timeout(Duration::from_secs(5), subscription.next_event())
+                .await
+                .expect("subscription next_event should not hang")
+                .expect("subscription should stay healthy")
+            {
                 Some(NodeSubscriptionEvent::ScreenDelta(delta))
                     if subscription_delta_contains(&delta, needle) =>
                 {

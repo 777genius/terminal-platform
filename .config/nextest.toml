@@ -3,3 +3,9 @@ fail-fast = false
 retries = 0
 status-level = "pass"
 
+[profile.ci]
+fail-fast = false
+retries = 0
+status-level = "slow"
+slow-timeout = { period = "60s", terminate-after = 5, grace-period = "15s" }
+global-timeout = "60m"

@@ -68,7 +68,7 @@ async fn closes_staged_package_subscriptions_when_daemon_stops() {
 }
 
 async fn wait_for_ready_file(path: &std::path::Path) {
-    for _ in 0..120 {
+    for _ in 0..600 {
         if path.is_file() {
             return;
         }

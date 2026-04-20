@@ -91,7 +91,7 @@ async fn recovers_staged_package_client_after_daemon_restart() {
 }
 
 async fn wait_for_file(path: &Path) {
-    for _ in 0..120 {
+    for _ in 0..600 {
         if path.is_file() {
             return;
         }

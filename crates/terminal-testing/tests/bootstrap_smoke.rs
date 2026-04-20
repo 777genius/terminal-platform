@@ -245,7 +245,7 @@ async fn bootstrap_smoke_streams_topology_updates() {
         .await
         .expect("subscription should open");
 
-    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = must_recv_subscription_event(&mut subscription).await;
     let initial = match initial {
         SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
         other => panic!("unexpected initial event: {other:?}"),
@@ -258,13 +258,13 @@ async fn bootstrap_smoke_streams_topology_updates() {
         )
         .await
         .expect("dispatch should succeed");
-    let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+    let updated = must_recv_subscription_event(&mut subscription).await;
     let mut updated = match updated {
         SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
         other => panic!("unexpected topology event: {other:?}"),
     };
     while updated.tabs.len() != 2 {
-        let next = subscription.recv().await.expect("recv should succeed").expect("event");
+        let next = must_recv_subscription_event(&mut subscription).await;
         updated = match next {
             SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
             other => panic!("unexpected topology event: {other:?}"),
@@ -295,13 +295,13 @@ async fn bootstrap_smoke_closes_subscription_lane_explicitly() {
         .await
         .expect("subscription should open");
 
-    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = must_recv_subscription_event(&mut subscription).await;
     match initial {
         SubscriptionEvent::TopologySnapshot(_) => {}
         other => panic!("unexpected initial event: {other:?}"),
     }
     subscription.close().await.expect("close should succeed");
-    assert!(subscription.recv().await.expect("recv should succeed").is_none());
+    assert!(recv_subscription_event(&mut subscription).await.is_none());
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
@@ -331,7 +331,7 @@ async fn bootstrap_smoke_streams_live_pane_surface_updates() {
         .await
         .expect("subscription should open");
 
-    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = must_recv_subscription_event(&mut subscription).await;
     let initial = match initial {
         SubscriptionEvent::ScreenDelta(delta) => delta,
         other => panic!("unexpected initial event: {other:?}"),
@@ -347,7 +347,7 @@ async fn bootstrap_smoke_streams_live_pane_surface_updates() {
         )
         .await
         .expect("dispatch should succeed");
-    let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+    let updated = must_recv_subscription_event(&mut subscription).await;
     let updated = match updated {
         SubscriptionEvent::ScreenDelta(delta) => delta,
         other => panic!("unexpected screen event: {other:?}"),
@@ -481,16 +481,14 @@ async fn bootstrap_smoke_streams_surface_updates_for_all_native_panes_after_resi
         .await
         .expect("resized subscription should open");
 
-    let original_initial =
-        match original_subscription.recv().await.expect("recv should succeed").expect("event") {
-            SubscriptionEvent::ScreenDelta(delta) => delta,
-            other => panic!("unexpected original initial event: {other:?}"),
-        };
-    let resized_initial =
-        match resized_subscription.recv().await.expect("recv should succeed").expect("event") {
-            SubscriptionEvent::ScreenDelta(delta) => delta,
-            other => panic!("unexpected resized initial event: {other:?}"),
-        };
+    let original_initial = match must_recv_subscription_event(&mut original_subscription).await {
+        SubscriptionEvent::ScreenDelta(delta) => delta,
+        other => panic!("unexpected original initial event: {other:?}"),
+    };
+    let resized_initial = match must_recv_subscription_event(&mut resized_subscription).await {
+        SubscriptionEvent::ScreenDelta(delta) => delta,
+        other => panic!("unexpected resized initial event: {other:?}"),
+    };
 
     let original_before = fixture
         .client
@@ -517,16 +515,14 @@ async fn bootstrap_smoke_streams_surface_updates_for_all_native_panes_after_resi
         .await
         .expect("resize should succeed");
 
-    let original_updated =
-        match original_subscription.recv().await.expect("recv should succeed").expect("event") {
-            SubscriptionEvent::ScreenDelta(delta) => delta,
-            other => panic!("unexpected original updated event: {other:?}"),
-        };
-    let resized_updated =
-        match resized_subscription.recv().await.expect("recv should succeed").expect("event") {
-            SubscriptionEvent::ScreenDelta(delta) => delta,
-            other => panic!("unexpected resized updated event: {other:?}"),
-        };
+    let original_updated = match must_recv_subscription_event(&mut original_subscription).await {
+        SubscriptionEvent::ScreenDelta(delta) => delta,
+        other => panic!("unexpected original updated event: {other:?}"),
+    };
+    let resized_updated = match must_recv_subscription_event(&mut resized_subscription).await {
+        SubscriptionEvent::ScreenDelta(delta) => delta,
+        other => panic!("unexpected resized updated event: {other:?}"),
+    };
 
     assert!(original_initial.full_replace.is_some());
     assert!(resized_initial.full_replace.is_some());
@@ -1000,7 +996,7 @@ async fn bootstrap_smoke_handles_rapid_native_tab_focus_churn() {
         .await
         .expect("topology subscription should open");
 
-    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = must_recv_subscription_event(&mut subscription).await;
     assert!(matches!(initial, SubscriptionEvent::TopologySnapshot(_)));
 
     for title in ["logs-a", "logs-b"] {
@@ -1837,7 +1833,7 @@ async fn bootstrap_smoke_streams_tmux_topology_updates() {
         .await
         .expect("subscription should open");
 
-    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = must_recv_subscription_event(&mut subscription).await;
     let initial = match initial {
         SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
         other => panic!("unexpected initial event: {other:?}"),
@@ -1859,13 +1855,13 @@ async fn bootstrap_smoke_streams_tmux_topology_updates() {
     )
     .expect("tmux new-window should succeed");
 
-    let updated = subscription.recv().await.expect("recv should succeed").expect("event");
+    let updated = must_recv_subscription_event(&mut subscription).await;
     let mut updated = match updated {
         SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
         other => panic!("unexpected topology event: {other:?}"),
     };
     while updated.tabs.len() != 3 {
-        let next = subscription.recv().await.expect("recv should succeed").expect("event");
+        let next = must_recv_subscription_event(&mut subscription).await;
         updated = match next {
             SubscriptionEvent::TopologySnapshot(snapshot) => snapshot,
             other => panic!("unexpected topology event: {other:?}"),
@@ -1911,7 +1907,7 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
         .await
         .expect("subscription should open");
 
-    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = must_recv_subscription_event(&mut subscription).await;
     let initial = match initial {
         SubscriptionEvent::ScreenDelta(delta) => delta,
         other => panic!("unexpected initial event: {other:?}"),
@@ -1930,7 +1926,7 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
         .expect("send input should succeed");
 
     let updated = loop {
-        let next = subscription.recv().await.expect("recv should succeed").expect("event");
+        let next = must_recv_subscription_event(&mut subscription).await;
         let next = match next {
             SubscriptionEvent::ScreenDelta(delta) => delta,
             other => panic!("unexpected pane event: {other:?}"),
@@ -2273,7 +2269,7 @@ async fn bootstrap_smoke_handles_rapid_zellij_tab_focus_churn() {
         .await
         .expect("topology subscription should open");
 
-    let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+    let initial = must_recv_subscription_event(&mut subscription).await;
     assert!(matches!(initial, SubscriptionEvent::TopologySnapshot(_)));
 
     for title in ["focus-a", "focus-b"] {
@@ -2454,6 +2450,23 @@ async fn wait_for_topology(
     }
 
     panic!("topology never reached expected state: {label}; last snapshot: {last_snapshot:?}");
+}
+
+#[cfg(any(unix, windows))]
+async fn recv_subscription_event(
+    subscription: &mut terminal_daemon_client::LocalSocketSubscription,
+) -> Option<SubscriptionEvent> {
+    tokio::time::timeout(Duration::from_secs(10), subscription.recv())
+        .await
+        .expect("subscription recv should not hang")
+        .expect("subscription recv should succeed")
+}
+
+#[cfg(any(unix, windows))]
+async fn must_recv_subscription_event(
+    subscription: &mut terminal_daemon_client::LocalSocketSubscription,
+) -> SubscriptionEvent {
+    recv_subscription_event(subscription).await.expect("subscription should emit an event")
 }
 
 #[cfg(any(unix, windows))]
