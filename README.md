@@ -38,6 +38,17 @@ Current workspace shape:
 - `crates/terminal-capi`
 - `crates/terminal-testing`
 
+## Node package surface
+
+`terminal-node` owns safe Rust DTO and facade truth.
+
+`terminal-node-napi` owns the Node/Electron leaf:
+
+- raw native addon via `napi-rs`
+- staged package surface in `crates/terminal-node-napi/package`
+- `index.cjs` and `index.mjs` loader entrypoints
+- `index.d.ts` plus generated `bindings/*.d.ts`
+
 ## Quality gates
 
 Bootstrap target:

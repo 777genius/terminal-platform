@@ -1,23 +1,23 @@
 const { runSmoke } = require("./smoke_flow.cjs");
 
-function createClient(binding) {
+function createClient(sdk) {
   const kind = process.env.TERMINAL_NODE_ADDRESS_KIND;
   const value = process.env.TERMINAL_NODE_ADDRESS_VALUE;
 
   if (kind === "namespaced") {
-    return binding.TerminalNodeClient.fromNamespacedAddress(value);
+    return sdk.TerminalNodeClient.fromNamespacedAddress(value);
   }
 
   if (kind === "filesystem") {
-    return binding.TerminalNodeClient.fromFilesystemPath(value);
+    return sdk.TerminalNodeClient.fromFilesystemPath(value);
   }
 
   throw new Error(`Unsupported address kind: ${kind}`);
 }
 
 async function main() {
-  const binding = require(process.env.TERMINAL_NODE_ADDON);
-  await runSmoke(() => createClient(binding));
+  const sdk = require(process.env.TERMINAL_NODE_PACKAGE);
+  await runSmoke(() => createClient(sdk));
 }
 
 main().catch((error) => {

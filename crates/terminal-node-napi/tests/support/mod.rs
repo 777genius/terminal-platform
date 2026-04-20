@@ -1,0 +1,93 @@
+#![allow(dead_code)]
+
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+pub fn locate_cdylib() -> std::io::Result<PathBuf> {
+    let test_binary = std::env::current_exe()?;
+    let deps_dir = test_binary
+        .parent()
+        .ok_or_else(|| std::io::Error::other("test binary should have a parent dir"))?;
+    let target_dir = deps_dir
+        .parent()
+        .ok_or_else(|| std::io::Error::other("deps dir should have a parent dir"))?;
+
+    for dir in [deps_dir, target_dir] {
+        for name in candidate_cdylib_names() {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        format!("could not find terminal-node-napi cdylib near {}", test_binary.display()),
+    ))
+}
+
+pub fn materialize_node_addon() -> std::io::Result<PathBuf> {
+    let source = locate_cdylib()?;
+    let target = unique_temp_path("terminal-node-napi", "node");
+    fs::copy(&source, &target)?;
+    Ok(target)
+}
+
+pub fn stage_node_package(addon_source: &Path) -> std::io::Result<PathBuf> {
+    let stage_dir = unique_temp_dir("terminal-node-package");
+    let script_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("package/scripts/stage-package.mjs");
+    let output = Command::new("node")
+        .arg(script_path)
+        .arg("--out")
+        .arg(&stage_dir)
+        .arg("--addon")
+        .arg(addon_source)
+        .output()
+        .expect("package staging should launch");
+
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "package staging failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    Ok(stage_dir)
+}
+
+fn unique_temp_dir(prefix: &str) -> PathBuf {
+    unique_temp_path(prefix, "dir")
+}
+
+fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+
+    std::env::temp_dir().join(format!("{prefix}-{}-{nanos}.{suffix}", std::process::id()))
+}
+
+fn candidate_cdylib_names() -> &'static [&'static str] {
+    #[cfg(target_os = "macos")]
+    {
+        &["libterminal_node_napi.dylib"]
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        &["libterminal_node_napi.so"]
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        &["terminal_node_napi.dll"]
+    }
+}

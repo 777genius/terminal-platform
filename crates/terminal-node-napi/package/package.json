@@ -1,0 +1,28 @@
+{
+  "name": "terminal-platform-node",
+  "version": "0.1.0",
+  "description": "Thin Node/Electron SDK for Terminal Platform",
+  "license": "MIT",
+  "main": "./index.cjs",
+  "module": "./index.mjs",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./index.cjs",
+      "import": "./index.mjs"
+    }
+  },
+  "files": [
+    "README.md",
+    "index.cjs",
+    "index.mjs",
+    "index.d.ts",
+    "bindings",
+    "native"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false
+}

@@ -240,7 +240,7 @@ Bootstrap details for the very first phase live in:
 ### Deliverables
 
 - safe host facade + `napi-rs` leaf wrapper
-- TS types
+- staged JS package + TS types
 - integration notes for repo feature slice
 
 ### Exit criteria
