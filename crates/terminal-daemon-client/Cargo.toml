@@ -2,6 +2,7 @@
 name = "terminal-daemon-client"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 futures-util = { workspace = true }

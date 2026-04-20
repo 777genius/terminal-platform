@@ -16,7 +16,7 @@ futures-util = { version = "0.3.32", features = ["sink"] }
 interprocess = { version = "2.4.2", features = ["tokio"] }
 portable-pty = "0.9.0"
 proptest = "1.11.0"
-rusqlite = "0.39.0"
+rusqlite = { version = "0.39.0", features = ["bundled"] }
 rusqlite_migration = "2.5.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"

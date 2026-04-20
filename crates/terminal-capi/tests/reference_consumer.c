@@ -1,7 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
 #include <unistd.h>
+#endif
 
 #include "terminal-platform-capi.h"
 
@@ -93,7 +99,14 @@ static int wait_for_file(const char *path, const char *label) {
       fclose(file);
       return 1;
     }
-    usleep(100000);
+#if defined(_WIN32)
+    Sleep(100);
+#else
+    {
+      struct timespec delay = {0, 100000000L};
+      nanosleep(&delay, NULL);
+    }
+#endif
   }
 
   fprintf(stderr, "timed out waiting for %s at %s\n", label, path);

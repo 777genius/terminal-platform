@@ -2,6 +2,7 @@
 name = "terminal-application"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 terminal-backend-api = { path = "../terminal-backend-api" }

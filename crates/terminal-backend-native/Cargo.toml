@@ -2,6 +2,7 @@
 name = "terminal-backend-native"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 alacritty_terminal = { workspace = true }

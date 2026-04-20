@@ -219,7 +219,7 @@ impl ZellijSessionGuard {
             .map_err(|error| format!("failed to spawn zellij: {error}"))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if !stderr.contains("could not get terminal attribute: ENODEV") {
+            if !is_headless_zellij_spawn_error(&stderr) {
                 return Err(stderr.trim().to_string());
             }
         }
@@ -261,6 +261,14 @@ fn run_zellij(args: &[&str]) -> Result<String, String> {
     }
 
     String::from_utf8(output.stdout).map_err(|error| format!("invalid zellij utf8 output: {error}"))
+}
+
+#[cfg(any(unix, windows))]
+fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
+    stderr.contains("could not get terminal attribute")
+        || stderr.contains("could not enable raw mode")
+        || stderr.contains("No such device or address")
+        || stderr.contains("The handle is invalid")
 }
 
 #[cfg(any(unix, windows))]

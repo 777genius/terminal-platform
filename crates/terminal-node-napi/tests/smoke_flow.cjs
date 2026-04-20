@@ -999,16 +999,22 @@ function spawnZellijSession(sessionName) {
     ["--session", sessionName, "--new-session-with-layout", "default"],
     { encoding: "utf8" },
   );
-  if (
-    output.status !== 0 &&
-    !`${output.stderr ?? ""}`.includes("could not get terminal attribute")
-  ) {
+  if (output.status !== 0 && !isHeadlessZellijSpawnError(`${output.stderr ?? ""}`)) {
     throw new Error(`Failed to spawn zellij session: ${(output.stderr ?? "").trim()}`);
   }
 }
 
 function stopZellijSession(sessionName) {
   spawnSync("zellij", ["kill-session", sessionName], { encoding: "utf8" });
+}
+
+function isHeadlessZellijSpawnError(stderr) {
+  return (
+    stderr.includes("could not get terminal attribute") ||
+    stderr.includes("could not enable raw mode") ||
+    stderr.includes("No such device or address") ||
+    stderr.includes("The handle is invalid")
+  );
 }
 
 async function waitForDiscoveredZellijSession(client, sessionName) {
