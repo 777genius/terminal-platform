@@ -1,17 +1,19 @@
 mod ffi_types;
 mod handles;
 
-use std::{
-    ffi::{CStr, CString, c_char},
-};
+use std::ffi::{CStr, CString, c_char};
 
 use serde::de::DeserializeOwned;
 use terminal_node::{
     NodeBackendKind, NodeCreateSessionRequest, NodeMuxCommand, NodeSessionRoute,
+    NodeSubscriptionSpec,
 };
 
-pub use ffi_types::{TerminalCapiClientResult, TerminalCapiStatus, TerminalCapiStringResult};
-use handles::TerminalCapiClientHandle;
+pub use ffi_types::{
+    TerminalCapiClientResult, TerminalCapiStatus, TerminalCapiStringResult,
+    TerminalCapiSubscriptionResult,
+};
+use handles::{TerminalCapiClientHandle, TerminalCapiHandleError, TerminalCapiSubscriptionHandle};
 
 fn with_client_handle<T>(
     handle: *mut TerminalCapiClientHandle,
@@ -30,7 +32,27 @@ fn with_client_handle<T>(
     Ok(op(handle))
 }
 
-fn read_required_string(value: *const c_char, name: &str) -> Result<String, TerminalCapiStringResult> {
+fn with_subscription_handle<T>(
+    handle: *mut TerminalCapiSubscriptionHandle,
+    op: impl FnOnce(&mut TerminalCapiSubscriptionHandle) -> T,
+) -> Result<T, TerminalCapiStringResult> {
+    if handle.is_null() {
+        return Err(TerminalCapiStringResult::null_pointer("subscription"));
+    }
+
+    let handle = {
+        // SAFETY: the null case is handled above, and callers must pass a live handle pointer
+        // produced by this crate's constructor functions.
+        unsafe { &mut *handle }
+    };
+
+    Ok(op(handle))
+}
+
+fn read_required_string(
+    value: *const c_char,
+    name: &str,
+) -> Result<String, TerminalCapiStringResult> {
     if value.is_null() {
         return Err(TerminalCapiStringResult::null_pointer(name));
     }
@@ -41,16 +63,10 @@ fn read_required_string(value: *const c_char, name: &str) -> Result<String, Term
         unsafe { CStr::from_ptr(value) }
     };
 
-    value
-        .to_str()
-        .map(str::to_owned)
-        .map_err(|_| TerminalCapiStringResult::invalid_utf8(name))
+    value.to_str().map(str::to_owned).map_err(|_| TerminalCapiStringResult::invalid_utf8(name))
 }
 
-fn read_json_or_default<T>(
-    value: *const c_char,
-    name: &str,
-) -> Result<T, TerminalCapiStringResult>
+fn read_json_or_default<T>(value: *const c_char, name: &str) -> Result<T, TerminalCapiStringResult>
 where
     T: DeserializeOwned + Default,
 {
@@ -90,6 +106,19 @@ fn read_backend_kind(
         .map_err(|error| TerminalCapiStringResult::invalid_json(name, error))
 }
 
+fn subscription_result_from_open_error(
+    error: TerminalCapiHandleError,
+) -> TerminalCapiSubscriptionResult {
+    match error {
+        TerminalCapiHandleError::Runtime(error) => {
+            TerminalCapiSubscriptionResult::runtime_error("runtime_init_failed", error.to_string())
+        }
+        TerminalCapiHandleError::Protocol(error) => {
+            TerminalCapiStringResult::protocol_error(error).into()
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn terminal_capi_client_new_from_runtime_slug(
     slug: *const c_char,
@@ -101,7 +130,9 @@ pub extern "C" fn terminal_capi_client_new_from_runtime_slug(
 
     match TerminalCapiClientHandle::from_runtime_slug(slug) {
         Ok(handle) => TerminalCapiClientResult::ok(Box::into_raw(Box::new(handle))),
-        Err(error) => TerminalCapiClientResult::runtime_error("runtime_init_failed", error.to_string()),
+        Err(error) => {
+            TerminalCapiClientResult::runtime_error("runtime_init_failed", error.to_string())
+        }
     }
 }
 
@@ -116,7 +147,9 @@ pub extern "C" fn terminal_capi_client_new_from_namespaced_address(
 
     match TerminalCapiClientHandle::from_namespaced_address(value) {
         Ok(handle) => TerminalCapiClientResult::ok(Box::into_raw(Box::new(handle))),
-        Err(error) => TerminalCapiClientResult::runtime_error("runtime_init_failed", error.to_string()),
+        Err(error) => {
+            TerminalCapiClientResult::runtime_error("runtime_init_failed", error.to_string())
+        }
     }
 }
 
@@ -131,7 +164,9 @@ pub extern "C" fn terminal_capi_client_new_from_filesystem_path(
 
     match TerminalCapiClientHandle::from_filesystem_path(path) {
         Ok(handle) => TerminalCapiClientResult::ok(Box::into_raw(Box::new(handle))),
-        Err(error) => TerminalCapiClientResult::runtime_error("runtime_init_failed", error.to_string()),
+        Err(error) => {
+            TerminalCapiClientResult::runtime_error("runtime_init_failed", error.to_string())
+        }
     }
 }
 
@@ -149,7 +184,9 @@ pub extern "C" fn terminal_capi_client_binding_version_json(
 pub extern "C" fn terminal_capi_client_handshake_info_json(
     client: *mut TerminalCapiClientHandle,
 ) -> TerminalCapiStringResult {
-    match with_client_handle(client, |client| client.runtime.block_on(client.client.handshake_info())) {
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.handshake_info())
+    }) {
         Ok(Ok(handshake)) => TerminalCapiStringResult::ok_json(&handshake),
         Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
         Err(error) => error,
@@ -160,7 +197,9 @@ pub extern "C" fn terminal_capi_client_handshake_info_json(
 pub extern "C" fn terminal_capi_client_list_sessions_json(
     client: *mut TerminalCapiClientHandle,
 ) -> TerminalCapiStringResult {
-    match with_client_handle(client, |client| client.runtime.block_on(client.client.list_sessions())) {
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.list_sessions())
+    }) {
         Ok(Ok(listed)) => TerminalCapiStringResult::ok_json(&listed),
         Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
         Err(error) => error,
@@ -223,10 +262,11 @@ pub extern "C" fn terminal_capi_client_create_native_session_json(
     client: *mut TerminalCapiClientHandle,
     request_json: *const c_char,
 ) -> TerminalCapiStringResult {
-    let request = match read_json_or_default::<NodeCreateSessionRequest>(request_json, "request_json") {
-        Ok(request) => request,
-        Err(error) => return error,
-    };
+    let request =
+        match read_json_or_default::<NodeCreateSessionRequest>(request_json, "request_json") {
+            Ok(request) => request,
+            Err(error) => return error,
+        };
 
     match with_client_handle(client, |client| {
         client.runtime.block_on(client.client.create_native_session(&request))
@@ -328,6 +368,67 @@ pub extern "C" fn terminal_capi_client_restore_saved_session_json(
     }) {
         Ok(Ok(restored)) => TerminalCapiStringResult::ok_json(&restored),
         Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_client_open_subscription(
+    client: *mut TerminalCapiClientHandle,
+    session_id: *const c_char,
+    spec_json: *const c_char,
+) -> TerminalCapiSubscriptionResult {
+    let session_id = match read_required_string(session_id, "session_id") {
+        Ok(session_id) => session_id,
+        Err(error) => return error.into(),
+    };
+    let spec = match read_required_json::<NodeSubscriptionSpec>(spec_json, "spec_json") {
+        Ok(spec) => spec,
+        Err(error) => return error.into(),
+    };
+
+    match with_client_handle(client, |client| {
+        TerminalCapiSubscriptionHandle::open(client.client.clone(), session_id, spec)
+    }) {
+        Ok(Ok(subscription)) => {
+            TerminalCapiSubscriptionResult::ok(Box::into_raw(Box::new(subscription)))
+        }
+        Ok(Err(error)) => subscription_result_from_open_error(error),
+        Err(error) => error.into(),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_subscription_meta_json(
+    subscription: *mut TerminalCapiSubscriptionHandle,
+) -> TerminalCapiStringResult {
+    match with_subscription_handle(subscription, |subscription| subscription.subscription.meta()) {
+        Ok(meta) => TerminalCapiStringResult::ok_json(&meta),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_subscription_next_event_json(
+    subscription: *mut TerminalCapiSubscriptionHandle,
+) -> TerminalCapiStringResult {
+    match with_subscription_handle(subscription, |subscription| {
+        subscription.runtime.block_on(subscription.subscription.next_event())
+    }) {
+        Ok(Ok(event)) => TerminalCapiStringResult::ok_json(&event),
+        Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_subscription_close(
+    subscription: *mut TerminalCapiSubscriptionHandle,
+) -> TerminalCapiStringResult {
+    match with_subscription_handle(subscription, |subscription| {
+        subscription.runtime.block_on(subscription.subscription.close());
+    }) {
+        Ok(()) => TerminalCapiStringResult::ok_json(&serde_json::json!({ "closed": true })),
         Err(error) => error,
     }
 }
@@ -454,7 +555,27 @@ pub unsafe extern "C" fn terminal_capi_client_free(client: *mut TerminalCapiClie
     }
 
     // SAFETY: callers must only free handles previously returned by this crate and not freed yet.
-    unsafe { drop(Box::from_raw(client)); }
+    unsafe {
+        drop(Box::from_raw(client));
+    }
+}
+
+/// # Safety
+///
+/// `subscription` must be a pointer previously returned by this crate and must
+/// not have been freed yet.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn terminal_capi_subscription_free(
+    subscription: *mut TerminalCapiSubscriptionHandle,
+) {
+    if subscription.is_null() {
+        return;
+    }
+
+    // SAFETY: callers must only free handles previously returned by this crate and not freed yet.
+    unsafe {
+        drop(Box::from_raw(subscription));
+    }
 }
 
 /// # Safety
@@ -468,7 +589,9 @@ pub unsafe extern "C" fn terminal_capi_string_free(value: *mut c_char) {
     }
 
     // SAFETY: callers must only free strings previously returned by this crate and not freed yet.
-    unsafe { drop(CString::from_raw(value)); }
+    unsafe {
+        drop(CString::from_raw(value));
+    }
 }
 
 #[cfg(test)]
@@ -505,7 +628,8 @@ mod tests {
                 }
             };
 
-            let binding_version = read_json_result(terminal_capi_client_binding_version_json(handle));
+            let binding_version =
+                read_json_result(terminal_capi_client_binding_version_json(handle));
             assert_eq!(binding_version["protocol"]["major"], 0);
             assert_eq!(binding_version["protocol"]["minor"], 1);
 
@@ -548,11 +672,44 @@ mod tests {
             );
 
             let session_id_c = c_string(&session_id);
-            let attached =
-                read_json_result(terminal_capi_client_attach_session_json(handle, session_id_c.as_ptr()));
+            let attached = read_json_result(terminal_capi_client_attach_session_json(
+                handle,
+                session_id_c.as_ptr(),
+            ));
             let pane_id =
                 attached["focused_screen"]["pane_id"].as_str().unwrap_or_default().to_string();
             assert!(!pane_id.is_empty());
+
+            let topology_subscription_spec = c_string(r#"{"kind":"session_topology"}"#);
+            let topology_subscription =
+                read_subscription_result(terminal_capi_client_open_subscription(
+                    handle,
+                    session_id_c.as_ptr(),
+                    topology_subscription_spec.as_ptr(),
+                ));
+            let topology_meta =
+                read_json_result(terminal_capi_subscription_meta_json(topology_subscription));
+            assert!(!topology_meta["subscription_id"].as_str().unwrap_or_default().is_empty());
+            let initial_topology_event =
+                read_json_result(terminal_capi_subscription_next_event_json(topology_subscription));
+            assert_eq!(initial_topology_event["kind"], "topology_snapshot");
+            assert_eq!(initial_topology_event["tabs"].as_array().map_or(0, Vec::len), 1);
+
+            let pane_subscription_spec =
+                c_string(&format!(r#"{{"kind":"pane_surface","pane_id":"{pane_id}"}}"#));
+            let pane_subscription =
+                read_subscription_result(terminal_capi_client_open_subscription(
+                    handle,
+                    session_id_c.as_ptr(),
+                    pane_subscription_spec.as_ptr(),
+                ));
+            let pane_meta =
+                read_json_result(terminal_capi_subscription_meta_json(pane_subscription));
+            assert!(!pane_meta["subscription_id"].as_str().unwrap_or_default().is_empty());
+            let initial_pane_event =
+                read_json_result(terminal_capi_subscription_next_event_json(pane_subscription));
+            assert_eq!(initial_pane_event["kind"], "screen_delta");
+            assert!(initial_pane_event["full_replace"].is_object());
 
             let pane_id_c = c_string(&pane_id);
             let snapshot = read_json_result(terminal_capi_client_screen_snapshot_json(
@@ -577,6 +734,21 @@ mod tests {
                 mux_command.as_ptr(),
             ));
             assert_eq!(dispatch["changed"], true);
+            let topology_update = wait_for_topology_event(topology_subscription, 2);
+            assert_eq!(topology_update["tabs"].as_array().map_or(0, Vec::len), 2);
+
+            let input_command = c_string(&format!(
+                r#"{{"kind":"send_input","pane_id":"{pane_id}","data":"ffi subscription input\r"}}"#
+            ));
+            let input_result = read_json_result(terminal_capi_client_dispatch_mux_command_json(
+                handle,
+                session_id_c.as_ptr(),
+                input_command.as_ptr(),
+            ));
+            assert_eq!(input_result["changed"], false);
+            let pane_update =
+                wait_for_screen_delta_with_text(pane_subscription, "ffi subscription input");
+            assert_eq!(pane_update["kind"], "screen_delta");
 
             let save_command = c_string(r#"{"kind":"save_session"}"#);
             let save = read_json_result(terminal_capi_client_dispatch_mux_command_json(
@@ -586,7 +758,8 @@ mod tests {
             ));
             assert_eq!(save["changed"], false);
 
-            let saved_sessions = read_json_result(terminal_capi_client_list_saved_sessions_json(handle));
+            let saved_sessions =
+                read_json_result(terminal_capi_client_list_saved_sessions_json(handle));
             assert!(
                 saved_sessions
                     .as_array()
@@ -622,6 +795,19 @@ mod tests {
                 session_id_c.as_ptr(),
             ));
             assert_eq!(deleted["session_id"], session_id);
+
+            let closed_topology =
+                read_json_result(terminal_capi_subscription_close(topology_subscription));
+            assert_eq!(closed_topology["closed"], true);
+
+            let closed_pane = read_json_result(terminal_capi_subscription_close(pane_subscription));
+            assert_eq!(closed_pane["closed"], true);
+
+            // SAFETY: subscription handles were returned by this crate and are freed exactly once.
+            unsafe {
+                terminal_capi_subscription_free(topology_subscription);
+                terminal_capi_subscription_free(pane_subscription);
+            }
 
             // SAFETY: handle was returned by this crate and is freed exactly once here.
             unsafe { terminal_capi_client_free(handle) };
@@ -661,5 +847,54 @@ mod tests {
 
         serde_json::from_str(&value)
             .unwrap_or_else(|error| panic!("result JSON should parse: {error}\n{value}"))
+    }
+
+    fn read_subscription_result(
+        result: TerminalCapiSubscriptionResult,
+    ) -> *mut TerminalCapiSubscriptionHandle {
+        assert_eq!(result.status, TerminalCapiStatus::Ok);
+        assert!(!result.subscription.is_null());
+        result.subscription
+    }
+
+    fn wait_for_topology_event(
+        subscription: *mut TerminalCapiSubscriptionHandle,
+        expected_tabs: usize,
+    ) -> Value {
+        for _ in 0..8 {
+            let event = read_json_result(terminal_capi_subscription_next_event_json(subscription));
+            if event["kind"] == "topology_snapshot"
+                && event["tabs"].as_array().map_or(0, Vec::len) == expected_tabs
+            {
+                return event;
+            }
+        }
+
+        panic!("topology subscription should yield snapshot with {expected_tabs} tabs");
+    }
+
+    fn wait_for_screen_delta_with_text(
+        subscription: *mut TerminalCapiSubscriptionHandle,
+        needle: &str,
+    ) -> Value {
+        for _ in 0..16 {
+            let event = read_json_result(terminal_capi_subscription_next_event_json(subscription));
+            if event["kind"] == "screen_delta" && json_value_contains_text(&event, needle) {
+                return event;
+            }
+        }
+
+        panic!("pane subscription should yield screen delta containing `{needle}`");
+    }
+
+    fn json_value_contains_text(value: &Value, needle: &str) -> bool {
+        match value {
+            Value::Null | Value::Bool(_) | Value::Number(_) => false,
+            Value::String(text) => text.contains(needle),
+            Value::Array(items) => items.iter().any(|item| json_value_contains_text(item, needle)),
+            Value::Object(entries) => {
+                entries.values().any(|item| json_value_contains_text(item, needle))
+            }
+        }
     }
 }

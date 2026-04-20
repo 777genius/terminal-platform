@@ -1,9 +1,12 @@
-use std::{ffi::{CString, c_char}, ptr};
+use std::{
+    ffi::{CString, c_char},
+    ptr,
+};
 
 use serde::Serialize;
 use terminal_protocol::ProtocolError;
 
-use crate::handles::TerminalCapiClientHandle;
+use crate::handles::{TerminalCapiClientHandle, TerminalCapiSubscriptionHandle};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +31,14 @@ pub struct TerminalCapiStringResult {
 pub struct TerminalCapiClientResult {
     pub status: TerminalCapiStatus,
     pub client: *mut TerminalCapiClientHandle,
+    pub error: *mut c_char,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct TerminalCapiSubscriptionResult {
+    pub status: TerminalCapiStatus,
+    pub subscription: *mut TerminalCapiSubscriptionHandle,
     pub error: *mut c_char,
 }
 
@@ -70,7 +81,9 @@ impl TerminalCapiStringResult {
     #[must_use]
     pub fn protocol_error(error: ProtocolError) -> Self {
         match serde_json::to_string(&error) {
-            Ok(json) => Self { status: TerminalCapiStatus::ProtocolError, value: into_raw_c_string(json) },
+            Ok(json) => {
+                Self { status: TerminalCapiStatus::ProtocolError, value: into_raw_c_string(json) }
+            }
             Err(error) => Self::runtime_error("serialize_failed", error.to_string()),
         }
     }
@@ -112,9 +125,37 @@ impl TerminalCapiClientResult {
     }
 }
 
+impl TerminalCapiSubscriptionResult {
+    #[must_use]
+    pub fn ok(subscription: *mut TerminalCapiSubscriptionHandle) -> Self {
+        Self { status: TerminalCapiStatus::Ok, subscription, error: ptr::null_mut() }
+    }
+
+    #[must_use]
+    pub fn runtime_error(code: &str, message: impl Into<String>) -> Self {
+        Self {
+            status: TerminalCapiStatus::RuntimeError,
+            subscription: ptr::null_mut(),
+            error: into_raw_c_string(
+                serde_json::json!({
+                    "code": code,
+                    "message": message.into(),
+                })
+                .to_string(),
+            ),
+        }
+    }
+}
+
 impl From<TerminalCapiStringResult> for TerminalCapiClientResult {
     fn from(value: TerminalCapiStringResult) -> Self {
         Self { status: value.status, client: ptr::null_mut(), error: value.value }
+    }
+}
+
+impl From<TerminalCapiStringResult> for TerminalCapiSubscriptionResult {
+    fn from(value: TerminalCapiStringResult) -> Self {
+        Self { status: value.status, subscription: ptr::null_mut(), error: value.value }
     }
 }
 
