@@ -1171,7 +1171,7 @@ function isLegacyZellijActionError(error) {
 function zellijSessionControlReady(sessionName) {
   const tabs = spawnSync(
     "zellij",
-    ["--session", sessionName, "action", "--", "list-tabs", "--json"],
+    ["--session", sessionName, "action", "list-tabs", "--json"],
     {
       encoding: "utf8",
       windowsHide: true,
@@ -1196,7 +1196,7 @@ function zellijSessionControlReady(sessionName) {
 
   const panes = spawnSync(
     "zellij",
-    ["--session", sessionName, "action", "--", "list-panes", "--json"],
+    ["--session", sessionName, "action", "list-panes", "--json"],
     {
       encoding: "utf8",
       windowsHide: true,

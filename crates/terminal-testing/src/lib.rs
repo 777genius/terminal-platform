@@ -372,7 +372,7 @@ fn run_zellij_in_session(session_name: &str, args: &[&str]) -> Result<String, St
 
 #[cfg(any(unix, windows))]
 fn is_zellij_session_control_ready(session_name: &str) -> Result<bool, String> {
-    match run_zellij_in_session(session_name, &["action", "--", "list-tabs", "--json"]) {
+    match run_zellij_in_session(session_name, &["action", "list-tabs", "--json"]) {
         Ok(output) if output.trim_start().starts_with('[') => {}
         Ok(_) => return Ok(false),
         Err(error) if is_transient_zellij_session_wait_error(&error) => return Ok(false),
@@ -380,7 +380,7 @@ fn is_zellij_session_control_ready(session_name: &str) -> Result<bool, String> {
         Err(error) => return Err(error),
     }
 
-    match run_zellij_in_session(session_name, &["action", "--", "list-panes", "--json"]) {
+    match run_zellij_in_session(session_name, &["action", "list-panes", "--json"]) {
         Ok(output) if output.trim_start().starts_with('[') => Ok(true),
         Ok(_) => Ok(false),
         Err(error) if is_transient_zellij_session_wait_error(&error) => Ok(false),
