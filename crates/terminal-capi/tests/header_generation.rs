@@ -1,25 +1,9 @@
-use std::path::PathBuf;
+mod support;
 
 #[test]
 fn generates_header_with_core_c_api_symbols() {
-    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let config_path = crate_dir.join("cbindgen.toml");
-    let config = match cbindgen::Config::from_file(&config_path) {
-        Ok(config) => config,
-        Err(error) => panic!("cbindgen config should load from {}: {error}", config_path.display()),
-    };
-    let builder =
-        cbindgen::Builder::new().with_crate(crate_dir.display().to_string()).with_config(config);
-    let bindings = match builder.generate() {
-        Ok(bindings) => bindings,
-        Err(error) => panic!("cbindgen should generate header: {error}"),
-    };
-    let mut header = Vec::new();
-    bindings.write(&mut header);
-    let header = match String::from_utf8(header) {
-        Ok(header) => header,
-        Err(error) => panic!("generated header should be valid UTF-8: {error}"),
-    };
+    let header = support::read_generated_header()
+        .unwrap_or_else(|error| panic!("header should generate: {error}"));
 
     assert!(header.contains("typedef enum TerminalCapiStatus"));
     assert!(header.contains("typedef struct TerminalCapiStringResult"));

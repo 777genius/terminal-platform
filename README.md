@@ -60,6 +60,7 @@ Current shape:
 - explicit subscription handles with open, poll-next-event, close and free semantics
 - Rust-owned C string carriers plus explicit free functions
 - checked-in `cbindgen.toml` plus tested header generation path
+- external C consumer smoke that compiles against the generated header and the built `cdylib`
 
 ## Quality gates
 
