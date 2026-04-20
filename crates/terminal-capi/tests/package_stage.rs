@@ -5,7 +5,6 @@ mod support;
 use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    time::Duration,
 };
 
 #[cfg(unix)]
@@ -15,7 +14,9 @@ use terminal_daemon_client::LocalSocketDaemonClient;
 #[cfg(unix)]
 use terminal_protocol::LocalSocketAddress;
 #[cfg(unix)]
-use terminal_testing::{daemon_fixture, daemon_state, unique_socket_address, wait_for_daemon_ready};
+use terminal_testing::{
+    daemon_fixture, daemon_state, unique_socket_address, wait_for_daemon_ready,
+};
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
@@ -76,8 +77,8 @@ async fn staged_terminal_capi_package_handles_shutdown_and_restart_flows() {
     let (binary_path, cdylib_path) = compile_staged_reference_consumer(&stage_dir);
 
     let shutdown_ready_file = support::unique_temp_path("terminal-capi-stage-shutdown", "ready");
-    let shutdown_fixture =
-        daemon_fixture("capi-stage-shutdown").expect("daemon fixture should start for stage shutdown smoke");
+    let shutdown_fixture = daemon_fixture("capi-stage-shutdown")
+        .expect("daemon fixture should start for stage shutdown smoke");
     wait_for_daemon_ready(&shutdown_fixture.client).await;
     let shutdown_child = spawn_staged_reference_consumer(
         &binary_path,
@@ -86,14 +87,13 @@ async fn staged_terminal_capi_package_handles_shutdown_and_restart_flows() {
         "shutdown",
         &[("TERMINAL_CAPI_READY_FILE", shutdown_ready_file.as_path())],
     );
-    wait_for_file(&shutdown_ready_file).await;
+    support::wait_for_file(&shutdown_ready_file, "staged shutdown consumer ready file").await;
     shutdown_fixture
         .shutdown()
         .await
         .expect("daemon fixture should stop cleanly before staged shutdown consumer exits");
-    let shutdown_output = shutdown_child
-        .wait_with_output()
-        .expect("staged shutdown consumer should collect output");
+    let shutdown_output =
+        shutdown_child.wait_with_output().expect("staged shutdown consumer should collect output");
     assert!(
         shutdown_output.status.success(),
         "staged shutdown consumer failed\nstdout:\n{}\nstderr:\n{}",
@@ -106,11 +106,9 @@ async fn staged_terminal_capi_package_handles_shutdown_and_restart_flows() {
     let initial_ready_file = support::unique_temp_path("terminal-capi-stage-restart", "ready");
     let stale_ready_file = support::unique_temp_path("terminal-capi-stage-restart", "stale");
     let restart_file = support::unique_temp_path("terminal-capi-stage-restart", "restart");
-    let initial_server = spawn_local_socket_server(
-        TerminalDaemon::new(daemon_state()),
-        restart_address.clone(),
-    )
-    .expect("initial daemon should start for staged restart consumer");
+    let initial_server =
+        spawn_local_socket_server(TerminalDaemon::new(daemon_state()), restart_address.clone())
+            .expect("initial daemon should start for staged restart consumer");
     wait_for_daemon_ready(&restart_client).await;
     let restart_child = spawn_staged_reference_consumer(
         &binary_path,
@@ -123,24 +121,31 @@ async fn staged_terminal_capi_package_handles_shutdown_and_restart_flows() {
             ("TERMINAL_CAPI_RESTART_FILE", restart_file.as_path()),
         ],
     );
-    wait_for_file(&initial_ready_file).await;
+    let restart_child = support::wait_for_file_or_child_exit(
+        &initial_ready_file,
+        restart_child,
+        "staged restart consumer initial ready",
+    )
+    .await;
     initial_server
         .shutdown()
         .await
         .expect("initial daemon should stop cleanly for staged restart consumer");
-    wait_for_file(&stale_ready_file).await;
+    let restart_child = support::wait_for_file_or_child_exit(
+        &stale_ready_file,
+        restart_child,
+        "staged restart consumer stale signal",
+    )
+    .await;
 
     let replacement_client = LocalSocketDaemonClient::new(restart_address.clone());
-    let replacement_server = spawn_local_socket_server(
-        TerminalDaemon::new(daemon_state()),
-        restart_address,
-    )
-    .expect("replacement daemon should start for staged restart consumer");
+    let replacement_server =
+        spawn_local_socket_server(TerminalDaemon::new(daemon_state()), restart_address)
+            .expect("replacement daemon should start for staged restart consumer");
     wait_for_daemon_ready(&replacement_client).await;
     std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");
-    let restart_output = restart_child
-        .wait_with_output()
-        .expect("staged restart consumer should collect output");
+    let restart_output =
+        restart_child.wait_with_output().expect("staged restart consumer should collect output");
     replacement_server
         .shutdown()
         .await
@@ -242,9 +247,7 @@ fn run_staged_reference_consumer(
     envs: &[(&str, &Path)],
 ) -> std::process::Output {
     let child = spawn_staged_reference_consumer(binary_path, cdylib_path, address, mode, envs);
-    child
-        .wait_with_output()
-        .expect("staged reference consumer should collect output")
+    child.wait_with_output().expect("staged reference consumer should collect output")
 }
 
 #[cfg(unix)]
@@ -273,19 +276,5 @@ fn spawn_staged_reference_consumer(
     consumer.stdout(Stdio::piped());
     consumer.stderr(Stdio::piped());
 
-    consumer
-        .spawn()
-        .expect("staged reference consumer should launch")
-}
-
-#[cfg(unix)]
-async fn wait_for_file(path: &Path) {
-    for _ in 0..200 {
-        if path.is_file() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-
-    panic!("staged reference consumer never observed file: {}", path.display());
+    consumer.spawn().expect("staged reference consumer should launch")
 }

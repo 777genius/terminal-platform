@@ -46,6 +46,50 @@ async fn roundtrips_node_addon_against_daemon_fixture() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn closes_node_addon_subscriptions_when_daemon_stops() {
+    let fixture = daemon_fixture("terminal-node-napi-addon-close").expect("fixture should start");
+    wait_for_daemon_ready(&fixture.client).await;
+    let addon_path = support::materialize_node_addon().expect("node addon should be materialized");
+    let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/node_smoke.cjs");
+    let (address_kind, address_value) = match fixture.client.address() {
+        LocalSocketAddress::Namespaced(value) => ("namespaced", value.clone()),
+        LocalSocketAddress::Filesystem(path) => ("filesystem", path.display().to_string()),
+    };
+    let ready_file = unique_temp_path("terminal-node-addon-close", "ready");
+
+    let child = Command::new("node")
+        .arg(script_path)
+        .env("TERMINAL_NODE_ADDON", &addon_path)
+        .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
+        .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value)
+        .env("TERMINAL_NODE_SMOKE_MODE", "shutdown")
+        .env("TERMINAL_NODE_READY_FILE", &ready_file)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("node shutdown smoke should launch");
+
+    wait_for_file(&ready_file).await;
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+
+    let output = child.wait_with_output().expect("node shutdown smoke should collect output");
+
+    assert!(
+        output.status.success(),
+        "node shutdown smoke failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"subscription_closed\":true"),
+        "node shutdown smoke should confirm subscription closure"
+    );
+
+    let _ = std::fs::remove_file(&ready_file);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn repeatedly_reopens_subscriptions_through_node_addon() {
     let fixture = daemon_fixture("terminal-node-napi-repeat").expect("fixture should start");
     wait_for_daemon_ready(&fixture.client).await;
@@ -146,6 +190,10 @@ async fn recovers_node_addon_client_after_daemon_restart() {
     assert!(
         stdout.contains("\"recovered\":true"),
         "node restart smoke should confirm recovery against restarted daemon"
+    );
+    assert!(
+        stdout.contains("\"recovered_subscription_ok\":true"),
+        "node restart smoke should confirm recovered subscription health"
     );
 
     let _ = std::fs::remove_file(&initial_ready_file);

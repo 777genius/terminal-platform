@@ -3,9 +3,12 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Child, Command},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(unix)]
+use std::time::Duration;
 
 pub fn generate_header() -> std::io::Result<PathBuf> {
     let header_dir = unique_temp_dir("terminal-capi-header");
@@ -187,6 +190,54 @@ pub fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
 
 pub fn unique_temp_dir(prefix: &str) -> PathBuf {
     unique_temp_path(prefix, "dir")
+}
+
+#[cfg(unix)]
+pub async fn wait_for_file(path: &Path, label: &str) {
+    for _ in 0..600 {
+        if path.is_file() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    panic!("timed out waiting for {label} at {}", path.display());
+}
+
+#[cfg(unix)]
+pub async fn wait_for_file_or_child_exit(path: &Path, mut child: Child, label: &str) -> Child {
+    for _ in 0..600 {
+        if path.is_file() {
+            return child;
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().expect("exited child output should collect");
+                panic!(
+                    "{label} exited before writing {} with status {status}\nstdout:\n{}\nstderr:\n{}",
+                    path.display(),
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            Ok(None) => {}
+            Err(error) => {
+                panic!("failed to poll {label} while waiting for {} - {error}", path.display())
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    let _ = child.kill();
+    let output = child.wait_with_output().expect("timed out child output should collect");
+    panic!(
+        "timed out waiting for {label} at {}\nstdout:\n{}\nstderr:\n{}",
+        path.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn candidate_cdylib_names() -> &'static [&'static str] {

@@ -2,7 +2,10 @@
 mod support;
 
 #[cfg(unix)]
-use std::{path::{Path, PathBuf}, process::{Child, Command, Stdio}, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+};
 
 #[cfg(unix)]
 use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
@@ -13,7 +16,8 @@ use terminal_protocol::LocalSocketAddress;
 #[cfg(unix)]
 use terminal_testing::{
     TmuxServerGuard, daemon_fixture, daemon_fixture_with_state, daemon_state, tmux_daemon_state,
-    unique_socket_address, unique_tmux_session_name, unique_tmux_socket_name, wait_for_daemon_ready,
+    unique_socket_address, unique_tmux_session_name, unique_tmux_socket_name,
+    wait_for_daemon_ready,
 };
 
 #[cfg(unix)]
@@ -49,8 +53,8 @@ async fn external_c_consumer_discovers_and_imports_tmux_sessions() {
 #[tokio::test(flavor = "multi_thread")]
 async fn external_c_consumer_closes_subscriptions_when_daemon_shuts_down() {
     let ready_file = support::unique_temp_path("terminal-capi-shutdown", "ready");
-    let fixture =
-        daemon_fixture("capi-ext-shutdown").expect("daemon fixture should start for shutdown smoke");
+    let fixture = daemon_fixture("capi-ext-shutdown")
+        .expect("daemon fixture should start for shutdown smoke");
     wait_for_daemon_ready(&fixture.client).await;
 
     let child = spawn_reference_consumer(
@@ -58,11 +62,13 @@ async fn external_c_consumer_closes_subscriptions_when_daemon_shuts_down() {
         "shutdown",
         &[("TERMINAL_CAPI_READY_FILE", ready_file.as_path())],
     );
-    wait_for_file(&ready_file).await;
-    fixture.shutdown().await.expect("daemon fixture should stop cleanly before shutdown consumer exits");
-    let output = child
-        .wait_with_output()
-        .expect("shutdown reference consumer should collect output");
+    support::wait_for_file(&ready_file, "external shutdown consumer ready file").await;
+    fixture
+        .shutdown()
+        .await
+        .expect("daemon fixture should stop cleanly before shutdown consumer exits");
+    let output =
+        child.wait_with_output().expect("shutdown reference consumer should collect output");
 
     assert!(
         output.status.success(),
@@ -83,11 +89,8 @@ async fn external_c_consumer_recovers_after_daemon_restart() {
     let stale_ready_file = support::unique_temp_path("terminal-capi-restart", "stale");
     let restart_file = support::unique_temp_path("terminal-capi-restart", "restart");
 
-    let server = spawn_local_socket_server(
-        TerminalDaemon::new(daemon_state()),
-        address.clone(),
-    )
-    .expect("initial daemon should start for restart consumer");
+    let server = spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
+        .expect("initial daemon should start for restart consumer");
     wait_for_daemon_ready(&initial_client).await;
     let child = spawn_reference_consumer(
         &address,
@@ -98,21 +101,28 @@ async fn external_c_consumer_recovers_after_daemon_restart() {
             ("TERMINAL_CAPI_RESTART_FILE", restart_file.as_path()),
         ],
     );
-
-    wait_for_file(&initial_ready_file).await;
+    let child = support::wait_for_file_or_child_exit(
+        &initial_ready_file,
+        child,
+        "external restart consumer initial ready",
+    )
+    .await;
     server.shutdown().await.expect("initial daemon should stop cleanly");
-    wait_for_file(&stale_ready_file).await;
+    let child = support::wait_for_file_or_child_exit(
+        &stale_ready_file,
+        child,
+        "external restart consumer stale signal",
+    )
+    .await;
 
     let restarted_client = LocalSocketDaemonClient::new(address.clone());
-    let replacement =
-        spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address)
-            .expect("replacement daemon should start for restart consumer");
+    let replacement = spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address)
+        .expect("replacement daemon should start for restart consumer");
     wait_for_daemon_ready(&restarted_client).await;
     std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");
 
-    let output = child
-        .wait_with_output()
-        .expect("restart reference consumer should collect output");
+    let output =
+        child.wait_with_output().expect("restart reference consumer should collect output");
     replacement.shutdown().await.expect("replacement daemon should stop cleanly");
 
     assert!(
@@ -185,16 +195,4 @@ fn spawn_reference_consumer(
     command.stderr(Stdio::piped());
 
     command.spawn().expect("reference c consumer should launch")
-}
-
-#[cfg(unix)]
-async fn wait_for_file(path: &Path) {
-    for _ in 0..200 {
-        if path.is_file() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-
-    panic!("reference c consumer never observed file: {}", path.display());
 }

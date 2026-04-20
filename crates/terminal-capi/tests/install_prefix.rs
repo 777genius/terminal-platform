@@ -5,7 +5,6 @@ mod support;
 use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::Duration,
 };
 
 #[cfg(unix)]
@@ -15,7 +14,9 @@ use terminal_daemon_client::LocalSocketDaemonClient;
 #[cfg(unix)]
 use terminal_protocol::LocalSocketAddress;
 #[cfg(unix)]
-use terminal_testing::{daemon_fixture, daemon_state, unique_socket_address, wait_for_daemon_ready};
+use terminal_testing::{
+    daemon_fixture, daemon_state, unique_socket_address, wait_for_daemon_ready,
+};
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
@@ -30,7 +31,8 @@ async fn installs_terminal_capi_package_into_prefix_layout() {
     install_capi_package(&workspace_root, &stage_dir, &prefix_dir);
     verify_capi_install(&workspace_root, &prefix_dir);
 
-    let (installed_manifest, cdylib_path, _binary_path) = compile_installed_reference_consumer(&prefix_dir);
+    let (installed_manifest, cdylib_path, _binary_path) =
+        compile_installed_reference_consumer(&prefix_dir);
     let exports =
         installed_manifest["exports"].as_object().expect("installed exports should be an object");
     let header_path = prefix_dir
@@ -43,12 +45,8 @@ async fn installs_terminal_capi_package_into_prefix_layout() {
     );
     let readme_path = prefix_dir
         .join(exports["readme"].as_str().expect("installed exports.readme should be a string"));
-    let consumer_output = run_installed_reference_consumer(
-        &prefix_dir,
-        fixture.client.address(),
-        "native",
-        &[],
-    );
+    let consumer_output =
+        run_installed_reference_consumer(&prefix_dir, fixture.client.address(), "native", &[]);
     assert!(
         consumer_output.status.success(),
         "reference consumer against installed prefix failed\nstdout:\n{}\nstderr:\n{}",
@@ -89,8 +87,11 @@ async fn installed_prefix_handles_shutdown_and_restart_flows() {
         "shutdown",
         &[("TERMINAL_CAPI_READY_FILE", shutdown_ready_file.as_path())],
     );
-    wait_for_file(&shutdown_ready_file).await;
-    fixture.shutdown().await.expect("daemon fixture should stop cleanly before install shutdown consumer exits");
+    support::wait_for_file(&shutdown_ready_file, "installed shutdown consumer ready file").await;
+    fixture
+        .shutdown()
+        .await
+        .expect("daemon fixture should stop cleanly before install shutdown consumer exits");
     let shutdown_output = shutdown_child
         .wait_with_output()
         .expect("installed prefix shutdown consumer should collect output");
@@ -120,9 +121,19 @@ async fn installed_prefix_handles_shutdown_and_restart_flows() {
             ("TERMINAL_CAPI_RESTART_FILE", restart_file.as_path()),
         ],
     );
-    wait_for_file(&initial_ready_file).await;
+    let restart_child = support::wait_for_file_or_child_exit(
+        &initial_ready_file,
+        restart_child,
+        "installed restart consumer initial ready",
+    )
+    .await;
     server.shutdown().await.expect("initial daemon should stop cleanly");
-    wait_for_file(&stale_ready_file).await;
+    let restart_child = support::wait_for_file_or_child_exit(
+        &stale_ready_file,
+        restart_child,
+        "installed restart consumer stale signal",
+    )
+    .await;
 
     let restarted_client = LocalSocketDaemonClient::new(address.clone());
     server = spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
@@ -281,19 +292,5 @@ fn spawn_installed_reference_consumer(
     consumer.stdout(Stdio::piped());
     consumer.stderr(Stdio::piped());
 
-    consumer
-        .spawn()
-        .expect("installed prefix reference consumer should launch")
-}
-
-#[cfg(unix)]
-async fn wait_for_file(path: &Path) {
-    for _ in 0..200 {
-        if path.is_file() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-
-    panic!("installed prefix smoke never observed file: {}", path.display());
+    consumer.spawn().expect("installed prefix reference consumer should launch")
 }

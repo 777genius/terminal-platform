@@ -1,7 +1,7 @@
 const fs = require("node:fs/promises");
 const {
+  runAddonShutdownSmoke,
   runRestartRecoverySmoke,
-  runShutdownSmoke,
   runSmoke,
   runSubscriptionCycleSmoke,
 } = require("./smoke_flow.cjs");
@@ -51,7 +51,7 @@ async function main() {
   }
 
   if (mode === "shutdown") {
-    const result = await runShutdownSmoke(create, {
+    const result = await runAddonShutdownSmoke(create, {
       onReady: async () => {
         await fs.writeFile(process.env.TERMINAL_NODE_READY_FILE, "ready\n");
       },

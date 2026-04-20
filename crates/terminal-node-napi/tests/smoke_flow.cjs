@@ -396,6 +396,54 @@ async function runSubscriptionCycleSmoke(createClient) {
   };
 }
 
+async function runAddonShutdownSmoke(createClient, options = {}) {
+  const { onReady } = options;
+  const client = createClient();
+  const created = await client.createNativeSession({
+    title: "node-addon-shutdown",
+    launch: readyEchoLaunch(),
+  });
+  const attached = await client.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+  const paneSubscription = await client.openSubscription(created.session_id, {
+    kind: "pane_surface",
+    pane_id: paneId,
+  });
+  const initialEvent = await withTimeout(
+    paneSubscription.nextEvent(),
+    5000,
+    "Timed out waiting for initial addon pane subscription event",
+  );
+
+  assert.equal(initialEvent?.kind, "screen_delta");
+  assert.equal(initialEvent?.pane_id, paneId);
+
+  if (typeof onReady === "function") {
+    await onReady({ sessionId: created.session_id, paneId });
+  }
+
+  let subscriptionClosed = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const event = await withTimeout(
+      paneSubscription.nextEvent(),
+      5000,
+      "Timed out waiting for addon pane subscription closure after daemon shutdown",
+    );
+    if (event == null) {
+      subscriptionClosed = true;
+      break;
+    }
+  }
+
+  assert.equal(subscriptionClosed, true);
+
+  return {
+    session_id: created.session_id,
+    pane_id: paneId,
+    subscription_closed: subscriptionClosed,
+  };
+}
+
 async function runPackageWatchSmoke(createClient, sdk) {
   const client = createClient();
   const created = await client.createNativeSession({
@@ -783,6 +831,7 @@ async function runRestartRecoverySmoke(createClient, options = {}) {
   }
 
   let recoveredSessionId = null;
+  let recoveredSubscriptionOk = false;
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
       const handshake = await client.handshakeInfo();
@@ -792,6 +841,26 @@ async function runRestartRecoverySmoke(createClient, options = {}) {
       });
       if (handshake.assessment.can_use && created.session_id) {
         recoveredSessionId = created.session_id;
+        const attached = await client.attachSession(created.session_id);
+        const paneId = attached.focused_screen?.pane_id;
+        if (typeof paneId === "string") {
+          const subscription = await client.openSubscription(created.session_id, {
+            kind: "pane_surface",
+            pane_id: paneId,
+          });
+          const initialEvent = await withTimeout(
+            subscription.nextEvent(),
+            5000,
+            "Timed out waiting for recovered subscription initial event",
+          );
+          recoveredSubscriptionOk =
+            initialEvent?.kind === "screen_delta" && initialEvent?.pane_id === paneId;
+          await withTimeout(
+            subscription.close(),
+            5000,
+            "Timed out closing recovered subscription",
+          );
+        }
         break;
       }
     } catch (_error) {
@@ -809,6 +878,7 @@ async function runRestartRecoverySmoke(createClient, options = {}) {
     stale_error_observed: staleErrorObserved,
     recovered: true,
     recovered_session_id: recoveredSessionId,
+    recovered_subscription_ok: recoveredSubscriptionOk,
   };
 }
 
@@ -1493,6 +1563,7 @@ async function runElectronPreloadDisposeSmoke(createClient, sdk) {
 }
 
 module.exports = {
+  runAddonShutdownSmoke,
   runPackageWatchSmoke,
   runRestartRecoverySmoke,
   runShutdownSmoke,
