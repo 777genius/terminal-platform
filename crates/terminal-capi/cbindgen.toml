@@ -1,0 +1,32 @@
+language = "C"
+pragma_once = true
+include_guard = "TERMINAL_PLATFORM_CAPI_H"
+cpp_compat = true
+usize_is_size_t = true
+documentation = true
+documentation_style = "c"
+sort_by = "Name"
+
+[parse]
+parse_deps = false
+
+[export]
+include = [
+  "TerminalCapiClientResult",
+  "TerminalCapiStatus",
+  "TerminalCapiStringResult",
+  "terminal_capi_client_attach_session_json",
+  "terminal_capi_client_binding_version_json",
+  "terminal_capi_client_create_native_session_json",
+  "terminal_capi_client_dispatch_mux_command_json",
+  "terminal_capi_client_free",
+  "terminal_capi_client_handshake_info_json",
+  "terminal_capi_client_list_sessions_json",
+  "terminal_capi_client_new_from_filesystem_path",
+  "terminal_capi_client_new_from_namespaced_address",
+  "terminal_capi_client_new_from_runtime_slug",
+  "terminal_capi_client_screen_delta_json",
+  "terminal_capi_client_screen_snapshot_json",
+  "terminal_capi_client_topology_snapshot_json",
+  "terminal_capi_string_free",
+]
