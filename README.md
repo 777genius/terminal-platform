@@ -80,6 +80,11 @@ If you are evaluating the repo, the honest takeaway is:
 - it is not yet presented as a finished stable public release
 - the remaining gap is mostly proof and packaging polish, not missing core design
 
+Release closeout artifacts:
+
+- [v1 release candidate summary](./docs/terminal/v1-release-candidate-summary.md)
+- [v1 release candidate checklist](./docs/terminal/v1-release-candidate-checklist.md)
+
 ## Who This Is For
 
 This repository is a good fit if you want:

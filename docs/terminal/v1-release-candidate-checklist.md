@@ -57,4 +57,5 @@ Verify the public v1 promise is still exactly:
 
 Use:
 
+- [`v1-release-candidate-summary.md`](./v1-release-candidate-summary.md)
 - [`v1-release-summary-template.md`](./v1-release-summary-template.md)

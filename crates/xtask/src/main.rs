@@ -19,6 +19,7 @@ const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README
 const MANUAL_DIR: &str = "crates/terminal-testing/manual";
 const MANUAL_RUNS_DIR: &str = "crates/terminal-testing/manual/runs";
 const RELEASE_READINESS_WORKFLOW_PATH: &str = ".github/workflows/release-readiness.yml";
+const RELEASE_CANDIDATE_SUMMARY_PATH: &str = "docs/terminal/v1-release-candidate-summary.md";
 const RELEASE_SUMMARY_TEMPLATE_PATH: &str = "docs/terminal/v1-release-summary-template.md";
 const MANUAL_RUN_TEMPLATE_DATE_PLACEHOLDER: &str = "Date: YYYY-MM-DD";
 const MANUAL_RUN_TEMPLATE_OS_PLACEHOLDER: &str = "OS: macOS 15.4 / Ubuntu 24.04 / Windows 11 24H2";
@@ -337,6 +338,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let manual_dir = workspace_root.join(MANUAL_DIR);
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
     let release_readiness_workflow = workspace_root.join(RELEASE_READINESS_WORKFLOW_PATH);
+    let release_candidate_summary = workspace_root.join(RELEASE_CANDIDATE_SUMMARY_PATH);
     let release_summary_template = workspace_root.join(RELEASE_SUMMARY_TEMPLATE_PATH);
 
     assert_value(license.is_file(), "root LICENSE is missing")?;
@@ -348,12 +350,17 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
     assert_value(manual_runs_dir.is_dir(), "manual run capture directory is missing")?;
     assert_value(release_readiness_workflow.is_file(), "release readiness workflow is missing")?;
+    assert_value(release_candidate_summary.is_file(), "release candidate summary is missing")?;
     assert_value(release_summary_template.is_file(), "release summary template is missing")?;
 
     let root_readme_contents = fs::read_to_string(&root_readme)
         .map_err(|error| format!("failed to read {} - {error}", root_readme.display()))?;
     let node_package_readme_contents = fs::read_to_string(&node_package_readme)
         .map_err(|error| format!("failed to read {} - {error}", node_package_readme.display()))?;
+    let release_candidate_summary_contents = fs::read_to_string(&release_candidate_summary)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", release_candidate_summary.display())
+        })?;
 
     for expected_line in [
         "- `macOS + Linux` - `Native + tmux + Zellij`",
@@ -376,6 +383,26 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
             &format!("Node package README is missing support matrix line: {expected_line}"),
         )?;
     }
+
+    for expected_line in [
+        "- `macOS + Linux` - `Native + tmux + Zellij`",
+        "- `Windows` - `Native + Zellij`",
+        "- `tmux` remains Unix-only in docs, CI, and acceptance",
+    ] {
+        assert_value(
+            release_candidate_summary_contents.contains(expected_line),
+            &format!("release candidate summary is missing support matrix line: {expected_line}"),
+        )?;
+    }
+
+    assert_value(
+        !release_candidate_summary_contents.contains("TODO"),
+        "release candidate summary still contains TODO placeholders",
+    )?;
+    assert_value(
+        !release_candidate_summary_contents.contains("TBD"),
+        "release candidate summary still contains TBD placeholders",
+    )?;
 
     for relative_path in [
         "README.md",
