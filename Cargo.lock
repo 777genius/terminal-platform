@@ -2135,7 +2135,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cbindgen",
  "serde_json",
