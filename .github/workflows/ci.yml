@@ -146,6 +146,9 @@ jobs:
       - name: cargo-deny
         run: cargo deny check bans licenses advisories sources
 
+      - name: Install nightly for cargo-public-api
+        run: rustup toolchain install nightly --profile minimal
+
       - name: cargo-public-api
         run: |
           cargo public-api -p terminal-domain > /dev/null
