@@ -113,13 +113,12 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        ShellLaunchSpec::new("powershell.exe").with_args([
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
+        ShellLaunchSpec::new("cmd.exe").with_args([
+            "/D",
+            "/Q",
+            "/V:ON",
+            "/K",
+            "echo ready & for /L %i in (1,1,2147483647) do @(set line= & set /P line= & if defined line echo(!line!))",
         ])
     }
 }
@@ -229,14 +228,7 @@ impl ZellijSessionGuard {
 
         for _ in 0..if cfg!(windows) { 5 } else { 3 } {
             let child = Command::new("zellij")
-                .args([
-                    "attach",
-                    "--create-background",
-                    session_name,
-                    "options",
-                    "--default-layout",
-                    "default",
-                ])
+                .args(["attach", "--create-background", session_name])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -244,11 +236,6 @@ impl ZellijSessionGuard {
                 .map_err(|error| format!("failed to spawn zellij: {error}"))?;
             let wait_result = wait_for_zellij_session(session_name);
             if wait_result.is_ok() {
-                thread::sleep(if cfg!(windows) {
-                    Duration::from_millis(1500)
-                } else {
-                    Duration::from_millis(500)
-                });
                 return Ok(Self {
                     session_name: session_name.to_string(),
                     spawn_child: Some(child),
@@ -340,7 +327,9 @@ fn wait_for_zellij_session(session_name: &str) -> Result<(), String> {
     for _ in 0..attempts {
         match run_zellij(&["list-sessions", "--short", "--no-formatting"]) {
             Ok(sessions) => {
-                if sessions.lines().map(str::trim).any(|line| line == session_name) {
+                if sessions.lines().map(str::trim).any(|line| line == session_name)
+                    && is_zellij_session_control_ready(session_name)?
+                {
                     return Ok(());
                 }
             }
@@ -358,6 +347,46 @@ fn is_transient_zellij_session_wait_error(error: &str) -> bool {
     error.contains("No active zellij sessions found")
         || error.contains("There is no active session")
         || error.contains("Session '") && error.contains("' not found")
+}
+
+#[cfg(any(unix, windows))]
+fn is_legacy_zellij_action_error(error: &str) -> bool {
+    error.contains("The subcommand 'list-tabs' wasn't recognized")
+        || error.contains("The subcommand 'list-panes' wasn't recognized")
+}
+
+#[cfg(any(unix, windows))]
+fn run_zellij_in_session(session_name: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("zellij")
+        .arg("--session")
+        .arg(session_name)
+        .args(args)
+        .output()
+        .map_err(|error| format!("failed to spawn zellij: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    String::from_utf8(output.stdout).map_err(|error| format!("invalid zellij utf8 output: {error}"))
+}
+
+#[cfg(any(unix, windows))]
+fn is_zellij_session_control_ready(session_name: &str) -> Result<bool, String> {
+    match run_zellij_in_session(session_name, &["action", "--", "list-tabs", "--json"]) {
+        Ok(output) if output.trim_start().starts_with('[') => {}
+        Ok(_) => return Ok(false),
+        Err(error) if is_transient_zellij_session_wait_error(&error) => return Ok(false),
+        Err(error) if is_legacy_zellij_action_error(&error) => return Ok(true),
+        Err(error) => return Err(error),
+    }
+
+    match run_zellij_in_session(session_name, &["action", "--", "list-panes", "--json"]) {
+        Ok(output) if output.trim_start().starts_with('[') => Ok(true),
+        Ok(_) => Ok(false),
+        Err(error) if is_transient_zellij_session_wait_error(&error) => Ok(false),
+        Err(error) if is_legacy_zellij_action_error(&error) => Ok(true),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(any(unix, windows))]

@@ -11,14 +11,13 @@ const INTERACTIVE_PROBE_INTERVAL = process.platform === "win32" ? 20 : 10;
 function readyEchoLaunch() {
   if (process.platform === "win32") {
     return {
-      program: "powershell.exe",
+      program: "cmd.exe",
       args: [
-        "-NoLogo",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
+        "/D",
+        "/Q",
+        "/V:ON",
+        "/K",
+        "echo ready & for /L %i in (1,1,2147483647) do @(set line= & set /P line= & if defined line echo(!line!))",
       ],
     };
   }
@@ -205,7 +204,6 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
 
       try {
         await waitForRawZellijSession(sessionName);
-        await delay(process.platform === "win32" ? 1500 : 500);
         try {
           candidate = await waitForDiscoveredZellijSession(client, sessionName);
         } catch (error) {
@@ -1071,21 +1069,10 @@ function uniqueZellijSessionName(label) {
 }
 
 function spawnZellijSession(sessionName) {
-  const child = spawn(
-    "zellij",
-    [
-      "attach",
-      "--create-background",
-      sessionName,
-      "options",
-      "--default-layout",
-      "default",
-    ],
-    {
-      stdio: "ignore",
-      windowsHide: true,
-    },
-  );
+  const child = spawn("zellij", ["attach", "--create-background", sessionName], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
   child.on("error", () => {});
   child.unref();
   return child;
@@ -1129,7 +1116,7 @@ async function waitForDiscoveredZellijSession(client, sessionName) {
 async function waitForRawZellijSession(sessionName) {
   for (let attempt = 0; attempt < DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS; attempt += 1) {
     const sessions = listZellijSessionsRaw();
-    if (sessions.includes(sessionName)) {
+    if (sessions.includes(sessionName) && zellijSessionControlReady(sessionName)) {
       return;
     }
     await delay(100);
@@ -1172,6 +1159,64 @@ function isTransientZellijSessionWaitError(error) {
     error.includes("There is no active session") ||
     (error.includes("Session '") && error.includes("' not found"))
   );
+}
+
+function isLegacyZellijActionError(error) {
+  return (
+    error.includes("The subcommand 'list-tabs' wasn't recognized") ||
+    error.includes("The subcommand 'list-panes' wasn't recognized")
+  );
+}
+
+function zellijSessionControlReady(sessionName) {
+  const tabs = spawnSync(
+    "zellij",
+    ["--session", sessionName, "action", "--", "list-tabs", "--json"],
+    {
+      encoding: "utf8",
+      windowsHide: true,
+    },
+  );
+  if (tabs.error) {
+    throw tabs.error;
+  }
+  if (tabs.status !== 0) {
+    const stderr = (tabs.stderr ?? "").trim();
+    if (isTransientZellijSessionWaitError(stderr)) {
+      return false;
+    }
+    if (isLegacyZellijActionError(stderr)) {
+      return true;
+    }
+    throw new Error(`zellij list-tabs failed: ${stderr}`);
+  }
+  if (!((tabs.stdout ?? "").trimStart().startsWith("["))) {
+    return false;
+  }
+
+  const panes = spawnSync(
+    "zellij",
+    ["--session", sessionName, "action", "--", "list-panes", "--json"],
+    {
+      encoding: "utf8",
+      windowsHide: true,
+    },
+  );
+  if (panes.error) {
+    throw panes.error;
+  }
+  if (panes.status !== 0) {
+    const stderr = (panes.stderr ?? "").trim();
+    if (isTransientZellijSessionWaitError(stderr)) {
+      return false;
+    }
+    if (isLegacyZellijActionError(stderr)) {
+      return true;
+    }
+    throw new Error(`zellij list-panes failed: ${stderr}`);
+  }
+
+  return (panes.stdout ?? "").trimStart().startsWith("[");
 }
 
 function fallbackZellijCandidate(sessionName) {

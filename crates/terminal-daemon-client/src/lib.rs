@@ -727,13 +727,12 @@ mod tests {
 
         #[cfg(windows)]
         {
-            ShellLaunchSpec::new("powershell.exe").with_args([
-                "-NoLogo",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                "Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
+            ShellLaunchSpec::new("cmd.exe").with_args([
+                "/D",
+                "/Q",
+                "/V:ON",
+                "/K",
+                "echo ready & for /L %i in (1,1,2147483647) do @(set line= & set /P line= & if defined line echo(!line!))",
             ])
         }
     }
