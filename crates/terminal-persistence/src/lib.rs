@@ -72,6 +72,8 @@ pub struct SqliteSessionStore {
     path: PathBuf,
 }
 
+type SavedSessionSummaryRow = (String, String, Option<String>, String, String, String, i64);
+
 #[derive(Debug, Error)]
 pub enum PersistenceError {
     #[error("persistence home path unavailable")]
@@ -258,7 +260,7 @@ impl SqliteSessionStore {
             ",
         )?;
         let rows = statement.query_map([], |row| {
-            Ok((
+            Ok::<SavedSessionSummaryRow, rusqlite::Error>((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, Option<String>>(2)?,
@@ -271,33 +273,10 @@ impl SqliteSessionStore {
 
         let mut sessions = Vec::new();
         for row in rows {
-            let (
-                session_id,
-                route_json,
-                title,
-                launch_json,
-                manifest_json,
-                topology_json,
-                saved_at_ms,
-            ) = row?;
-            let route: SessionRoute = serde_json::from_str(&route_json)?;
-            let launch: Option<ShellLaunchSpec> = serde_json::from_str(&launch_json)?;
-            let manifest: SavedSessionManifest = serde_json::from_str(&manifest_json)?;
-            let topology: TopologySnapshot = serde_json::from_str(&topology_json)?;
-            sessions.push(SavedSessionSummary {
-                session_id: SessionId::from(Uuid::parse_str(&session_id).map_err(|error| {
-                    PersistenceError::InvalidData(format!(
-                        "invalid saved session id `{session_id}` - {error}"
-                    ))
-                })?),
-                route,
-                title,
-                saved_at_ms,
-                manifest,
-                has_launch: launch.is_some(),
-                tab_count: topology.tabs.len(),
-                pane_count: topology.tabs.iter().map(|tab| pane_count(&tab.root)).sum(),
-            });
+            let row = row?;
+            if let Ok(session) = decode_saved_session_summary_row(row) {
+                sessions.push(session);
+            }
         }
 
         Ok(sessions)
@@ -347,6 +326,37 @@ fn duplicate_column_error(error: &rusqlite::Error) -> bool {
     matches!(error, rusqlite::Error::SqliteFailure(_, Some(message)) if message.contains("duplicate column name"))
 }
 
+fn decode_saved_session_summary_row(
+    (
+        session_id,
+        route_json,
+        title,
+        launch_json,
+        manifest_json,
+        topology_json,
+        saved_at_ms,
+    ): SavedSessionSummaryRow,
+) -> Result<SavedSessionSummary, PersistenceError> {
+    let route: SessionRoute = serde_json::from_str(&route_json)?;
+    let launch: Option<ShellLaunchSpec> = serde_json::from_str(&launch_json)?;
+    let manifest: SavedSessionManifest = serde_json::from_str(&manifest_json)?;
+    let topology: TopologySnapshot = serde_json::from_str(&topology_json)?;
+    Ok(SavedSessionSummary {
+        session_id: SessionId::from(Uuid::parse_str(&session_id).map_err(|error| {
+            PersistenceError::InvalidData(format!(
+                "invalid saved session id `{session_id}` - {error}"
+            ))
+        })?),
+        route,
+        title,
+        saved_at_ms,
+        manifest,
+        has_launch: launch.is_some(),
+        tab_count: topology.tabs.len(),
+        pane_count: topology.tabs.iter().map(|tab| pane_count(&tab.root)).sum(),
+    })
+}
+
 fn pane_count(root: &PaneTreeNode) -> usize {
     match root {
         PaneTreeNode::Leaf { .. } => 1,
@@ -356,7 +366,7 @@ fn pane_count(root: &PaneTreeNode) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::Connection;
+    use rusqlite::{Connection, params};
     use terminal_backend_api::ShellLaunchSpec;
     use terminal_domain::{
         BackendKind, CURRENT_BINARY_VERSION, PaneId, RouteAuthority, SavedSessionManifest,
@@ -366,7 +376,7 @@ mod tests {
         ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
     };
 
-    use super::{SavedNativeSession, SqliteSessionStore};
+    use super::{PersistenceError, SavedNativeSession, SqliteSessionStore};
 
     fn sample_snapshot(session_id: SessionId, title: &str, line: &str) -> SavedNativeSession {
         SavedNativeSession {
@@ -523,6 +533,105 @@ mod tests {
         assert_eq!(listed[0].manifest.format_version, 1);
         assert_eq!(listed[1].session_id, older_session);
         assert_eq!(listed[1].manifest.format_version, 1);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn lists_saved_native_sessions_ignores_corrupted_rows() {
+        let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+        let path = std::env::temp_dir()
+            .join(format!("terminal-platform-corrupt-list-test-{nonce}.sqlite3"));
+        let store = SqliteSessionStore::open(&path).expect("store should open");
+        let valid_session_id = SessionId::new();
+        let corrupt_session_id = SessionId::new();
+        let snapshot = sample_snapshot(valid_session_id, "shell", "ready");
+
+        store.save_native_session(&snapshot).expect("valid save should succeed");
+
+        let connection = Connection::open(&path).expect("raw sqlite should open");
+        connection
+            .execute(
+                "
+                INSERT INTO native_saved_sessions (
+                    session_id,
+                    route_json,
+                    title,
+                    launch_json,
+                    manifest_json,
+                    topology_json,
+                    screens_json,
+                    saved_at_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                ",
+                params![
+                    corrupt_session_id.0.to_string(),
+                    serde_json::to_string(&snapshot.route).expect("route json should serialize"),
+                    "corrupt",
+                    serde_json::to_string(&snapshot.launch).expect("launch json should serialize"),
+                    serde_json::to_string(&snapshot.manifest)
+                        .expect("manifest json should serialize"),
+                    "{not-json",
+                    serde_json::to_string(&snapshot.screens)
+                        .expect("screens json should serialize"),
+                    snapshot.saved_at_ms + 1,
+                ],
+            )
+            .expect("corrupted row should insert");
+
+        let listed = store.list_native_sessions().expect("list should succeed");
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].session_id, valid_session_id);
+        assert_eq!(listed[0].title.as_deref(), Some("shell"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_native_session_reports_corrupted_row_for_targeted_lookup() {
+        let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+        let path = std::env::temp_dir()
+            .join(format!("terminal-platform-corrupt-load-test-{nonce}.sqlite3"));
+        let store = SqliteSessionStore::open(&path).expect("store should open");
+        let session_id = SessionId::new();
+        let snapshot = sample_snapshot(session_id, "shell", "ready");
+
+        let connection = Connection::open(&path).expect("raw sqlite should open");
+        connection
+            .execute(
+                "
+                INSERT INTO native_saved_sessions (
+                    session_id,
+                    route_json,
+                    title,
+                    launch_json,
+                    manifest_json,
+                    topology_json,
+                    screens_json,
+                    saved_at_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                ",
+                params![
+                    session_id.0.to_string(),
+                    serde_json::to_string(&snapshot.route).expect("route json should serialize"),
+                    "corrupt",
+                    serde_json::to_string(&snapshot.launch).expect("launch json should serialize"),
+                    serde_json::to_string(&snapshot.manifest)
+                        .expect("manifest json should serialize"),
+                    "{not-json",
+                    serde_json::to_string(&snapshot.screens)
+                        .expect("screens json should serialize"),
+                    snapshot.saved_at_ms,
+                ],
+            )
+            .expect("corrupted row should insert");
+
+        let error = store
+            .load_native_session(session_id)
+            .expect_err("targeted lookup should fail for corrupted row");
+
+        assert!(matches!(error, PersistenceError::Serde(_) | PersistenceError::InvalidData(_)));
 
         let _ = std::fs::remove_file(path);
     }

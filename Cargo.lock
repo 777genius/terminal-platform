@@ -1444,6 +1444,8 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "interprocess",
+ "rusqlite",
+ "serde_json",
  "terminal-backend-api",
  "terminal-daemon",
  "terminal-domain",

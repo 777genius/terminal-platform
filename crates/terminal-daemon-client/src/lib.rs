@@ -487,6 +487,7 @@ mod tests {
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
+    use rusqlite::{Connection, params};
     use terminal_backend_api::{
         CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SubscriptionSpec,
     };
@@ -577,6 +578,90 @@ mod tests {
                 store,
             )),
             session_id,
+        )
+    }
+
+    fn isolated_daemon_with_valid_and_corrupted_saved_rows(
+        label: &str,
+    ) -> (TerminalDaemon, SessionId, SessionId) {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let path = std::env::temp_dir().join(format!(
+            "terminal-platform-daemon-client-{label}-{}-{nanos}.sqlite3",
+            std::process::id()
+        ));
+        let store =
+            SqliteSessionStore::open(&path).expect("isolated sqlite session store should open");
+        let valid_session_id = SessionId::new();
+        let corrupt_session_id = SessionId::new();
+        let tab_id = TabId::new();
+        let pane_id = PaneId::new();
+        let manifest = SavedSessionManifest::current();
+        let route = local_native_route(valid_session_id);
+        let launch = Some(cat_launch_spec());
+        store
+            .save_native_session(&terminal_persistence::SavedNativeSession {
+                session_id: valid_session_id,
+                route: route.clone(),
+                title: Some("healthy-shell".to_string()),
+                launch: launch.clone(),
+                manifest: manifest.clone(),
+                topology: TopologySnapshot {
+                    session_id: valid_session_id,
+                    backend_kind: BackendKind::Native,
+                    tabs: vec![TabSnapshot {
+                        tab_id,
+                        title: Some("healthy-shell".to_string()),
+                        root: PaneTreeNode::Leaf { pane_id },
+                        focused_pane: Some(pane_id),
+                    }],
+                    focused_tab: Some(tab_id),
+                },
+                screens: Vec::new(),
+                saved_at_ms: SqliteSessionStore::save_timestamp_ms()
+                    .expect("save timestamp should resolve"),
+            })
+            .expect("valid snapshot should save");
+
+        let connection = Connection::open(&path).expect("raw sqlite should open");
+        connection
+            .execute(
+                "
+                INSERT INTO native_saved_sessions (
+                    session_id,
+                    route_json,
+                    title,
+                    launch_json,
+                    manifest_json,
+                    topology_json,
+                    screens_json,
+                    saved_at_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                ",
+                params![
+                    corrupt_session_id.0.to_string(),
+                    serde_json::to_string(&route).expect("route should serialize"),
+                    "corrupt-shell",
+                    serde_json::to_string(&launch).expect("launch should serialize"),
+                    serde_json::to_string(&manifest).expect("manifest should serialize"),
+                    "{not-json",
+                    serde_json::to_string::<Vec<terminal_projection::ScreenSnapshot>>(&Vec::new())
+                        .expect("screens should serialize"),
+                    SqliteSessionStore::save_timestamp_ms()
+                        .expect("save timestamp should resolve")
+                        + 1,
+                ],
+            )
+            .expect("corrupted row should insert");
+
+        (
+            TerminalDaemon::new(terminal_daemon::TerminalDaemonState::with_default_persistence(
+                store,
+            )),
+            valid_session_id,
+            corrupt_session_id,
         )
     }
 
@@ -993,6 +1078,36 @@ mod tests {
             restore_error.degraded_reason,
             Some(DegradedModeReason::SavedSessionIncompatible)
         );
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn list_saved_sessions_skips_corrupted_rows() {
+        let (daemon, valid_session_id, corrupt_session_id) =
+            isolated_daemon_with_valid_and_corrupted_saved_rows("daemon-client-saved-corrupt");
+        let address = unique_address("daemon-client-saved-corrupt");
+        let server =
+            spawn_local_socket_server(daemon, address.clone()).expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+
+        let listed =
+            client.list_saved_sessions().await.expect("list_saved_sessions should succeed");
+        let loaded = client
+            .saved_session(valid_session_id)
+            .await
+            .expect("valid saved_session should succeed");
+        let corrupt_error = client
+            .saved_session(corrupt_session_id)
+            .await
+            .expect_err("corrupted saved_session lookup should fail");
+
+        assert_eq!(listed.sessions.len(), 1);
+        assert_eq!(listed.sessions[0].session_id, valid_session_id);
+        assert_eq!(listed.sessions[0].title.as_deref(), Some("healthy-shell"));
+        assert_eq!(loaded.session.session_id, valid_session_id);
+        assert_eq!(corrupt_error.code, "backend_internal");
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

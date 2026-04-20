@@ -16,6 +16,8 @@ tokio-util = { workspace = true }
 workspace = true
 
 [dev-dependencies]
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
 terminal-daemon = { path = "../terminal-daemon" }
 terminal-mux-domain = { path = "../terminal-mux-domain" }
 terminal-persistence = { path = "../terminal-persistence" }
