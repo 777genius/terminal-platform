@@ -5,7 +5,7 @@ use terminal_backend_api::{
 };
 use terminal_domain::{
     BackendKind, DegradedModeReason, PaneId, RouteAuthority, SavedSessionManifest, SessionId,
-    SessionRoute, TabId, imported_session_id,
+    SessionRoute, TabId, imported_session_id, saved_session_compatibility,
 };
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
 use terminal_persistence::{
@@ -141,6 +141,16 @@ impl SessionService {
         session_id: SessionId,
     ) -> Result<BackendSessionSummary, BackendError> {
         let saved = self.saved_session(session_id)?;
+        let compatibility = saved_session_compatibility(&saved.manifest);
+        if !compatibility.can_restore {
+            return Err(BackendError::unsupported(
+                format!(
+                    "saved session manifest is not restore-compatible - {:?}",
+                    compatibility.status
+                ),
+                DegradedModeReason::SavedSessionIncompatible,
+            ));
+        }
         if saved.route.backend != BackendKind::Native {
             return Err(BackendError::unsupported(
                 "restore saved session is only implemented for native sessions in v1",

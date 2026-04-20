@@ -21,22 +21,24 @@ use terminal_backend_tmux::TmuxBackend;
 use terminal_backend_zellij::ZellijBackend;
 #[cfg(unix)]
 use terminal_daemon::TerminalDaemonState;
-#[cfg(unix)]
-use terminal_domain::DegradedModeReason;
-#[cfg(unix)]
-use terminal_domain::PaneId;
 use terminal_domain::{
     BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
 };
 #[cfg(unix)]
-use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection};
+use terminal_domain::{
+    CURRENT_SAVED_SESSION_FORMAT_VERSION, DegradedModeReason, PaneId,
+    SavedSessionCompatibilityStatus, SavedSessionManifest, SessionId, TabId, local_native_route,
+};
+#[cfg(unix)]
+use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 #[cfg(unix)]
 use terminal_persistence::SqliteSessionStore;
 #[cfg(unix)]
-use terminal_projection::ProjectionSource;
+use terminal_projection::{ProjectionSource, TopologySnapshot};
 use terminal_protocol::SubscriptionEvent;
 use terminal_testing::{
     daemon_fixture, daemon_fixture_with_state, daemon_state, isolated_daemon_state,
+    unique_sqlite_path,
 };
 
 #[test]
@@ -598,6 +600,8 @@ async fn bootstrap_smoke_lists_and_loads_saved_native_sessions_via_daemon_api() 
     assert_eq!(saved_summary.manifest.binary_version, CURRENT_BINARY_VERSION);
     assert_eq!(saved_summary.manifest.protocol_major, CURRENT_PROTOCOL_MAJOR);
     assert_eq!(saved_summary.manifest.protocol_minor, CURRENT_PROTOCOL_MINOR);
+    assert!(saved_summary.compatibility.can_restore);
+    assert_eq!(saved_summary.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
     assert!(saved_summary.restore_semantics.restores_topology);
     assert!(saved_summary.restore_semantics.uses_saved_launch_spec);
     assert!(!saved_summary.restore_semantics.replays_saved_screen_buffers);
@@ -608,6 +612,8 @@ async fn bootstrap_smoke_lists_and_loads_saved_native_sessions_via_daemon_api() 
     assert_eq!(loaded.session.screens.len(), 1);
     assert_eq!(loaded.session.launch, Some(cat_launch_spec()));
     assert_eq!(loaded.session.manifest.binary_version, CURRENT_BINARY_VERSION);
+    assert!(loaded.session.compatibility.can_restore);
+    assert_eq!(loaded.session.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
     assert!(loaded.session.restore_semantics.restores_focus_state);
     assert!(loaded.session.restore_semantics.restores_tab_titles);
     assert!(!loaded.session.restore_semantics.replays_saved_screen_buffers);
@@ -748,6 +754,8 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     assert_eq!(restored.session.route.backend, BackendKind::Native);
     assert_eq!(restored.session.title.as_deref(), Some("logs"));
     assert_eq!(restored.manifest.binary_version, CURRENT_BINARY_VERSION);
+    assert!(restored.compatibility.can_restore);
+    assert_eq!(restored.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
     assert!(restored.restore_semantics.restores_topology);
     assert!(restored.restore_semantics.uses_saved_launch_spec);
     assert!(!restored.restore_semantics.replays_saved_screen_buffers);
@@ -762,6 +770,52 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
         .find(|tab| tab.tab_id == focused_tab)
         .expect("focused tab should exist");
     assert_eq!(focused_tab.title.as_deref(), Some("logs"));
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_reports_incompatible_saved_session_manifest_via_daemon_api() {
+    let (state, session_id) = daemon_state_with_incompatible_saved_session(
+        "smoke-saved-incompat",
+        SavedSessionManifest {
+            format_version: CURRENT_SAVED_SESSION_FORMAT_VERSION,
+            binary_version: CURRENT_BINARY_VERSION.to_string(),
+            protocol_major: CURRENT_PROTOCOL_MAJOR,
+            protocol_minor: CURRENT_PROTOCOL_MINOR + 1,
+        },
+    );
+    let fixture = daemon_fixture_with_state("smoke-saved-incompat", state)
+        .expect("fixture should start");
+
+    let listed =
+        fixture.client.list_saved_sessions().await.expect("list_saved_sessions should succeed");
+    let listed_session = listed
+        .sessions
+        .iter()
+        .find(|session| session.session_id == session_id)
+        .expect("saved session should be listed");
+    let loaded =
+        fixture.client.saved_session(session_id).await.expect("saved_session should succeed");
+    let restore_error = fixture
+        .client
+        .restore_saved_session(session_id)
+        .await
+        .expect_err("restore_saved_session should reject incompatible manifest");
+
+    assert!(!listed_session.compatibility.can_restore);
+    assert_eq!(
+        listed_session.compatibility.status,
+        SavedSessionCompatibilityStatus::ProtocolMinorAhead
+    );
+    assert!(!loaded.session.compatibility.can_restore);
+    assert_eq!(
+        loaded.session.compatibility.status,
+        SavedSessionCompatibilityStatus::ProtocolMinorAhead
+    );
+    assert_eq!(restore_error.code, "backend_unsupported");
+    assert_eq!(restore_error.degraded_reason, Some(DegradedModeReason::SavedSessionIncompatible));
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
@@ -1814,6 +1868,43 @@ async fn bootstrap_smoke_discovers_zellij_session_and_rejects_import_on_legacy_s
 #[cfg(unix)]
 fn cat_launch_spec() -> ShellLaunchSpec {
     ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+}
+
+#[cfg(unix)]
+fn daemon_state_with_incompatible_saved_session(
+    label: &str,
+    manifest: SavedSessionManifest,
+) -> (TerminalDaemonState, SessionId) {
+    let store = SqliteSessionStore::open(unique_sqlite_path(label))
+        .expect("isolated sqlite session store should open");
+    let session_id = SessionId::new();
+    let tab_id = TabId::new();
+    let pane_id = PaneId::new();
+    store
+        .save_native_session(&terminal_persistence::SavedNativeSession {
+            session_id,
+            route: local_native_route(session_id),
+            title: Some("future-shell".to_string()),
+            launch: None,
+            manifest,
+            topology: TopologySnapshot {
+                session_id,
+                backend_kind: BackendKind::Native,
+                tabs: vec![TabSnapshot {
+                    tab_id,
+                    title: Some("future-shell".to_string()),
+                    root: PaneTreeNode::Leaf { pane_id },
+                    focused_pane: Some(pane_id),
+                }],
+                focused_tab: Some(tab_id),
+            },
+            screens: Vec::new(),
+            saved_at_ms: SqliteSessionStore::save_timestamp_ms()
+                .expect("save timestamp should resolve"),
+        })
+        .expect("future snapshot should save");
+
+    (TerminalDaemonState::with_default_persistence(store), session_id)
 }
 
 #[cfg(unix)]

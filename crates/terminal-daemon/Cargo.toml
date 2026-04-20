@@ -20,3 +20,6 @@ tokio-util = { workspace = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+terminal-mux-domain = { path = "../terminal-mux-domain" }

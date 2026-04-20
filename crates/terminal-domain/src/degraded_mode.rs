@@ -8,5 +8,6 @@ pub enum DegradedModeReason {
     ImportedForeignSession,
     ResizeAuthorityExternal,
     ReadOnlyRoute,
+    SavedSessionIncompatible,
     NotYetImplemented,
 }

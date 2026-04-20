@@ -4,7 +4,10 @@ use terminal_backend_api::{
     BackendCapabilities, BackendSessionSummary, DiscoveredSession, MuxCommandResult,
     ShellLaunchSpec,
 };
-use terminal_domain::{BackendKind, SavedSessionManifest, SessionId, SessionRoute, SubscriptionId};
+use terminal_domain::{
+    BackendKind, SavedSessionCompatibility, SavedSessionManifest, SessionId, SessionRoute,
+    SubscriptionId,
+};
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
 use crate::Handshake;
@@ -21,6 +24,7 @@ pub struct SavedSessionSummary {
     pub title: Option<String>,
     pub saved_at_ms: i64,
     pub manifest: SavedSessionManifest,
+    pub compatibility: SavedSessionCompatibility,
     pub has_launch: bool,
     pub tab_count: usize,
     pub pane_count: usize,
@@ -44,6 +48,7 @@ pub struct SavedSessionRecord {
     pub title: Option<String>,
     pub launch: Option<ShellLaunchSpec>,
     pub manifest: SavedSessionManifest,
+    pub compatibility: SavedSessionCompatibility,
     pub topology: TopologySnapshot,
     pub screens: Vec<ScreenSnapshot>,
     pub saved_at_ms: i64,
@@ -64,6 +69,7 @@ pub struct SavedSessionResponse {
 pub struct RestoreSavedSessionResponse {
     pub saved_session_id: SessionId,
     pub manifest: SavedSessionManifest,
+    pub compatibility: SavedSessionCompatibility,
     pub session: BackendSessionSummary,
     pub restore_semantics: SavedSessionRestoreSemantics,
 }

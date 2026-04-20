@@ -437,8 +437,13 @@ mod tests {
     use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
     use terminal_domain::{
         BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
+        CURRENT_SAVED_SESSION_FORMAT_VERSION, DegradedModeReason, PaneId,
+        SavedSessionCompatibilityStatus, SavedSessionManifest, SessionId, TabId,
+        local_native_route,
     };
+    use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
     use terminal_persistence::SqliteSessionStore;
+    use terminal_projection::TopologySnapshot;
     use terminal_protocol::SubscriptionEvent;
 
     use super::LocalSocketDaemonClient;
@@ -465,6 +470,55 @@ mod tests {
         .expect("isolated sqlite session store should open");
 
         TerminalDaemon::new(terminal_daemon::TerminalDaemonState::with_default_persistence(store))
+    }
+
+    fn isolated_daemon_with_saved_snapshot(
+        label: &str,
+        manifest: SavedSessionManifest,
+    ) -> (TerminalDaemon, SessionId) {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let path = std::env::temp_dir().join(format!(
+            "terminal-platform-daemon-client-{label}-{}-{nanos}.sqlite3",
+            std::process::id()
+        ));
+        let store =
+            SqliteSessionStore::open(&path).expect("isolated sqlite session store should open");
+        let session_id = SessionId::new();
+        let tab_id = TabId::new();
+        let pane_id = PaneId::new();
+        store
+            .save_native_session(&terminal_persistence::SavedNativeSession {
+                session_id,
+                route: local_native_route(session_id),
+                title: Some("future-shell".to_string()),
+                launch: None,
+                manifest,
+                topology: TopologySnapshot {
+                    session_id,
+                    backend_kind: BackendKind::Native,
+                    tabs: vec![TabSnapshot {
+                        tab_id,
+                        title: Some("future-shell".to_string()),
+                        root: PaneTreeNode::Leaf { pane_id },
+                        focused_pane: Some(pane_id),
+                    }],
+                    focused_tab: Some(tab_id),
+                },
+                screens: Vec::new(),
+                saved_at_ms: SqliteSessionStore::save_timestamp_ms()
+                    .expect("save timestamp should resolve"),
+            })
+            .expect("future snapshot should save");
+
+        (
+            TerminalDaemon::new(terminal_daemon::TerminalDaemonState::with_default_persistence(
+                store,
+            )),
+            session_id,
+        )
     }
 
     #[cfg(unix)]
@@ -624,6 +678,8 @@ mod tests {
         assert_eq!(saved_summary.manifest.binary_version, CURRENT_BINARY_VERSION);
         assert_eq!(saved_summary.manifest.protocol_major, CURRENT_PROTOCOL_MAJOR);
         assert_eq!(saved_summary.manifest.protocol_minor, CURRENT_PROTOCOL_MINOR);
+        assert!(saved_summary.compatibility.can_restore);
+        assert_eq!(saved_summary.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
         assert!(saved_summary.restore_semantics.restores_topology);
         assert!(saved_summary.restore_semantics.uses_saved_launch_spec);
         assert!(!saved_summary.restore_semantics.replays_saved_screen_buffers);
@@ -633,6 +689,11 @@ mod tests {
         assert_eq!(loaded.session.topology.tabs.len(), 1);
         assert_eq!(loaded.session.screens.len(), 1);
         assert_eq!(loaded.session.manifest.binary_version, CURRENT_BINARY_VERSION);
+        assert!(loaded.session.compatibility.can_restore);
+        assert_eq!(
+            loaded.session.compatibility.status,
+            SavedSessionCompatibilityStatus::Compatible
+        );
         assert!(loaded.session.restore_semantics.restores_focus_state);
         assert!(loaded.session.restore_semantics.restores_tab_titles);
         assert!(!loaded.session.restore_semantics.replays_saved_screen_buffers);
@@ -748,6 +809,8 @@ mod tests {
         assert_eq!(restored.session.route.backend, BackendKind::Native);
         assert_eq!(restored.session.title.as_deref(), Some("logs"));
         assert_eq!(restored.manifest.binary_version, CURRENT_BINARY_VERSION);
+        assert!(restored.compatibility.can_restore);
+        assert_eq!(restored.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
         assert!(restored.restore_semantics.restores_topology);
         assert!(restored.restore_semantics.uses_saved_launch_spec);
         assert!(!restored.restore_semantics.replays_saved_screen_buffers);
@@ -760,6 +823,55 @@ mod tests {
             .find(|tab| tab.tab_id == focused_tab)
             .expect("focused tab should exist");
         assert_eq!(focused_tab.title.as_deref(), Some("logs"));
+
+        server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reports_incompatible_saved_sessions_and_blocks_restore() {
+        let (daemon, session_id) = isolated_daemon_with_saved_snapshot(
+            "daemon-client-saved-incompatible",
+            SavedSessionManifest {
+                format_version: CURRENT_SAVED_SESSION_FORMAT_VERSION,
+                binary_version: CURRENT_BINARY_VERSION.to_string(),
+                protocol_major: CURRENT_PROTOCOL_MAJOR,
+                protocol_minor: CURRENT_PROTOCOL_MINOR + 1,
+            },
+        );
+        let address = unique_address("daemon-client-saved-incompatible");
+        let server =
+            spawn_local_socket_server(daemon, address.clone()).expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+
+        let listed =
+            client.list_saved_sessions().await.expect("list_saved_sessions should succeed");
+        let listed_session = listed
+            .sessions
+            .iter()
+            .find(|session| session.session_id == session_id)
+            .expect("saved session should be listed");
+        let loaded = client.saved_session(session_id).await.expect("saved_session should succeed");
+        let restore_error = client
+            .restore_saved_session(session_id)
+            .await
+            .expect_err("restore_saved_session should reject incompatible manifest");
+
+        assert!(!listed_session.compatibility.can_restore);
+        assert_eq!(
+            listed_session.compatibility.status,
+            SavedSessionCompatibilityStatus::ProtocolMinorAhead
+        );
+        assert!(!loaded.session.compatibility.can_restore);
+        assert_eq!(
+            loaded.session.compatibility.status,
+            SavedSessionCompatibilityStatus::ProtocolMinorAhead
+        );
+        assert_eq!(restore_error.code, "backend_unsupported");
+        assert_eq!(
+            restore_error.degraded_reason,
+            Some(DegradedModeReason::SavedSessionIncompatible)
+        );
 
         server.shutdown().await.expect("server shutdown should succeed");
     }

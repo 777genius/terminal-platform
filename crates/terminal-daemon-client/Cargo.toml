@@ -17,5 +17,6 @@ workspace = true
 
 [dev-dependencies]
 terminal-daemon = { path = "../terminal-daemon" }
+terminal-mux-domain = { path = "../terminal-mux-domain" }
 terminal-persistence = { path = "../terminal-persistence" }
 tokio = { workspace = true }
