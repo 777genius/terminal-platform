@@ -6,12 +6,39 @@ use napi::{Error, Result, Status};
 use napi_derive::napi;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use terminal_node::NodeHostClient;
+use terminal_node::{NodeHostClient, NodeSubscriptionHandle};
 use terminal_protocol::{LocalSocketAddress, ProtocolError};
 
 #[napi(js_name = "TerminalNodeClient")]
 pub struct TerminalNodeBinding {
     inner: NodeHostClient,
+}
+
+#[napi(js_name = "TerminalNodeSubscription")]
+pub struct TerminalNodeSubscriptionBinding {
+    inner: NodeSubscriptionHandle,
+}
+
+#[napi]
+impl TerminalNodeSubscriptionBinding {
+    #[napi(getter, js_name = "subscriptionId")]
+    pub fn subscription_id(&self) -> String {
+        self.inner.meta().subscription_id
+    }
+
+    #[napi(js_name = "nextEvent")]
+    pub async fn next_event(&self) -> Result<Value> {
+        let event = self.inner.next_event().await.map_err(protocol_error)?;
+        match event {
+            Some(event) => to_json(event),
+            None => Ok(Value::Null),
+        }
+    }
+
+    #[napi]
+    pub async fn close(&self) {
+        self.inner.close().await;
+    }
 }
 
 #[napi]
@@ -161,6 +188,20 @@ impl TerminalNodeBinding {
             .await
             .map_err(protocol_error)
             .and_then(to_json)
+    }
+
+    #[napi(js_name = "openSubscription")]
+    pub async fn open_subscription(
+        &self,
+        session_id: String,
+        spec: Value,
+    ) -> Result<TerminalNodeSubscriptionBinding> {
+        let client = self.inner.clone();
+        let spec = from_json(spec, "invalid_subscription_spec")?;
+        let subscription =
+            client.open_subscription(&session_id, &spec).await.map_err(protocol_error)?;
+
+        Ok(TerminalNodeSubscriptionBinding { inner: subscription })
     }
 }
 

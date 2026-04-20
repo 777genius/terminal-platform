@@ -1,11 +1,12 @@
 mod dto;
 
-use std::fs;
+use std::{fs, sync::Arc};
 
 use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_domain::{PaneId, SessionId};
 use terminal_mux_domain::PaneTreeNode;
 use terminal_protocol::{LocalSocketAddress, ProtocolError};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use ts_rs::{Config, TS};
 use uuid::Uuid;
 
@@ -23,8 +24,97 @@ pub use dto::{
     NodeScreenCursor, NodeScreenDelta, NodeScreenLine, NodeScreenLinePatch, NodeScreenPatch,
     NodeScreenSnapshot, NodeScreenSurface, NodeSendInputCommand, NodeSendPasteCommand,
     NodeSessionRoute, NodeSessionSummary, NodeShellLaunchSpec, NodeSplitDirection,
-    NodeSplitPaneCommand, NodeTabSnapshot, NodeTopologySnapshot,
+    NodeSplitPaneCommand, NodeSubscriptionEvent, NodeSubscriptionMeta, NodeSubscriptionSpec,
+    NodeTabSnapshot, NodeTopologySnapshot,
 };
+
+#[derive(Debug, Clone)]
+pub struct NodeSubscriptionHandle {
+    inner: Arc<NodeSubscriptionInner>,
+}
+
+#[derive(Debug)]
+struct NodeSubscriptionInner {
+    subscription_id: terminal_domain::SubscriptionId,
+    events: Mutex<mpsc::Receiver<Result<NodeSubscriptionEvent, ProtocolError>>>,
+    close_tx: Mutex<Option<oneshot::Sender<()>>>,
+}
+
+impl Drop for NodeSubscriptionInner {
+    fn drop(&mut self) {
+        if let Some(close_tx) = self.close_tx.get_mut().take() {
+            let _ = close_tx.send(());
+        }
+    }
+}
+
+impl NodeSubscriptionHandle {
+    async fn open(
+        client: LocalSocketDaemonClient,
+        session_id: SessionId,
+        spec: &NodeSubscriptionSpec,
+    ) -> Result<Self, ProtocolError> {
+        let mut subscription = client.open_subscription(session_id, spec.try_into()?).await?;
+        let subscription_id = subscription.subscription_id();
+        let (events_tx, events_rx) = mpsc::channel(32);
+        let (close_tx, mut close_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut close_rx => {
+                        let _ = subscription.close().await;
+                        break;
+                    }
+                    next = subscription.recv() => {
+                        match next {
+                            Ok(Some(event)) => {
+                                if events_tx.send(Ok((&event).into())).await.is_err() {
+                                    let _ = subscription.close().await;
+                                    break;
+                                }
+                            }
+                            Ok(None) => break,
+                            Err(error) => {
+                                let _ = events_tx.send(Err(error)).await;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(Self {
+            inner: Arc::new(NodeSubscriptionInner {
+                subscription_id,
+                events: Mutex::new(events_rx),
+                close_tx: Mutex::new(Some(close_tx)),
+            }),
+        })
+    }
+
+    #[must_use]
+    pub fn meta(&self) -> NodeSubscriptionMeta {
+        (&self.inner.subscription_id).into()
+    }
+
+    pub async fn next_event(&self) -> Result<Option<NodeSubscriptionEvent>, ProtocolError> {
+        let mut events = self.inner.events.lock().await;
+        match events.recv().await {
+            Some(Ok(event)) => Ok(Some(event)),
+            Some(Err(error)) => Err(error),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn close(&self) {
+        let mut close_tx = self.inner.close_tx.lock().await;
+        if let Some(close_tx) = close_tx.take() {
+            let _ = close_tx.send(());
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeHostClient {
@@ -208,6 +298,14 @@ impl NodeHostClient {
             self.client.dispatch(parse_session_id(session_id)?, command.try_into()?).await?;
         Ok((&result).into())
     }
+
+    pub async fn open_subscription(
+        &self,
+        session_id: &str,
+        spec: &NodeSubscriptionSpec,
+    ) -> Result<NodeSubscriptionHandle, ProtocolError> {
+        NodeSubscriptionHandle::open(self.client.clone(), parse_session_id(session_id)?, spec).await
+    }
 }
 
 pub fn export_typescript_bindings() -> std::io::Result<()> {
@@ -228,6 +326,9 @@ pub fn export_typescript_bindings() -> std::io::Result<()> {
     NodeScreenDelta::export_all(&cfg).map_err(export_error)?;
     NodeMuxCommand::export_all(&cfg).map_err(export_error)?;
     NodeMuxCommandResult::export_all(&cfg).map_err(export_error)?;
+    NodeSubscriptionSpec::export_all(&cfg).map_err(export_error)?;
+    NodeSubscriptionEvent::export_all(&cfg).map_err(export_error)?;
+    NodeSubscriptionMeta::export_all(&cfg).map_err(export_error)?;
     NodeAttachedSession::export_all(&cfg).map_err(export_error)?;
 
     Ok(())
@@ -281,7 +382,8 @@ mod tests {
 
     use super::{
         NodeBackendKind, NodeCreateSessionRequest, NodeHostClient, NodeMuxCommand,
-        NodeNewTabCommand, NodeSendInputCommand, export_typescript_bindings,
+        NodeNewTabCommand, NodeSendInputCommand, NodeSubscriptionEvent, NodeSubscriptionSpec,
+        export_typescript_bindings,
     };
 
     #[test]
@@ -451,6 +553,81 @@ mod tests {
         fixture.shutdown().await.expect("fixture should stop cleanly");
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn streams_subscription_events_through_node_surface() {
+        let fixture = daemon_fixture("terminal-node-subscriptions").expect("fixture should start");
+        let node = NodeHostClient::new(fixture.client.address().clone());
+        let created = node
+            .create_native_session(&cat_launch_request("shell"))
+            .await
+            .expect("create_native_session should succeed");
+        let attached =
+            node.attach_session(&created.session_id).await.expect("attach_session should succeed");
+        let pane_id =
+            attached.focused_screen.as_ref().expect("focused screen should exist").pane_id.clone();
+
+        let topology_subscription = node
+            .open_subscription(&created.session_id, &NodeSubscriptionSpec::SessionTopology)
+            .await
+            .expect("topology subscription should open");
+        let initial_topology = topology_subscription
+            .next_event()
+            .await
+            .expect("initial topology event should arrive")
+            .expect("initial topology event should exist");
+
+        let pane_subscription = node
+            .open_subscription(
+                &created.session_id,
+                &NodeSubscriptionSpec::PaneSurface { pane_id: pane_id.clone() },
+            )
+            .await
+            .expect("pane subscription should open");
+        let initial_pane = pane_subscription
+            .next_event()
+            .await
+            .expect("initial pane event should arrive")
+            .expect("initial pane event should exist");
+
+        node.dispatch_mux_command(
+            &created.session_id,
+            &NodeMuxCommand::NewTab(NodeNewTabCommand { title: Some("logs".to_string()) }),
+        )
+        .await
+        .expect("new tab should succeed");
+        let topology_update = next_topology_snapshot(&topology_subscription)
+            .await
+            .expect("topology snapshot should arrive");
+
+        node.dispatch_mux_command(
+            &created.session_id,
+            &NodeMuxCommand::SendInput(NodeSendInputCommand {
+                pane_id: pane_id.clone(),
+                data: "node subscription input\r".to_string(),
+            }),
+        )
+        .await
+        .expect("send input should succeed");
+        let pane_update = wait_for_subscription_line(&pane_subscription, "node subscription input")
+            .await
+            .expect("pane update should arrive");
+
+        assert_eq!(
+            initial_topology,
+            NodeSubscriptionEvent::TopologySnapshot(attached.topology.clone())
+        );
+        assert!(matches!(
+            initial_pane,
+            NodeSubscriptionEvent::ScreenDelta(delta) if delta.full_replace.is_some()
+        ));
+        assert_eq!(topology_update.tabs.len(), 2);
+        assert!(subscription_delta_contains(&pane_update, "node subscription input"));
+
+        topology_subscription.close().await;
+        pane_subscription.close().await;
+        fixture.shutdown().await.expect("fixture should stop cleanly");
+    }
+
     #[test]
     fn exports_typescript_bindings_for_node_surface() {
         let export_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("bindings");
@@ -462,6 +639,8 @@ mod tests {
         assert!(export_dir.join("NodeSavedSessionSummary.ts").exists());
         assert!(export_dir.join("NodeScreenDelta.ts").exists());
         assert!(export_dir.join("NodeMuxCommand.ts").exists());
+        assert!(export_dir.join("NodeSubscriptionSpec.ts").exists());
+        assert!(export_dir.join("NodeSubscriptionEvent.ts").exists());
         assert!(export_dir.join("NodeAttachedSession.ts").exists());
         let binding = std::fs::read_to_string(export_dir.join("NodeHandshakeInfo.ts"))
             .expect("handshake binding should be readable");
@@ -497,5 +676,52 @@ mod tests {
         }
 
         panic!("screen never contained expected line: {needle}");
+    }
+
+    async fn next_topology_snapshot(
+        subscription: &super::NodeSubscriptionHandle,
+    ) -> Option<super::NodeTopologySnapshot> {
+        for _ in 0..20 {
+            match subscription.next_event().await.expect("subscription should stay healthy") {
+                Some(NodeSubscriptionEvent::TopologySnapshot(snapshot)) => return Some(snapshot),
+                Some(NodeSubscriptionEvent::ScreenDelta(_)) => continue,
+                None => return None,
+            }
+        }
+
+        None
+    }
+
+    async fn wait_for_subscription_line(
+        subscription: &super::NodeSubscriptionHandle,
+        needle: &str,
+    ) -> Option<super::NodeScreenDelta> {
+        for _ in 0..50 {
+            match subscription.next_event().await.expect("subscription should stay healthy") {
+                Some(NodeSubscriptionEvent::ScreenDelta(delta))
+                    if subscription_delta_contains(&delta, needle) =>
+                {
+                    return Some(delta);
+                }
+                Some(NodeSubscriptionEvent::ScreenDelta(_)) => continue,
+                Some(NodeSubscriptionEvent::TopologySnapshot(_)) => continue,
+                None => return None,
+            }
+        }
+
+        None
+    }
+
+    fn subscription_delta_contains(delta: &super::NodeScreenDelta, needle: &str) -> bool {
+        delta
+            .patch
+            .as_ref()
+            .map(|patch| patch.line_updates.iter().any(|line| line.line.text.contains(needle)))
+            .unwrap_or(false)
+            || delta
+                .full_replace
+                .as_ref()
+                .map(|surface| surface.lines.iter().any(|line| line.text.contains(needle)))
+                .unwrap_or(false)
     }
 }

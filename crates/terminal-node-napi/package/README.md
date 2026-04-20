@@ -14,6 +14,7 @@ Current client surface includes:
 - native session create, list, attach and restore flows
 - foreign backend discovery and import for `tmux` and `Zellij`
 - topology snapshots, screen snapshots and screen deltas
+- live topology and pane subscriptions via async stream handles
 - mux command dispatch for tabs, panes, input and save operations
 
 ## Local staging

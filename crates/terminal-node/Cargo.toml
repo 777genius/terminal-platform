@@ -11,12 +11,12 @@ terminal-domain = { path = "../terminal-domain" }
 terminal-mux-domain = { path = "../terminal-mux-domain" }
 terminal-projection = { path = "../terminal-projection" }
 terminal-protocol = { path = "../terminal-protocol" }
+tokio = { workspace = true }
 ts-rs = "12.0.1"
 uuid = { workspace = true }
 
 [dev-dependencies]
 terminal-testing = { path = "../terminal-testing" }
-tokio = { workspace = true }
 
 [lints]
 workspace = true

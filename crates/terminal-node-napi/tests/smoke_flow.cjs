@@ -22,6 +22,15 @@ async function runSmoke(createClient) {
     created.session_id,
     attached.focused_screen.pane_id,
   );
+  const topologySubscription = await client.openSubscription(created.session_id, {
+    kind: "session_topology",
+  });
+  const initialTopologyEvent = await topologySubscription.nextEvent();
+  const paneSubscription = await client.openSubscription(created.session_id, {
+    kind: "pane_surface",
+    pane_id: attached.focused_screen.pane_id,
+  });
+  const initialPaneEvent = await paneSubscription.nextEvent();
   const save = await client.dispatchMuxCommand(created.session_id, {
     kind: "save_session",
   });
@@ -48,6 +57,7 @@ async function runSmoke(createClient) {
     title: "logs",
   });
   const topologyAfterDispatch = await client.topologySnapshot(created.session_id);
+  const topologyUpdate = await waitForTopologyTabs(topologySubscription, 2);
   const restored = await client.restoreSavedSession(created.session_id);
   const deleted = await client.deleteSavedSession(created.session_id);
   const savedAfterDelete = await client.listSavedSessions();
@@ -69,6 +79,10 @@ async function runSmoke(createClient) {
   assert.equal(topology.session_id, created.session_id);
   assert.equal(focusedScreen.pane_id, attached.focused_screen.pane_id);
   assert.equal(focusedScreen.surface.lines.length > 0, true);
+  assert.equal(initialTopologyEvent.kind, "topology_snapshot");
+  assert.equal(initialTopologyEvent.session_id, created.session_id);
+  assert.equal(initialPaneEvent.kind, "screen_delta");
+  assert.equal(initialPaneEvent.pane_id, attached.focused_screen.pane_id);
   assert.equal(save.changed, false);
   assert.equal(saved.some((session) => session.session_id === created.session_id), true);
   assert.equal(savedRecord.session_id, created.session_id);
@@ -84,10 +98,15 @@ async function runSmoke(createClient) {
   assert.equal(screenDelta.patch !== null || screenDelta.full_replace !== null, true);
   assert.equal(newTab.changed, true);
   assert.equal(topologyAfterDispatch.tabs.length, 2);
+  assert.equal(topologyUpdate.kind, "topology_snapshot");
+  assert.equal(topologyUpdate.tabs.length, 2);
   assert.equal(restored.saved_session_id, created.session_id);
   assert.equal(restored.session.session_id === created.session_id, false);
   assert.equal(deleted.session_id, created.session_id);
   assert.equal(savedAfterDelete.some((session) => session.session_id === created.session_id), false);
+
+  await topologySubscription.close();
+  await paneSubscription.close();
 
   let invalidSessionFailed = false;
   try {
@@ -117,6 +136,20 @@ async function waitForLine(client, sessionId, paneId, needle) {
   }
 
   throw new Error(`Timed out waiting for screen line: ${needle}`);
+}
+
+async function waitForTopologyTabs(subscription, tabCount) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const event = await subscription.nextEvent();
+    if (event == null) {
+      break;
+    }
+    if (event.kind === "topology_snapshot" && event.tabs.length === tabCount) {
+      return event;
+    }
+  }
+
+  throw new Error(`Timed out waiting for topology with ${tabCount} tabs`);
 }
 
 module.exports = {

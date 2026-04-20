@@ -6,4 +6,5 @@ const cjs = require("./index.cjs");
 export const loadNativeBinding = cjs.loadNativeBinding;
 export const resolveNativeBindingPath = cjs.resolveNativeBindingPath;
 export const TerminalNodeClient = cjs.TerminalNodeClient;
+export const TerminalNodeSubscription = cjs.TerminalNodeSubscription;
 export default cjs;

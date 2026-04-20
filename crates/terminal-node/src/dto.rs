@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 use terminal_backend_api::{
     BackendCapabilities, BackendSessionSummary, CreateSessionSpec, DiscoveredSession, MuxCommand,
     MuxCommandResult, NewTabSpec, OverrideLayoutSpec, ResizePaneSpec, SendInputSpec, SendPasteSpec,
-    ShellLaunchSpec, SplitPaneSpec,
+    ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
 };
 use terminal_daemon_client::{HandshakeAssessment, HandshakeAssessmentStatus};
 use terminal_domain::{
     BackendKind, PaneId, ProtocolCompatibility, ProtocolCompatibilityStatus, RouteAuthority,
     SavedSessionCompatibility, SavedSessionCompatibilityStatus, SavedSessionManifest, SessionRoute,
-    TabId,
+    SubscriptionId, TabId,
 };
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 use terminal_projection::{
@@ -19,7 +19,7 @@ use terminal_protocol::{
     BackendCapabilitiesResponse, DaemonCapabilities, DaemonPhase, DeleteSavedSessionResponse,
     Handshake, ProtocolError, ProtocolVersion, PruneSavedSessionsResponse,
     RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionRestoreSemantics,
-    SavedSessionSummary,
+    SavedSessionSummary, SubscriptionEvent,
 };
 use ts_rs::TS;
 use uuid::Uuid;
@@ -302,6 +302,28 @@ pub struct NodeDeleteSavedSessionResult {
 pub struct NodePruneSavedSessionsResult {
     pub deleted_count: usize,
     pub kept_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodeSubscriptionSpec {
+    SessionTopology,
+    PaneSurface { pane_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodeSubscriptionEvent {
+    TopologySnapshot(NodeTopologySnapshot),
+    ScreenDelta(NodeScreenDelta),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSubscriptionMeta {
+    pub subscription_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -811,6 +833,23 @@ impl From<&PruneSavedSessionsResponse> for NodePruneSavedSessionsResult {
     }
 }
 
+impl From<&SubscriptionId> for NodeSubscriptionMeta {
+    fn from(value: &SubscriptionId) -> Self {
+        Self { subscription_id: value.0.to_string() }
+    }
+}
+
+impl From<&SubscriptionEvent> for NodeSubscriptionEvent {
+    fn from(value: &SubscriptionEvent) -> Self {
+        match value {
+            SubscriptionEvent::TopologySnapshot(snapshot) => {
+                Self::TopologySnapshot(snapshot.into())
+            }
+            SubscriptionEvent::ScreenDelta(delta) => Self::ScreenDelta(delta.into()),
+        }
+    }
+}
+
 impl From<&ProjectionSource> for NodeProjectionSource {
     fn from(value: &ProjectionSource) -> Self {
         match value {
@@ -1051,6 +1090,19 @@ impl TryFrom<&NodeMuxCommand> for MuxCommand {
                 tab_id: parse_tab_id(&command.tab_id)?,
                 root: (&command.root).try_into()?,
             }),
+        })
+    }
+}
+
+impl TryFrom<&NodeSubscriptionSpec> for SubscriptionSpec {
+    type Error = ProtocolError;
+
+    fn try_from(value: &NodeSubscriptionSpec) -> Result<Self, Self::Error> {
+        Ok(match value {
+            NodeSubscriptionSpec::SessionTopology => Self::SessionTopology,
+            NodeSubscriptionSpec::PaneSurface { pane_id } => {
+                Self::PaneSurface { pane_id: parse_pane_id(pane_id)? }
+            }
         })
     }
 }

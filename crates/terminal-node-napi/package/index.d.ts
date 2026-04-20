@@ -41,6 +41,9 @@ export type { NodeSessionRoute } from "./bindings/NodeSessionRoute";
 export type { NodeSessionSummary } from "./bindings/NodeSessionSummary";
 export type { NodeShellLaunchSpec } from "./bindings/NodeShellLaunchSpec";
 export type { NodeSplitDirection } from "./bindings/NodeSplitDirection";
+export type { NodeSubscriptionEvent } from "./bindings/NodeSubscriptionEvent";
+export type { NodeSubscriptionMeta } from "./bindings/NodeSubscriptionMeta";
+export type { NodeSubscriptionSpec } from "./bindings/NodeSubscriptionSpec";
 export type { NodeTabSnapshot } from "./bindings/NodeTabSnapshot";
 export type { NodeTopologySnapshot } from "./bindings/NodeTopologySnapshot";
 
@@ -62,6 +65,8 @@ import type { NodeSavedSessionRecord } from "./bindings/NodeSavedSessionRecord";
 import type { NodeSavedSessionSummary } from "./bindings/NodeSavedSessionSummary";
 import type { NodeSessionRoute } from "./bindings/NodeSessionRoute";
 import type { NodeSessionSummary } from "./bindings/NodeSessionSummary";
+import type { NodeSubscriptionEvent } from "./bindings/NodeSubscriptionEvent";
+import type { NodeSubscriptionSpec } from "./bindings/NodeSubscriptionSpec";
 import type { NodeTopologySnapshot } from "./bindings/NodeTopologySnapshot";
 
 export interface NativeBindingLoadOptions {
@@ -115,6 +120,16 @@ export interface NativeTerminalNodeClientHandle {
     sessionId: string,
     command: NodeMuxCommand,
   ): Promise<NodeMuxCommandResult>;
+  openSubscription(
+    sessionId: string,
+    spec: NodeSubscriptionSpec,
+  ): Promise<NativeTerminalNodeSubscriptionHandle>;
+}
+
+export interface NativeTerminalNodeSubscriptionHandle {
+  readonly subscriptionId: string;
+  nextEvent(): Promise<NodeSubscriptionEvent | null>;
+  close(): Promise<void>;
 }
 
 export interface NativeBindingModule {
@@ -122,6 +137,9 @@ export interface NativeBindingModule {
     fromRuntimeSlug(slug: string): NativeTerminalNodeClientHandle;
     fromNamespacedAddress(value: string): NativeTerminalNodeClientHandle;
     fromFilesystemPath(value: string): NativeTerminalNodeClientHandle;
+  };
+  TerminalNodeSubscription: {
+    prototype: NativeTerminalNodeSubscriptionHandle;
   };
 }
 
@@ -187,12 +205,33 @@ export declare class TerminalNodeClient
     sessionId: string,
     command: NodeMuxCommand,
   ): Promise<NodeMuxCommandResult>;
+  openSubscription(
+    sessionId: string,
+    spec: NodeSubscriptionSpec,
+  ): Promise<TerminalNodeSubscription>;
+  subscribeTopology(sessionId: string): Promise<TerminalNodeSubscription>;
+  subscribePane(
+    sessionId: string,
+    paneId: string,
+  ): Promise<TerminalNodeSubscription>;
+}
+
+export declare class TerminalNodeSubscription
+  implements NativeTerminalNodeSubscriptionHandle, AsyncIterable<NodeSubscriptionEvent>
+{
+  private constructor(inner: NativeTerminalNodeSubscriptionHandle);
+
+  get subscriptionId(): string;
+  nextEvent(): Promise<NodeSubscriptionEvent | null>;
+  close(): Promise<void>;
+  [Symbol.asyncIterator](): AsyncIterableIterator<NodeSubscriptionEvent>;
 }
 
 declare const _default: {
   loadNativeBinding: typeof loadNativeBinding;
   resolveNativeBindingPath: typeof resolveNativeBindingPath;
   TerminalNodeClient: typeof TerminalNodeClient;
+  TerminalNodeSubscription: typeof TerminalNodeSubscription;
 };
 
 export default _default;

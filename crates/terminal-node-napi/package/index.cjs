@@ -101,13 +101,58 @@ function loadNativeBinding(options = {}) {
   const addonPath = resolveNativeBindingPath(options);
   const binding = require(addonPath);
 
-  if (!binding || !binding.TerminalNodeClient) {
+  if (!binding || !binding.TerminalNodeClient || !binding.TerminalNodeSubscription) {
     throw new Error(
-      `terminal-node addon at ${addonPath} did not expose TerminalNodeClient`,
+      `terminal-node addon at ${addonPath} did not expose TerminalNodeClient/TerminalNodeSubscription`,
     );
   }
 
   return binding;
+}
+
+class TerminalNodeSubscription {
+  #inner;
+  #closed;
+
+  constructor(inner) {
+    this.#inner = inner;
+    this.#closed = false;
+  }
+
+  get subscriptionId() {
+    return this.#inner.subscriptionId;
+  }
+
+  async nextEvent() {
+    const event = await this.#inner.nextEvent();
+    if (event == null) {
+      this.#closed = true;
+    }
+    return event;
+  }
+
+  async close() {
+    if (this.#closed) {
+      return;
+    }
+
+    this.#closed = true;
+    await this.#inner.close();
+  }
+
+  async *[Symbol.asyncIterator]() {
+    try {
+      while (true) {
+        const event = await this.nextEvent();
+        if (event == null) {
+          return;
+        }
+        yield event;
+      }
+    } finally {
+      await this.close().catch(() => {});
+    }
+  }
 }
 
 class TerminalNodeClient {
@@ -207,10 +252,27 @@ class TerminalNodeClient {
   dispatchMuxCommand(sessionId, command) {
     return this.#inner.dispatchMuxCommand(sessionId, command);
   }
+
+  async openSubscription(sessionId, spec) {
+    const subscription = await this.#inner.openSubscription(sessionId, spec);
+    return new TerminalNodeSubscription(subscription);
+  }
+
+  subscribeTopology(sessionId) {
+    return this.openSubscription(sessionId, { kind: "session_topology" });
+  }
+
+  subscribePane(sessionId, paneId) {
+    return this.openSubscription(sessionId, {
+      kind: "pane_surface",
+      pane_id: paneId,
+    });
+  }
 }
 
 module.exports = {
   loadNativeBinding,
   resolveNativeBindingPath,
   TerminalNodeClient,
+  TerminalNodeSubscription,
 };
