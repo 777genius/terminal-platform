@@ -481,40 +481,44 @@ async function runElectronBridgeSmoke(createClient, sdk) {
   let openedTab = false;
   const watchAbort = new AbortController();
 
-  await rendererClient.watchSessionState(created.session_id, {
-    signal: watchAbort.signal,
-    onState: async (state) => {
-      stateEvents.push(state);
+  await withTimeout(
+    rendererClient.watchSessionState(created.session_id, {
+      signal: watchAbort.signal,
+      onState: async (state) => {
+        stateEvents.push(state);
 
-      if (!sentInput && state.focusedScreen) {
-        sentInput = true;
-        await rendererClient.dispatchMuxCommand(created.session_id, {
-          kind: "send_input",
-          pane_id: paneId,
-          data: "electron bridge input\r",
-        });
-        return;
-      }
+        if (!sentInput && state.focusedScreen) {
+          sentInput = true;
+          await rendererClient.dispatchMuxCommand(created.session_id, {
+            kind: "send_input",
+            pane_id: paneId,
+            data: "electron bridge input\r",
+          });
+          return;
+        }
 
-      if (
-        !openedTab &&
-        state.focusedScreen?.surface.lines.some((line) =>
-          line.text.includes("electron bridge input"),
-        )
-      ) {
-        openedTab = true;
-        await rendererClient.dispatchMuxCommand(created.session_id, {
-          kind: "new_tab",
-          title: "electron",
-        });
-        return;
-      }
+        if (
+          !openedTab &&
+          state.focusedScreen?.surface.lines.some((line) =>
+            line.text.includes("electron bridge input"),
+          )
+        ) {
+          openedTab = true;
+          await rendererClient.dispatchMuxCommand(created.session_id, {
+            kind: "new_tab",
+            title: "electron",
+          });
+          return;
+        }
 
-      if (openedTab && state.topology.tabs.length === 2) {
-        watchAbort.abort();
-      }
-    },
-  });
+        if (openedTab && state.topology.tabs.length === 2) {
+          watchAbort.abort();
+        }
+      },
+    }),
+    5000,
+    "Timed out waiting for ElectronTerminalNodeClient.watchSessionState happy path",
+  );
 
   const topology = await rendererClient.topologySnapshot(created.session_id);
   const screen = await rendererClient.screenSnapshot(created.session_id, paneId);
@@ -540,6 +544,7 @@ async function runElectronBridgeSmoke(createClient, sdk) {
   );
 
   bridge.dispose();
+  await runElectronBridgeDisposeSmoke(createClient, sdk);
 
   await runElectronPreloadSmoke(createClient, sdk);
 }
@@ -649,7 +654,11 @@ async function runElectronPreloadSmoke(createClient, sdk) {
     data: "electron preload input\r",
   });
 
-  const observedState = await seenState;
+  const observedState = await withTimeout(
+    seenState,
+    5000,
+    "Timed out waiting for Electron preload observed state",
+  );
   assert.equal(observedState.session.session_id, created.session_id);
   assert.equal(observedState.focusedScreen.pane_id, paneId);
 
@@ -659,7 +668,135 @@ async function runElectronPreloadSmoke(createClient, sdk) {
   assert.equal(stopped, true);
   assert.equal(stoppedAgain, false);
 
-  await exposed.terminalPlatform.dispose();
+  await withTimeout(
+    exposed.terminalPlatform.dispose(),
+    5000,
+    "Timed out waiting for Electron preload dispose()",
+  );
+  bridge.dispose();
+  await runElectronPreloadDisposeSmoke(createClient, sdk);
+}
+
+async function runElectronBridgeDisposeSmoke(createClient, sdk) {
+  const client = createClient();
+  const { ipcMain, ipcRenderer } = createFakeElectronIpc();
+  const bridge = sdk.createElectronMainBridge({
+    channelPrefix: "terminal-platform-dispose-smoke",
+    client,
+    ipcMain,
+  });
+  const rendererClient = new sdk.ElectronTerminalNodeClient({
+    channelPrefix: "terminal-platform-dispose-smoke",
+    ipcRenderer,
+  });
+  const created = await rendererClient.createNativeSession({
+    title: "electron-bridge-dispose-smoke",
+    launch: {
+      program: "/bin/sh",
+      args: ["-lc", "printf 'ready\\n'; exec cat"],
+    },
+  });
+
+  let observedStates = 0;
+  let resolveReady;
+  const ready = new Promise((resolve) => {
+    resolveReady = resolve;
+  });
+  const watchPromise = rendererClient.watchSessionState(created.session_id, {
+    onState: async (state) => {
+      observedStates += 1;
+      if (observedStates === 1) {
+        resolveReady(state);
+      }
+    },
+  });
+
+  const initialState = await withTimeout(
+    ready,
+    5000,
+    "Timed out waiting for first Electron bridge state before dispose()",
+  );
+  assert.equal(initialState.session.session_id, created.session_id);
+
+  bridge.dispose();
+
+  await withTimeout(
+    watchPromise,
+    5000,
+    "Timed out waiting for Electron bridge watch promise to resolve after dispose()",
+  );
+  await assert.rejects(
+    rendererClient.bindingVersion(),
+    /Missing fake Electron handler/,
+  );
+  assert.equal(observedStates >= 1, true);
+}
+
+async function runElectronPreloadDisposeSmoke(createClient, sdk) {
+  const client = createClient();
+  const { ipcMain, ipcRenderer } = createFakeElectronIpc();
+  const bridge = sdk.createElectronMainBridge({
+    channelPrefix: "terminal-platform-preload-dispose-smoke",
+    client,
+    ipcMain,
+  });
+  const preloadApi = sdk.createElectronPreloadApi({
+    channelPrefix: "terminal-platform-preload-dispose-smoke",
+    ipcRenderer,
+  });
+  const created = await preloadApi.createNativeSession({
+    title: "electron-preload-dispose-smoke",
+    launch: {
+      program: "/bin/sh",
+      args: ["-lc", "printf 'ready\\n'; exec cat"],
+    },
+  });
+
+  const readyResolvers = new Map();
+  const waitForReady = (key) =>
+    new Promise((resolve) => {
+      readyResolvers.set(key, resolve);
+    });
+  const firstState = waitForReady("first");
+  const secondState = waitForReady("second");
+  const firstSubscriptionId = await preloadApi.subscribeSessionState(
+    created.session_id,
+    async (state) => {
+      const resolve = readyResolvers.get("first");
+      if (resolve) {
+        readyResolvers.delete("first");
+        resolve(state);
+      }
+    },
+  );
+  const secondSubscriptionId = await preloadApi.subscribeSessionState(
+    created.session_id,
+    async (state) => {
+      const resolve = readyResolvers.get("second");
+      if (resolve) {
+        readyResolvers.delete("second");
+        resolve(state);
+      }
+    },
+  );
+
+  const [firstObservedState, secondObservedState] = await withTimeout(
+    Promise.all([firstState, secondState]),
+    5000,
+    "Timed out waiting for preload subscriptions before dispose()",
+  );
+  assert.equal(firstObservedState.session.session_id, created.session_id);
+  assert.equal(secondObservedState.session.session_id, created.session_id);
+
+  await withTimeout(
+    preloadApi.dispose(),
+    5000,
+    "Timed out waiting for createElectronPreloadApi().dispose() to drain subscriptions",
+  );
+
+  assert.equal(await preloadApi.unsubscribeSessionState(firstSubscriptionId), false);
+  assert.equal(await preloadApi.unsubscribeSessionState(secondSubscriptionId), false);
+
   bridge.dispose();
 }
 

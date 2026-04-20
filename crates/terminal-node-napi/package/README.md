@@ -89,6 +89,9 @@ and exercises both the CJS and ESM entrypoints through normal package resolution
 Integration smoke also verifies that package-level subscription and watch helpers
 close cleanly when the daemon shuts down underneath an active session.
 
+Electron bridge smoke also covers active watcher teardown when the main bridge or
+preload API is disposed during a live session-state subscription.
+
 The staged directory contains:
 
 - `index.cjs`

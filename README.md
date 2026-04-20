@@ -50,6 +50,7 @@ Current workspace shape:
 - `index.d.ts` plus generated `bindings/*.d.ts`
 - publish/install smoke through a packed local tarball in a temp Node project
 - shutdown smoke for staged Node package watch/subscription helpers
+- Electron bridge smoke for active watcher teardown across main/preload disposal
 
 ## C ABI surface
 
