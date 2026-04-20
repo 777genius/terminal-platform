@@ -7,6 +7,7 @@ const CAPI_PACKAGE_NAME: &str = "terminal-capi";
 const CAPI_HEADER_NAME: &str = "terminal-platform-capi.h";
 const CAPI_LIBRARY_BASENAME: &str = "terminal_capi";
 const CAPI_PKGCONFIG_NAME: &str = "terminal-platform-capi";
+const CAPI_INSTALL_SHARE_DIR: &str = "share/terminal-capi";
 const CAPI_SCHEMA_VERSION: u64 = 1;
 
 fn main() {
@@ -28,12 +29,24 @@ fn run() -> Result<(), String> {
             println!("{}", package_dir.display());
             Ok(())
         }
+        Command::InstallCapiPackage { package_dir, prefix } => {
+            let installed_prefix = install_capi_package(&package_dir, &prefix)?;
+            println!("{}", installed_prefix.display());
+            Ok(())
+        }
+        Command::VerifyCapiInstall { prefix } => {
+            verify_capi_install(&prefix)?;
+            println!("{}", prefix.display());
+            Ok(())
+        }
     }
 }
 
 enum Command {
     StageCapiPackage { out_dir: PathBuf },
     VerifyCapiPackage { package_dir: PathBuf },
+    InstallCapiPackage { package_dir: PathBuf, prefix: PathBuf },
+    VerifyCapiInstall { prefix: PathBuf },
 }
 
 fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
@@ -78,6 +91,49 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
             }
 
             Ok(Command::VerifyCapiPackage { package_dir })
+        }
+        "install-capi-package" => {
+            let mut package_dir = workspace_root().join("crates/terminal-capi/artifacts/local");
+            let mut prefix = workspace_root().join("crates/terminal-capi/artifacts/install");
+
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--package-dir" => {
+                        let value = args
+                            .next()
+                            .ok_or_else(|| "missing value for --package-dir".to_string())?;
+                        package_dir = PathBuf::from(value);
+                    }
+                    "--prefix" => {
+                        let value =
+                            args.next().ok_or_else(|| "missing value for --prefix".to_string())?;
+                        prefix = PathBuf::from(value);
+                    }
+                    other => {
+                        return Err(format!("unsupported install-capi-package argument: {other}"));
+                    }
+                }
+            }
+
+            Ok(Command::InstallCapiPackage { package_dir, prefix })
+        }
+        "verify-capi-install" => {
+            let mut prefix = workspace_root().join("crates/terminal-capi/artifacts/install");
+
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--prefix" => {
+                        let value =
+                            args.next().ok_or_else(|| "missing value for --prefix".to_string())?;
+                        prefix = PathBuf::from(value);
+                    }
+                    other => {
+                        return Err(format!("unsupported verify-capi-install argument: {other}"));
+                    }
+                }
+            }
+
+            Ok(Command::VerifyCapiInstall { prefix })
         }
         other => Err(format!("unsupported xtask command: {other}")),
     }
@@ -229,6 +285,140 @@ fn verify_capi_package(package_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn install_capi_package(package_dir: &Path, prefix: &Path) -> Result<PathBuf, String> {
+    let manifest_path = package_dir.join("manifest.json");
+    let manifest = read_json(&manifest_path)?;
+    let exports =
+        manifest.get("exports").and_then(serde_json::Value::as_object).ok_or_else(|| {
+            format!("manifest is missing exports object at {}", manifest_path.display())
+        })?;
+    let header_relative = exports
+        .get("header")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "manifest exports.header must be a string".to_string())?;
+    let cdylib_relative = exports
+        .get("cdylib")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "manifest exports.cdylib must be a string".to_string())?;
+    let staticlib_relative = exports
+        .get("staticlib")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "manifest exports.staticlib must be a string".to_string())?;
+    let pkgconfig_relative = exports
+        .get("pkgConfig")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "manifest exports.pkgConfig must be a string".to_string())?;
+    let package_version = manifest
+        .get("packageVersion")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "manifest packageVersion must be a string".to_string())?;
+
+    if prefix.exists() {
+        fs::remove_dir_all(prefix)
+            .map_err(|error| format!("failed to clear {} - {error}", prefix.display()))?;
+    }
+
+    copy_file_ensuring_parent(&package_dir.join(header_relative), &prefix.join(header_relative))?;
+    copy_file_ensuring_parent(&package_dir.join(cdylib_relative), &prefix.join(cdylib_relative))?;
+    copy_file_ensuring_parent(
+        &package_dir.join(staticlib_relative),
+        &prefix.join(staticlib_relative),
+    )?;
+    copy_file_ensuring_parent(
+        &package_dir.join(pkgconfig_relative),
+        &prefix.join(pkgconfig_relative),
+    )?;
+
+    let installed_readme = prefix.join(CAPI_INSTALL_SHARE_DIR).join("README.md");
+    let installed_manifest_path = prefix.join(CAPI_INSTALL_SHARE_DIR).join("manifest.json");
+    copy_file_ensuring_parent(&package_dir.join("README.md"), &installed_readme)?;
+
+    let installed_manifest = serde_json::json!({
+        "schemaVersion": CAPI_SCHEMA_VERSION,
+        "package": CAPI_PACKAGE_NAME,
+        "packageVersion": package_version,
+        "layout": "prefix",
+        "target": manifest
+            .get("target")
+            .cloned()
+            .unwrap_or_else(current_target_descriptor),
+        "exports": {
+            "header": header_relative,
+            "cdylib": cdylib_relative,
+            "staticlib": staticlib_relative,
+            "pkgConfig": pkgconfig_relative,
+            "libraryBaseName": CAPI_LIBRARY_BASENAME,
+            "metadata": format!("{CAPI_INSTALL_SHARE_DIR}/manifest.json"),
+            "readme": format!("{CAPI_INSTALL_SHARE_DIR}/README.md"),
+        }
+    });
+    write_json(&installed_manifest_path, &installed_manifest)?;
+    Ok(prefix.to_path_buf())
+}
+
+fn verify_capi_install(prefix: &Path) -> Result<(), String> {
+    let installed_manifest_path = prefix.join(CAPI_INSTALL_SHARE_DIR).join("manifest.json");
+    let manifest = read_json(&installed_manifest_path)?;
+    let exports =
+        manifest.get("exports").and_then(serde_json::Value::as_object).ok_or_else(|| {
+            format!(
+                "installed manifest is missing exports object at {}",
+                installed_manifest_path.display()
+            )
+        })?;
+    let header_path = prefix.join(
+        exports["header"]
+            .as_str()
+            .ok_or_else(|| "installed exports.header must be a string".to_string())?,
+    );
+    let cdylib_path = prefix.join(
+        exports["cdylib"]
+            .as_str()
+            .ok_or_else(|| "installed exports.cdylib must be a string".to_string())?,
+    );
+    let staticlib_path = prefix.join(
+        exports["staticlib"]
+            .as_str()
+            .ok_or_else(|| "installed exports.staticlib must be a string".to_string())?,
+    );
+    let pkgconfig_path = prefix.join(
+        exports["pkgConfig"]
+            .as_str()
+            .ok_or_else(|| "installed exports.pkgConfig must be a string".to_string())?,
+    );
+    let readme_path = prefix.join(
+        exports["readme"]
+            .as_str()
+            .ok_or_else(|| "installed exports.readme must be a string".to_string())?,
+    );
+    let package_version = manifest
+        .get("packageVersion")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "installed manifest packageVersion must be a string".to_string())?;
+
+    assert_value(
+        manifest.get("layout").and_then(serde_json::Value::as_str) == Some("prefix"),
+        "installed manifest layout is unexpected",
+    )?;
+    assert_value(header_path.is_file(), "installed header is missing")?;
+    assert_value(cdylib_path.is_file(), "installed cdylib is missing")?;
+    assert_value(staticlib_path.is_file(), "installed staticlib is missing")?;
+    assert_value(pkgconfig_path.is_file(), "installed pkg-config file is missing")?;
+    assert_value(readme_path.is_file(), "installed README is missing")?;
+
+    let pkgconfig = fs::read_to_string(&pkgconfig_path)
+        .map_err(|error| format!("failed to read {} - {error}", pkgconfig_path.display()))?;
+    assert_value(
+        pkgconfig.contains(&format!("Version: {package_version}")),
+        "installed pkg-config file is missing expected package version",
+    )?;
+    assert_value(
+        pkgconfig.contains("prefix=${pcfiledir}/../.."),
+        "installed pkg-config file is missing relative prefix",
+    )?;
+    Ok(())
+}
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -358,6 +548,15 @@ fn copy_file(source: &Path, target: &Path) -> Result<(), String> {
     fs::copy(source, target).map(|_| ()).map_err(|error| {
         format!("failed to copy {} to {} - {error}", source.display(), target.display())
     })
+}
+
+fn copy_file_ensuring_parent(source: &Path, target: &Path) -> Result<(), String> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("target {} does not have a parent directory", target.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create {} - {error}", parent.display()))?;
+    copy_file(source, target)
 }
 
 fn file_name(path: &Path) -> Result<&str, String> {

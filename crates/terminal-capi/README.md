@@ -29,6 +29,7 @@ Current test coverage includes:
 - external consumer coverage for native request/subscription flow and `tmux` discover/import flow
 - staged package smoke via `cargo run -p xtask -- stage-capi-package`
 - staged package emits `pkg-config` metadata for standard C consumer integration
+- install prefix smoke via `cargo run -p xtask -- install-capi-package`
 
 ## Local verification
 
@@ -43,6 +44,8 @@ Stage and verify a local C package layout:
 ```bash
 cargo run -p xtask -- stage-capi-package --out ./crates/terminal-capi/artifacts/local
 cargo run -p xtask -- verify-capi-package --package-dir ./crates/terminal-capi/artifacts/local
+cargo run -p xtask -- install-capi-package --package-dir ./crates/terminal-capi/artifacts/local --prefix ./crates/terminal-capi/artifacts/install
+cargo run -p xtask -- verify-capi-install --prefix ./crates/terminal-capi/artifacts/install
 ```
 
 The staged package now includes:
@@ -52,6 +55,15 @@ The staged package now includes:
 - `lib/<static library>`
 - `lib/pkgconfig/terminal-platform-capi.pc`
 - `manifest.json`
+
+Installed prefix layout now includes:
+
+- `include/terminal-platform-capi.h`
+- `lib/<dynamic library>`
+- `lib/<static library>`
+- `lib/pkgconfig/terminal-platform-capi.pc`
+- `share/terminal-capi/manifest.json`
+- `share/terminal-capi/README.md`
 
 Full workspace quality gates:
 
