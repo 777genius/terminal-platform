@@ -14,6 +14,37 @@ const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README
 const MANUAL_DIR: &str = "crates/terminal-testing/manual";
 const MANUAL_RUNS_DIR: &str = "crates/terminal-testing/manual/runs";
 const RELEASE_READINESS_WORKFLOW_PATH: &str = ".github/workflows/release-readiness.yml";
+const MANUAL_RUN_TEMPLATE_DATE_PLACEHOLDER: &str = "Date: YYYY-MM-DD";
+const MANUAL_RUN_TEMPLATE_OS_PLACEHOLDER: &str = "OS: macOS 15.4 / Ubuntu 24.04 / Windows 11 24H2";
+const MANUAL_RUN_TEMPLATE_CHECKLIST_PLACEHOLDER: &str =
+    "Checklist: crates/terminal-testing/manual/<checklist>.md";
+const MANUAL_RUN_TEMPLATE_RUST_PLACEHOLDER: &str = "Rust: rustc 1.xx.x";
+const MANUAL_RUN_TEMPLATE_NODE_PLACEHOLDER: &str = "Node: vxx.x.x";
+
+#[derive(Clone, Copy)]
+struct ManualRunExpectation {
+    file_prefix: &'static str,
+    checklist_path: &'static str,
+    required_runtime_marker: Option<(&'static str, &'static str)>,
+}
+
+const REQUIRED_MANUAL_RUNS: [ManualRunExpectation; 3] = [
+    ManualRunExpectation {
+        file_prefix: "electron-",
+        checklist_path: "crates/terminal-testing/manual/electron.md",
+        required_runtime_marker: None,
+    },
+    ManualRunExpectation {
+        file_prefix: "unix-tmux-",
+        checklist_path: "crates/terminal-testing/manual/tmux.md",
+        required_runtime_marker: Some(("tmux:", "tmux: 3.x or n/a")),
+    },
+    ManualRunExpectation {
+        file_prefix: "windows-native-zellij-",
+        checklist_path: "crates/terminal-testing/manual/windows-native-zellij.md",
+        required_runtime_marker: Some(("Zellij:", "Zellij: 0.44.x or n/a")),
+    },
+];
 
 fn main() {
     if let Err(error) = run() {
@@ -259,40 +290,20 @@ fn verify_recorded_passes(manual_runs_dir: &Path) -> Result<(), String> {
 
         let contents = fs::read_to_string(&path)
             .map_err(|error| format!("failed to read {} - {error}", path.display()))?;
+        let Some(expectation) = REQUIRED_MANUAL_RUNS
+            .iter()
+            .find(|expectation| name.starts_with(expectation.file_prefix))
+        else {
+            continue;
+        };
 
-        for required_marker in
-            ["Date:", "OS:", "Checklist:", "Result: pass", "Rust:", "Node:", "Findings:"]
-        {
-            assert_value(
-                contents.contains(required_marker),
-                &format!(
-                    "manual run artifact {} is missing required marker: {required_marker}",
-                    path.display()
-                ),
-            )?;
-        }
+        verify_recorded_pass(&path, name, &contents, *expectation)?;
 
-        if name.starts_with("electron-") {
-            has_electron_pass = true;
-        }
-
-        if name.starts_with("unix-tmux-") {
-            assert_value(
-                contents.contains("tmux:"),
-                &format!("manual tmux artifact {} is missing tmux version", path.display()),
-            )?;
-            has_tmux_pass = true;
-        }
-
-        if name.starts_with("windows-native-zellij-") {
-            assert_value(
-                contents.contains("Zellij:"),
-                &format!(
-                    "manual Windows Zellij artifact {} is missing Zellij version",
-                    path.display()
-                ),
-            )?;
-            has_windows_zellij_pass = true;
+        match expectation.file_prefix {
+            "electron-" => has_electron_pass = true,
+            "unix-tmux-" => has_tmux_pass = true,
+            "windows-native-zellij-" => has_windows_zellij_pass = true,
+            _ => {}
         }
     }
 
@@ -304,6 +315,100 @@ fn verify_recorded_passes(manual_runs_dir: &Path) -> Result<(), String> {
     )?;
 
     Ok(())
+}
+
+fn verify_recorded_pass(
+    path: &Path,
+    file_name: &str,
+    contents: &str,
+    expectation: ManualRunExpectation,
+) -> Result<(), String> {
+    assert_value(
+        path.extension().and_then(|value| value.to_str()) == Some("md"),
+        &format!("manual run artifact {} must be a markdown file", path.display()),
+    )?;
+
+    let date_value = require_line_value(contents, "Date: ", path)?;
+    let checklist_value = require_line_value(contents, "Checklist: ", path)?;
+    let _ = require_line_value(contents, "OS: ", path)?;
+    let _ = require_line_value(contents, "Rust: ", path)?;
+    let _ = require_line_value(contents, "Node: ", path)?;
+
+    assert_value(
+        contents.contains("Result: pass"),
+        &format!("manual run artifact {} must say Result: pass", path.display()),
+    )?;
+    assert_value(
+        contents.contains("## Scope"),
+        &format!("manual run artifact {} is missing ## Scope", path.display()),
+    )?;
+    assert_value(
+        contents.contains("## Findings"),
+        &format!("manual run artifact {} is missing ## Findings", path.display()),
+    )?;
+
+    for template_placeholder in [
+        MANUAL_RUN_TEMPLATE_DATE_PLACEHOLDER,
+        MANUAL_RUN_TEMPLATE_OS_PLACEHOLDER,
+        MANUAL_RUN_TEMPLATE_CHECKLIST_PLACEHOLDER,
+        MANUAL_RUN_TEMPLATE_RUST_PLACEHOLDER,
+        MANUAL_RUN_TEMPLATE_NODE_PLACEHOLDER,
+    ] {
+        assert_value(
+            !contents.contains(template_placeholder),
+            &format!(
+                "manual run artifact {} still contains template placeholder: {template_placeholder}",
+                path.display()
+            ),
+        )?;
+    }
+
+    assert_value(
+        checklist_value == expectation.checklist_path,
+        &format!(
+            "manual run artifact {} has unexpected checklist: {}",
+            path.display(),
+            checklist_value
+        ),
+    )?;
+
+    let expected_file_name = format!("{}{date_value}.md", expectation.file_prefix);
+    assert_value(
+        file_name == expected_file_name,
+        &format!(
+            "manual run artifact {} must match Date field with filename {}",
+            path.display(),
+            expected_file_name
+        ),
+    )?;
+
+    if let Some((runtime_marker, runtime_placeholder)) = expectation.required_runtime_marker {
+        let _ = require_line_value(contents, runtime_marker, path)?;
+        assert_value(
+            !contents.contains(runtime_placeholder),
+            &format!(
+                "manual run artifact {} still contains template placeholder: {runtime_placeholder}",
+                path.display()
+            ),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn require_line_value<'a>(contents: &'a str, prefix: &str, path: &Path) -> Result<&'a str, String> {
+    let Some(line) = contents.lines().find(|line| line.starts_with(prefix)) else {
+        return Err(format!(
+            "manual run artifact {} is missing required marker: {prefix}",
+            path.display()
+        ));
+    };
+    let value = line[prefix.len()..].trim();
+    assert_value(
+        !value.is_empty(),
+        &format!("manual run artifact {} has empty value for {prefix}", path.display()),
+    )?;
+    Ok(value)
 }
 
 fn stage_capi_package(out_dir: &Path) -> Result<PathBuf, String> {
@@ -748,4 +853,220 @@ fn read_json(path: &Path) -> Result<serde_json::Value, String> {
 
 fn assert_value(value: bool, message: &str) -> Result<(), String> {
     if value { Ok(()) } else { Err(message.to_string()) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::verify_recorded_passes;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new() -> Self {
+            let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(duration) => duration.as_nanos(),
+                Err(error) => panic!("failed to get test timestamp - {error}"),
+            };
+            let path = std::env::temp_dir()
+                .join(format!("terminal-platform-xtask-test-{}-{timestamp}", std::process::id()));
+            if let Err(error) = fs::create_dir_all(&path) {
+                panic!("failed to create {} - {error}", path.display());
+            }
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn write_file(&self, relative_path: &str, contents: &str) {
+            let path = self.path.join(relative_path);
+            if let Err(error) = fs::write(&path, contents) {
+                panic!("failed to write {} - {error}", path.display());
+            }
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn verify_recorded_passes_accepts_expected_artifacts() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "electron-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: macOS 15.4
+Checklist: crates/terminal-testing/manual/electron.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+Electron embed lifecycle and resize churn.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+        dir.write_file(
+            "unix-tmux-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: Ubuntu 24.04
+Checklist: crates/terminal-testing/manual/tmux.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: 3.5a
+Zellij: n/a
+
+## Scope
+
+tmux import and detach or reattach.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+        dir.write_file(
+            "windows-native-zellij-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: Windows 11 24H2
+Checklist: crates/terminal-testing/manual/windows-native-zellij.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: 0.44.1
+
+## Scope
+
+Native create or attach plus imported zellij mutation lane.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+
+        if let Err(error) = verify_recorded_passes(dir.path()) {
+            panic!("expected recorded passes to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_recorded_passes_rejects_template_placeholders() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "electron-2026-04-20.md",
+            "\
+Date: YYYY-MM-DD
+OS: macOS 15.4 / Ubuntu 24.04 / Windows 11 24H2
+Checklist: crates/terminal-testing/manual/<checklist>.md
+Result: pass
+
+Rust: rustc 1.xx.x
+Node: vxx.x.x
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+placeholder
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+
+        let error = match verify_recorded_passes(dir.path()) {
+            Ok(()) => panic!("expected placeholder artifact to fail"),
+            Err(error) => error,
+        };
+        assert!(error.contains("template placeholder"), "expected placeholder error, got: {error}");
+    }
+
+    #[test]
+    fn verify_recorded_passes_rejects_missing_findings_section() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "electron-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: macOS 15.4
+Checklist: crates/terminal-testing/manual/electron.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+Electron embed lifecycle.
+
+Findings:
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+
+        let error = match verify_recorded_passes(dir.path()) {
+            Ok(()) => panic!("expected findings section mismatch to fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("missing ## Findings"),
+            "expected findings section error, got: {error}"
+        );
+    }
 }

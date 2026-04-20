@@ -14,15 +14,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
+          package-manager-cache: false
 
       - name: Install readiness tools
         uses: taiki-e/install-action@v2

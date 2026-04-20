@@ -13,10 +13,13 @@ Use [`_template.md`](./_template.md) as the source of truth for each run artifac
 
 Every recorded pass must:
 
+- keep the filename date aligned with the `Date:` field
 - reference the checklist file that was executed
 - record OS plus tool versions
 - say `Result: pass`
+- keep the `## Scope`, `## Findings`, and `## Notes` headings from the template
 - list findings explicitly, even if the value is `no issues found`
+- replace every template placeholder with a real value
 
 Do not add fake or placeholder pass files. If a manual run fails, capture the failure outside
 this directory until it is resolved or explicitly documented as degraded behavior.
