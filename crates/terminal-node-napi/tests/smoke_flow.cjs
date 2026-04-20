@@ -960,6 +960,7 @@ async function runElectronBridgeSmoke(createClient, sdk) {
 
   bridge.dispose();
   await runElectronBridgeDisposeSmoke(createClient, sdk);
+  await runElectronBridgeRepeatedWatchCyclesSmoke(createClient, sdk);
 
   await runElectronPreloadSmoke(createClient, sdk);
 }
@@ -1087,6 +1088,7 @@ async function runElectronPreloadSmoke(createClient, sdk) {
   );
   bridge.dispose();
   await runElectronBridgeStopDrainSmoke(sdk);
+  await runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk);
   await runElectronPreloadDisposeSmoke(createClient, sdk);
 }
 
@@ -1140,6 +1142,66 @@ async function runElectronBridgeDisposeSmoke(createClient, sdk) {
     /Missing fake Electron handler/,
   );
   assert.equal(observedStates >= 1, true);
+}
+
+async function runElectronBridgeRepeatedWatchCyclesSmoke(createClient, sdk) {
+  const client = createClient();
+  const { ipcMain, ipcRenderer } = createFakeElectronIpc();
+  const bridge = sdk.createElectronMainBridge({
+    channelPrefix: "terminal-platform-repeat-bridge-smoke",
+    client,
+    ipcMain,
+  });
+  const rendererClient = new sdk.ElectronTerminalNodeClient({
+    channelPrefix: "terminal-platform-repeat-bridge-smoke",
+    ipcRenderer,
+  });
+  const created = await rendererClient.createNativeSession({
+    title: "electron-bridge-repeat-smoke",
+    launch: readyEchoLaunch(),
+  });
+  const attached = await rendererClient.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+
+  for (let cycle = 0; cycle < 4; cycle += 1) {
+    const marker = `electron bridge repeat ${cycle}`;
+    const abortController = new AbortController();
+    let observedMatchingState = false;
+
+    const watchPromise = rendererClient.watchSessionState(created.session_id, {
+      signal: abortController.signal,
+      onState: async (state) => {
+        const expectedPaneId = focusedPaneIdFromTopology(state.topology);
+        assert.equal(
+          expectedPaneId ? state.focusedScreen?.pane_id === expectedPaneId : true,
+          true,
+        );
+        if (
+          state.focusedScreen?.surface.lines.some((line) =>
+            line.text.includes(marker),
+          )
+        ) {
+          observedMatchingState = true;
+          abortController.abort();
+        }
+      },
+    });
+
+    await rendererClient.dispatchMuxCommand(created.session_id, {
+      kind: "send_input",
+      pane_id: paneId,
+      data: `${marker}\r`,
+    });
+
+    await withTimeout(
+      watchPromise,
+      5000,
+      `Timed out waiting for Electron bridge repeat watch cycle ${cycle}`,
+    );
+    assert.equal(observedMatchingState, true);
+  }
+
+  bridge.dispose();
 }
 
 async function runElectronBridgeStopDrainSmoke(sdk) {
@@ -1204,6 +1266,79 @@ async function runElectronBridgeStopDrainSmoke(sdk) {
   );
   assert.equal(watchFinished, true);
 
+  bridge.dispose();
+}
+
+async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {
+  const client = createClient();
+  const { ipcMain, ipcRenderer } = createFakeElectronIpc();
+  const bridge = sdk.createElectronMainBridge({
+    channelPrefix: "terminal-platform-repeat-preload-smoke",
+    client,
+    ipcMain,
+  });
+  const preloadApi = sdk.createElectronPreloadApi({
+    channelPrefix: "terminal-platform-repeat-preload-smoke",
+    ipcRenderer,
+  });
+  const created = await preloadApi.createNativeSession({
+    title: "electron-preload-repeat-smoke",
+    launch: readyEchoLaunch(),
+  });
+  const attached = await preloadApi.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+
+  for (let cycle = 0; cycle < 4; cycle += 1) {
+    const marker = `electron preload repeat ${cycle}`;
+    let resolveState;
+    let rejectState;
+    const statePromise = new Promise((resolve, reject) => {
+      resolveState = resolve;
+      rejectState = reject;
+    });
+    const subscriptionId = await preloadApi.subscribeSessionState(
+      created.session_id,
+      async (state) => {
+        const expectedPaneId = focusedPaneIdFromTopology(state.topology);
+        assert.equal(
+          expectedPaneId ? state.focusedScreen?.pane_id === expectedPaneId : true,
+          true,
+        );
+        if (
+          state.focusedScreen?.surface.lines.some((line) =>
+            line.text.includes(marker),
+          )
+        ) {
+          resolveState(state);
+        }
+      },
+      async (error) => {
+        rejectState(error);
+      },
+    );
+
+    await preloadApi.dispatchMuxCommand(created.session_id, {
+      kind: "send_input",
+      pane_id: paneId,
+      data: `${marker}\r`,
+    });
+
+    const observedState = await withTimeout(
+      statePromise,
+      5000,
+      `Timed out waiting for Electron preload repeat cycle ${cycle}`,
+    );
+    assert.equal(observedState.session.session_id, created.session_id);
+    assert.equal(observedState.focusedScreen?.pane_id, paneId);
+    assert.equal(await preloadApi.unsubscribeSessionState(subscriptionId), true);
+    assert.equal(await preloadApi.unsubscribeSessionState(subscriptionId), false);
+  }
+
+  await withTimeout(
+    preloadApi.dispose(),
+    5000,
+    "Timed out waiting for Electron preload repeat dispose()",
+  );
   bridge.dispose();
 }
 
