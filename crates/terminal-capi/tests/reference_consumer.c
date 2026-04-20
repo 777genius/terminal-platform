@@ -85,6 +85,86 @@ static int extract_json_string(const char *json, const char *key, char *out, siz
   return 1;
 }
 
+static int extract_json_object(const char *json, const char *key, char *out, size_t out_len) {
+  char pattern[128];
+  const char *start = NULL;
+  const char *cursor = NULL;
+  const char *end = NULL;
+  int depth = 0;
+  int in_string = 0;
+  int escaped = 0;
+  size_t length = 0;
+
+  if (snprintf(pattern, sizeof(pattern), "\"%s\":", key) >= (int)sizeof(pattern)) {
+    fprintf(stderr, "json key pattern for %s is too large\n", key);
+    return 0;
+  }
+
+  start = strstr(json, pattern);
+  if (start == NULL) {
+    fprintf(stderr, "missing json object key %s in payload: %s\n", key, json);
+    return 0;
+  }
+
+  start += strlen(pattern);
+  while (*start == ' ' || *start == '\n' || *start == '\r' || *start == '\t') {
+    start++;
+  }
+
+  if (*start != '{') {
+    fprintf(stderr, "json key %s does not point to an object in payload: %s\n", key, json);
+    return 0;
+  }
+
+  for (cursor = start; *cursor != '\0'; ++cursor) {
+    char ch = *cursor;
+
+    if (in_string) {
+      if (escaped) {
+        escaped = 0;
+      } else if (ch == '\\') {
+        escaped = 1;
+      } else if (ch == '"') {
+        in_string = 0;
+      }
+      continue;
+    }
+
+    if (ch == '"') {
+      in_string = 1;
+      continue;
+    }
+
+    if (ch == '{') {
+      depth++;
+      continue;
+    }
+
+    if (ch == '}') {
+      depth--;
+      if (depth == 0) {
+        end = cursor + 1;
+        break;
+      }
+    }
+  }
+
+  if (end == NULL) {
+    fprintf(stderr, "unterminated json object for key %s in payload: %s\n", key, json);
+    return 0;
+  }
+
+  length = (size_t)(end - start);
+  if (length + 1 > out_len) {
+    fprintf(stderr, "buffer too small for object key %s\n", key);
+    return 0;
+  }
+
+  memcpy(out, start, length);
+  out[length] = '\0';
+  return 1;
+}
+
 static int wait_for_event_with_substring(const char *label,
                                          TerminalCapiSubscriptionHandle *subscription,
                                          const char *expected_kind, const char *needle,
@@ -116,13 +196,19 @@ int main(int argc, char **argv) {
   char session_id[128];
   char pane_id[128];
   char pane_subscription_spec[256];
+  char route_json[512];
   char *json = NULL;
   char *event = NULL;
+  const char *mode = "native";
   int ok = 0;
 
-  if (argc != 3) {
-    fprintf(stderr, "usage: %s <namespaced|filesystem> <address>\n", argv[0]);
+  if (argc != 3 && argc != 4) {
+    fprintf(stderr, "usage: %s <namespaced|filesystem> <address> [native|tmux]\n", argv[0]);
     return 1;
+  }
+
+  if (argc == 4) {
+    mode = argv[3];
   }
 
   if (strcmp(argv[1], "namespaced") == 0) {
@@ -160,176 +246,249 @@ int main(int argc, char **argv) {
   terminal_capi_string_free(json);
   json = NULL;
 
-  if (!expect_string_ok("backend_capabilities",
-                        terminal_capi_client_backend_capabilities_json(client, "native"), &json)) {
-    goto cleanup;
-  }
-  if (!json_contains(json, "\"backend\":\"native\"") ||
-      !json_contains(json, "\"explicit_session_save\":true")) {
-    fprintf(stderr, "backend_capabilities payload is missing expected native capabilities: %s\n",
-            json);
-    goto cleanup;
-  }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  if (!expect_string_ok(
-          "create_native_session",
-          terminal_capi_client_create_native_session_json(
-              client,
-              "{\"title\":\"c-consumer\",\"launch\":{\"program\":\"/bin/sh\",\"args\":[\"-lc\","
-              "\"printf 'ready\\\\n'; exec cat\"]}}"),
-          &json)) {
-    goto cleanup;
-  }
-  if (!extract_json_string(json, "session_id", session_id, sizeof(session_id))) {
-    goto cleanup;
-  }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  if (!expect_string_ok("list_sessions", terminal_capi_client_list_sessions_json(client), &json)) {
-    goto cleanup;
-  }
-  if (!json_contains(json, session_id)) {
-    fprintf(stderr, "list_sessions payload does not contain session_id %s: %s\n", session_id, json);
-    goto cleanup;
-  }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  if (!expect_string_ok("attach_session", terminal_capi_client_attach_session_json(client, session_id),
-                        &json)) {
-    goto cleanup;
-  }
-  if (!extract_json_string(json, "pane_id", pane_id, sizeof(pane_id))) {
-    goto cleanup;
-  }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  if (!expect_subscription_ok("open_topology_subscription",
-                              terminal_capi_client_open_subscription(
-                                  client, session_id, "{\"kind\":\"session_topology\"}"),
-                              &topology_subscription)) {
-    goto cleanup;
-  }
-
-  if (!expect_string_ok("topology_subscription_meta",
-                        terminal_capi_subscription_meta_json(topology_subscription), &json)) {
-    goto cleanup;
-  }
-  if (!json_contains(json, "\"subscription_id\":\"")) {
-    fprintf(stderr, "topology subscription meta is missing subscription_id: %s\n", json);
-    goto cleanup;
-  }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  if (!expect_string_ok("topology_subscription_initial",
-                        terminal_capi_subscription_next_event_json(topology_subscription), &json)) {
-    goto cleanup;
-  }
-  if (!json_contains(json, "\"kind\":\"topology_snapshot\"")) {
-    fprintf(stderr, "topology subscription initial event is unexpected: %s\n", json);
-    goto cleanup;
-  }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  if (snprintf(pane_subscription_spec, sizeof(pane_subscription_spec),
-               "{\"kind\":\"pane_surface\",\"pane_id\":\"%s\"}", pane_id) >=
-      (int)sizeof(pane_subscription_spec)) {
-    fprintf(stderr, "pane subscription spec is too large\n");
-    goto cleanup;
-  }
-
-  if (!expect_subscription_ok("open_pane_subscription",
-                              terminal_capi_client_open_subscription(client, session_id,
-                                                                     pane_subscription_spec),
-                              &pane_subscription)) {
-    goto cleanup;
-  }
-
-  if (!expect_string_ok("pane_subscription_initial",
-                        terminal_capi_subscription_next_event_json(pane_subscription), &json)) {
-    goto cleanup;
-  }
-  if (!json_contains(json, "\"kind\":\"screen_delta\"") || !json_contains(json, "\"full_replace\":")) {
-    fprintf(stderr, "pane subscription initial event is unexpected: %s\n", json);
-    goto cleanup;
-  }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  if (!expect_string_ok("dispatch_new_tab",
-                        terminal_capi_client_dispatch_mux_command_json(
-                            client, session_id, "{\"kind\":\"new_tab\",\"title\":\"logs\"}"),
-                        &json)) {
-    goto cleanup;
-  }
-  if (!json_contains(json, "\"changed\":true")) {
-    fprintf(stderr, "dispatch new_tab did not report changed=true: %s\n", json);
-    goto cleanup;
-  }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  if (!wait_for_event_with_substring("wait_topology_update", topology_subscription,
-                                     "\"kind\":\"topology_snapshot\"", "\"title\":\"logs\"",
-                                     &event)) {
-    goto cleanup;
-  }
-  terminal_capi_string_free(event);
-  event = NULL;
-
-  {
-    char input_command[384];
-    if (snprintf(input_command, sizeof(input_command),
-                 "{\"kind\":\"send_input\",\"pane_id\":\"%s\",\"data\":\"ffi c consumer "
-                 "input\\r\"}",
-                 pane_id) >= (int)sizeof(input_command)) {
-      fprintf(stderr, "input command buffer is too small\n");
-      goto cleanup;
-    }
-
-    if (!expect_string_ok("dispatch_send_input",
-                          terminal_capi_client_dispatch_mux_command_json(client, session_id,
-                                                                         input_command),
+  if (strcmp(mode, "native") == 0) {
+    if (!expect_string_ok("backend_capabilities",
+                          terminal_capi_client_backend_capabilities_json(client, "native"),
                           &json)) {
       goto cleanup;
     }
-  }
-  if (!json_contains(json, "\"changed\":false")) {
-    fprintf(stderr, "dispatch send_input did not report changed=false: %s\n", json);
+    if (!json_contains(json, "\"backend\":\"native\"") ||
+        !json_contains(json, "\"explicit_session_save\":true")) {
+      fprintf(stderr,
+              "backend_capabilities payload is missing expected native capabilities: %s\n", json);
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_string_ok(
+            "create_native_session",
+            terminal_capi_client_create_native_session_json(
+                client,
+                "{\"title\":\"c-consumer\",\"launch\":{\"program\":\"/bin/sh\",\"args\":[\"-lc\","
+                "\"printf 'ready\\\\n'; exec cat\"]}}"),
+            &json)) {
+      goto cleanup;
+    }
+    if (!extract_json_string(json, "session_id", session_id, sizeof(session_id))) {
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_string_ok("list_sessions", terminal_capi_client_list_sessions_json(client), &json)) {
+      goto cleanup;
+    }
+    if (!json_contains(json, session_id)) {
+      fprintf(stderr, "list_sessions payload does not contain session_id %s: %s\n", session_id,
+              json);
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_string_ok("attach_session",
+                          terminal_capi_client_attach_session_json(client, session_id), &json)) {
+      goto cleanup;
+    }
+    if (!extract_json_string(json, "pane_id", pane_id, sizeof(pane_id))) {
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_subscription_ok("open_topology_subscription",
+                                terminal_capi_client_open_subscription(
+                                    client, session_id, "{\"kind\":\"session_topology\"}"),
+                                &topology_subscription)) {
+      goto cleanup;
+    }
+
+    if (!expect_string_ok("topology_subscription_meta",
+                          terminal_capi_subscription_meta_json(topology_subscription), &json)) {
+      goto cleanup;
+    }
+    if (!json_contains(json, "\"subscription_id\":\"")) {
+      fprintf(stderr, "topology subscription meta is missing subscription_id: %s\n", json);
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_string_ok("topology_subscription_initial",
+                          terminal_capi_subscription_next_event_json(topology_subscription),
+                          &json)) {
+      goto cleanup;
+    }
+    if (!json_contains(json, "\"kind\":\"topology_snapshot\"")) {
+      fprintf(stderr, "topology subscription initial event is unexpected: %s\n", json);
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (snprintf(pane_subscription_spec, sizeof(pane_subscription_spec),
+                 "{\"kind\":\"pane_surface\",\"pane_id\":\"%s\"}", pane_id) >=
+        (int)sizeof(pane_subscription_spec)) {
+      fprintf(stderr, "pane subscription spec is too large\n");
+      goto cleanup;
+    }
+
+    if (!expect_subscription_ok("open_pane_subscription",
+                                terminal_capi_client_open_subscription(client, session_id,
+                                                                       pane_subscription_spec),
+                                &pane_subscription)) {
+      goto cleanup;
+    }
+
+    if (!expect_string_ok("pane_subscription_initial",
+                          terminal_capi_subscription_next_event_json(pane_subscription), &json)) {
+      goto cleanup;
+    }
+    if (!json_contains(json, "\"kind\":\"screen_delta\"") ||
+        !json_contains(json, "\"full_replace\":")) {
+      fprintf(stderr, "pane subscription initial event is unexpected: %s\n", json);
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_string_ok("dispatch_new_tab",
+                          terminal_capi_client_dispatch_mux_command_json(
+                              client, session_id, "{\"kind\":\"new_tab\",\"title\":\"logs\"}"),
+                          &json)) {
+      goto cleanup;
+    }
+    if (!json_contains(json, "\"changed\":true")) {
+      fprintf(stderr, "dispatch new_tab did not report changed=true: %s\n", json);
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!wait_for_event_with_substring("wait_topology_update", topology_subscription,
+                                       "\"kind\":\"topology_snapshot\"", "\"title\":\"logs\"",
+                                       &event)) {
+      goto cleanup;
+    }
+    terminal_capi_string_free(event);
+    event = NULL;
+
+    {
+      char input_command[384];
+      if (snprintf(input_command, sizeof(input_command),
+                   "{\"kind\":\"send_input\",\"pane_id\":\"%s\",\"data\":\"ffi c consumer "
+                   "input\\r\"}",
+                   pane_id) >= (int)sizeof(input_command)) {
+        fprintf(stderr, "input command buffer is too small\n");
+        goto cleanup;
+      }
+
+      if (!expect_string_ok("dispatch_send_input",
+                            terminal_capi_client_dispatch_mux_command_json(client, session_id,
+                                                                           input_command),
+                            &json)) {
+        goto cleanup;
+      }
+    }
+    if (!json_contains(json, "\"changed\":false")) {
+      fprintf(stderr, "dispatch send_input did not report changed=false: %s\n", json);
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!wait_for_event_with_substring("wait_pane_update", pane_subscription,
+                                       "\"kind\":\"screen_delta\"", "ffi c consumer input",
+                                       &event)) {
+      goto cleanup;
+    }
+    terminal_capi_string_free(event);
+    event = NULL;
+
+    if (!expect_string_ok("close_topology_subscription",
+                          terminal_capi_subscription_close(topology_subscription), &json)) {
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_string_ok("close_pane_subscription",
+                          terminal_capi_subscription_close(pane_subscription), &json)) {
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    ok = 1;
+  } else if (strcmp(mode, "tmux") == 0) {
+    if (!expect_string_ok("backend_capabilities",
+                          terminal_capi_client_backend_capabilities_json(client, "tmux"), &json)) {
+      goto cleanup;
+    }
+    if (!json_contains(json, "\"backend\":\"tmux\"")) {
+      fprintf(stderr, "backend_capabilities payload is missing tmux backend: %s\n", json);
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_string_ok("discover_sessions",
+                          terminal_capi_client_discover_sessions_json(client, "tmux"), &json)) {
+      goto cleanup;
+    }
+    if (!json_contains(json, "\"backend\":\"tmux\"")) {
+      fprintf(stderr, "discover_sessions payload is missing tmux route: %s\n", json);
+      goto cleanup;
+    }
+    if (!extract_json_object(json, "route", route_json, sizeof(route_json))) {
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_string_ok("import_session",
+                          terminal_capi_client_import_session_json(client, route_json, NULL),
+                          &json)) {
+      goto cleanup;
+    }
+    if (!extract_json_string(json, "session_id", session_id, sizeof(session_id))) {
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_string_ok("topology_snapshot",
+                          terminal_capi_client_topology_snapshot_json(client, session_id), &json)) {
+      goto cleanup;
+    }
+    if (!json_contains(json, "\"backend_kind\":\"tmux\"")) {
+      fprintf(stderr, "topology_snapshot payload is missing tmux backend kind: %s\n", json);
+      goto cleanup;
+    }
+    if (!extract_json_string(json, "pane_id", pane_id, sizeof(pane_id))) {
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    if (!expect_string_ok("screen_snapshot",
+                          terminal_capi_client_screen_snapshot_json(client, session_id, pane_id),
+                          &json)) {
+      goto cleanup;
+    }
+    if (!json_contains(json, "hello from tmux")) {
+      fprintf(stderr, "screen_snapshot payload did not contain tmux shell output: %s\n", json);
+      goto cleanup;
+    }
+    terminal_capi_string_free(json);
+    json = NULL;
+
+    ok = 1;
+  } else {
+    fprintf(stderr, "unsupported mode %s\n", mode);
     goto cleanup;
   }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  if (!wait_for_event_with_substring("wait_pane_update", pane_subscription,
-                                     "\"kind\":\"screen_delta\"", "ffi c consumer input",
-                                     &event)) {
-    goto cleanup;
-  }
-  terminal_capi_string_free(event);
-  event = NULL;
-
-  if (!expect_string_ok("close_topology_subscription",
-                        terminal_capi_subscription_close(topology_subscription), &json)) {
-    goto cleanup;
-  }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  if (!expect_string_ok("close_pane_subscription",
-                        terminal_capi_subscription_close(pane_subscription), &json)) {
-    goto cleanup;
-  }
-  terminal_capi_string_free(json);
-  json = NULL;
-
-  ok = 1;
 
 cleanup:
   if (event != NULL) {

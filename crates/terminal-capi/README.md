@@ -26,6 +26,7 @@ Current test coverage includes:
 - header generation via `cbindgen`
 - Rust-side C ABI smoke against a live daemon fixture
 - external C consumer smoke that compiles a real C program against the generated header and links to the built `cdylib`
+- external consumer coverage for native request/subscription flow and `tmux` discover/import flow
 
 ## Local verification
 
