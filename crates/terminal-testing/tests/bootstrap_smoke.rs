@@ -2,6 +2,7 @@ use std::{thread, time::Duration};
 
 #[cfg(unix)]
 use std::{
+    fs,
     process::Command,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -1958,6 +1959,149 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_preserves_tmux_fullscreen_viewports_for_vim_less_and_fzf() {
+    let socket_name = unique_tmux_socket_name("bootstrap-tmux-fullscreen");
+    let session_name = unique_tmux_session_name("workspace");
+    let _tmux = TmuxServerGuard::spawn_with_shell(&socket_name, &session_name)
+        .expect("tmux interactive test server should start");
+    let fixture =
+        daemon_fixture_with_state("bootstrap-tmux-fullscreen", tmux_daemon_state(&socket_name))
+            .expect("fixture should start");
+
+    let discovered = fixture
+        .client
+        .discover_sessions(BackendKind::Tmux)
+        .await
+        .expect("discover_sessions should succeed");
+    let candidate = discovered
+        .sessions
+        .into_iter()
+        .find(|session| session.title.as_deref() == Some(session_name.as_str()))
+        .expect("importable tmux session should exist");
+    let imported = fixture
+        .client
+        .import_session(candidate.route.clone(), candidate.title.clone())
+        .await
+        .expect("import_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(imported.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let focused_pane = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "terminal-platform$")
+        .await;
+
+    let temp_name = format!(
+        "terminal-platform-fullscreen-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    );
+    let viewport_file = std::env::temp_dir().join(format!("{temp_name}.txt"));
+    let fzf_file = std::env::temp_dir().join(format!("{temp_name}-fzf.txt"));
+    fs::write(
+        &viewport_file,
+        "tmux-vim-alpha\n\
+tmux-vim-beta\n\
+tmux-less-gamma\n\
+tmux-less-delta\n",
+    )
+    .expect("viewport fixture file should write");
+    fs::write(&fzf_file, "tmux-fzf-alpha\ntmux-fzf-beta\ntmux-fzf-gamma\n")
+        .expect("fzf fixture file should write");
+
+    fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id: focused_pane,
+                data: format!("vim {}\r", viewport_file.display()),
+            }),
+        )
+        .await
+        .expect("vim should launch");
+    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "tmux-vim-alpha")
+        .await;
+    fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id: focused_pane,
+                data: ":q!\r".to_string(),
+            }),
+        )
+        .await
+        .expect("vim should exit");
+    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "terminal-platform$")
+        .await;
+
+    fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id: focused_pane,
+                data: format!("less {}\r", viewport_file.display()),
+            }),
+        )
+        .await
+        .expect("less should launch");
+    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "tmux-less-gamma")
+        .await;
+    fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::SendInput(SendInputSpec { pane_id: focused_pane, data: "q".to_string() }),
+        )
+        .await
+        .expect("less should exit");
+    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "terminal-platform$")
+        .await;
+
+    fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id: focused_pane,
+                data: format!("fzf < {}\r", fzf_file.display()),
+            }),
+        )
+        .await
+        .expect("fzf should launch");
+    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "tmux-fzf-beta")
+        .await;
+    fixture
+        .client
+        .dispatch(
+            imported.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id: focused_pane,
+                data: "beta\r".to_string(),
+            }),
+        )
+        .await
+        .expect("fzf should accept selection");
+    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "tmux-fzf-beta")
+        .await;
+    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "terminal-platform$")
+        .await;
+
+    let _ = fs::remove_file(viewport_file);
+    let _ = fs::remove_file(fzf_file);
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
 #[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
@@ -2586,31 +2730,36 @@ struct TmuxServerGuard {
 #[cfg(unix)]
 impl TmuxServerGuard {
     fn spawn(socket_name: &str, session_name: &str) -> Result<Self, String> {
+        Self::spawn_with_commands(
+            socket_name,
+            session_name,
+            "printf 'hello from tmux\\n'; exec cat",
+            "printf 'logs ready\\n'; exec cat",
+        )
+    }
+
+    fn spawn_with_shell(socket_name: &str, session_name: &str) -> Result<Self, String> {
+        Self::spawn_with_commands(
+            socket_name,
+            session_name,
+            "printf 'hello from tmux\\n'; exec env PS1='terminal-platform$ ' sh -i",
+            "printf 'logs ready\\n'; exec env PS1='terminal-platform$ ' sh -i",
+        )
+    }
+
+    fn spawn_with_commands(
+        socket_name: &str,
+        session_name: &str,
+        main_command: &str,
+        secondary_command: &str,
+    ) -> Result<Self, String> {
         run_tmux(
             socket_name,
-            &[
-                "new-session",
-                "-d",
-                "-s",
-                session_name,
-                "sh",
-                "-lc",
-                "printf 'hello from tmux\\n'; exec cat",
-            ],
+            &["new-session", "-d", "-s", session_name, "sh", "-lc", main_command],
         )?;
         run_tmux(
             socket_name,
-            &[
-                "new-window",
-                "-d",
-                "-t",
-                session_name,
-                "-n",
-                "logs",
-                "sh",
-                "-lc",
-                "printf 'logs ready\\n'; exec cat",
-            ],
+            &["new-window", "-d", "-t", session_name, "-n", "logs", "sh", "-lc", secondary_command],
         )?;
 
         Ok(Self { socket_name: socket_name.to_string() })
