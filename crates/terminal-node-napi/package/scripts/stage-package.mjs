@@ -14,6 +14,7 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const outDir = path.resolve(options.out);
   const addonPath = path.resolve(options.addon);
+  const packageVersion = await readCrateVersion();
 
   await assertFile(crateManifestPath, "crate manifest");
   await assertFile(addonPath, "addon");
@@ -26,7 +27,7 @@ async function main() {
     await fs.copyFile(path.join(packageDir, file), path.join(outDir, file));
   }
 
-  await stagePackageManifest(outDir);
+  await stagePackageManifest(outDir, packageVersion);
 
   const bindingsOutDir = path.join(outDir, "bindings");
   await fs.mkdir(bindingsOutDir, { recursive: true });
@@ -47,15 +48,28 @@ async function main() {
 
   const nativeDir = path.join(outDir, "native");
   await fs.mkdir(nativeDir, { recursive: true });
-  await fs.copyFile(addonPath, path.join(nativeDir, "terminal_node_napi.node"));
+  const targetDescriptor = currentTargetDescriptor(packageVersion);
+  await fs.copyFile(addonPath, path.join(nativeDir, targetDescriptor.file));
+  await fs.writeFile(
+    path.join(nativeDir, "manifest.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        packageVersion,
+        targets: [targetDescriptor],
+      },
+      null,
+      2,
+    )}\n`,
+  );
 
   process.stdout.write(`${outDir}\n`);
 }
 
-async function stagePackageManifest(outDir) {
+async function stagePackageManifest(outDir, packageVersion) {
   const templateManifestPath = path.join(packageDir, "package.json");
   const packageManifest = JSON.parse(await fs.readFile(templateManifestPath, "utf8"));
-  packageManifest.version = await readCrateVersion();
+  packageManifest.version = packageVersion;
   delete packageManifest.scripts;
   await fs.writeFile(
     path.join(outDir, "package.json"),
@@ -118,6 +132,29 @@ async function readCrateVersion() {
   }
 
   return match.groups.version;
+}
+
+function currentTargetDescriptor(packageVersion) {
+  const libc = detectLibc();
+
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    libc,
+    file: ["terminal_node_napi", process.platform, process.arch, libc]
+      .filter(Boolean)
+      .join(".") + ".node",
+    packageVersion,
+  };
+}
+
+function detectLibc() {
+  if (process.platform !== "linux") {
+    return null;
+  }
+
+  const report = process.report?.getReport?.();
+  return report?.header?.glibcVersionRuntime ? "gnu" : "musl";
 }
 
 main().catch((error) => {

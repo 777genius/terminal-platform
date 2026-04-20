@@ -12,6 +12,10 @@ async fn roundtrips_staged_package_through_cjs_and_esm() {
     let package_dir =
         support::stage_node_package(&addon_path).expect("package should stage successfully");
     support::verify_node_package(&package_dir).expect("package should verify successfully");
+    let native_manifest = support::read_json(&package_dir.join("native/manifest.json"))
+        .expect("manifest should parse");
+    let native_file =
+        native_manifest["targets"][0]["file"].as_str().expect("manifest target file should exist");
     let tarball_path = support::pack_node_package(&package_dir).expect("package should pack");
     let archive_entries = support::tar_list(&tarball_path).expect("tarball should be readable");
     let (address_kind, address_value) = match fixture.client.address() {
@@ -25,13 +29,17 @@ async fn roundtrips_staged_package_through_cjs_and_esm() {
         "package/index.cjs",
         "package/index.mjs",
         "package/index.d.ts",
-        "package/native/terminal_node_napi.node",
+        "package/native/manifest.json",
     ] {
         assert!(
             archive_entries.iter().any(|entry| entry == required_entry),
             "tarball should contain {required_entry}"
         );
     }
+    assert!(
+        archive_entries.iter().any(|entry| entry == &format!("package/native/{native_file}")),
+        "tarball should contain manifest-selected native file"
+    );
 
     for script in ["package_smoke.cjs", "package_smoke.mjs"] {
         let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("tests/{script}"));

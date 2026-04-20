@@ -4,11 +4,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const defaultAddonPath = path.join(__dirname, "native", "terminal_node_napi.node");
+const nativeManifestPath = path.join(__dirname, "native", "manifest.json");
 
 function resolveNativeBindingPath(options = {}) {
+  const manifestAddonPath = resolveManifestAddonPath();
   const candidates = [
     options.addonPath,
     process.env.TERMINAL_NODE_ADDON_PATH,
+    manifestAddonPath,
     defaultAddonPath,
   ].filter(Boolean);
 
@@ -21,6 +24,77 @@ function resolveNativeBindingPath(options = {}) {
   throw new Error(
     `terminal-node addon was not found. Tried: ${candidates.join(", ") || "<none>"}`,
   );
+}
+
+function resolveManifestAddonPath() {
+  const manifest = readNativeManifest();
+  if (!manifest) {
+    return null;
+  }
+
+  const target = resolveCurrentTarget();
+  const targets = Array.isArray(manifest.targets) ? manifest.targets : [];
+  const exactMatch =
+    targets.find((candidate) => {
+      return (
+        candidate.platform === target.platform &&
+        candidate.arch === target.arch &&
+        normalizeLibc(candidate.libc) === normalizeLibc(target.libc)
+      );
+    }) ??
+    targets.find((candidate) => {
+      return (
+        candidate.platform === target.platform &&
+        candidate.arch === target.arch &&
+        candidate.libc == null
+      );
+    });
+
+  if (!exactMatch?.file) {
+    const availableTargets = targets
+      .map((candidate) =>
+        [candidate.platform, candidate.arch, candidate.libc].filter(Boolean).join("-"),
+      )
+      .join(", ");
+    throw new Error(
+      `terminal-node addon manifest does not contain a compatible target for ${formatTarget(target)}. Available targets: ${availableTargets || "<none>"}`,
+    );
+  }
+
+  return path.join(__dirname, "native", exactMatch.file);
+}
+
+function readNativeManifest() {
+  if (!fs.existsSync(nativeManifestPath)) {
+    return null;
+  }
+
+  return JSON.parse(fs.readFileSync(nativeManifestPath, "utf8"));
+}
+
+function resolveCurrentTarget() {
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    libc: detectLibc(),
+  };
+}
+
+function detectLibc() {
+  if (process.platform !== "linux") {
+    return null;
+  }
+
+  const report = process.report?.getReport?.();
+  return report?.header?.glibcVersionRuntime ? "gnu" : "musl";
+}
+
+function normalizeLibc(value) {
+  return value == null ? null : value;
+}
+
+function formatTarget(target) {
+  return [target.platform, target.arch, target.libc].filter(Boolean).join("-");
 }
 
 function loadNativeBinding(options = {}) {

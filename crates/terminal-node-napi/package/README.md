@@ -36,4 +36,5 @@ The staged directory contains:
 - `index.mjs`
 - `index.d.ts`
 - `bindings/*.d.ts`
-- `native/terminal_node_napi.node`
+- `native/manifest.json`
+- `native/terminal_node_napi.<platform>.<arch>[.<libc>].node`

@@ -39,6 +39,20 @@ export interface NativeBindingLoadOptions {
   addonPath?: string | undefined;
 }
 
+export interface NativeTargetDescriptor {
+  platform: string;
+  arch: string;
+  libc: string | null;
+  file: string;
+  packageVersion: string;
+}
+
+export interface NativeAddonManifest {
+  schemaVersion: 1;
+  packageVersion: string;
+  targets: NativeTargetDescriptor[];
+}
+
 export interface NativeTerminalNodeClientHandle {
   readonly address: string;
   bindingVersion(): NodeBindingVersion;

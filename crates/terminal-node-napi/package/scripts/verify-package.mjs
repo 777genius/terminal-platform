@@ -11,12 +11,13 @@ function main() {
   const options = parseArgs(process.argv.slice(2));
   const rootDir = path.resolve(options.packageDir);
   const packageJson = readJson(path.join(rootDir, "package.json"));
+  const nativeManifest = readJson(path.join(rootDir, "native", "manifest.json"));
   const requiredFiles = [
     "README.md",
     "index.cjs",
     "index.mjs",
     "index.d.ts",
-    path.join("native", "terminal_node_napi.node"),
+    path.join("native", "manifest.json"),
   ];
 
   assertValue(packageJson.name === "terminal-platform-node", "Unexpected package name");
@@ -25,6 +26,11 @@ function main() {
   assertValue(packageJson.module === "./index.mjs", "Unexpected module entrypoint");
   assertValue(packageJson.types === "./index.d.ts", "Unexpected types entrypoint");
   assertValue(!("scripts" in packageJson), "Published package should not include dev scripts");
+  assertValue(nativeManifest.schemaVersion === 1, "Unexpected native manifest schema version");
+  assertValue(
+    nativeManifest.packageVersion === packageJson.version,
+    "Native manifest version should match package version",
+  );
 
   for (const relativePath of requiredFiles) {
     assertFile(path.join(rootDir, relativePath), `Missing required file: ${relativePath}`);
@@ -40,12 +46,25 @@ function main() {
     bindingFiles.some((entry) => entry.name === "NodeHandshakeInfo.d.ts"),
     "Expected NodeHandshakeInfo.d.ts binding to exist",
   );
+  assertValue(
+    Array.isArray(nativeManifest.targets) && nativeManifest.targets.length > 0,
+    "Native manifest does not define any targets",
+  );
+
+  for (const target of nativeManifest.targets) {
+    assertValue(target.file, "Native target is missing a file name");
+    assertFile(
+      path.join(rootDir, "native", target.file),
+      `Missing native target file: ${target.file}`,
+    );
+  }
 
   process.stdout.write(
     JSON.stringify({
       packageDir: rootDir,
       version: packageJson.version,
       bindings: bindingFiles.length,
+      targets: nativeManifest.targets.length,
     }),
   );
 }

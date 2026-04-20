@@ -127,6 +127,13 @@ pub fn tar_list(archive_path: &Path) -> std::io::Result<Vec<String>> {
     Ok(String::from_utf8_lossy(&output.stdout).lines().map(ToOwned::to_owned).collect())
 }
 
+pub fn read_json(path: &Path) -> std::io::Result<serde_json::Value> {
+    let contents = fs::read_to_string(path)?;
+    serde_json::from_str(&contents).map_err(|error| {
+        std::io::Error::other(format!("failed to parse json {} - {error}", path.display()))
+    })
+}
+
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     unique_temp_path(prefix, "dir")
 }
