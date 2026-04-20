@@ -17,6 +17,7 @@ const CODE_OF_CONDUCT_PATH: &str = "CODE_OF_CONDUCT.md";
 const ROOT_README_PATH: &str = "README.md";
 const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README.md";
 const MANUAL_DIR: &str = "crates/terminal-testing/manual";
+const MANUAL_DRAFTS_DIR: &str = "crates/terminal-testing/manual/drafts";
 const MANUAL_RUNS_DIR: &str = "crates/terminal-testing/manual/runs";
 const RELEASE_READINESS_WORKFLOW_PATH: &str = ".github/workflows/release-readiness.yml";
 const RELEASE_CANDIDATE_SUMMARY_PATH: &str = "docs/terminal/v1-release-candidate-summary.md";
@@ -336,6 +337,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let root_readme = workspace_root.join(ROOT_README_PATH);
     let node_package_readme = workspace_root.join(NODE_PACKAGE_README_PATH);
     let manual_dir = workspace_root.join(MANUAL_DIR);
+    let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
     let release_readiness_workflow = workspace_root.join(RELEASE_READINESS_WORKFLOW_PATH);
     let release_candidate_summary = workspace_root.join(RELEASE_CANDIDATE_SUMMARY_PATH);
@@ -348,6 +350,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(root_readme.is_file(), "root README is missing")?;
     assert_value(node_package_readme.is_file(), "Node package README is missing")?;
     assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
+    assert_value(manual_drafts_dir.is_dir(), "manual draft capture directory is missing")?;
     assert_value(manual_runs_dir.is_dir(), "manual run capture directory is missing")?;
     assert_value(release_readiness_workflow.is_file(), "release readiness workflow is missing")?;
     assert_value(release_candidate_summary.is_file(), "release candidate summary is missing")?;
@@ -415,6 +418,12 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         let path = manual_dir.join(relative_path);
         assert_value(path.is_file(), &format!("manual checklist is missing: {}", path.display()))?;
     }
+
+    let drafts_readme = manual_drafts_dir.join("README.md");
+    assert_value(
+        drafts_readme.is_file(),
+        &format!("manual draft helper is missing: {}", drafts_readme.display()),
+    )?;
 
     for relative_path in ["README.md", "_template.md"] {
         let path = manual_runs_dir.join(relative_path);
@@ -531,12 +540,12 @@ fn scaffold_manual_run(
 ) -> Result<PathBuf, String> {
     let ManualRunScaffoldOptions { output, os, rust, node, tmux, zellij, force } = options;
     let workspace_root = workspace_root();
-    let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
-    let template_path = manual_runs_dir.join("_template.md");
+    let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
+    let template_path = workspace_root.join(MANUAL_RUNS_DIR).join("_template.md");
     let template = fs::read_to_string(&template_path)
         .map_err(|error| format!("failed to read {} - {error}", template_path.display()))?;
-    let output_path =
-        output.unwrap_or_else(|| manual_runs_dir.join(format!("{}{date}.md", kind.file_prefix())));
+    let output_path = output
+        .unwrap_or_else(|| manual_drafts_dir.join(format!("{}{date}.md", kind.file_prefix())));
 
     if output_path.exists() && !force {
         return Err(format!(
@@ -587,7 +596,8 @@ fn scaffold_manual_run(
         .replace(MANUAL_RUN_TEMPLATE_RUST_PLACEHOLDER, &format!("Rust: {resolved_rust}"))
         .replace(MANUAL_RUN_TEMPLATE_NODE_PLACEHOLDER, &format!("Node: {resolved_node}"))
         .replace("tmux: 3.x or n/a", &format!("tmux: {resolved_tmux}"))
-        .replace("Zellij: 0.44.x or n/a", &format!("Zellij: {resolved_zellij}"));
+        .replace("Zellij: 0.44.x or n/a", &format!("Zellij: {resolved_zellij}"))
+        .replace("Result: pass", "Result: pending");
 
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)

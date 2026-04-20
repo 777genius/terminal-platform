@@ -82,6 +82,7 @@ If you are evaluating the repo, the honest takeaway is:
 
 Release closeout artifacts:
 
+- [v1 manual closeout runbook](./docs/terminal/v1-manual-closeout-runbook.md)
 - [v1 release candidate summary](./docs/terminal/v1-release-candidate-summary.md)
 - [v1 release candidate checklist](./docs/terminal/v1-release-candidate-checklist.md)
 

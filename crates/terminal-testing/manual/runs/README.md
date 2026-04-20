@@ -30,11 +30,19 @@ The readiness audit command enforces the required structure:
 cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
 ```
 
-You can scaffold a recorded pass file from the template with detected local tool versions:
+Do not draft incomplete files in this directory. Use [`../drafts`](../drafts/) for in-progress notes.
+
+You can scaffold a draft file with detected local tool versions:
 
 ```bash
 cargo run -p xtask -- scaffold-manual-run --kind electron --date 2026-04-20
 ```
+
+That command now writes to `manual/drafts/` on purpose. Move the finished file here only after:
+
+- the real checklist run is complete
+- `Result:` is changed from `pending` to `pass`
+- the findings and notes reflect the actual run
 
 Supported kinds:
 
