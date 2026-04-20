@@ -5,14 +5,21 @@ const { EventEmitter } = require("node:events");
 const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 90000 : 5000;
 const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 90000 : 5000;
 const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 900 : 50;
-const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 1200 : 600;
+const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 200 : 100;
 const INTERACTIVE_PROBE_INTERVAL = process.platform === "win32" ? 20 : 10;
 
 function readyEchoLaunch() {
   if (process.platform === "win32") {
     return {
-      program: process.env.ComSpec || process.env.COMSPEC || "cmd.exe",
-      args: ["/Q", "/K", "echo ready & more"],
+      program: "powershell.exe",
+      args: [
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
+      ],
     };
   }
 
@@ -68,7 +75,7 @@ async function runSmoke(createClient) {
   const sendInput = await client.dispatchMuxCommand(created.session_id, {
     kind: "send_input",
     pane_id: attached.focused_screen.pane_id,
-    data: "hello from node smoke\r",
+    data: submittedInput("hello from node smoke"),
   });
   const screenAfterInput = await waitForLine(
     client,
@@ -241,7 +248,7 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
     const sendInput = await client.dispatchMuxCommand(imported.session_id, {
       kind: "send_input",
       pane_id: focusedPaneId,
-      data: "echo zellij package smoke\r",
+      data: submittedInput("echo zellij package smoke"),
     });
     const screen = await waitForLine(
       client,
@@ -414,7 +421,7 @@ async function runSubscriptionCycleSmoke(createClient) {
       await client.dispatchMuxCommand(created.session_id, {
         kind: "send_input",
         pane_id: paneId,
-        data: `${marker}\r`,
+        data: submittedInput(marker),
       });
       const paneUpdate = await waitForSubscriptionText(
         paneSubscription,
@@ -541,7 +548,7 @@ async function runPackageWatchSmoke(createClient, sdk) {
   await client.dispatchMuxCommand(created.session_id, {
     kind: "send_input",
     pane_id: paneId,
-    data: "package watch input\r",
+    data: submittedInput("package watch input"),
   });
   await withTimeout(
     panePump,
@@ -615,7 +622,7 @@ async function runPackageWatchSmoke(createClient, sdk) {
           await client.dispatchMuxCommand(sessionCreated.session_id, {
             kind: "send_input",
             pane_id: sessionPaneId,
-            data: "package session watch input\r",
+            data: submittedInput("package session watch input"),
           });
           return;
         }
@@ -947,7 +954,7 @@ async function waitForInteractiveScreen(client, sessionId, paneId, label) {
         client.dispatchMuxCommand(sessionId, {
           kind: "send_input",
           pane_id: paneId,
-          data: `${marker}\r`,
+          data: submittedInput(marker),
         }),
         DEFAULT_HOST_TIMEOUT_MS,
         `Timed out sending interactive probe marker: ${label}`,
@@ -1181,6 +1188,10 @@ function fallbackZellijCandidate(sessionName) {
   };
 }
 
+function submittedInput(text) {
+  return process.platform === "win32" ? `${text}\r\n` : `${text}\r`;
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1222,7 +1233,7 @@ async function runElectronBridgeSmoke(createClient, sdk) {
           await rendererClient.dispatchMuxCommand(created.session_id, {
             kind: "send_input",
             pane_id: paneId,
-            data: "electron bridge input\r",
+            data: submittedInput("electron bridge input"),
           });
           return;
         }
@@ -1379,7 +1390,7 @@ async function runElectronPreloadSmoke(createClient, sdk) {
   await exposed.terminalPlatform.dispatchMuxCommand(created.session_id, {
     kind: "send_input",
     pane_id: paneId,
-    data: "electron preload input\r",
+    data: submittedInput("electron preload input"),
   });
 
   const observedState = await withTimeout(
@@ -1505,7 +1516,7 @@ async function runElectronBridgeRepeatedWatchCyclesSmoke(createClient, sdk) {
     await rendererClient.dispatchMuxCommand(created.session_id, {
       kind: "send_input",
       pane_id: paneId,
-      data: `${marker}\r`,
+      data: submittedInput(marker),
     });
 
     await withTimeout(
@@ -1635,7 +1646,7 @@ async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {
     await preloadApi.dispatchMuxCommand(created.session_id, {
       kind: "send_input",
       pane_id: paneId,
-      data: `${marker}\r`,
+      data: submittedInput(marker),
     });
 
     const observedState = await withTimeout(

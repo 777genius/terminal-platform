@@ -727,13 +727,19 @@ mod tests {
 
         #[cfg(windows)]
         {
-            let program = std::env::var("COMSPEC")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "cmd.exe".to_string());
-
-            ShellLaunchSpec::new(program).with_args(["/Q", "/K", "echo ready & more"])
+            ShellLaunchSpec::new("powershell.exe").with_args([
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
+            ])
         }
+    }
+
+    fn submitted_input(text: &str) -> String {
+        if cfg!(windows) { format!("{text}\r\n") } else { format!("{text}\r") }
     }
 
     async fn wait_for_screen_line(
@@ -1663,7 +1669,7 @@ mod tests {
                 created.session.session_id,
                 MuxCommand::SendInput(SendInputSpec {
                     pane_id,
-                    data: "hello from subscription\r".to_string(),
+                    data: submitted_input("hello from subscription"),
                 }),
             )
             .await

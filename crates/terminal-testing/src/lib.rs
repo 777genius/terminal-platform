@@ -113,12 +113,14 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        let program = std::env::var("COMSPEC")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "cmd.exe".to_string());
-
-        ShellLaunchSpec::new(program).with_args(["/Q", "/K", "echo ready & more"])
+        ShellLaunchSpec::new("powershell.exe").with_args([
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
+        ])
     }
 }
 

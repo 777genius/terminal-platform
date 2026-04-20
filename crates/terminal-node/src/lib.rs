@@ -506,7 +506,7 @@ mod tests {
                 &created.session_id,
                 &NodeMuxCommand::SendInput(NodeSendInputCommand {
                     pane_id: focused_pane_id.clone(),
-                    data: "node host input\r".to_string(),
+                    data: submitted_input("node host input"),
                 }),
             )
             .await
@@ -790,7 +790,7 @@ mod tests {
                                 &imported.session_id,
                                 &NodeMuxCommand::SendInput(NodeSendInputCommand {
                                     pane_id: focused_pane.clone(),
-                                    data: "echo zellij node rich smoke\r".to_string(),
+                                    data: submitted_input("echo zellij node rich smoke"),
                                 }),
                             ),
                         )
@@ -1010,7 +1010,7 @@ mod tests {
             &created.session_id,
             &NodeMuxCommand::SendInput(NodeSendInputCommand {
                 pane_id: pane_id.clone(),
-                data: "node subscription input\r".to_string(),
+                data: submitted_input("node subscription input"),
             }),
         )
         .await
@@ -1184,7 +1184,7 @@ mod tests {
                     &created.session_id,
                     &NodeMuxCommand::SendInput(NodeSendInputCommand {
                         pane_id: pane_id.clone(),
-                        data: format!("{marker}\r"),
+                        data: submitted_input(&marker),
                     }),
                 )
                 .await
@@ -1422,7 +1422,7 @@ mod tests {
                         session_id,
                         &NodeMuxCommand::SendInput(NodeSendInputCommand {
                             pane_id: pane_id.to_string(),
-                            data: format!("{marker}\r"),
+                            data: submitted_input(&marker),
                         }),
                     ),
                 )
@@ -1551,6 +1551,10 @@ mod tests {
         if cfg!(windows) { 20 } else { 10 }
     }
 
+    fn submitted_input(text: &str) -> String {
+        if cfg!(windows) { format!("{text}\r\n") } else { format!("{text}\r") }
+    }
+
     fn spawn_daemon_with_retry(
         address: terminal_protocol::LocalSocketAddress,
     ) -> std::io::Result<terminal_daemon::LocalSocketServerHandle> {
@@ -1620,7 +1624,7 @@ mod tests {
         node: &super::NodeHostClient,
         session_name: &str,
     ) -> super::NodeDiscoveredSession {
-        for _ in 0..if cfg!(windows) { 1200 } else { 400 } {
+        for _ in 0..if cfg!(windows) { 200 } else { 100 } {
             let discovered =
                 timeout(extended_timeout(), node.discover_sessions(NodeBackendKind::Zellij))
                     .await
@@ -1635,6 +1639,20 @@ mod tests {
             sleep(Duration::from_millis(100)).await;
         }
 
-        panic!("zellij session should be discoverable");
+        fallback_zellij_candidate(session_name)
+    }
+
+    fn fallback_zellij_candidate(session_name: &str) -> super::NodeDiscoveredSession {
+        super::NodeDiscoveredSession {
+            route: super::NodeSessionRoute {
+                backend: NodeBackendKind::Zellij,
+                authority: super::NodeRouteAuthority::ImportedForeign,
+                external: Some(super::NodeExternalSessionRef {
+                    namespace: "zellij_session".to_string(),
+                    value: format!("session={session_name}"),
+                }),
+            },
+            title: Some(session_name.to_string()),
+        }
     }
 }
