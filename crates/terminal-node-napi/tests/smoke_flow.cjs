@@ -579,6 +579,85 @@ async function runShutdownSmoke(createClient, options = {}) {
   };
 }
 
+async function runRestartRecoverySmoke(createClient, options = {}) {
+  const { onInitialReady, waitForStop, onStaleObserved, waitForRestart } = options;
+  const client = createClient();
+  const initialHandshake = await client.handshakeInfo();
+  const initial = await client.createNativeSession({
+    title: "node-package-restart-before",
+    launch: {
+      program: "/bin/sh",
+      args: ["-lc", "printf 'ready\\n'; exec cat"],
+    },
+  });
+
+  if (typeof onInitialReady === "function") {
+    await onInitialReady({
+      sessionId: initial.session_id,
+      protocol: initialHandshake.handshake.protocol_version,
+    });
+  }
+
+  if (typeof waitForStop === "function") {
+    await waitForStop();
+  }
+
+  let staleErrorObserved = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      await client.handshakeInfo();
+    } catch (_error) {
+      staleErrorObserved = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  if (!staleErrorObserved) {
+    throw new Error("Expected stale daemon request to fail after shutdown");
+  }
+
+  if (typeof onStaleObserved === "function") {
+    await onStaleObserved();
+  }
+
+  if (typeof waitForRestart === "function") {
+    await waitForRestart();
+  }
+
+  let recoveredSessionId = null;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      const handshake = await client.handshakeInfo();
+      const created = await client.createNativeSession({
+        title: "node-package-restart-after",
+        launch: {
+          program: "/bin/sh",
+          args: ["-lc", "printf 'ready\\n'; exec cat"],
+        },
+      });
+      if (handshake.assessment.can_use && created.session_id) {
+        recoveredSessionId = created.session_id;
+        break;
+      }
+    } catch (_error) {
+      // Keep retrying while the replacement daemon is becoming ready.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  if (recoveredSessionId == null) {
+    throw new Error("Failed to recover against restarted daemon using the same client");
+  }
+
+  return {
+    initial_session_id: initial.session_id,
+    stale_error_observed: staleErrorObserved,
+    recovered: true,
+    recovered_session_id: recoveredSessionId,
+  };
+}
+
 async function waitForLine(client, sessionId, paneId, needle) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const snapshot = await client.screenSnapshot(sessionId, paneId);
@@ -1057,6 +1136,7 @@ async function runElectronPreloadDisposeSmoke(createClient, sdk) {
 
 module.exports = {
   runPackageWatchSmoke,
+  runRestartRecoverySmoke,
   runShutdownSmoke,
   runSmoke,
 };

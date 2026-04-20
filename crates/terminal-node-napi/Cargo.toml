@@ -18,6 +18,8 @@ terminal-protocol = { path = "../terminal-protocol" }
 napi-build = "2.3.1"
 
 [dev-dependencies]
+terminal-daemon = { path = "../terminal-daemon" }
+terminal-daemon-client = { path = "../terminal-daemon-client" }
 terminal-testing = { path = "../terminal-testing" }
 tokio = { workspace = true }
 

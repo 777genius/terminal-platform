@@ -663,6 +663,9 @@ class TerminalNodeClient {
     let paneSubscription = null;
     let panePump = Promise.resolve();
     let paneError = null;
+    let topologySubscription = null;
+    let topologyPump = Promise.resolve();
+    let topologyError = null;
 
     const stopPane = async () => {
       if (paneSubscription) {
@@ -672,19 +675,24 @@ class TerminalNodeClient {
       await panePump.catch(() => {});
     };
 
-    const startPane = async (paneId, emitFocusedScreen) => {
-      await stopPane();
-      paneSubscription = await this.subscribePane(sessionId, paneId);
-
-      if (emitFocusedScreen) {
-        const screen = await this.screenSnapshot(sessionId, paneId);
-        await onEvent({ kind: "focused_screen", screen });
+    const stopTopology = async () => {
+      if (topologySubscription) {
+        await topologySubscription.close().catch(() => {});
+        topologySubscription = null;
       }
+      await topologyPump.catch(() => {});
+    };
 
+    const runPanePump = (paneId, emitFocusedScreen) => {
       panePump = paneSubscription
         .pump({
           signal: bridgeAbort.signal,
           onEvent: async (event) => {
+            if (emitFocusedScreen) {
+              const screen = await this.screenSnapshot(sessionId, paneId);
+              emitFocusedScreen = false;
+              await onEvent({ kind: "focused_screen", screen });
+            }
             await onEvent({ kind: "screen_delta", delta: event });
           },
         })
@@ -694,30 +702,52 @@ class TerminalNodeClient {
         });
     };
 
+    const startPane = async (paneId, emitFocusedScreen, startPump = true) => {
+      await stopPane();
+      paneSubscription = await this.subscribePane(sessionId, paneId);
+      if (startPump) {
+        runPanePump(paneId, emitFocusedScreen);
+      }
+    };
+
     try {
       const attached = await this.attachSession(sessionId);
-      await onEvent({ kind: "attached", attached });
 
       let currentPaneId =
         attached.focused_screen?.pane_id ?? focusedPaneId(attached.topology);
       if (currentPaneId) {
-        await startPane(currentPaneId, false);
+        await startPane(currentPaneId, false, false);
       }
 
-      await this.watchTopology(sessionId, {
-        signal: bridgeAbort.signal,
-        onEvent: async (event) => {
-          await onEvent({ kind: "topology_snapshot", topology: event });
+      topologySubscription = await this.subscribeTopology(sessionId);
 
-          const nextPaneId = focusedPaneId(event);
-          if (nextPaneId && nextPaneId !== currentPaneId) {
-            currentPaneId = nextPaneId;
-            await startPane(nextPaneId, true);
-          }
-        },
-      });
+      await onEvent({ kind: "attached", attached });
+      if (currentPaneId) {
+        runPanePump(currentPaneId, false);
+      }
+      topologyPump = topologySubscription
+        .pump({
+          signal: bridgeAbort.signal,
+          onEvent: async (event) => {
+            await onEvent({ kind: "topology_snapshot", topology: event });
 
+            const nextPaneId = focusedPaneId(event);
+            if (nextPaneId && nextPaneId !== currentPaneId) {
+              currentPaneId = nextPaneId;
+              await startPane(nextPaneId, true);
+            }
+          },
+        })
+        .catch((error) => {
+          topologyError = error;
+          bridgeAbort.abort();
+        });
+
+      await topologyPump;
       await panePump;
+      if (topologyError) {
+        throw topologyError;
+      }
       if (paneError) {
         throw paneError;
       }
@@ -726,6 +756,7 @@ class TerminalNodeClient {
         signal.removeEventListener("abort", bridgeAbortListener);
       }
       bridgeAbort.abort();
+      await stopTopology();
       await stopPane();
     }
   }
