@@ -1,6 +1,6 @@
-# Recorded Manual Passes
+# Recorded Acceptance Passes
 
-This directory stores the recorded human acceptance artifacts required before calling
+This directory stores the recorded acceptance artifacts required before calling
 the project ship-ready v1.
 
 Required pass files:
@@ -23,6 +23,14 @@ Every recorded pass must:
 
 Do not add fake or placeholder pass files. If a manual run fails, capture the failure outside
 this directory until it is resolved or explicitly documented as degraded behavior.
+
+Hosted target-OS evidence is allowed when it is stronger than a local approximation.
+If you use a hosted run, capture:
+
+- the exact workflow URL
+- the relevant job name
+- the executed commands or checklist-equivalent coverage
+- the real tool versions printed by that run
 
 The readiness audit command enforces the required structure:
 

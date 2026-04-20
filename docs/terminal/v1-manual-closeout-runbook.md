@@ -1,6 +1,6 @@
 # V1 Manual Closeout Runbook
 
-This runbook exists to make the last non-automated v1 gate explicit and repeatable.
+This runbook exists to make the last v1 acceptance-evidence gate explicit and repeatable.
 
 The strict readiness audit requires recorded pass artifacts for:
 
@@ -13,6 +13,10 @@ The strict readiness audit requires recorded pass artifacts for:
 Do not write fake recorded passes directly into `crates/terminal-testing/manual/runs/`.
 
 Use draft files first, complete the real run, then promote the finished artifact into `manual/runs/`.
+
+For Windows or other target environments where hosted CI is the strongest source of truth,
+you may promote a hosted acceptance run instead of a local hands-on run, but the artifact must
+link the workflow URL, identify the exact job, and record the printed tool versions.
 
 ## 1. Scaffold draft files
 
