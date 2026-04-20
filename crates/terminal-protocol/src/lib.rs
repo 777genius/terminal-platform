@@ -8,7 +8,7 @@ pub mod transport;
 
 pub use envelope::{RequestEnvelope, ResponseEnvelope, SubscriptionEnvelope};
 pub use errors::ProtocolError;
-pub use handshake::{DaemonPhase, Handshake, ProtocolVersion};
+pub use handshake::{DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion};
 pub use requests::{
     CreateSessionRequest, DeleteSavedSessionRequest, DiscoverSessionsRequest,
     DispatchMuxCommandRequest, GetBackendCapabilitiesRequest, GetSavedSessionRequest,

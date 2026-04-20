@@ -13,6 +13,7 @@ pub use session_route::{
 };
 pub use version_info::{
     CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
-    CURRENT_SAVED_SESSION_FORMAT_VERSION, SavedSessionCompatibility,
-    SavedSessionCompatibilityStatus, SavedSessionManifest, saved_session_compatibility,
+    CURRENT_SAVED_SESSION_FORMAT_VERSION, ProtocolCompatibility, ProtocolCompatibilityStatus,
+    SavedSessionCompatibility, SavedSessionCompatibilityStatus, SavedSessionManifest,
+    protocol_compatibility, saved_session_compatibility,
 };

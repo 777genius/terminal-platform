@@ -18,7 +18,7 @@ use terminal_persistence::{
     SavedSessionSummary as PersistedSavedSessionSummary, SqliteSessionStore,
 };
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
-use terminal_protocol::{DaemonPhase, Handshake, ProtocolVersion};
+use terminal_protocol::{DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion};
 
 pub struct TerminalDaemonState {
     sessions: SessionService,
@@ -49,9 +49,9 @@ impl TerminalDaemonState {
                 minor: CURRENT_PROTOCOL_MINOR,
             },
             binary_version: CURRENT_BINARY_VERSION.to_string(),
-            daemon_phase: DaemonPhase::Starting,
-            capabilities: BackendCapabilities::default(),
-            available_backends: vec![BackendKind::Native, BackendKind::Tmux, BackendKind::Zellij],
+            daemon_phase: DaemonPhase::Ready,
+            capabilities: daemon_capabilities(),
+            available_backends: self.sessions.available_backends(),
             session_scope: "current_user".to_string(),
         }
     }
@@ -171,21 +171,50 @@ fn default_backend_catalog() -> BackendCatalog {
     ])
 }
 
+fn daemon_capabilities() -> DaemonCapabilities {
+    DaemonCapabilities {
+        request_reply: true,
+        topology_subscriptions: true,
+        pane_subscriptions: true,
+        backend_discovery: true,
+        backend_capability_queries: true,
+        saved_sessions: true,
+        session_restore: true,
+        degraded_error_reasons: true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use terminal_application::BackendCatalog;
     use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec};
+    use terminal_backend_native::NativeBackend;
     use terminal_domain::BackendKind;
+    use terminal_protocol::DaemonPhase;
 
     use super::TerminalDaemonState;
 
     #[test]
-    fn exposes_starting_handshake_with_known_backends() {
-        let state = TerminalDaemonState::default();
+    fn exposes_ready_handshake_with_configured_backends() {
+        let state = TerminalDaemonState::new(BackendCatalog::new([
+            Arc::new(NativeBackend::default()) as Arc<dyn terminal_backend_api::MuxBackendPort>,
+        ]));
         let handshake = state.handshake();
 
         assert_eq!(handshake.protocol_version.major, 0);
         assert_eq!(handshake.protocol_version.minor, 1);
-        assert_eq!(handshake.available_backends.len(), 3);
+        assert_eq!(handshake.daemon_phase, DaemonPhase::Ready);
+        assert_eq!(handshake.available_backends, vec![BackendKind::Native]);
+        assert!(handshake.capabilities.request_reply);
+        assert!(handshake.capabilities.topology_subscriptions);
+        assert!(handshake.capabilities.pane_subscriptions);
+        assert!(handshake.capabilities.backend_discovery);
+        assert!(handshake.capabilities.backend_capability_queries);
+        assert!(handshake.capabilities.saved_sessions);
+        assert!(handshake.capabilities.session_restore);
+        assert!(handshake.capabilities.degraded_error_reasons);
         assert_eq!(state.session_count(), 0);
     }
 

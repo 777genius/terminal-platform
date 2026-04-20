@@ -22,4 +22,15 @@ impl BackendCatalog {
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("backend {kind:?} is not configured")))
     }
+
+    #[must_use]
+    pub fn kinds(&self) -> Vec<BackendKind> {
+        let mut kinds = self.backends.keys().copied().collect::<Vec<_>>();
+        kinds.sort_by_key(|kind| match kind {
+            BackendKind::Native => 0,
+            BackendKind::Tmux => 1,
+            BackendKind::Zellij => 2,
+        });
+        kinds
+    }
 }

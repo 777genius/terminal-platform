@@ -326,7 +326,23 @@ mod tests {
         match response.payload {
             ResponsePayload::Handshake(handshake) => {
                 assert_eq!(handshake.protocol_version.major, 0);
-                assert_eq!(handshake.available_backends.len(), 3);
+                assert_eq!(handshake.daemon_phase, terminal_protocol::DaemonPhase::Ready);
+                assert_eq!(
+                    handshake.available_backends,
+                    vec![
+                        terminal_domain::BackendKind::Native,
+                        terminal_domain::BackendKind::Tmux,
+                        terminal_domain::BackendKind::Zellij
+                    ]
+                );
+                assert!(handshake.capabilities.request_reply);
+                assert!(handshake.capabilities.topology_subscriptions);
+                assert!(handshake.capabilities.pane_subscriptions);
+                assert!(handshake.capabilities.backend_discovery);
+                assert!(handshake.capabilities.backend_capability_queries);
+                assert!(handshake.capabilities.saved_sessions);
+                assert!(handshake.capabilities.session_restore);
+                assert!(handshake.capabilities.degraded_error_reasons);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }

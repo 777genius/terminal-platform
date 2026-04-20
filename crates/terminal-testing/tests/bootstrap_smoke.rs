@@ -35,7 +35,7 @@ use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 use terminal_persistence::SqliteSessionStore;
 #[cfg(unix)]
 use terminal_projection::{ProjectionSource, TopologySnapshot};
-use terminal_protocol::SubscriptionEvent;
+use terminal_protocol::{DaemonPhase, SubscriptionEvent};
 use terminal_testing::{
     daemon_fixture, daemon_fixture_with_state, daemon_state, isolated_daemon_state,
     unique_sqlite_path,
@@ -48,7 +48,19 @@ fn bootstrap_smoke_exposes_empty_daemon_state() {
 
     assert_eq!(handshake.protocol_version.major, 0);
     assert_eq!(handshake.protocol_version.minor, 1);
-    assert_eq!(handshake.available_backends.len(), 3);
+    assert_eq!(handshake.daemon_phase, DaemonPhase::Ready);
+    assert_eq!(
+        handshake.available_backends,
+        vec![BackendKind::Native, BackendKind::Tmux, BackendKind::Zellij]
+    );
+    assert!(handshake.capabilities.request_reply);
+    assert!(handshake.capabilities.topology_subscriptions);
+    assert!(handshake.capabilities.pane_subscriptions);
+    assert!(handshake.capabilities.backend_discovery);
+    assert!(handshake.capabilities.backend_capability_queries);
+    assert!(handshake.capabilities.saved_sessions);
+    assert!(handshake.capabilities.session_restore);
+    assert!(handshake.capabilities.degraded_error_reasons);
     assert_eq!(daemon.session_count(), 0);
 }
 
@@ -126,6 +138,8 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
         .await
         .expect("create_session should succeed");
     let handshake = fixture.client.handshake().await.expect("handshake should succeed");
+    let handshake_assessment =
+        fixture.client.handshake_assessment().await.expect("handshake_assessment should succeed");
     let sessions = fixture.client.list_sessions().await.expect("list_sessions should succeed");
     let topology = fixture
         .client
@@ -159,6 +173,10 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
 
     assert_eq!(handshake.protocol_version.major, 0);
     assert_eq!(handshake.protocol_version.minor, 1);
+    assert_eq!(handshake.daemon_phase, DaemonPhase::Ready);
+    assert!(handshake.capabilities.request_reply);
+    assert!(handshake.capabilities.saved_sessions);
+    assert!(handshake_assessment.can_use);
     assert_eq!(created.session.route.backend, BackendKind::Native);
     assert_eq!(created.session.title.as_deref(), Some("shell"));
     assert_eq!(sessions.sessions.len(), 1);
@@ -786,8 +804,8 @@ async fn bootstrap_smoke_reports_incompatible_saved_session_manifest_via_daemon_
             protocol_minor: CURRENT_PROTOCOL_MINOR + 1,
         },
     );
-    let fixture = daemon_fixture_with_state("smoke-saved-incompat", state)
-        .expect("fixture should start");
+    let fixture =
+        daemon_fixture_with_state("smoke-saved-incompat", state).expect("fixture should start");
 
     let listed =
         fixture.client.list_saved_sessions().await.expect("list_saved_sessions should succeed");

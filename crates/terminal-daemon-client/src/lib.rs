@@ -1,7 +1,10 @@
 use futures_util::{SinkExt as _, StreamExt as _};
 use interprocess::local_socket::{tokio::Stream, traits::tokio::Stream as _};
 use terminal_backend_api::{CreateSessionSpec, MuxCommand, MuxCommandResult, SubscriptionSpec};
-use terminal_domain::{BackendKind, OperationId, SessionRoute};
+use terminal_domain::{
+    BackendKind, OperationId, ProtocolCompatibility, ProtocolCompatibilityStatus, SessionRoute,
+    protocol_compatibility,
+};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
@@ -26,9 +29,57 @@ pub struct DaemonClientInfo {
     pub expected_protocol: ProtocolVersion,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandshakeAssessmentStatus {
+    Ready,
+    Starting,
+    Degraded,
+    ProtocolMajorUnsupported,
+    ProtocolMinorAhead,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandshakeAssessment {
+    pub can_use: bool,
+    pub protocol: ProtocolCompatibility,
+    pub status: HandshakeAssessmentStatus,
+}
+
 impl Default for DaemonClientInfo {
     fn default() -> Self {
         Self { expected_protocol: ProtocolVersion { major: 0, minor: 1 } }
+    }
+}
+
+impl DaemonClientInfo {
+    #[must_use]
+    pub fn assess_handshake(&self, handshake: &Handshake) -> HandshakeAssessment {
+        let protocol = protocol_compatibility(
+            self.expected_protocol.major,
+            self.expected_protocol.minor,
+            handshake.protocol_version.major,
+            handshake.protocol_version.minor,
+        );
+        let status = match protocol.status {
+            ProtocolCompatibilityStatus::Compatible => match handshake.daemon_phase {
+                terminal_protocol::DaemonPhase::Ready => HandshakeAssessmentStatus::Ready,
+                terminal_protocol::DaemonPhase::Starting => HandshakeAssessmentStatus::Starting,
+                terminal_protocol::DaemonPhase::Degraded => HandshakeAssessmentStatus::Degraded,
+            },
+            ProtocolCompatibilityStatus::ProtocolMajorUnsupported => {
+                HandshakeAssessmentStatus::ProtocolMajorUnsupported
+            }
+            ProtocolCompatibilityStatus::ProtocolMinorAhead => {
+                HandshakeAssessmentStatus::ProtocolMinorAhead
+            }
+        };
+
+        HandshakeAssessment {
+            can_use: protocol.can_connect
+                && matches!(handshake.daemon_phase, terminal_protocol::DaemonPhase::Ready),
+            protocol,
+            status,
+        }
     }
 }
 
@@ -118,6 +169,11 @@ impl LocalSocketDaemonClient {
             ResponsePayload::Handshake(handshake) => Ok(handshake),
             other => Err(ProtocolError::unexpected_payload("handshake", &other)),
         }
+    }
+
+    pub async fn handshake_assessment(&self) -> Result<HandshakeAssessment, ProtocolError> {
+        let handshake = self.handshake().await?;
+        Ok(self.info.assess_handshake(&handshake))
     }
 
     pub async fn list_sessions(&self) -> Result<ListSessionsResponse, ProtocolError> {
@@ -444,9 +500,11 @@ mod tests {
     use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
     use terminal_persistence::SqliteSessionStore;
     use terminal_projection::TopologySnapshot;
-    use terminal_protocol::SubscriptionEvent;
+    use terminal_protocol::{
+        DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion, SubscriptionEvent,
+    };
 
-    use super::LocalSocketDaemonClient;
+    use super::{HandshakeAssessmentStatus, LocalSocketDaemonClient};
 
     fn unique_address(label: &str) -> terminal_protocol::LocalSocketAddress {
         let nanos = SystemTime::now()
@@ -555,14 +613,73 @@ mod tests {
         let client = LocalSocketDaemonClient::new(address);
 
         let handshake = client.handshake().await.expect("handshake should succeed");
+        let assessment =
+            client.handshake_assessment().await.expect("handshake_assessment should succeed");
         let sessions = client.list_sessions().await.expect("list_sessions should succeed");
 
         assert_eq!(handshake.protocol_version.major, 0);
         assert_eq!(handshake.protocol_version.minor, 1);
+        assert_eq!(handshake.daemon_phase, DaemonPhase::Ready);
+        assert!(handshake.capabilities.request_reply);
+        assert!(handshake.capabilities.topology_subscriptions);
+        assert!(handshake.capabilities.pane_subscriptions);
+        assert!(handshake.capabilities.backend_discovery);
+        assert!(handshake.capabilities.backend_capability_queries);
+        assert!(handshake.capabilities.saved_sessions);
+        assert!(handshake.capabilities.session_restore);
+        assert!(handshake.capabilities.degraded_error_reasons);
         assert_eq!(client.info().expected_protocol, handshake.protocol_version);
+        assert!(assessment.can_use);
+        assert_eq!(assessment.status, HandshakeAssessmentStatus::Ready);
         assert!(sessions.sessions.is_empty());
 
         server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[test]
+    fn assesses_handshake_protocol_and_phase() {
+        let info = super::DaemonClientInfo::default();
+        let starting = info.assess_handshake(&Handshake {
+            protocol_version: ProtocolVersion { major: 0, minor: 1 },
+            binary_version: CURRENT_BINARY_VERSION.to_string(),
+            daemon_phase: DaemonPhase::Starting,
+            capabilities: DaemonCapabilities {
+                request_reply: true,
+                topology_subscriptions: true,
+                pane_subscriptions: true,
+                backend_discovery: true,
+                backend_capability_queries: true,
+                saved_sessions: true,
+                session_restore: true,
+                degraded_error_reasons: true,
+            },
+            available_backends: vec![BackendKind::Native],
+            session_scope: "current_user".to_string(),
+        });
+        let incompatible = info.assess_handshake(&Handshake {
+            protocol_version: ProtocolVersion { major: 0, minor: 2 },
+            binary_version: CURRENT_BINARY_VERSION.to_string(),
+            daemon_phase: DaemonPhase::Ready,
+            capabilities: DaemonCapabilities {
+                request_reply: true,
+                topology_subscriptions: true,
+                pane_subscriptions: true,
+                backend_discovery: true,
+                backend_capability_queries: true,
+                saved_sessions: true,
+                session_restore: true,
+                degraded_error_reasons: true,
+            },
+            available_backends: vec![BackendKind::Native],
+            session_scope: "current_user".to_string(),
+        });
+
+        assert!(!starting.can_use);
+        assert_eq!(starting.status, HandshakeAssessmentStatus::Starting);
+        assert!(starting.protocol.can_connect);
+        assert!(!incompatible.can_use);
+        assert_eq!(incompatible.status, HandshakeAssessmentStatus::ProtocolMinorAhead);
+        assert!(!incompatible.protocol.can_connect);
     }
 
     #[tokio::test(flavor = "multi_thread")]

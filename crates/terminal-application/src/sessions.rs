@@ -107,6 +107,11 @@ impl SessionService {
         })
     }
 
+    #[must_use]
+    pub fn available_backends(&self) -> Vec<BackendKind> {
+        self.backends.kinds()
+    }
+
     pub fn saved_session(&self, session_id: SessionId) -> Result<SavedNativeSession, BackendError> {
         self.persistence
             .load_native_session(session_id)

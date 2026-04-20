@@ -7,6 +7,14 @@ pub const CURRENT_SAVED_SESSION_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ProtocolCompatibilityStatus {
+    Compatible,
+    ProtocolMajorUnsupported,
+    ProtocolMinorAhead,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SavedSessionCompatibilityStatus {
     Compatible,
     BinarySkew,
@@ -29,6 +37,12 @@ pub struct SavedSessionCompatibility {
     pub status: SavedSessionCompatibilityStatus,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolCompatibility {
+    pub can_connect: bool,
+    pub status: ProtocolCompatibilityStatus,
+}
+
 impl SavedSessionManifest {
     #[must_use]
     pub fn current() -> Self {
@@ -38,6 +52,27 @@ impl SavedSessionManifest {
             protocol_major: CURRENT_PROTOCOL_MAJOR,
             protocol_minor: CURRENT_PROTOCOL_MINOR,
         }
+    }
+}
+
+#[must_use]
+pub fn protocol_compatibility(
+    expected_protocol_major: u16,
+    expected_protocol_minor: u16,
+    actual_protocol_major: u16,
+    actual_protocol_minor: u16,
+) -> ProtocolCompatibility {
+    let status = if actual_protocol_major != expected_protocol_major {
+        ProtocolCompatibilityStatus::ProtocolMajorUnsupported
+    } else if actual_protocol_minor > expected_protocol_minor {
+        ProtocolCompatibilityStatus::ProtocolMinorAhead
+    } else {
+        ProtocolCompatibilityStatus::Compatible
+    };
+
+    ProtocolCompatibility {
+        can_connect: matches!(status, ProtocolCompatibilityStatus::Compatible),
+        status,
     }
 }
 
@@ -67,9 +102,49 @@ pub fn saved_session_compatibility(manifest: &SavedSessionManifest) -> SavedSess
 mod tests {
     use super::{
         CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
-        CURRENT_SAVED_SESSION_FORMAT_VERSION, SavedSessionCompatibilityStatus,
-        SavedSessionManifest, saved_session_compatibility,
+        CURRENT_SAVED_SESSION_FORMAT_VERSION, ProtocolCompatibilityStatus,
+        SavedSessionCompatibilityStatus, SavedSessionManifest, protocol_compatibility,
+        saved_session_compatibility,
     };
+
+    #[test]
+    fn marks_current_protocol_as_compatible() {
+        let compatibility = protocol_compatibility(
+            CURRENT_PROTOCOL_MAJOR,
+            CURRENT_PROTOCOL_MINOR,
+            CURRENT_PROTOCOL_MAJOR,
+            CURRENT_PROTOCOL_MINOR,
+        );
+
+        assert!(compatibility.can_connect);
+        assert_eq!(compatibility.status, ProtocolCompatibilityStatus::Compatible);
+    }
+
+    #[test]
+    fn rejects_future_protocol_minor_for_connections() {
+        let compatibility = protocol_compatibility(
+            CURRENT_PROTOCOL_MAJOR,
+            CURRENT_PROTOCOL_MINOR,
+            CURRENT_PROTOCOL_MAJOR,
+            CURRENT_PROTOCOL_MINOR + 1,
+        );
+
+        assert!(!compatibility.can_connect);
+        assert_eq!(compatibility.status, ProtocolCompatibilityStatus::ProtocolMinorAhead);
+    }
+
+    #[test]
+    fn rejects_protocol_major_mismatch_for_connections() {
+        let compatibility = protocol_compatibility(
+            CURRENT_PROTOCOL_MAJOR,
+            CURRENT_PROTOCOL_MINOR,
+            CURRENT_PROTOCOL_MAJOR + 1,
+            CURRENT_PROTOCOL_MINOR,
+        );
+
+        assert!(!compatibility.can_connect);
+        assert_eq!(compatibility.status, ProtocolCompatibilityStatus::ProtocolMajorUnsupported);
+    }
 
     #[test]
     fn marks_current_manifest_as_compatible() {

@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use terminal_backend_api::BackendCapabilities;
 use terminal_domain::BackendKind;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,11 +17,23 @@ pub enum DaemonPhase {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DaemonCapabilities {
+    pub request_reply: bool,
+    pub topology_subscriptions: bool,
+    pub pane_subscriptions: bool,
+    pub backend_discovery: bool,
+    pub backend_capability_queries: bool,
+    pub saved_sessions: bool,
+    pub session_restore: bool,
+    pub degraded_error_reasons: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Handshake {
     pub protocol_version: ProtocolVersion,
     pub binary_version: String,
     pub daemon_phase: DaemonPhase,
-    pub capabilities: BackendCapabilities,
+    pub capabilities: DaemonCapabilities,
     pub available_backends: Vec<BackendKind>,
     pub session_scope: String,
 }
