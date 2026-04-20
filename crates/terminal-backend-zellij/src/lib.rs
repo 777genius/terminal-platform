@@ -9,8 +9,8 @@ use serde::Deserialize;
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
     BackendSessionSummary, BackendSubscription, BackendSubscriptionEvent, BoxFuture,
-    CreateSessionSpec, DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult,
-    SubscriptionSpec,
+    CreateSessionSpec, DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult, NewTabSpec,
+    SendInputSpec, SendPasteSpec, SubscriptionSpec,
 };
 use terminal_domain::{
     BackendKind, DegradedModeReason, ExternalSessionRef, PaneId, RouteAuthority, SessionId,
@@ -23,7 +23,7 @@ use terminal_projection::{
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command as TokioCommand,
-    sync::{mpsc, oneshot},
+    sync::{Mutex, mpsc, oneshot},
     time::{self, Duration, MissedTickBehavior},
 };
 use uuid::Uuid;
@@ -113,8 +113,16 @@ impl MuxBackendPort for ZellijBackend {
             Ok(match probe.surface {
                 ZellijSurface::RichCli044Plus => BackendCapabilities {
                     tiled_panes: true,
+                    tab_create: true,
+                    tab_close: true,
+                    tab_focus: true,
+                    tab_rename: true,
                     session_scoped_tab_refs: true,
                     session_scoped_pane_refs: true,
+                    pane_close: true,
+                    pane_focus: true,
+                    pane_input_write: true,
+                    pane_paste_write: true,
                     rendered_viewport_stream: true,
                     rendered_viewport_snapshot: true,
                     plugin_panes: true,
@@ -192,8 +200,12 @@ impl MuxBackendPort for ZellijBackend {
                     let session_id = imported_session_id(&route).ok_or_else(|| {
                         BackendError::invalid_input("zellij route is not importable")
                     })?;
-                    let attached =
-                        ZellijAttachedSession { backend: Arc::new(backend), session_id, target };
+                    let attached = ZellijAttachedSession {
+                        backend: Arc::new(backend),
+                        session_id,
+                        target,
+                        command_lane: Arc::new(Mutex::new(())),
+                    };
                     attached.snapshot()?;
 
                     Ok(Box::new(attached) as Box<dyn BackendSessionPort>)
@@ -234,6 +246,7 @@ struct ZellijAttachedSession {
     backend: Arc<ZellijBackend>,
     session_id: SessionId,
     target: ZellijTarget,
+    command_lane: Arc<Mutex<()>>,
 }
 
 impl BackendSessionPort for ZellijAttachedSession {
@@ -265,14 +278,10 @@ impl BackendSessionPort for ZellijAttachedSession {
 
     fn dispatch(
         &self,
-        _command: MuxCommand,
+        command: MuxCommand,
     ) -> BoxFuture<'_, Result<MuxCommandResult, BackendError>> {
-        Box::pin(async {
-            Err(BackendError::unsupported(
-                "zellij rich imported routes are currently read-only in the v1 rollout phase",
-                DegradedModeReason::UnsupportedByBackend,
-            ))
-        })
+        let session = self.clone();
+        Box::pin(async move { session.dispatch_inner(command).await })
     }
 
     fn subscribe(
@@ -285,6 +294,21 @@ impl BackendSessionPort for ZellijAttachedSession {
 }
 
 impl ZellijAttachedSession {
+    async fn dispatch_inner(&self, command: MuxCommand) -> Result<MuxCommandResult, BackendError> {
+        let snapshot = self.snapshot()?;
+        let actions = self.dispatch_actions(&snapshot, command)?;
+        if actions.is_empty() {
+            return Ok(MuxCommandResult { changed: false });
+        }
+
+        let _permit = self.command_lane.lock().await;
+        for action in actions {
+            self.backend.run_owned(Some(&self.target), &action.args())?;
+        }
+
+        Ok(MuxCommandResult { changed: true })
+    }
+
     fn open_subscription(
         &self,
         spec: SubscriptionSpec,
@@ -443,8 +467,206 @@ impl ZellijAttachedSession {
     fn pane_target(&self, pane_id: PaneId) -> Result<ZellijPaneTarget, BackendError> {
         self.snapshot()?
             .pane_targets
-            .remove(&pane_id)
+            .get(&pane_id)
+            .cloned()
             .ok_or_else(|| BackendError::not_found(format!("unknown zellij pane {pane_id:?}")))
+    }
+
+    fn dispatch_actions(
+        &self,
+        snapshot: &ZellijSessionSnapshot,
+        command: MuxCommand,
+    ) -> Result<Vec<ZellijAction>, BackendError> {
+        match command {
+            MuxCommand::NewTab(spec) => Ok(self.new_tab_actions(spec)),
+            MuxCommand::SendInput(spec) => self.send_input_actions(snapshot, spec),
+            MuxCommand::SendPaste(spec) => self.send_paste_actions(snapshot, spec),
+            MuxCommand::FocusPane { pane_id } => {
+                Ok(vec![self.focus_pane_action(snapshot, pane_id)?])
+            }
+            MuxCommand::ClosePane { pane_id } => {
+                Ok(vec![self.close_pane_action(snapshot, pane_id)?])
+            }
+            MuxCommand::FocusTab { tab_id } => Ok(vec![self.focus_tab_action(snapshot, tab_id)?]),
+            MuxCommand::CloseTab { tab_id } => Ok(vec![self.close_tab_action(snapshot, tab_id)?]),
+            MuxCommand::RenameTab { tab_id, title } => {
+                Ok(vec![self.rename_tab_action(snapshot, tab_id, &title)?])
+            }
+            MuxCommand::SplitPane(_)
+            | MuxCommand::ResizePane(_)
+            | MuxCommand::Detach
+            | MuxCommand::SaveSession
+            | MuxCommand::OverrideLayout(_) => Err(BackendError::unsupported(
+                "zellij imported routes do not support this command in the current rollout phase",
+                DegradedModeReason::UnsupportedByBackend,
+            )),
+        }
+    }
+
+    fn new_tab_actions(&self, spec: NewTabSpec) -> Vec<ZellijAction> {
+        vec![ZellijAction::NewTab { title: spec.title }]
+    }
+
+    fn focus_tab_action(
+        &self,
+        snapshot: &ZellijSessionSnapshot,
+        tab_id: TabId,
+    ) -> Result<ZellijAction, BackendError> {
+        let tab_target = snapshot
+            .tab_targets
+            .get(&tab_id)
+            .cloned()
+            .ok_or_else(|| BackendError::not_found(format!("unknown zellij tab {tab_id:?}")))?;
+        Ok(ZellijAction::FocusTab { backend_tab_id: tab_target.backend_tab_id })
+    }
+
+    fn close_tab_action(
+        &self,
+        snapshot: &ZellijSessionSnapshot,
+        tab_id: TabId,
+    ) -> Result<ZellijAction, BackendError> {
+        if snapshot.topology.tabs.len() <= 1 {
+            return Err(BackendError::unsupported(
+                "zellij imported routes refuse to close the last tab because it would terminate the foreign session",
+                DegradedModeReason::UnsupportedByBackend,
+            ));
+        }
+        let tab_target = snapshot
+            .tab_targets
+            .get(&tab_id)
+            .cloned()
+            .ok_or_else(|| BackendError::not_found(format!("unknown zellij tab {tab_id:?}")))?;
+
+        Ok(ZellijAction::CloseTab { backend_tab_id: tab_target.backend_tab_id })
+    }
+
+    fn rename_tab_action(
+        &self,
+        snapshot: &ZellijSessionSnapshot,
+        tab_id: TabId,
+        title: &str,
+    ) -> Result<ZellijAction, BackendError> {
+        let tab_target = snapshot
+            .tab_targets
+            .get(&tab_id)
+            .cloned()
+            .ok_or_else(|| BackendError::not_found(format!("unknown zellij tab {tab_id:?}")))?;
+        Ok(ZellijAction::RenameTab {
+            backend_tab_id: tab_target.backend_tab_id,
+            title: title.to_string(),
+        })
+    }
+
+    fn focus_pane_action(
+        &self,
+        snapshot: &ZellijSessionSnapshot,
+        pane_id: PaneId,
+    ) -> Result<ZellijAction, BackendError> {
+        let pane_target =
+            snapshot.pane_targets.get(&pane_id).cloned().ok_or_else(|| {
+                BackendError::not_found(format!("unknown zellij pane {pane_id:?}"))
+            })?;
+        Ok(ZellijAction::FocusPane { pane_ref: pane_target.backend_ref })
+    }
+
+    fn close_pane_action(
+        &self,
+        snapshot: &ZellijSessionSnapshot,
+        pane_id: PaneId,
+    ) -> Result<ZellijAction, BackendError> {
+        let pane_target =
+            snapshot.pane_targets.get(&pane_id).cloned().ok_or_else(|| {
+                BackendError::not_found(format!("unknown zellij pane {pane_id:?}"))
+            })?;
+        let tab = snapshot
+            .topology
+            .tabs
+            .iter()
+            .find(|tab| tab_contains_pane(tab, pane_id))
+            .ok_or_else(|| {
+                BackendError::not_found(format!("zellij pane {pane_id:?} is not bound to a tab"))
+            })?;
+        if collect_pane_ids(&tab.root).len() <= 1 {
+            return Err(BackendError::unsupported(
+                "zellij imported routes refuse to close the last pane in a tab because it would collapse tab lifecycle into tab closure semantics",
+                DegradedModeReason::UnsupportedByBackend,
+            ));
+        }
+
+        Ok(ZellijAction::ClosePane { pane_ref: pane_target.backend_ref })
+    }
+
+    fn send_input_actions(
+        &self,
+        snapshot: &ZellijSessionSnapshot,
+        spec: SendInputSpec,
+    ) -> Result<Vec<ZellijAction>, BackendError> {
+        if spec.data.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let pane_target = snapshot.pane_targets.get(&spec.pane_id).cloned().ok_or_else(|| {
+            BackendError::not_found(format!("unknown zellij pane {:?}", spec.pane_id))
+        })?;
+        if pane_target.kind != ZellijPaneKind::Terminal {
+            return Err(BackendError::unsupported(
+                "zellij input writes target terminal panes only",
+                DegradedModeReason::UnsupportedByBackend,
+            ));
+        }
+
+        let mut actions = Vec::new();
+        let mut literal = String::new();
+        for ch in spec.data.chars() {
+            match ch {
+                '\r' | '\n' => {
+                    flush_zellij_literal(&pane_target.backend_ref, &mut literal, &mut actions);
+                    actions.push(ZellijAction::SendKeys {
+                        pane_ref: pane_target.backend_ref.clone(),
+                        keys: vec!["Enter".to_string()],
+                    });
+                }
+                '\t' => {
+                    flush_zellij_literal(&pane_target.backend_ref, &mut literal, &mut actions);
+                    actions.push(ZellijAction::SendKeys {
+                        pane_ref: pane_target.backend_ref.clone(),
+                        keys: vec!["Tab".to_string()],
+                    });
+                }
+                c if c.is_control() => {
+                    return Err(BackendError::unsupported(
+                        format!("zellij input path does not support control character {:?}", c),
+                        DegradedModeReason::UnsupportedByBackend,
+                    ));
+                }
+                c => literal.push(c),
+            }
+        }
+        flush_zellij_literal(&pane_target.backend_ref, &mut literal, &mut actions);
+
+        Ok(actions)
+    }
+
+    fn send_paste_actions(
+        &self,
+        snapshot: &ZellijSessionSnapshot,
+        spec: SendPasteSpec,
+    ) -> Result<Vec<ZellijAction>, BackendError> {
+        if spec.data.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let pane_target = snapshot.pane_targets.get(&spec.pane_id).cloned().ok_or_else(|| {
+            BackendError::not_found(format!("unknown zellij pane {:?}", spec.pane_id))
+        })?;
+        if pane_target.kind != ZellijPaneKind::Terminal {
+            return Err(BackendError::unsupported(
+                "zellij paste writes target terminal panes only",
+                DegradedModeReason::UnsupportedByBackend,
+            ));
+        }
+
+        Ok(vec![ZellijAction::Paste { pane_ref: pane_target.backend_ref, text: spec.data }])
     }
 
     fn screen_snapshot_inner(&self, pane_id: PaneId) -> Result<ScreenSnapshot, BackendError> {
@@ -482,6 +704,7 @@ impl ZellijAttachedSession {
 
 struct ZellijSessionSnapshot {
     topology: TopologySnapshot,
+    tab_targets: HashMap<TabId, ZellijTabTarget>,
     pane_targets: HashMap<PaneId, ZellijPaneTarget>,
 }
 
@@ -572,9 +795,102 @@ impl ZellijPaneRow {
 #[derive(Debug, Clone)]
 struct ZellijPaneTarget {
     backend_ref: String,
+    kind: ZellijPaneKind,
     title: Option<String>,
     rows: u16,
     cols: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ZellijPaneKind {
+    Terminal,
+    Plugin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ZellijTabTarget {
+    backend_tab_id: u32,
+    position: u32,
+    title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ZellijAction {
+    NewTab { title: Option<String> },
+    FocusTab { backend_tab_id: u32 },
+    CloseTab { backend_tab_id: u32 },
+    RenameTab { backend_tab_id: u32, title: String },
+    FocusPane { pane_ref: String },
+    ClosePane { pane_ref: String },
+    WriteChars { pane_ref: String, chars: String },
+    Paste { pane_ref: String, text: String },
+    SendKeys { pane_ref: String, keys: Vec<String> },
+}
+
+impl ZellijAction {
+    fn args(&self) -> Vec<String> {
+        match self {
+            Self::NewTab { title } => {
+                let mut args = vec!["action".to_string(), "new-tab".to_string()];
+                if let Some(title) = title {
+                    args.push("--name".to_string());
+                    args.push(title.clone());
+                }
+                args
+            }
+            Self::FocusTab { backend_tab_id } => vec![
+                "action".to_string(),
+                "go-to-tab-by-id".to_string(),
+                backend_tab_id.to_string(),
+            ],
+            Self::CloseTab { backend_tab_id } => vec![
+                "action".to_string(),
+                "close-tab".to_string(),
+                "--tab-id".to_string(),
+                backend_tab_id.to_string(),
+            ],
+            Self::RenameTab { backend_tab_id, title } => vec![
+                "action".to_string(),
+                "rename-tab".to_string(),
+                "--tab-id".to_string(),
+                backend_tab_id.to_string(),
+                title.clone(),
+            ],
+            Self::FocusPane { pane_ref } => {
+                vec!["action".to_string(), "focus-pane-id".to_string(), pane_ref.clone()]
+            }
+            Self::ClosePane { pane_ref } => vec![
+                "action".to_string(),
+                "close-pane".to_string(),
+                "--pane-id".to_string(),
+                pane_ref.clone(),
+            ],
+            Self::WriteChars { pane_ref, chars } => vec![
+                "action".to_string(),
+                "write-chars".to_string(),
+                "--pane-id".to_string(),
+                pane_ref.clone(),
+                chars.clone(),
+            ],
+            Self::Paste { pane_ref, text } => vec![
+                "action".to_string(),
+                "paste".to_string(),
+                "--pane-id".to_string(),
+                pane_ref.clone(),
+                text.clone(),
+            ],
+            Self::SendKeys { pane_ref, keys } => {
+                let mut args = vec![
+                    "action".to_string(),
+                    "send-keys".to_string(),
+                    "--pane-id".to_string(),
+                    pane_ref.clone(),
+                ];
+                args.extend(keys.clone());
+                args
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -612,6 +928,7 @@ fn build_session_snapshot(
     let mut tabs = tabs.to_vec();
     tabs.sort_by_key(|tab| tab.position);
 
+    let mut tab_targets = HashMap::new();
     let mut pane_targets = HashMap::new();
     let mut topology_tabs = Vec::new();
     let mut focused_tab = None;
@@ -637,6 +954,11 @@ fn build_session_snapshot(
                     pane_id,
                     ZellijPaneTarget {
                         backend_ref: pane.backend_ref(),
+                        kind: if pane.is_plugin {
+                            ZellijPaneKind::Plugin
+                        } else {
+                            ZellijPaneKind::Terminal
+                        },
                         title: non_empty(&pane.title),
                         rows: pane.pane_rows,
                         cols: pane.pane_columns,
@@ -650,6 +972,15 @@ fn build_session_snapshot(
             .find(|pane| pane.is_focused)
             .map(|pane| deterministic_pane_id(target, tab.tab_id, &pane.backend_ref()))
             .or_else(|| pane_ids.first().copied());
+
+        tab_targets.insert(
+            tab_id,
+            ZellijTabTarget {
+                backend_tab_id: tab.tab_id,
+                position: tab.position,
+                title: non_empty(&tab.name),
+            },
+        );
 
         if focused_tab.is_none() && (tab.active || focused_tab_from_pane == Some(tab.tab_id)) {
             focused_tab = Some(tab_id);
@@ -683,6 +1014,7 @@ fn build_session_snapshot(
             tabs,
             focused_tab,
         },
+        tab_targets,
         pane_targets,
     })
 }
@@ -821,13 +1153,50 @@ fn non_empty(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+fn flush_zellij_literal(pane_ref: &str, literal: &mut String, actions: &mut Vec<ZellijAction>) {
+    if literal.is_empty() {
+        return;
+    }
+
+    actions
+        .push(ZellijAction::WriteChars { pane_ref: pane_ref.to_string(), chars: literal.clone() });
+    literal.clear();
+}
+
+fn tab_contains_pane(tab: &TabSnapshot, pane_id: PaneId) -> bool {
+    collect_pane_ids(&tab.root).into_iter().any(|candidate| candidate == pane_id)
+}
+
+fn collect_pane_ids(root: &PaneTreeNode) -> Vec<PaneId> {
+    let mut pane_ids = Vec::new();
+    collect_pane_ids_inner(root, &mut pane_ids);
+    pane_ids
+}
+
+fn collect_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
+    match root {
+        PaneTreeNode::Leaf { pane_id } => pane_ids.push(*pane_id),
+        PaneTreeNode::Split(split) => {
+            collect_pane_ids_inner(&split.first, pane_ids);
+            collect_pane_ids_inner(&split.second, pane_ids);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use terminal_domain::{RouteAuthority, SessionRoute};
+    use std::sync::Arc;
+
+    use terminal_backend_api::{
+        BackendErrorKind, MuxCommand, NewTabSpec, SendInputSpec, SendPasteSpec,
+    };
+    use terminal_domain::{DegradedModeReason, RouteAuthority, SessionRoute};
+    use tokio::sync::Mutex;
 
     use super::{
-        ZELLIJ_ROUTE_NAMESPACE, ZellijPaneRow, ZellijProbe, ZellijSurface, ZellijTabRow,
-        ZellijTarget, build_session_snapshot, parse_panes_json, parse_semver_triplet,
+        ZELLIJ_ROUTE_NAMESPACE, ZellijAction, ZellijAttachedSession, ZellijBackend, ZellijPaneKind,
+        ZellijPaneRow, ZellijProbe, ZellijSurface, ZellijTabRow, ZellijTarget,
+        build_session_snapshot, collect_pane_ids, parse_panes_json, parse_semver_triplet,
         parse_tabs_json,
     };
 
@@ -1013,26 +1382,269 @@ mod tests {
             snapshot.topology.tabs[0].focused_pane,
             Some(collect_pane_ids(&snapshot.topology.tabs[0].root)[0])
         );
+        assert_eq!(snapshot.tab_targets.len(), 2);
         assert_eq!(snapshot.pane_targets.len(), 3);
         assert!(snapshot.pane_targets.values().any(|pane| pane.backend_ref == "plugin_2"));
+        assert!(snapshot.pane_targets.values().any(|pane| pane.kind == ZellijPaneKind::Plugin));
     }
 
-    fn collect_pane_ids(root: &terminal_mux_domain::PaneTreeNode) -> Vec<terminal_domain::PaneId> {
-        let mut pane_ids = Vec::new();
-        collect_pane_ids_inner(root, &mut pane_ids);
-        pane_ids
+    #[test]
+    fn builds_targeted_dispatch_actions_for_rich_surface() {
+        let (attached, snapshot, first_tab, second_tab, terminal_pane, _plugin_pane) =
+            sample_attached_session();
+
+        assert_eq!(
+            attached
+                .dispatch_actions(
+                    &snapshot,
+                    MuxCommand::NewTab(NewTabSpec { title: Some("debug".to_string()) }),
+                )
+                .expect("new-tab should map"),
+            vec![ZellijAction::NewTab { title: Some("debug".to_string()) }]
+        );
+        assert_eq!(
+            attached
+                .dispatch_actions(&snapshot, MuxCommand::FocusTab { tab_id: second_tab })
+                .expect("focus-tab should map"),
+            vec![ZellijAction::FocusTab { backend_tab_id: 2 }]
+        );
+        assert_eq!(
+            attached
+                .dispatch_actions(
+                    &snapshot,
+                    MuxCommand::RenameTab { tab_id: second_tab, title: "renamed".to_string() },
+                )
+                .expect("rename-tab should map"),
+            vec![ZellijAction::RenameTab { backend_tab_id: 2, title: "renamed".to_string() }]
+        );
+        assert_eq!(
+            attached
+                .dispatch_actions(&snapshot, MuxCommand::CloseTab { tab_id: second_tab })
+                .expect("close-tab should map"),
+            vec![ZellijAction::CloseTab { backend_tab_id: 2 }]
+        );
+        assert_eq!(
+            attached
+                .dispatch_actions(&snapshot, MuxCommand::FocusPane { pane_id: terminal_pane })
+                .expect("focus-pane should map"),
+            vec![ZellijAction::FocusPane { pane_ref: "terminal_1".to_string() }]
+        );
+        assert_eq!(
+            attached
+                .dispatch_actions(&snapshot, MuxCommand::ClosePane { pane_id: terminal_pane })
+                .expect("close-pane should map"),
+            vec![ZellijAction::ClosePane { pane_ref: "terminal_1".to_string() }]
+        );
+        assert_ne!(first_tab, second_tab);
     }
 
-    fn collect_pane_ids_inner(
-        root: &terminal_mux_domain::PaneTreeNode,
-        pane_ids: &mut Vec<terminal_domain::PaneId>,
+    #[test]
+    fn splits_terminal_input_into_ordered_rich_actions() {
+        let (attached, snapshot, _first_tab, _second_tab, terminal_pane, _plugin_pane) =
+            sample_attached_session();
+
+        let actions = attached
+            .dispatch_actions(
+                &snapshot,
+                MuxCommand::SendInput(SendInputSpec {
+                    pane_id: terminal_pane,
+                    data: "echo\tok\r".to_string(),
+                }),
+            )
+            .expect("send-input should map");
+
+        assert_eq!(
+            actions,
+            vec![
+                ZellijAction::WriteChars {
+                    pane_ref: "terminal_1".to_string(),
+                    chars: "echo".to_string(),
+                },
+                ZellijAction::SendKeys {
+                    pane_ref: "terminal_1".to_string(),
+                    keys: vec!["Tab".to_string()],
+                },
+                ZellijAction::WriteChars {
+                    pane_ref: "terminal_1".to_string(),
+                    chars: "ok".to_string(),
+                },
+                ZellijAction::SendKeys {
+                    pane_ref: "terminal_1".to_string(),
+                    keys: vec!["Enter".to_string()],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn maps_paste_to_target_terminal_pane() {
+        let (attached, snapshot, _first_tab, _second_tab, terminal_pane, _plugin_pane) =
+            sample_attached_session();
+
+        let actions = attached
+            .dispatch_actions(
+                &snapshot,
+                MuxCommand::SendPaste(SendPasteSpec {
+                    pane_id: terminal_pane,
+                    data: "hello\nworld".to_string(),
+                }),
+            )
+            .expect("send-paste should map");
+
+        assert_eq!(
+            actions,
+            vec![ZellijAction::Paste {
+                pane_ref: "terminal_1".to_string(),
+                text: "hello\nworld".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn rejects_plugin_input_writes() {
+        let (attached, snapshot, _first_tab, _second_tab, _terminal_pane, plugin_pane) =
+            sample_attached_session();
+
+        let error = attached
+            .dispatch_actions(
+                &snapshot,
+                MuxCommand::SendInput(SendInputSpec {
+                    pane_id: plugin_pane,
+                    data: "hello".to_string(),
+                }),
+            )
+            .expect_err("plugin input should fail");
+
+        assert_eq!(error.kind, BackendErrorKind::Unsupported);
+        assert_eq!(error.degraded_reason, Some(DegradedModeReason::UnsupportedByBackend));
+    }
+
+    #[test]
+    fn rejects_closing_last_foreign_tab() {
+        let (attached, snapshot, first_tab, _pane) = single_tab_attached_session();
+
+        let error = attached
+            .dispatch_actions(&snapshot, MuxCommand::CloseTab { tab_id: first_tab })
+            .expect_err("closing the last tab should fail");
+
+        assert_eq!(error.kind, BackendErrorKind::Unsupported);
+        assert_eq!(error.degraded_reason, Some(DegradedModeReason::UnsupportedByBackend));
+    }
+
+    #[test]
+    fn rejects_closing_last_pane_in_tab() {
+        let (attached, snapshot, _first_tab, pane_id) = single_tab_attached_session();
+
+        let error = attached
+            .dispatch_actions(&snapshot, MuxCommand::ClosePane { pane_id })
+            .expect_err("closing the last pane should fail");
+
+        assert_eq!(error.kind, BackendErrorKind::Unsupported);
+        assert_eq!(error.degraded_reason, Some(DegradedModeReason::UnsupportedByBackend));
+    }
+
+    fn sample_attached_session() -> (
+        ZellijAttachedSession,
+        super::ZellijSessionSnapshot,
+        terminal_domain::TabId,
+        terminal_domain::TabId,
+        terminal_domain::PaneId,
+        terminal_domain::PaneId,
     ) {
-        match root {
-            terminal_mux_domain::PaneTreeNode::Leaf { pane_id } => pane_ids.push(*pane_id),
-            terminal_mux_domain::PaneTreeNode::Split(split) => {
-                collect_pane_ids_inner(&split.first, pane_ids);
-                collect_pane_ids_inner(&split.second, pane_ids);
-            }
-        }
+        let target = ZellijTarget { session_name: "workspace".to_string() };
+        let session_id = terminal_domain::SessionId::new();
+        let tabs = vec![
+            ZellijTabRow { tab_id: 1, position: 0, name: "shell".to_string(), active: true },
+            ZellijTabRow { tab_id: 2, position: 1, name: "logs".to_string(), active: false },
+        ];
+        let panes = vec![
+            ZellijPaneRow {
+                id: 1,
+                tab_id: 1,
+                title: "shell".to_string(),
+                is_plugin: false,
+                is_focused: true,
+                is_floating: false,
+                pane_x: 0,
+                pane_y: 0,
+                pane_rows: 24,
+                pane_columns: 80,
+            },
+            ZellijPaneRow {
+                id: 2,
+                tab_id: 1,
+                title: "status".to_string(),
+                is_plugin: true,
+                is_focused: false,
+                is_floating: false,
+                pane_x: 81,
+                pane_y: 0,
+                pane_rows: 24,
+                pane_columns: 40,
+            },
+            ZellijPaneRow {
+                id: 3,
+                tab_id: 2,
+                title: "logs".to_string(),
+                is_plugin: false,
+                is_focused: false,
+                is_floating: false,
+                pane_x: 0,
+                pane_y: 0,
+                pane_rows: 24,
+                pane_columns: 100,
+            },
+        ];
+
+        let snapshot = build_session_snapshot(session_id, &target, &tabs, &panes)
+            .expect("snapshot should build");
+        let first_tab = snapshot.topology.tabs[0].tab_id;
+        let second_tab = snapshot.topology.tabs[1].tab_id;
+        let tab_one_panes = collect_pane_ids(&snapshot.topology.tabs[0].root);
+        let attached = ZellijAttachedSession {
+            backend: Arc::new(ZellijBackend),
+            session_id,
+            target,
+            command_lane: Arc::new(Mutex::new(())),
+        };
+
+        (attached, snapshot, first_tab, second_tab, tab_one_panes[0], tab_one_panes[1])
+    }
+
+    fn single_tab_attached_session() -> (
+        ZellijAttachedSession,
+        super::ZellijSessionSnapshot,
+        terminal_domain::TabId,
+        terminal_domain::PaneId,
+    ) {
+        let target = ZellijTarget { session_name: "workspace".to_string() };
+        let session_id = terminal_domain::SessionId::new();
+        let tabs =
+            vec![ZellijTabRow { tab_id: 1, position: 0, name: "shell".to_string(), active: true }];
+        let panes = vec![ZellijPaneRow {
+            id: 1,
+            tab_id: 1,
+            title: "shell".to_string(),
+            is_plugin: false,
+            is_focused: true,
+            is_floating: false,
+            pane_x: 0,
+            pane_y: 0,
+            pane_rows: 24,
+            pane_columns: 80,
+        }];
+
+        let snapshot = build_session_snapshot(session_id, &target, &tabs, &panes)
+            .expect("snapshot should build");
+        let tab_id = snapshot.topology.tabs[0].tab_id;
+        let pane_id = collect_pane_ids(&snapshot.topology.tabs[0].root)[0];
+        let attached = ZellijAttachedSession {
+            backend: Arc::new(ZellijBackend),
+            session_id,
+            target,
+            command_lane: Arc::new(Mutex::new(())),
+        };
+
+        (attached, snapshot, tab_id, pane_id)
     }
 }

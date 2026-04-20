@@ -115,26 +115,37 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert!(tmux.capabilities.rendered_viewport_stream);
     assert_eq!(zellij.backend, BackendKind::Zellij);
     assert!(zellij.capabilities.read_only_client_mode);
-    assert!(!zellij.capabilities.tab_create);
-    assert!(!zellij.capabilities.tab_close);
-    assert!(!zellij.capabilities.tab_focus);
     assert!(!zellij.capabilities.split_resize);
     assert!(!zellij.capabilities.pane_split);
-    assert!(!zellij.capabilities.pane_close);
-    assert!(!zellij.capabilities.pane_focus);
     if zellij.capabilities.rendered_viewport_snapshot {
         assert!(zellij.capabilities.tiled_panes);
+        assert!(zellij.capabilities.tab_create);
+        assert!(zellij.capabilities.tab_close);
+        assert!(zellij.capabilities.tab_focus);
+        assert!(zellij.capabilities.tab_rename);
         assert!(zellij.capabilities.session_scoped_tab_refs);
         assert!(zellij.capabilities.session_scoped_pane_refs);
+        assert!(zellij.capabilities.pane_close);
+        assert!(zellij.capabilities.pane_focus);
+        assert!(zellij.capabilities.pane_input_write);
+        assert!(zellij.capabilities.pane_paste_write);
         assert!(zellij.capabilities.rendered_viewport_stream);
         assert!(zellij.capabilities.plugin_panes);
         assert!(zellij.capabilities.advisory_metadata_subscriptions);
         assert!(!zellij.capabilities.floating_panes);
         assert!(!zellij.capabilities.rendered_scrollback_snapshot);
     } else {
+        assert!(!zellij.capabilities.tab_create);
+        assert!(!zellij.capabilities.tab_close);
+        assert!(!zellij.capabilities.tab_focus);
+        assert!(!zellij.capabilities.tab_rename);
         assert!(!zellij.capabilities.tiled_panes);
         assert!(!zellij.capabilities.session_scoped_tab_refs);
         assert!(!zellij.capabilities.session_scoped_pane_refs);
+        assert!(!zellij.capabilities.pane_close);
+        assert!(!zellij.capabilities.pane_focus);
+        assert!(!zellij.capabilities.pane_input_write);
+        assert!(!zellij.capabilities.pane_paste_write);
         assert!(!zellij.capabilities.rendered_viewport_stream);
         assert!(!zellij.capabilities.plugin_panes);
         assert!(!zellij.capabilities.advisory_metadata_subscriptions);
@@ -1995,6 +2006,136 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
             }
             other => panic!("unexpected initial zellij pane event: {other:?}"),
         }
+
+        let initial_tab_count = topology.tabs.len();
+        let initial_focused_tab = topology.focused_tab.expect("focused zellij tab should exist");
+        let send_input = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.client.dispatch(
+                imported.session.session_id,
+                MuxCommand::SendInput(SendInputSpec {
+                    pane_id: focused_pane,
+                    data: "echo zellij rich smoke\r".to_string(),
+                }),
+            ),
+        )
+        .await
+        .expect("zellij send_input should not hang")
+        .expect("zellij send_input should succeed");
+        wait_for_screen_line(
+            &fixture,
+            imported.session.session_id,
+            focused_pane,
+            "zellij rich smoke",
+        )
+        .await;
+
+        let created = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.client.dispatch(
+                imported.session.session_id,
+                MuxCommand::NewTab(NewTabSpec { title: Some("logs-rich".to_string()) }),
+            ),
+        )
+        .await
+        .expect("zellij new_tab should not hang")
+        .expect("zellij new_tab should succeed");
+        let after_create = wait_for_topology(
+            &fixture,
+            imported.session.session_id,
+            |snapshot| {
+                snapshot.tabs.len() == initial_tab_count + 1
+                    && snapshot.tabs.iter().any(|tab| tab.title.as_deref() == Some("logs-rich"))
+            },
+            "zellij rich new tab topology",
+        )
+        .await;
+        let rich_tab_id = after_create
+            .tabs
+            .iter()
+            .find(|tab| tab.title.as_deref() == Some("logs-rich"))
+            .map(|tab| tab.tab_id)
+            .expect("created rich zellij tab should exist");
+
+        let renamed = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.client.dispatch(
+                imported.session.session_id,
+                MuxCommand::RenameTab {
+                    tab_id: rich_tab_id,
+                    title: "logs-rich-renamed".to_string(),
+                },
+            ),
+        )
+        .await
+        .expect("zellij rename_tab should not hang")
+        .expect("zellij rename_tab should succeed");
+        let after_rename = wait_for_topology(
+            &fixture,
+            imported.session.session_id,
+            |snapshot| {
+                snapshot.tabs.iter().any(|tab| {
+                    tab.tab_id == rich_tab_id && tab.title.as_deref() == Some("logs-rich-renamed")
+                })
+            },
+            "zellij rich renamed tab topology",
+        )
+        .await;
+
+        let focused = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.client.dispatch(
+                imported.session.session_id,
+                MuxCommand::FocusTab { tab_id: initial_focused_tab },
+            ),
+        )
+        .await
+        .expect("zellij focus_tab should not hang")
+        .expect("zellij focus_tab should succeed");
+        let after_focus = wait_for_topology(
+            &fixture,
+            imported.session.session_id,
+            |snapshot| snapshot.focused_tab == Some(initial_focused_tab),
+            "zellij rich focus tab topology",
+        )
+        .await;
+
+        let closed = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.client.dispatch(
+                imported.session.session_id,
+                MuxCommand::CloseTab { tab_id: rich_tab_id },
+            ),
+        )
+        .await
+        .expect("zellij close_tab should not hang")
+        .expect("zellij close_tab should succeed");
+        let after_close = wait_for_topology(
+            &fixture,
+            imported.session.session_id,
+            |snapshot| {
+                snapshot.tabs.len() == initial_tab_count
+                    && snapshot.tabs.iter().all(|tab| tab.tab_id != rich_tab_id)
+            },
+            "zellij rich close tab topology",
+        )
+        .await;
+
+        assert!(send_input.changed);
+        assert!(created.changed);
+        assert_eq!(after_create.tabs.len(), initial_tab_count + 1);
+        assert!(renamed.changed);
+        assert!(
+            after_rename.tabs.iter().any(|tab| tab.tab_id == rich_tab_id
+                && tab.title.as_deref() == Some("logs-rich-renamed"))
+        );
+        assert!(focused.changed);
+        assert_eq!(after_focus.focused_tab, Some(initial_focused_tab));
+        assert!(closed.changed);
+        assert_eq!(after_close.tabs.len(), initial_tab_count);
+
+        topology_subscription.close().await.expect("topology subscription should close cleanly");
+        pane_subscription.close().await.expect("pane subscription should close cleanly");
     }
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
@@ -2064,6 +2205,30 @@ async fn wait_for_screen_line(
     }
 
     panic!("screen never contained expected text: {needle}; last lines: {last_lines:?}");
+}
+
+#[cfg(unix)]
+async fn wait_for_topology(
+    fixture: &terminal_testing::DaemonFixture,
+    session_id: terminal_domain::SessionId,
+    predicate: impl Fn(&TopologySnapshot) -> bool,
+    label: &str,
+) -> TopologySnapshot {
+    let mut last_snapshot = None;
+    for _ in 0..120 {
+        let snapshot = fixture
+            .client
+            .topology_snapshot(session_id)
+            .await
+            .expect("topology_snapshot should succeed");
+        if predicate(&snapshot) {
+            return snapshot;
+        }
+        last_snapshot = Some(snapshot);
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!("topology never reached expected state: {label}; last snapshot: {last_snapshot:?}");
 }
 
 #[cfg(unix)]

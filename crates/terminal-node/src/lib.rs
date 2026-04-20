@@ -384,8 +384,9 @@ mod tests {
 
     use super::{
         NodeBackendKind, NodeCreateSessionRequest, NodeHostClient, NodeMuxCommand,
-        NodeNewTabCommand, NodePaneTreeNode, NodeProjectionSource, NodeSendInputCommand,
-        NodeSubscriptionEvent, NodeSubscriptionSpec, export_typescript_bindings,
+        NodeNewTabCommand, NodePaneTreeNode, NodeProjectionSource, NodeRenameTabCommand,
+        NodeSendInputCommand, NodeSubscriptionEvent, NodeSubscriptionSpec,
+        export_typescript_bindings,
     };
 
     #[test]
@@ -484,15 +485,30 @@ mod tests {
         assert_eq!(tmux_capabilities.backend, NodeBackendKind::Tmux);
         assert!(tmux_capabilities.capabilities.read_only_client_mode);
         assert_eq!(zellij_capabilities.backend, NodeBackendKind::Zellij);
-        assert!(!zellij_capabilities.capabilities.tab_create);
         if zellij_capabilities.capabilities.rendered_viewport_snapshot {
+            assert!(zellij_capabilities.capabilities.tab_create);
+            assert!(zellij_capabilities.capabilities.tab_close);
+            assert!(zellij_capabilities.capabilities.tab_focus);
+            assert!(zellij_capabilities.capabilities.tab_rename);
             assert!(zellij_capabilities.capabilities.rendered_viewport_stream);
             assert!(zellij_capabilities.capabilities.session_scoped_tab_refs);
             assert!(zellij_capabilities.capabilities.session_scoped_pane_refs);
+            assert!(zellij_capabilities.capabilities.pane_close);
+            assert!(zellij_capabilities.capabilities.pane_focus);
+            assert!(zellij_capabilities.capabilities.pane_input_write);
+            assert!(zellij_capabilities.capabilities.pane_paste_write);
             assert!(zellij_capabilities.capabilities.plugin_panes);
             assert!(zellij_capabilities.capabilities.advisory_metadata_subscriptions);
             assert!(zellij_capabilities.capabilities.read_only_client_mode);
         } else {
+            assert!(!zellij_capabilities.capabilities.tab_create);
+            assert!(!zellij_capabilities.capabilities.tab_close);
+            assert!(!zellij_capabilities.capabilities.tab_focus);
+            assert!(!zellij_capabilities.capabilities.tab_rename);
+            assert!(!zellij_capabilities.capabilities.pane_close);
+            assert!(!zellij_capabilities.capabilities.pane_focus);
+            assert!(!zellij_capabilities.capabilities.pane_input_write);
+            assert!(!zellij_capabilities.capabilities.pane_paste_write);
             assert!(!zellij_capabilities.capabilities.rendered_viewport_stream);
         }
         assert!(listed.iter().any(|session| session.session_id == created.session_id));
@@ -689,6 +705,143 @@ mod tests {
                 other => panic!("unexpected initial zellij pane event: {other:?}"),
             }
 
+            let initial_tab_count = topology.tabs.len();
+            let initial_focused_tab =
+                topology.focused_tab.clone().expect("focused zellij tab should exist");
+            let send_input = timeout(
+                Duration::from_secs(10),
+                node.dispatch_mux_command(
+                    &imported.session_id,
+                    &NodeMuxCommand::SendInput(NodeSendInputCommand {
+                        pane_id: focused_pane.clone(),
+                        data: "echo zellij node rich smoke\r".to_string(),
+                    }),
+                ),
+            )
+            .await
+            .expect("zellij send_input should not hang")
+            .expect("zellij send_input should succeed");
+            let screen = wait_for_screen_line(
+                &node,
+                &imported.session_id,
+                &focused_pane,
+                "zellij node rich smoke",
+            )
+            .await;
+
+            let created = timeout(
+                Duration::from_secs(10),
+                node.dispatch_mux_command(
+                    &imported.session_id,
+                    &NodeMuxCommand::NewTab(NodeNewTabCommand {
+                        title: Some("logs-rich".to_string()),
+                    }),
+                ),
+            )
+            .await
+            .expect("zellij new_tab should not hang")
+            .expect("zellij new_tab should succeed");
+            let after_create = wait_for_topology_state(
+                &node,
+                &imported.session_id,
+                |snapshot| {
+                    snapshot.tabs.len() == initial_tab_count + 1
+                        && snapshot.tabs.iter().any(|tab| tab.title.as_deref() == Some("logs-rich"))
+                },
+                "zellij rich new tab topology",
+            )
+            .await;
+            let rich_tab_id = after_create
+                .tabs
+                .iter()
+                .find(|tab| tab.title.as_deref() == Some("logs-rich"))
+                .map(|tab| tab.tab_id.clone())
+                .expect("created rich zellij tab should exist");
+
+            let renamed = timeout(
+                Duration::from_secs(10),
+                node.dispatch_mux_command(
+                    &imported.session_id,
+                    &NodeMuxCommand::RenameTab(NodeRenameTabCommand {
+                        tab_id: rich_tab_id.clone(),
+                        title: "logs-rich-renamed".to_string(),
+                    }),
+                ),
+            )
+            .await
+            .expect("zellij rename_tab should not hang")
+            .expect("zellij rename_tab should succeed");
+            let after_rename = wait_for_topology_state(
+                &node,
+                &imported.session_id,
+                |snapshot| {
+                    snapshot.tabs.iter().any(|tab| {
+                        tab.tab_id == rich_tab_id
+                            && tab.title.as_deref() == Some("logs-rich-renamed")
+                    })
+                },
+                "zellij rich renamed tab topology",
+            )
+            .await;
+
+            let focused = timeout(
+                Duration::from_secs(10),
+                node.dispatch_mux_command(
+                    &imported.session_id,
+                    &NodeMuxCommand::FocusTab { tab_id: initial_focused_tab.clone() },
+                ),
+            )
+            .await
+            .expect("zellij focus_tab should not hang")
+            .expect("zellij focus_tab should succeed");
+            let after_focus = wait_for_topology_state(
+                &node,
+                &imported.session_id,
+                |snapshot| snapshot.focused_tab.as_deref() == Some(initial_focused_tab.as_str()),
+                "zellij rich focus tab topology",
+            )
+            .await;
+
+            let closed = timeout(
+                Duration::from_secs(10),
+                node.dispatch_mux_command(
+                    &imported.session_id,
+                    &NodeMuxCommand::CloseTab { tab_id: rich_tab_id.clone() },
+                ),
+            )
+            .await
+            .expect("zellij close_tab should not hang")
+            .expect("zellij close_tab should succeed");
+            let after_close = wait_for_topology_state(
+                &node,
+                &imported.session_id,
+                |snapshot| {
+                    snapshot.tabs.len() == initial_tab_count
+                        && snapshot.tabs.iter().all(|tab| tab.tab_id != rich_tab_id)
+                },
+                "zellij rich close tab topology",
+            )
+            .await;
+
+            assert!(send_input.changed);
+            assert!(
+                screen
+                    .surface
+                    .lines
+                    .iter()
+                    .any(|line| line.text.contains("zellij node rich smoke"))
+            );
+            assert!(created.changed);
+            assert_eq!(after_create.tabs.len(), initial_tab_count + 1);
+            assert!(renamed.changed);
+            assert!(after_rename.tabs.iter().any(|tab| {
+                tab.tab_id == rich_tab_id && tab.title.as_deref() == Some("logs-rich-renamed")
+            }));
+            assert!(focused.changed);
+            assert_eq!(after_focus.focused_tab.as_deref(), Some(initial_focused_tab.as_str()));
+            assert!(closed.changed);
+            assert_eq!(after_close.tabs.len(), initial_tab_count);
+
             topology_subscription.close().await;
             pane_subscription.close().await;
         }
@@ -868,6 +1021,24 @@ mod tests {
         }
 
         None
+    }
+
+    async fn wait_for_topology_state(
+        node: &NodeHostClient,
+        session_id: &str,
+        predicate: impl Fn(&super::NodeTopologySnapshot) -> bool,
+        label: &str,
+    ) -> super::NodeTopologySnapshot {
+        for _ in 0..50 {
+            let snapshot =
+                node.topology_snapshot(session_id).await.expect("topology_snapshot should succeed");
+            if predicate(&snapshot) {
+                return snapshot;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        panic!("topology never reached expected state: {label}");
     }
 
     async fn wait_for_subscription_line(

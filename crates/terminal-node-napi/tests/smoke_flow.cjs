@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
 async function runSmoke(createClient) {
@@ -81,15 +82,30 @@ async function runSmoke(createClient) {
   assert.equal(tmuxCapabilities.backend, "tmux");
   assert.equal(tmuxCapabilities.capabilities.read_only_client_mode, true);
   assert.equal(zellijCapabilities.backend, "zellij");
-  assert.equal(zellijCapabilities.capabilities.tab_create, false);
   if (zellijCapabilities.capabilities.rendered_viewport_snapshot) {
+    assert.equal(zellijCapabilities.capabilities.tab_create, true);
+    assert.equal(zellijCapabilities.capabilities.tab_close, true);
+    assert.equal(zellijCapabilities.capabilities.tab_focus, true);
+    assert.equal(zellijCapabilities.capabilities.tab_rename, true);
     assert.equal(zellijCapabilities.capabilities.rendered_viewport_stream, true);
     assert.equal(zellijCapabilities.capabilities.session_scoped_tab_refs, true);
     assert.equal(zellijCapabilities.capabilities.session_scoped_pane_refs, true);
+    assert.equal(zellijCapabilities.capabilities.pane_close, true);
+    assert.equal(zellijCapabilities.capabilities.pane_focus, true);
+    assert.equal(zellijCapabilities.capabilities.pane_input_write, true);
+    assert.equal(zellijCapabilities.capabilities.pane_paste_write, true);
     assert.equal(zellijCapabilities.capabilities.plugin_panes, true);
     assert.equal(zellijCapabilities.capabilities.advisory_metadata_subscriptions, true);
     assert.equal(zellijCapabilities.capabilities.read_only_client_mode, true);
   } else {
+    assert.equal(zellijCapabilities.capabilities.tab_create, false);
+    assert.equal(zellijCapabilities.capabilities.tab_close, false);
+    assert.equal(zellijCapabilities.capabilities.tab_focus, false);
+    assert.equal(zellijCapabilities.capabilities.tab_rename, false);
+    assert.equal(zellijCapabilities.capabilities.pane_close, false);
+    assert.equal(zellijCapabilities.capabilities.pane_focus, false);
+    assert.equal(zellijCapabilities.capabilities.pane_input_write, false);
+    assert.equal(zellijCapabilities.capabilities.pane_paste_write, false);
     assert.equal(zellijCapabilities.capabilities.rendered_viewport_stream, false);
   }
   assert.equal(listed.some((session) => session.session_id === created.session_id), true);
@@ -124,6 +140,8 @@ async function runSmoke(createClient) {
   assert.equal(deleted.session_id, created.session_id);
   assert.equal(savedAfterDelete.some((session) => session.session_id === created.session_id), false);
 
+  await runZellijImportSmoke(createClient, zellijCapabilities);
+
   await topologySubscription.close();
   await paneSubscription.close();
 
@@ -143,6 +161,121 @@ async function runSmoke(createClient) {
       saved_session_id: savedRecord.session_id,
     }),
   );
+}
+
+async function runZellijImportSmoke(createClient, zellijCapabilities) {
+  const client = createClient();
+  const sessionName = uniqueZellijSessionName("pkg");
+  spawnZellijSession(sessionName);
+
+  try {
+    const candidate = await waitForDiscoveredZellijSession(client, sessionName);
+
+    if (!zellijCapabilities.capabilities.rendered_viewport_snapshot) {
+      await assert.rejects(
+        client.importSession(candidate.route, candidate.title),
+        /backend_unsupported:.*zellij/i,
+      );
+      return;
+    }
+
+    const imported = await client.importSession(candidate.route, candidate.title);
+    const topology = await client.topologySnapshot(imported.session_id);
+    const initialTabCount = topology.tabs.length;
+    const initialFocusedTab = topology.focused_tab ?? topology.tabs[0]?.tab_id ?? null;
+    const focusedPaneId = focusedPaneIdFromTopology(topology);
+
+    assert.equal(imported.route.backend, "zellij");
+    assert.equal(topology.backend_kind, "zellij");
+    assert.equal(typeof initialFocusedTab, "string");
+    assert.equal(typeof focusedPaneId, "string");
+
+    const sendInput = await client.dispatchMuxCommand(imported.session_id, {
+      kind: "send_input",
+      pane_id: focusedPaneId,
+      data: "echo zellij package smoke\r",
+    });
+    const screen = await waitForLine(
+      client,
+      imported.session_id,
+      focusedPaneId,
+      "zellij package smoke",
+    );
+    const newTab = await client.dispatchMuxCommand(imported.session_id, {
+      kind: "new_tab",
+      title: "package-rich",
+    });
+    const topologyAfterCreate = await waitForTopologyState(
+      client,
+      imported.session_id,
+      (snapshot) =>
+        snapshot.tabs.length === initialTabCount + 1 &&
+        snapshot.tabs.some((tab) => tab.title === "package-rich"),
+      "zellij package new tab",
+    );
+    const richTabId =
+      topologyAfterCreate.tabs.find((tab) => tab.title === "package-rich")?.tab_id ?? null;
+
+    assert.equal(sendInput.changed, true);
+    assert.equal(
+      screen.surface.lines.some((line) => line.text.includes("zellij package smoke")),
+      true,
+    );
+    assert.equal(newTab.changed, true);
+    assert.equal(typeof richTabId, "string");
+
+    const renameTab = await client.dispatchMuxCommand(imported.session_id, {
+      kind: "rename_tab",
+      tab_id: richTabId,
+      title: "package-rich-renamed",
+    });
+    const topologyAfterRename = await waitForTopologyState(
+      client,
+      imported.session_id,
+      (snapshot) =>
+        snapshot.tabs.some(
+          (tab) =>
+            tab.tab_id === richTabId && tab.title === "package-rich-renamed",
+        ),
+      "zellij package rename tab",
+    );
+    const focusTab = await client.dispatchMuxCommand(imported.session_id, {
+      kind: "focus_tab",
+      tab_id: initialFocusedTab,
+    });
+    const topologyAfterFocus = await waitForTopologyState(
+      client,
+      imported.session_id,
+      (snapshot) => snapshot.focused_tab === initialFocusedTab,
+      "zellij package focus tab",
+    );
+    const closeTab = await client.dispatchMuxCommand(imported.session_id, {
+      kind: "close_tab",
+      tab_id: richTabId,
+    });
+    const topologyAfterClose = await waitForTopologyState(
+      client,
+      imported.session_id,
+      (snapshot) =>
+        snapshot.tabs.length === initialTabCount &&
+        snapshot.tabs.every((tab) => tab.tab_id !== richTabId),
+      "zellij package close tab",
+    );
+
+    assert.equal(renameTab.changed, true);
+    assert.equal(
+      topologyAfterRename.tabs.some(
+        (tab) => tab.tab_id === richTabId && tab.title === "package-rich-renamed",
+      ),
+      true,
+    );
+    assert.equal(focusTab.changed, true);
+    assert.equal(topologyAfterFocus.focused_tab, initialFocusedTab);
+    assert.equal(closeTab.changed, true);
+    assert.equal(topologyAfterClose.tabs.length, initialTabCount);
+  } finally {
+    stopZellijSession(sessionName);
+  }
 }
 
 async function runPackageWatchSmoke(createClient, sdk) {
@@ -436,6 +569,18 @@ async function waitForTopologyTabs(subscription, tabCount) {
   throw new Error(`Timed out waiting for topology with ${tabCount} tabs`);
 }
 
+async function waitForTopologyState(client, sessionId, predicate, label) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const snapshot = await client.topologySnapshot(sessionId);
+    if (predicate(snapshot)) {
+      return snapshot;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for topology state: ${label}`);
+}
+
 async function withTimeout(promise, ms, message) {
   let timer = null;
 
@@ -484,6 +629,42 @@ function focusedPaneIdFromTopology(topology) {
   }
 
   return focusedTab.focused_pane ?? firstPaneId(focusedTab.root);
+}
+
+function uniqueZellijSessionName(label) {
+  return `tp-${label}-${process.pid}-${Date.now().toString(16)}`;
+}
+
+function spawnZellijSession(sessionName) {
+  const output = spawnSync(
+    "zellij",
+    ["--session", sessionName, "--new-session-with-layout", "default"],
+    { encoding: "utf8" },
+  );
+  if (
+    output.status !== 0 &&
+    !`${output.stderr ?? ""}`.includes("could not get terminal attribute")
+  ) {
+    throw new Error(`Failed to spawn zellij session: ${(output.stderr ?? "").trim()}`);
+  }
+}
+
+function stopZellijSession(sessionName) {
+  spawnSync("zellij", ["kill-session", sessionName], { encoding: "utf8" });
+}
+
+async function waitForDiscoveredZellijSession(client, sessionName) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const sessions = await client.discoverSessions("zellij");
+    const candidate =
+      sessions.find((session) => session.title === sessionName) ?? null;
+    if (candidate) {
+      return candidate;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for discovered zellij session: ${sessionName}`);
 }
 
 async function runElectronBridgeSmoke(createClient, sdk) {
