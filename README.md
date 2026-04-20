@@ -34,6 +34,7 @@ Current workspace shape:
 - `crates/terminal-daemon`
 - `crates/terminal-daemon-client`
 - `crates/terminal-node`
+- `crates/terminal-node-napi`
 - `crates/terminal-capi`
 - `crates/terminal-testing`
 
@@ -46,4 +47,3 @@ Bootstrap target:
 - `cargo nextest run --workspace`
 
 If `cargo nextest` is not installed yet, bootstrap work may temporarily use `cargo test --workspace` until the tool is installed.
-

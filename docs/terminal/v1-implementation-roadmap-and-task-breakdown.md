@@ -232,13 +232,14 @@ Bootstrap details for the very first phase live in:
 ### Scope
 
 - `terminal-node`
+- `terminal-node-napi`
 - TS DTO export
 - Electron integration seam
 - one working embedded terminal consumer path
 
 ### Deliverables
 
-- Node wrapper
+- safe host facade + `napi-rs` leaf wrapper
 - TS types
 - integration notes for repo feature slice
 
