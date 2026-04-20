@@ -113,6 +113,55 @@ pub fn compile_reference_consumer(
 }
 
 #[cfg(unix)]
+pub fn compile_reference_consumer_with_pkg_config(
+    source_path: &Path,
+    package_dir: &Path,
+    pkgconfig_name: &str,
+) -> std::io::Result<PathBuf> {
+    let compiler = std::env::var("CC").unwrap_or_else(|_| "cc".to_string());
+    let binary_path = unique_temp_path("terminal-capi-consumer-pkgconfig", "bin");
+    let pkgconfig_dir = package_dir.join("lib/pkgconfig");
+    let output = Command::new("pkg-config")
+        .args(["--cflags", "--libs", pkgconfig_name])
+        .env("PKG_CONFIG_PATH", &pkgconfig_dir)
+        .output()
+        .map_err(|error| std::io::Error::other(format!("failed to launch pkg-config - {error}")))?;
+
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "pkg-config resolution failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    let flags = String::from_utf8(output.stdout).map_err(|error| {
+        std::io::Error::other(format!("pkg-config emitted invalid utf8 - {error}"))
+    })?;
+    let mut command = Command::new(&compiler);
+    command.arg("-std=c11").arg("-Wall").arg("-Wextra").arg("-Werror").arg(source_path);
+
+    for flag in flags.split_whitespace() {
+        command.arg(flag);
+    }
+
+    let output =
+        command.arg("-o").arg(&binary_path).output().map_err(|error| {
+            std::io::Error::other(format!("failed to launch {compiler} - {error}"))
+        })?;
+
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "reference consumer compile via pkg-config failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    Ok(binary_path)
+}
+
+#[cfg(unix)]
 pub fn configure_runtime_library_path(command: &mut Command, cdylib_path: &Path) {
     let lib_dir = cdylib_path.parent().expect("cdylib should have a parent dir");
 

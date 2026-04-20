@@ -6,6 +6,7 @@ use std::{
 const CAPI_PACKAGE_NAME: &str = "terminal-capi";
 const CAPI_HEADER_NAME: &str = "terminal-platform-capi.h";
 const CAPI_LIBRARY_BASENAME: &str = "terminal_capi";
+const CAPI_PKGCONFIG_NAME: &str = "terminal-platform-capi";
 const CAPI_SCHEMA_VERSION: u64 = 1;
 
 fn main() {
@@ -86,7 +87,9 @@ fn stage_capi_package(out_dir: &Path) -> Result<PathBuf, String> {
     let capi_dir = workspace_root().join("crates/terminal-capi");
     let include_dir = out_dir.join("include");
     let lib_dir = out_dir.join("lib");
+    let pkgconfig_dir = lib_dir.join("pkgconfig");
     let header_path = include_dir.join(CAPI_HEADER_NAME);
+    let pkgconfig_path = pkgconfig_dir.join(format!("{CAPI_PKGCONFIG_NAME}.pc"));
     let package_version = read_crate_version(&capi_dir.join("Cargo.toml"))?;
     let cdylib_path = locate_artifact(candidate_cdylib_names())?;
     let staticlib_path = locate_artifact(candidate_staticlib_names())?;
@@ -101,11 +104,14 @@ fn stage_capi_package(out_dir: &Path) -> Result<PathBuf, String> {
         .map_err(|error| format!("failed to create {} - {error}", include_dir.display()))?;
     fs::create_dir_all(&lib_dir)
         .map_err(|error| format!("failed to create {} - {error}", lib_dir.display()))?;
+    fs::create_dir_all(&pkgconfig_dir)
+        .map_err(|error| format!("failed to create {} - {error}", pkgconfig_dir.display()))?;
 
     generate_header(&capi_dir, &header_path)?;
     copy_file(&capi_dir.join("README.md"), &out_dir.join("README.md"))?;
     copy_file(&cdylib_path, &lib_dir.join(cdylib_name))?;
     copy_file(&staticlib_path, &lib_dir.join(staticlib_name))?;
+    write_pkgconfig(&pkgconfig_path, &package_version)?;
 
     let manifest = serde_json::json!({
         "schemaVersion": CAPI_SCHEMA_VERSION,
@@ -117,6 +123,7 @@ fn stage_capi_package(out_dir: &Path) -> Result<PathBuf, String> {
             "cdylib": format!("lib/{cdylib_name}"),
             "staticlib": format!("lib/{staticlib_name}"),
             "libraryBaseName": CAPI_LIBRARY_BASENAME,
+            "pkgConfig": format!("lib/pkgconfig/{CAPI_PKGCONFIG_NAME}.pc"),
         }
     });
 
@@ -144,9 +151,14 @@ fn verify_capi_package(package_dir: &Path) -> Result<(), String> {
         .get("staticlib")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| "manifest exports.staticlib must be a string".to_string())?;
+    let pkgconfig_relative = exports
+        .get("pkgConfig")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "manifest exports.pkgConfig must be a string".to_string())?;
     let header_path = package_dir.join(header_relative);
     let cdylib_path = package_dir.join(cdylib_relative);
     let staticlib_path = package_dir.join(staticlib_relative);
+    let pkgconfig_path = package_dir.join(pkgconfig_relative);
     let package_version = manifest
         .get("packageVersion")
         .and_then(serde_json::Value::as_str)
@@ -170,6 +182,7 @@ fn verify_capi_package(package_dir: &Path) -> Result<(), String> {
     assert_value(header_path.is_file(), "staged header is missing")?;
     assert_value(cdylib_path.is_file(), "staged cdylib is missing")?;
     assert_value(staticlib_path.is_file(), "staged staticlib is missing")?;
+    assert_value(pkgconfig_path.is_file(), "staged pkg-config file is missing")?;
     assert_value(
         target.get("platform").and_then(serde_json::Value::as_str) == Some(env::consts::OS),
         "manifest target.platform is unexpected",
@@ -194,6 +207,24 @@ fn verify_capi_package(package_dir: &Path) -> Result<(), String> {
     assert_value(
         header.contains("terminal_capi_subscription_next_event_json"),
         "staged header is missing terminal_capi_subscription_next_event_json",
+    )?;
+    let pkgconfig = fs::read_to_string(&pkgconfig_path)
+        .map_err(|error| format!("failed to read {} - {error}", pkgconfig_path.display()))?;
+    assert_value(
+        pkgconfig.contains(&format!("Name: {CAPI_PKGCONFIG_NAME}")),
+        "staged pkg-config file is missing expected package name",
+    )?;
+    assert_value(
+        pkgconfig.contains(&format!("Version: {package_version}")),
+        "staged pkg-config file is missing expected package version",
+    )?;
+    assert_value(
+        pkgconfig.contains("Libs: -L${libdir} -lterminal_capi"),
+        "staged pkg-config file is missing expected linker flags",
+    )?;
+    assert_value(
+        pkgconfig.contains("Cflags: -I${includedir}"),
+        "staged pkg-config file is missing expected include flags",
     )?;
     Ok(())
 }
@@ -232,6 +263,14 @@ fn generate_header(capi_dir: &Path, header_path: &Path) -> Result<(), String> {
         .map_err(|error| format!("failed to generate c api header - {error}"))?;
     bindings.write_to_file(header_path);
     Ok(())
+}
+
+fn write_pkgconfig(pkgconfig_path: &Path, package_version: &str) -> Result<(), String> {
+    let payload = format!(
+        "prefix=${{pcfiledir}}/../..\nexec_prefix=${{prefix}}\nlibdir=${{exec_prefix}}/lib\nincludedir=${{prefix}}/include\n\nName: {CAPI_PKGCONFIG_NAME}\nDescription: Terminal platform C ABI package\nVersion: {package_version}\nLibs: -L${{libdir}} -l{CAPI_LIBRARY_BASENAME}\nCflags: -I${{includedir}}\n"
+    );
+    fs::write(pkgconfig_path, payload)
+        .map_err(|error| format!("failed to write {} - {error}", pkgconfig_path.display()))
 }
 
 fn locate_artifact(candidates: &[&str]) -> Result<PathBuf, String> {

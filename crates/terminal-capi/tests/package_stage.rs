@@ -56,10 +56,16 @@ async fn stages_and_verifies_terminal_capi_package() {
         .join(exports["cdylib"].as_str().expect("exports.cdylib should be a relative path"));
     let staticlib_path = stage_dir
         .join(exports["staticlib"].as_str().expect("exports.staticlib should be a relative path"));
+    let pkgconfig_path = stage_dir
+        .join(exports["pkgConfig"].as_str().expect("exports.pkgConfig should be a relative path"));
     let readme_path = stage_dir.join("README.md");
     let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/reference_consumer.c");
-    let binary_path = support::compile_reference_consumer(&source_path, &header_path, &cdylib_path)
-        .expect("reference consumer should compile against staged package");
+    let binary_path = support::compile_reference_consumer_with_pkg_config(
+        &source_path,
+        &stage_dir,
+        "terminal-platform-capi",
+    )
+    .expect("reference consumer should compile against staged package via pkg-config");
     let mut consumer = Command::new(&binary_path);
 
     support::configure_runtime_library_path(&mut consumer, &cdylib_path);
@@ -87,6 +93,7 @@ async fn stages_and_verifies_terminal_capi_package() {
     assert!(header_path.is_file(), "staged header should exist");
     assert!(cdylib_path.is_file(), "staged cdylib should exist");
     assert!(staticlib_path.is_file(), "staged staticlib should exist");
+    assert!(pkgconfig_path.is_file(), "staged pkg-config file should exist");
     assert!(readme_path.is_file(), "staged README should exist");
 
     fixture

@@ -62,6 +62,7 @@ Current shape:
 - checked-in `cbindgen.toml` plus tested header generation path
 - external C consumer smoke that compiles against the generated header and the built `cdylib`
 - `xtask` packaging lane for staging and verifying a local C package layout
+- staged C package now includes `pkg-config` metadata for conventional host integration
 
 ## Quality gates
 

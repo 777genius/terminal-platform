@@ -28,6 +28,7 @@ Current test coverage includes:
 - external C consumer smoke that compiles a real C program against the generated header and links to the built `cdylib`
 - external consumer coverage for native request/subscription flow and `tmux` discover/import flow
 - staged package smoke via `cargo run -p xtask -- stage-capi-package`
+- staged package emits `pkg-config` metadata for standard C consumer integration
 
 ## Local verification
 
@@ -43,6 +44,14 @@ Stage and verify a local C package layout:
 cargo run -p xtask -- stage-capi-package --out ./crates/terminal-capi/artifacts/local
 cargo run -p xtask -- verify-capi-package --package-dir ./crates/terminal-capi/artifacts/local
 ```
+
+The staged package now includes:
+
+- `include/terminal-platform-capi.h`
+- `lib/<dynamic library>`
+- `lib/<static library>`
+- `lib/pkgconfig/terminal-platform-capi.pc`
+- `manifest.json`
 
 Full workspace quality gates:
 
