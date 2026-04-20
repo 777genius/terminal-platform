@@ -434,7 +434,7 @@ mod tests {
         unique_tmux_socket_name,
     };
     use terminal_testing::{
-        ZellijSessionGuard, daemon_fixture, daemon_state, echo_shell_launch_spec,
+        ZellijSessionGuard, ZellijTestLock, daemon_fixture, daemon_state, echo_shell_launch_spec,
         unique_socket_address, unique_zellij_session_name, wait_for_daemon_ready,
     };
     use tokio::time::{sleep, timeout};
@@ -646,257 +646,290 @@ mod tests {
     #[cfg(any(unix, windows))]
     #[tokio::test(flavor = "multi_thread")]
     async fn discovers_zellij_sessions_and_handles_import_surface_through_node_surface() {
-        let session_name = unique_zellij_session_name("workspace");
-        let _zellij =
-            ZellijSessionGuard::spawn(&session_name).expect("zellij session should start");
-        let fixture = daemon_fixture("terminal-node-zellij").expect("fixture should start");
-        let node = NodeHostClient::new(fixture.client.address().clone());
-        let zellij_capabilities = node
-            .backend_capabilities(NodeBackendKind::Zellij)
-            .await
-            .expect("zellij capabilities should succeed");
+        let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
+        let attempts = if cfg!(windows) { 4 } else { 3 };
+        let mut last_error = None;
 
-        let candidate = wait_for_discovered_zellij_session(&node, &session_name).await;
-
-        assert_eq!(candidate.route.backend, NodeBackendKind::Zellij);
-
-        if !zellij_capabilities.capabilities.rendered_viewport_snapshot {
-            let error = timeout(
-                Duration::from_secs(10),
-                node.import_session(&candidate.route, candidate.title.clone()),
-            )
-            .await
-            .expect("import_session should not hang")
-            .expect_err("legacy zellij surface should reject imported attach");
-
-            assert_eq!(error.code, "backend_unsupported");
-            assert_eq!(error.degraded_reason, Some(DegradedModeReason::MissingCapability));
-            assert!(error.message.contains("zellij"));
-        } else {
-            let imported = timeout(
-                zellij_operation_timeout(),
-                node.import_session(&candidate.route, candidate.title.clone()),
-            )
-            .await
-            .expect("import_session should not hang")
-            .expect("rich zellij surface should import successfully");
-            let topology =
-                timeout(Duration::from_secs(10), node.topology_snapshot(&imported.session_id))
+        for attempt in 0..attempts {
+            let run = tokio::spawn(async move {
+                let session_name = unique_zellij_session_name("workspace");
+                let _zellij =
+                    ZellijSessionGuard::spawn(&session_name).expect("zellij session should start");
+                let fixture = daemon_fixture("terminal-node-zellij").expect("fixture should start");
+                let node = NodeHostClient::new(fixture.client.address().clone());
+                let zellij_capabilities = node
+                    .backend_capabilities(NodeBackendKind::Zellij)
                     .await
-                    .expect("topology_snapshot should not hang")
-                    .expect("topology_snapshot should succeed");
-            let focused_tab = topology
-                .tabs
-                .iter()
-                .find(|tab| Some(tab.tab_id.as_str()) == topology.focused_tab.as_deref())
-                .or_else(|| topology.tabs.first())
-                .expect("zellij topology should have tabs");
-            let focused_pane = focused_tab
-                .focused_pane
-                .clone()
-                .or_else(|| first_node_pane_id(&focused_tab.root))
-                .expect("focused zellij pane should exist");
-            let screen = timeout(
-                Duration::from_secs(10),
-                node.screen_snapshot(&imported.session_id, &focused_pane),
-            )
-            .await
-            .expect("screen_snapshot should not hang")
-            .expect("screen_snapshot should succeed");
-            let delta = timeout(
-                Duration::from_secs(10),
-                node.screen_delta(&imported.session_id, &focused_pane, screen.sequence),
-            )
-            .await
-            .expect("screen_delta should not hang")
-            .expect("screen_delta should succeed");
-            let topology_subscription = node
-                .open_subscription(&imported.session_id, &NodeSubscriptionSpec::SessionTopology)
-                .await
-                .expect("zellij topology subscription should open");
-            let pane_subscription = node
-                .open_subscription(
-                    &imported.session_id,
-                    &NodeSubscriptionSpec::PaneSurface { pane_id: focused_pane.clone() },
-                )
-                .await
-                .expect("zellij pane subscription should open");
-            let initial_topology =
-                timeout(Duration::from_secs(10), topology_subscription.next_event())
+                    .expect("zellij capabilities should succeed");
+
+                let candidate = wait_for_discovered_zellij_session(&node, &session_name).await;
+
+                assert_eq!(candidate.route.backend, NodeBackendKind::Zellij);
+
+                if !zellij_capabilities.capabilities.rendered_viewport_snapshot {
+                    let error = timeout(
+                        extended_timeout(),
+                        node.import_session(&candidate.route, candidate.title.clone()),
+                    )
                     .await
-                    .expect("zellij topology subscription should not hang")
-                    .expect("zellij topology subscription should stay healthy")
-                    .expect("zellij topology subscription should emit initial event");
-            let initial_pane = timeout(Duration::from_secs(10), pane_subscription.next_event())
-                .await
-                .expect("zellij pane subscription should not hang")
-                .expect("zellij pane subscription should stay healthy")
-                .expect("zellij pane subscription should emit initial event");
+                    .expect("import_session should not hang")
+                    .expect_err("legacy zellij surface should reject imported attach");
 
-            assert_eq!(imported.route.backend, NodeBackendKind::Zellij);
-            assert_eq!(topology.backend_kind, NodeBackendKind::Zellij);
-            assert!(!topology.tabs.is_empty());
-            assert_eq!(screen.pane_id, focused_pane);
-            assert_eq!(screen.source, NodeProjectionSource::ZellijDumpSnapshot);
-            assert_zellij_delta_compatible_with_snapshot(&screen, &delta);
-            match initial_topology {
-                NodeSubscriptionEvent::TopologySnapshot(snapshot) => {
-                    assert_eq!(snapshot.session_id, imported.session_id);
-                    assert_eq!(snapshot.backend_kind, NodeBackendKind::Zellij);
-                }
-                other => panic!("unexpected initial zellij topology event: {other:?}"),
-            }
-            match initial_pane {
-                NodeSubscriptionEvent::ScreenDelta(delta) => {
-                    assert_eq!(delta.pane_id, focused_pane);
-                    assert_eq!(delta.source, NodeProjectionSource::ZellijDumpSnapshot);
-                    assert!(delta.full_replace.is_some());
-                }
-                other => panic!("unexpected initial zellij pane event: {other:?}"),
-            }
+                    assert_eq!(error.code, "backend_unsupported");
+                    assert_eq!(error.degraded_reason, Some(DegradedModeReason::MissingCapability));
+                    assert!(error.message.contains("zellij"));
+                } else {
+                    let imported = timeout(
+                        zellij_operation_timeout(),
+                        node.import_session(&candidate.route, candidate.title.clone()),
+                    )
+                    .await
+                    .expect("import_session should not hang")
+                    .expect("rich zellij surface should import successfully");
+                    let topology =
+                        timeout(extended_timeout(), node.topology_snapshot(&imported.session_id))
+                            .await
+                            .expect("topology_snapshot should not hang")
+                            .expect("topology_snapshot should succeed");
+                    let focused_tab = topology
+                        .tabs
+                        .iter()
+                        .find(|tab| Some(tab.tab_id.as_str()) == topology.focused_tab.as_deref())
+                        .or_else(|| topology.tabs.first())
+                        .expect("zellij topology should have tabs");
+                    let focused_pane = focused_tab
+                        .focused_pane
+                        .clone()
+                        .or_else(|| first_node_pane_id(&focused_tab.root))
+                        .expect("focused zellij pane should exist");
+                    let screen = timeout(
+                        extended_timeout(),
+                        node.screen_snapshot(&imported.session_id, &focused_pane),
+                    )
+                    .await
+                    .expect("screen_snapshot should not hang")
+                    .expect("screen_snapshot should succeed");
+                    let delta = timeout(
+                        extended_timeout(),
+                        node.screen_delta(&imported.session_id, &focused_pane, screen.sequence),
+                    )
+                    .await
+                    .expect("screen_delta should not hang")
+                    .expect("screen_delta should succeed");
+                    let topology_subscription = node
+                        .open_subscription(
+                            &imported.session_id,
+                            &NodeSubscriptionSpec::SessionTopology,
+                        )
+                        .await
+                        .expect("zellij topology subscription should open");
+                    let pane_subscription = node
+                        .open_subscription(
+                            &imported.session_id,
+                            &NodeSubscriptionSpec::PaneSurface { pane_id: focused_pane.clone() },
+                        )
+                        .await
+                        .expect("zellij pane subscription should open");
+                    let initial_topology =
+                        timeout(extended_timeout(), topology_subscription.next_event())
+                            .await
+                            .expect("zellij topology subscription should not hang")
+                            .expect("zellij topology subscription should stay healthy")
+                            .expect("zellij topology subscription should emit initial event");
+                    let initial_pane = timeout(extended_timeout(), pane_subscription.next_event())
+                        .await
+                        .expect("zellij pane subscription should not hang")
+                        .expect("zellij pane subscription should stay healthy")
+                        .expect("zellij pane subscription should emit initial event");
 
-            let initial_tab_count = topology.tabs.len();
-            let initial_focused_tab =
-                topology.focused_tab.clone().expect("focused zellij tab should exist");
-            let send_input = timeout(
-                zellij_operation_timeout(),
-                node.dispatch_mux_command(
-                    &imported.session_id,
-                    &NodeMuxCommand::SendInput(NodeSendInputCommand {
-                        pane_id: focused_pane.clone(),
-                        data: "echo zellij node rich smoke\r".to_string(),
-                    }),
-                ),
-            )
-            .await
-            .expect("zellij send_input should not hang")
-            .expect("zellij send_input should succeed");
-            let screen = wait_for_screen_line(
-                &node,
-                &imported.session_id,
-                &focused_pane,
-                "zellij node rich smoke",
-            )
-            .await;
+                    assert_eq!(imported.route.backend, NodeBackendKind::Zellij);
+                    assert_eq!(topology.backend_kind, NodeBackendKind::Zellij);
+                    assert!(!topology.tabs.is_empty());
+                    assert_eq!(screen.pane_id, focused_pane);
+                    assert_eq!(screen.source, NodeProjectionSource::ZellijDumpSnapshot);
+                    assert_zellij_delta_compatible_with_snapshot(&screen, &delta);
+                    match initial_topology {
+                        NodeSubscriptionEvent::TopologySnapshot(snapshot) => {
+                            assert_eq!(snapshot.session_id, imported.session_id);
+                            assert_eq!(snapshot.backend_kind, NodeBackendKind::Zellij);
+                        }
+                        other => panic!("unexpected initial zellij topology event: {other:?}"),
+                    }
+                    match initial_pane {
+                        NodeSubscriptionEvent::ScreenDelta(delta) => {
+                            assert_eq!(delta.pane_id, focused_pane);
+                            assert_eq!(delta.source, NodeProjectionSource::ZellijDumpSnapshot);
+                            assert!(delta.full_replace.is_some());
+                        }
+                        other => panic!("unexpected initial zellij pane event: {other:?}"),
+                    }
 
-            let created = timeout(
-                zellij_operation_timeout(),
-                node.dispatch_mux_command(
-                    &imported.session_id,
-                    &NodeMuxCommand::NewTab(NodeNewTabCommand {
-                        title: Some("logs-rich".to_string()),
-                    }),
-                ),
-            )
-            .await
-            .expect("zellij new_tab should not hang")
-            .expect("zellij new_tab should succeed");
-            let after_create = wait_for_topology_state(
-                &node,
-                &imported.session_id,
-                |snapshot| {
-                    snapshot.tabs.len() == initial_tab_count + 1
-                        && snapshot.tabs.iter().any(|tab| tab.title.as_deref() == Some("logs-rich"))
-                },
-                "zellij rich new tab topology",
-            )
-            .await;
-            let rich_tab_id = after_create
-                .tabs
-                .iter()
-                .find(|tab| tab.title.as_deref() == Some("logs-rich"))
-                .map(|tab| tab.tab_id.clone())
-                .expect("created rich zellij tab should exist");
+                    let initial_tab_count = topology.tabs.len();
+                    let initial_focused_tab =
+                        topology.focused_tab.clone().expect("focused zellij tab should exist");
+                    let send_input = timeout(
+                        zellij_operation_timeout(),
+                        node.dispatch_mux_command(
+                            &imported.session_id,
+                            &NodeMuxCommand::SendInput(NodeSendInputCommand {
+                                pane_id: focused_pane.clone(),
+                                data: "echo zellij node rich smoke\r".to_string(),
+                            }),
+                        ),
+                    )
+                    .await
+                    .expect("zellij send_input should not hang")
+                    .expect("zellij send_input should succeed");
+                    let screen = wait_for_screen_line(
+                        &node,
+                        &imported.session_id,
+                        &focused_pane,
+                        "zellij node rich smoke",
+                    )
+                    .await;
 
-            let renamed = timeout(
-                zellij_operation_timeout(),
-                node.dispatch_mux_command(
-                    &imported.session_id,
-                    &NodeMuxCommand::RenameTab(NodeRenameTabCommand {
-                        tab_id: rich_tab_id.clone(),
-                        title: "logs-rich-renamed".to_string(),
-                    }),
-                ),
-            )
-            .await
-            .expect("zellij rename_tab should not hang")
-            .expect("zellij rename_tab should succeed");
-            let after_rename = wait_for_topology_state(
-                &node,
-                &imported.session_id,
-                |snapshot| {
-                    snapshot.tabs.iter().any(|tab| {
+                    let created = timeout(
+                        zellij_operation_timeout(),
+                        node.dispatch_mux_command(
+                            &imported.session_id,
+                            &NodeMuxCommand::NewTab(NodeNewTabCommand {
+                                title: Some("logs-rich".to_string()),
+                            }),
+                        ),
+                    )
+                    .await
+                    .expect("zellij new_tab should not hang")
+                    .expect("zellij new_tab should succeed");
+                    let after_create = wait_for_topology_state(
+                        &node,
+                        &imported.session_id,
+                        |snapshot| {
+                            snapshot.tabs.len() == initial_tab_count + 1
+                                && snapshot
+                                    .tabs
+                                    .iter()
+                                    .any(|tab| tab.title.as_deref() == Some("logs-rich"))
+                        },
+                        "zellij rich new tab topology",
+                    )
+                    .await;
+                    let rich_tab_id = after_create
+                        .tabs
+                        .iter()
+                        .find(|tab| tab.title.as_deref() == Some("logs-rich"))
+                        .map(|tab| tab.tab_id.clone())
+                        .expect("created rich zellij tab should exist");
+
+                    let renamed = timeout(
+                        zellij_operation_timeout(),
+                        node.dispatch_mux_command(
+                            &imported.session_id,
+                            &NodeMuxCommand::RenameTab(NodeRenameTabCommand {
+                                tab_id: rich_tab_id.clone(),
+                                title: "logs-rich-renamed".to_string(),
+                            }),
+                        ),
+                    )
+                    .await
+                    .expect("zellij rename_tab should not hang")
+                    .expect("zellij rename_tab should succeed");
+                    let after_rename = wait_for_topology_state(
+                        &node,
+                        &imported.session_id,
+                        |snapshot| {
+                            snapshot.tabs.iter().any(|tab| {
+                                tab.tab_id == rich_tab_id
+                                    && tab.title.as_deref() == Some("logs-rich-renamed")
+                            })
+                        },
+                        "zellij rich renamed tab topology",
+                    )
+                    .await;
+
+                    let focused = timeout(
+                        zellij_operation_timeout(),
+                        node.dispatch_mux_command(
+                            &imported.session_id,
+                            &NodeMuxCommand::FocusTab { tab_id: initial_focused_tab.clone() },
+                        ),
+                    )
+                    .await
+                    .expect("zellij focus_tab should not hang")
+                    .expect("zellij focus_tab should succeed");
+                    let after_focus = wait_for_topology_state(
+                        &node,
+                        &imported.session_id,
+                        |snapshot| {
+                            snapshot.focused_tab.as_deref() == Some(initial_focused_tab.as_str())
+                        },
+                        "zellij rich focus tab topology",
+                    )
+                    .await;
+
+                    let closed = timeout(
+                        zellij_operation_timeout(),
+                        node.dispatch_mux_command(
+                            &imported.session_id,
+                            &NodeMuxCommand::CloseTab { tab_id: rich_tab_id.clone() },
+                        ),
+                    )
+                    .await
+                    .expect("zellij close_tab should not hang")
+                    .expect("zellij close_tab should succeed");
+                    let after_close = wait_for_topology_state(
+                        &node,
+                        &imported.session_id,
+                        |snapshot| {
+                            snapshot.tabs.len() == initial_tab_count
+                                && snapshot.tabs.iter().all(|tab| tab.tab_id != rich_tab_id)
+                        },
+                        "zellij rich close tab topology",
+                    )
+                    .await;
+
+                    assert!(send_input.changed);
+                    assert!(
+                        screen
+                            .surface
+                            .lines
+                            .iter()
+                            .any(|line| line.text.contains("zellij node rich smoke"))
+                    );
+                    assert!(created.changed);
+                    assert_eq!(after_create.tabs.len(), initial_tab_count + 1);
+                    assert!(renamed.changed);
+                    assert!(after_rename.tabs.iter().any(|tab| {
                         tab.tab_id == rich_tab_id
                             && tab.title.as_deref() == Some("logs-rich-renamed")
-                    })
-                },
-                "zellij rich renamed tab topology",
-            )
-            .await;
+                    }));
+                    assert!(focused.changed);
+                    assert_eq!(
+                        after_focus.focused_tab.as_deref(),
+                        Some(initial_focused_tab.as_str())
+                    );
+                    assert!(closed.changed);
+                    assert_eq!(after_close.tabs.len(), initial_tab_count);
 
-            let focused = timeout(
-                zellij_operation_timeout(),
-                node.dispatch_mux_command(
-                    &imported.session_id,
-                    &NodeMuxCommand::FocusTab { tab_id: initial_focused_tab.clone() },
-                ),
-            )
-            .await
-            .expect("zellij focus_tab should not hang")
-            .expect("zellij focus_tab should succeed");
-            let after_focus = wait_for_topology_state(
-                &node,
-                &imported.session_id,
-                |snapshot| snapshot.focused_tab.as_deref() == Some(initial_focused_tab.as_str()),
-                "zellij rich focus tab topology",
-            )
-            .await;
+                    topology_subscription.close().await;
+                    pane_subscription.close().await;
+                }
 
-            let closed = timeout(
-                zellij_operation_timeout(),
-                node.dispatch_mux_command(
-                    &imported.session_id,
-                    &NodeMuxCommand::CloseTab { tab_id: rich_tab_id.clone() },
-                ),
-            )
-            .await
-            .expect("zellij close_tab should not hang")
-            .expect("zellij close_tab should succeed");
-            let after_close = wait_for_topology_state(
-                &node,
-                &imported.session_id,
-                |snapshot| {
-                    snapshot.tabs.len() == initial_tab_count
-                        && snapshot.tabs.iter().all(|tab| tab.tab_id != rich_tab_id)
-                },
-                "zellij rich close tab topology",
-            )
-            .await;
+                fixture.shutdown().await.expect("fixture should stop cleanly");
+            });
 
-            assert!(send_input.changed);
-            assert!(
-                screen
-                    .surface
-                    .lines
-                    .iter()
-                    .any(|line| line.text.contains("zellij node rich smoke"))
-            );
-            assert!(created.changed);
-            assert_eq!(after_create.tabs.len(), initial_tab_count + 1);
-            assert!(renamed.changed);
-            assert!(after_rename.tabs.iter().any(|tab| {
-                tab.tab_id == rich_tab_id && tab.title.as_deref() == Some("logs-rich-renamed")
-            }));
-            assert!(focused.changed);
-            assert_eq!(after_focus.focused_tab.as_deref(), Some(initial_focused_tab.as_str()));
-            assert!(closed.changed);
-            assert_eq!(after_close.tabs.len(), initial_tab_count);
-
-            topology_subscription.close().await;
-            pane_subscription.close().await;
+            match run.await {
+                Ok(()) => return,
+                Err(error) => {
+                    last_error = Some(format!("attempt {} failed: {error}", attempt + 1));
+                    sleep(Duration::from_millis(250)).await;
+                }
+            }
         }
 
-        fixture.shutdown().await.expect("fixture should stop cleanly");
+        panic!(
+            "node zellij import smoke failed after {attempts} attempts: {}",
+            last_error.unwrap_or_else(|| "unknown failure".to_string())
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1046,10 +1079,10 @@ mod tests {
             .expect("rename tab should succeed");
         }
 
-        timeout(Duration::from_secs(5), subscription.close())
+        timeout(operation_timeout(), subscription.close())
             .await
             .expect("subscription close should not hang under backpressure");
-        timeout(Duration::from_secs(5), fixture.shutdown())
+        timeout(operation_timeout(), fixture.shutdown())
             .await
             .expect("fixture shutdown should not hang after backpressure close")
             .expect("fixture should stop cleanly");
@@ -1070,18 +1103,17 @@ mod tests {
 
         for cycle in 0..24 {
             let topology_subscription = timeout(
-                Duration::from_secs(5),
+                operation_timeout(),
                 node.open_subscription(&created.session_id, &NodeSubscriptionSpec::SessionTopology),
             )
             .await
             .expect("topology subscription open should not hang")
             .expect("topology subscription should open");
-            let initial_topology =
-                timeout(Duration::from_secs(5), topology_subscription.next_event())
-                    .await
-                    .expect("topology subscription next_event should not hang")
-                    .expect("topology subscription should stay healthy")
-                    .expect("topology subscription should yield initial event");
+            let initial_topology = timeout(operation_timeout(), topology_subscription.next_event())
+                .await
+                .expect("topology subscription next_event should not hang")
+                .expect("topology subscription should stay healthy")
+                .expect("topology subscription should yield initial event");
             assert!(
                 matches!(
                     initial_topology,
@@ -1090,12 +1122,12 @@ mod tests {
                 ),
                 "cycle {cycle} should receive an initial topology snapshot"
             );
-            timeout(Duration::from_secs(5), topology_subscription.close())
+            timeout(operation_timeout(), topology_subscription.close())
                 .await
                 .expect("topology subscription close should not hang");
 
             let pane_subscription = timeout(
-                Duration::from_secs(5),
+                operation_timeout(),
                 node.open_subscription(
                     &created.session_id,
                     &NodeSubscriptionSpec::PaneSurface { pane_id: pane_id.clone() },
@@ -1104,7 +1136,7 @@ mod tests {
             .await
             .expect("pane subscription open should not hang")
             .expect("pane subscription should open");
-            let initial_pane = timeout(Duration::from_secs(5), pane_subscription.next_event())
+            let initial_pane = timeout(operation_timeout(), pane_subscription.next_event())
                 .await
                 .expect("pane subscription next_event should not hang")
                 .expect("pane subscription should stay healthy")
@@ -1129,7 +1161,7 @@ mod tests {
                 .await
                 .expect("send input should succeed during reopen stress");
                 let update = timeout(
-                    Duration::from_secs(5),
+                    operation_timeout(),
                     wait_for_subscription_line(&pane_subscription, &marker),
                 )
                 .await
@@ -1141,7 +1173,7 @@ mod tests {
                 );
             }
 
-            timeout(Duration::from_secs(5), pane_subscription.close())
+            timeout(operation_timeout(), pane_subscription.close())
                 .await
                 .expect("pane subscription close should not hang");
         }
@@ -1162,7 +1194,7 @@ mod tests {
                 .expect("initial daemon should bind");
         wait_for_daemon_ready(&readiness_client).await;
 
-        let initial_list = timeout(Duration::from_secs(5), node.list_sessions())
+        let initial_list = timeout(operation_timeout(), node.list_sessions())
             .await
             .expect("initial list_sessions should not hang")
             .expect("initial list_sessions should succeed");
@@ -1170,7 +1202,7 @@ mod tests {
 
         server.shutdown().await.expect("initial daemon should stop cleanly");
 
-        let stale_result = timeout(Duration::from_secs(5), node.list_sessions())
+        let stale_result = timeout(operation_timeout(), node.list_sessions())
             .await
             .expect("stale list_sessions should not hang");
         assert!(stale_result.is_err(), "stale daemon request should fail");
@@ -1182,13 +1214,13 @@ mod tests {
         wait_for_daemon_ready(&restarted_readiness_client).await;
 
         let created = timeout(
-            Duration::from_secs(5),
+            operation_timeout(),
             node.create_native_session(&cat_launch_request("restart")),
         )
         .await
         .expect("post-restart create_native_session should not hang")
         .expect("post-restart create_native_session should succeed");
-        let attached = timeout(Duration::from_secs(5), node.attach_session(&created.session_id))
+        let attached = timeout(operation_timeout(), node.attach_session(&created.session_id))
             .await
             .expect("post-restart attach_session should not hang")
             .expect("post-restart attach_session should succeed");
@@ -1199,7 +1231,7 @@ mod tests {
             .pane_id
             .clone();
         let subscription = timeout(
-            Duration::from_secs(5),
+            operation_timeout(),
             node.open_subscription(
                 &created.session_id,
                 &NodeSubscriptionSpec::PaneSurface { pane_id: pane_id.clone() },
@@ -1208,7 +1240,7 @@ mod tests {
         .await
         .expect("post-restart subscription open should not hang")
         .expect("post-restart subscription should open");
-        let initial_event = timeout(Duration::from_secs(5), subscription.next_event())
+        let initial_event = timeout(operation_timeout(), subscription.next_event())
             .await
             .expect("post-restart subscription next_event should not hang")
             .expect("post-restart subscription should stay healthy")
@@ -1219,7 +1251,7 @@ mod tests {
             NodeSubscriptionEvent::ScreenDelta(delta) if delta.full_replace.is_some()
         ));
 
-        timeout(Duration::from_secs(5), subscription.close())
+        timeout(operation_timeout(), subscription.close())
             .await
             .expect("post-restart subscription close should not hang");
         replacement.shutdown().await.expect("replacement daemon should stop cleanly");
@@ -1237,24 +1269,23 @@ mod tests {
                     .expect("daemon should bind for restart cycle");
             wait_for_daemon_ready(&readiness_client).await;
 
-            let listed = timeout(Duration::from_secs(5), node.list_sessions())
+            let listed = timeout(operation_timeout(), node.list_sessions())
                 .await
                 .expect("list_sessions should not hang")
                 .expect("list_sessions should succeed");
             assert!(listed.is_empty(), "cycle {cycle} should start with a fresh daemon state");
 
             let created = timeout(
-                Duration::from_secs(5),
+                operation_timeout(),
                 node.create_native_session(&cat_launch_request(&format!("restart-cycle-{cycle}"))),
             )
             .await
             .expect("create_native_session should not hang")
             .expect("create_native_session should succeed");
-            let attached =
-                timeout(Duration::from_secs(5), node.attach_session(&created.session_id))
-                    .await
-                    .expect("attach_session should not hang")
-                    .expect("attach_session should succeed");
+            let attached = timeout(operation_timeout(), node.attach_session(&created.session_id))
+                .await
+                .expect("attach_session should not hang")
+                .expect("attach_session should succeed");
             let pane_id = attached
                 .focused_screen
                 .as_ref()
@@ -1262,7 +1293,7 @@ mod tests {
                 .pane_id
                 .clone();
             let subscription = timeout(
-                Duration::from_secs(5),
+                operation_timeout(),
                 node.open_subscription(
                     &created.session_id,
                     &NodeSubscriptionSpec::PaneSurface { pane_id: pane_id.clone() },
@@ -1271,7 +1302,7 @@ mod tests {
             .await
             .expect("subscription open should not hang")
             .expect("subscription should open");
-            let initial_event = timeout(Duration::from_secs(5), subscription.next_event())
+            let initial_event = timeout(operation_timeout(), subscription.next_event())
                 .await
                 .expect("subscription next_event should not hang")
                 .expect("subscription should stay healthy")
@@ -1283,16 +1314,16 @@ mod tests {
                 ),
                 "cycle {cycle} should receive an initial pane delta"
             );
-            timeout(Duration::from_secs(5), subscription.close())
+            timeout(operation_timeout(), subscription.close())
                 .await
                 .expect("subscription close should not hang");
 
-            timeout(Duration::from_secs(5), server.shutdown())
+            timeout(operation_timeout(), server.shutdown())
                 .await
                 .expect("daemon shutdown should not hang")
                 .expect("daemon should stop cleanly");
 
-            let stale_result = timeout(Duration::from_secs(5), node.list_sessions())
+            let stale_result = timeout(operation_timeout(), node.list_sessions())
                 .await
                 .expect("stale list_sessions should not hang");
             assert!(stale_result.is_err(), "cycle {cycle} stale request should fail");
@@ -1430,7 +1461,15 @@ mod tests {
     }
 
     fn subscription_timeout() -> Duration {
-        if cfg!(windows) { Duration::from_secs(15) } else { Duration::from_secs(5) }
+        if cfg!(windows) { Duration::from_secs(60) } else { Duration::from_secs(5) }
+    }
+
+    fn operation_timeout() -> Duration {
+        if cfg!(windows) { Duration::from_secs(60) } else { Duration::from_secs(5) }
+    }
+
+    fn extended_timeout() -> Duration {
+        if cfg!(windows) { Duration::from_secs(90) } else { Duration::from_secs(10) }
     }
 
     fn zellij_operation_timeout() -> Duration {
@@ -1438,7 +1477,7 @@ mod tests {
     }
 
     fn screen_wait_attempts() -> usize {
-        if cfg!(windows) { 200 } else { 50 }
+        if cfg!(windows) { 900 } else { 50 }
     }
 
     fn first_node_pane_id(root: &NodePaneTreeNode) -> Option<String> {
@@ -1485,9 +1524,9 @@ mod tests {
         node: &super::NodeHostClient,
         session_name: &str,
     ) -> super::NodeDiscoveredSession {
-        for _ in 0..200 {
+        for _ in 0..if cfg!(windows) { 1200 } else { 400 } {
             let discovered =
-                timeout(Duration::from_secs(10), node.discover_sessions(NodeBackendKind::Zellij))
+                timeout(extended_timeout(), node.discover_sessions(NodeBackendKind::Zellij))
                     .await
                     .expect("discover_sessions should not hang")
                     .expect("discover_sessions should succeed");

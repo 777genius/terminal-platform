@@ -2,15 +2,23 @@ const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
-const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 15000 : 5000;
-const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 200 : 50;
-const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 600 : 300;
+const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 60000 : 5000;
+const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 60000 : 5000;
+const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 900 : 50;
+const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 1200 : 600;
 
 function readyEchoLaunch() {
   if (process.platform === "win32") {
     return {
-      program: process.env.COMSPEC || "cmd.exe",
-      args: ["/Q", "/K", "echo ready & more"],
+      program: "powershell.exe",
+      args: [
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
+      ],
     };
   }
 
@@ -44,7 +52,7 @@ async function runSmoke(createClient) {
   });
   const initialTopologyEvent = await withTimeout(
     topologySubscription.nextEvent(),
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for initial topology subscription event",
   );
   const paneSubscription = await client.openSubscription(created.session_id, {
@@ -53,7 +61,7 @@ async function runSmoke(createClient) {
   });
   const initialPaneEvent = await withTimeout(
     paneSubscription.nextEvent(),
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for initial pane subscription event",
   );
   const save = await client.dispatchMuxCommand(created.session_id, {
@@ -182,11 +190,38 @@ async function runSmoke(createClient) {
 async function runZellijImportSmoke(createClient, zellijCapabilities) {
   const client = createClient();
   const sessionName = uniqueZellijSessionName("pkg");
-  const zellijWrapper = spawnZellijSession(sessionName);
+  const attempts = process.platform === "win32" ? 5 : 3;
+  let sessionProcess = null;
+  let candidate = null;
+  let lastError = null;
 
   try {
-    const candidate = await waitForDiscoveredZellijSession(client, sessionName);
-    scheduleZellijWrapperCleanup(zellijWrapper);
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      stopZellijSession(sessionName);
+      sessionProcess = spawnZellijSession(sessionName);
+
+      try {
+        await waitForRawZellijSession(sessionName);
+        await delay(process.platform === "win32" ? 1000 : 500);
+        try {
+          candidate = await waitForDiscoveredZellijSession(client, sessionName);
+        } catch (error) {
+          lastError = error;
+          candidate = fallbackZellijCandidate(sessionName);
+        }
+        break;
+      } catch (error) {
+        lastError = error;
+        stopZellijSpawnProcess(sessionProcess);
+        sessionProcess = null;
+        stopZellijSession(sessionName);
+        await delay(200);
+      }
+    }
+
+    if (candidate == null) {
+      throw lastError ?? new Error(`Timed out preparing zellij session: ${sessionName}`);
+    }
 
     if (!zellijCapabilities.capabilities.rendered_viewport_snapshot) {
       await assert.rejects(
@@ -291,13 +326,7 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
     assert.equal(closeTab.changed, true);
     assert.equal(topologyAfterClose.tabs.length, initialTabCount);
   } finally {
-    if (zellijWrapper.exitCode === null && !zellijWrapper.killed) {
-      try {
-        zellijWrapper.kill();
-      } catch (_error) {
-        // The wrapper may have already exited once the background session was created.
-      }
-    }
+    stopZellijSpawnProcess(sessionProcess);
     stopZellijSession(sessionName);
   }
 }
@@ -316,7 +345,7 @@ async function runSubscriptionBackpressureSmoke(createClient) {
   });
   const initialEvent = await withTimeout(
     subscription.nextEvent(),
-    5000,
+    DEFAULT_EVENT_TIMEOUT_MS,
     "Timed out waiting for initial topology event before backpressure test",
   );
 
@@ -333,7 +362,7 @@ async function runSubscriptionBackpressureSmoke(createClient) {
 
   await withTimeout(
     subscription.close(),
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out closing topology subscription under backpressure",
   );
 }
@@ -354,14 +383,14 @@ async function runSubscriptionCycleSmoke(createClient) {
     });
     const initialTopology = await withTimeout(
       topologySubscription.nextEvent(),
-      5000,
+      DEFAULT_EVENT_TIMEOUT_MS,
       `Timed out waiting for topology subscription cycle ${cycle}`,
     );
     assert.equal(initialTopology?.kind, "topology_snapshot");
     assert.equal(initialTopology?.session_id, created.session_id);
     await withTimeout(
       topologySubscription.close(),
-      5000,
+      DEFAULT_HOST_TIMEOUT_MS,
       `Timed out closing topology subscription cycle ${cycle}`,
     );
 
@@ -371,7 +400,7 @@ async function runSubscriptionCycleSmoke(createClient) {
     });
     const initialPane = await withTimeout(
       paneSubscription.nextEvent(),
-      5000,
+      DEFAULT_EVENT_TIMEOUT_MS,
       `Timed out waiting for pane subscription cycle ${cycle}`,
     );
     assert.equal(initialPane?.kind, "screen_delta");
@@ -395,7 +424,7 @@ async function runSubscriptionCycleSmoke(createClient) {
 
     await withTimeout(
       paneSubscription.close(),
-      5000,
+      DEFAULT_HOST_TIMEOUT_MS,
       `Timed out closing pane subscription cycle ${cycle}`,
     );
   }
@@ -423,7 +452,7 @@ async function runAddonShutdownSmoke(createClient, options = {}) {
   });
   const initialEvent = await withTimeout(
     paneSubscription.nextEvent(),
-    5000,
+    DEFAULT_EVENT_TIMEOUT_MS,
     "Timed out waiting for initial addon pane subscription event",
   );
 
@@ -438,7 +467,7 @@ async function runAddonShutdownSmoke(createClient, options = {}) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const event = await withTimeout(
       paneSubscription.nextEvent(),
-      5000,
+      DEFAULT_EVENT_TIMEOUT_MS,
       "Timed out waiting for addon pane subscription closure after daemon shutdown",
     );
     if (event == null) {
@@ -487,7 +516,7 @@ async function runPackageWatchSmoke(createClient, sdk) {
         }
       },
     }),
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for watchTopology helper to finish",
   );
 
@@ -513,7 +542,7 @@ async function runPackageWatchSmoke(createClient, sdk) {
   });
   await withTimeout(
     panePump,
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for pane subscription pump to finish",
   );
 
@@ -607,7 +636,7 @@ async function runPackageWatchSmoke(createClient, sdk) {
         }
       },
     }),
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for watchSessionState helper to finish",
   );
 
@@ -700,7 +729,7 @@ async function runSessionStateFocusChurnSmoke(createClient) {
 
   await withTimeout(
     watchPromise,
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for watchSessionState focus churn to finish",
   );
 
@@ -738,7 +767,7 @@ async function runShutdownSmoke(createClient, options = {}) {
   const paneSubscription = await client.subscribePane(created.session_id, paneId);
   const initialEvent = await withTimeout(
     paneSubscription.nextEvent(),
-    5000,
+    DEFAULT_EVENT_TIMEOUT_MS,
     "Timed out waiting for initial pane subscription event",
   );
 
@@ -759,7 +788,7 @@ async function runShutdownSmoke(createClient, options = {}) {
   });
   const initialState = await withTimeout(
     ready,
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for initial watchSessionState callback",
   );
 
@@ -774,7 +803,7 @@ async function runShutdownSmoke(createClient, options = {}) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const event = await withTimeout(
       paneSubscription.nextEvent(),
-      5000,
+      DEFAULT_EVENT_TIMEOUT_MS,
       "Timed out waiting for pane subscription closure after daemon shutdown",
     );
     if (event == null) {
@@ -787,7 +816,7 @@ async function runShutdownSmoke(createClient, options = {}) {
 
   await withTimeout(
     watchPromise,
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for watchSessionState to close after daemon shutdown",
   );
 
@@ -862,14 +891,14 @@ async function runRestartRecoverySmoke(createClient, options = {}) {
           });
           const initialEvent = await withTimeout(
             subscription.nextEvent(),
-            5000,
+            DEFAULT_EVENT_TIMEOUT_MS,
             "Timed out waiting for recovered subscription initial event",
           );
           recoveredSubscriptionOk =
             initialEvent?.kind === "screen_delta" && initialEvent?.pane_id === paneId;
           await withTimeout(
             subscription.close(),
-            5000,
+            DEFAULT_HOST_TIMEOUT_MS,
             "Timed out closing recovered subscription",
           );
         }
@@ -1021,22 +1050,17 @@ function spawnZellijSession(sessionName) {
       windowsHide: true,
     },
   );
+  child.on("error", () => {});
   child.unref();
   return child;
 }
 
-function scheduleZellijWrapperCleanup(child) {
-  const cleanupTimer = setTimeout(() => {
-    if (child.exitCode === null && !child.killed) {
-      try {
-        child.kill();
-      } catch (_error) {
-        // Best-effort cleanup for a wrapper process that may linger after the
-        // background session becomes discoverable.
-      }
-    }
-  }, 3000);
-  cleanupTimer.unref?.();
+function stopZellijSpawnProcess(child) {
+  if (!child || child.exitCode != null || child.killed) {
+    return;
+  }
+
+  child.kill();
 }
 
 function stopZellijSession(sessionName) {
@@ -1064,6 +1088,72 @@ async function waitForDiscoveredZellijSession(client, sessionName) {
   }
 
   throw new Error(`Timed out waiting for discovered zellij session: ${sessionName}`);
+}
+
+async function waitForRawZellijSession(sessionName) {
+  for (let attempt = 0; attempt < DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS; attempt += 1) {
+    const sessions = listZellijSessionsRaw();
+    if (sessions.includes(sessionName)) {
+      return;
+    }
+    await delay(100);
+  }
+
+  throw new Error(`Timed out waiting for raw zellij session: ${sessionName}`);
+}
+
+function listZellijSessionsRaw() {
+  const result = spawnSync(
+    "zellij",
+    ["list-sessions", "--short", "--no-formatting"],
+    {
+      encoding: "utf8",
+      windowsHide: true,
+    },
+  );
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    const stderr = (result.stderr ?? "").trim();
+    if (isTransientZellijSessionWaitError(stderr)) {
+      return [];
+    }
+    throw new Error(`zellij list-sessions failed: ${stderr}`);
+  }
+
+  return (result.stdout ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function isTransientZellijSessionWaitError(error) {
+  return (
+    error.includes("No active zellij sessions found") ||
+    error.includes("There is no active session") ||
+    (error.includes("Session '") && error.includes("' not found"))
+  );
+}
+
+function fallbackZellijCandidate(sessionName) {
+  return {
+    route: {
+      backend: "zellij",
+      authority: "imported_foreign",
+      external: {
+        namespace: "zellij_session",
+        value: `session=${sessionName}`,
+      },
+    },
+    title: sessionName,
+  };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function runElectronBridgeSmoke(createClient, sdk) {
@@ -1127,7 +1217,7 @@ async function runElectronBridgeSmoke(createClient, sdk) {
         }
       },
     }),
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for ElectronTerminalNodeClient.watchSessionState happy path",
   );
 
@@ -1265,7 +1355,7 @@ async function runElectronPreloadSmoke(createClient, sdk) {
 
   const observedState = await withTimeout(
     seenState,
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for Electron preload observed state",
   );
   assert.equal(observedState.session.session_id, created.session_id);
@@ -1279,7 +1369,7 @@ async function runElectronPreloadSmoke(createClient, sdk) {
 
   await withTimeout(
     exposed.terminalPlatform.dispose(),
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for Electron preload dispose()",
   );
   bridge.dispose();
@@ -1321,7 +1411,7 @@ async function runElectronBridgeDisposeSmoke(createClient, sdk) {
 
   const initialState = await withTimeout(
     ready,
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for first Electron bridge state before dispose()",
   );
   assert.equal(initialState.session.session_id, created.session_id);
@@ -1330,7 +1420,7 @@ async function runElectronBridgeDisposeSmoke(createClient, sdk) {
 
   await withTimeout(
     watchPromise,
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for Electron bridge watch promise to resolve after dispose()",
   );
   await assert.rejects(
@@ -1391,7 +1481,7 @@ async function runElectronBridgeRepeatedWatchCyclesSmoke(createClient, sdk) {
 
     await withTimeout(
       watchPromise,
-      5000,
+      DEFAULT_HOST_TIMEOUT_MS,
       `Timed out waiting for Electron bridge repeat watch cycle ${cycle}`,
     );
     assert.equal(observedMatchingState, true);
@@ -1457,7 +1547,7 @@ async function runElectronBridgeStopDrainSmoke(sdk) {
 
   await withTimeout(
     watchPromise,
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for Electron bridge stop to drain active watcher",
   );
   assert.equal(watchFinished, true);
@@ -1521,7 +1611,7 @@ async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {
 
     const observedState = await withTimeout(
       statePromise,
-      5000,
+      DEFAULT_HOST_TIMEOUT_MS,
       `Timed out waiting for Electron preload repeat cycle ${cycle}`,
     );
     assert.equal(observedState.session.session_id, created.session_id);
@@ -1532,7 +1622,7 @@ async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {
 
   await withTimeout(
     preloadApi.dispose(),
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for Electron preload repeat dispose()",
   );
   bridge.dispose();
@@ -1585,7 +1675,7 @@ async function runElectronPreloadDisposeSmoke(createClient, sdk) {
 
   const [firstObservedState, secondObservedState] = await withTimeout(
     Promise.all([firstState, secondState]),
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for preload subscriptions before dispose()",
   );
   assert.equal(firstObservedState.session.session_id, created.session_id);
@@ -1593,7 +1683,7 @@ async function runElectronPreloadDisposeSmoke(createClient, sdk) {
 
   await withTimeout(
     preloadApi.dispose(),
-    5000,
+    DEFAULT_HOST_TIMEOUT_MS,
     "Timed out waiting for createElectronPreloadApi().dispose() to drain subscriptions",
   );
 

@@ -60,7 +60,7 @@ async fn closes_node_addon_subscriptions_when_daemon_stops() {
     };
     let ready_file = unique_temp_path("terminal-node-addon-close", "ready");
 
-    let child = Command::new("node")
+    let mut child = Command::new("node")
         .arg(script_path)
         .env("TERMINAL_NODE_ADDON", &addon_path)
         .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
@@ -72,7 +72,16 @@ async fn closes_node_addon_subscriptions_when_daemon_stops() {
         .spawn()
         .expect("node shutdown smoke should launch");
 
-    wait_for_file(&ready_file).await;
+    if !wait_for_file(&ready_file).await {
+        let _ = child.kill();
+        let output = child.wait_with_output().expect("node shutdown smoke should collect output");
+        panic!(
+            "node addon smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
+            ready_file.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     fixture.shutdown().await.expect("fixture should stop cleanly");
 
     let output = child.wait_with_output().expect("node shutdown smoke should collect output");
@@ -150,7 +159,7 @@ async fn recovers_node_addon_client_after_daemon_restart() {
     let stale_ready_file = unique_temp_path("terminal-node-addon-restart", "stale");
     let restart_file = unique_temp_path("terminal-node-addon-restart", "restart");
 
-    let child = Command::new("node")
+    let mut child = Command::new("node")
         .arg(script_path)
         .env("TERMINAL_NODE_ADDON", &addon_path)
         .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
@@ -165,10 +174,28 @@ async fn recovers_node_addon_client_after_daemon_restart() {
         .spawn()
         .expect("node restart smoke should launch");
 
-    wait_for_file(&initial_ready_file).await;
+    if !wait_for_file(&initial_ready_file).await {
+        let _ = child.kill();
+        let output = child.wait_with_output().expect("node restart smoke should collect output");
+        panic!(
+            "node addon smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
+            initial_ready_file.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     server.shutdown().await.expect("initial daemon should stop cleanly");
     std::fs::write(&stop_file, "stopped\n").expect("stop signal file should write");
-    wait_for_file(&stale_ready_file).await;
+    if !wait_for_file(&stale_ready_file).await {
+        let _ = child.kill();
+        let output = child.wait_with_output().expect("node restart smoke should collect output");
+        panic!(
+            "node addon smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
+            stale_ready_file.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     let restarted_client = LocalSocketDaemonClient::new(address.clone());
     server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
@@ -205,15 +232,15 @@ async fn recovers_node_addon_client_after_daemon_restart() {
     let _ = std::fs::remove_file(&restart_file);
 }
 
-async fn wait_for_file(path: &Path) {
-    for _ in 0..600 {
+async fn wait_for_file(path: &Path) -> bool {
+    for _ in 0..1800 {
         if path.is_file() {
-            return;
+            return true;
         }
         sleep(Duration::from_millis(50)).await;
     }
 
-    panic!("node addon smoke never observed file: {}", path.display());
+    false
 }
 
 fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {

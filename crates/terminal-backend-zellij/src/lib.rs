@@ -34,8 +34,8 @@ use uuid::Uuid;
 const ZELLIJ_ROUTE_NAMESPACE: &str = "zellij_session";
 const ZELLIJ_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const ZELLIJ_TRANSIENT_RETRY_ATTEMPTS: usize = 4;
-const ZELLIJ_ACTION_SETTLE_ATTEMPTS: usize = 200;
-const ZELLIJ_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+const ZELLIJ_ACTION_SETTLE_ATTEMPTS: usize = 600;
+const ZELLIJ_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const ZELLIJ_COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone, Default)]

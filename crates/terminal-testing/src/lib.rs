@@ -2,6 +2,7 @@
 
 use std::{
     fs::{self, OpenOptions},
+    io::Write,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -10,7 +11,7 @@ use std::{
 use std::sync::Arc;
 #[cfg(any(unix, windows))]
 use std::{
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     thread,
     time::Duration,
 };
@@ -112,12 +113,14 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        let program = std::env::var("COMSPEC")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "cmd.exe".to_string());
-
-        ShellLaunchSpec::new(program).with_args(["/Q", "/K", "echo ready & more"])
+        ShellLaunchSpec::new("powershell.exe").with_args([
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
+        ])
     }
 }
 
@@ -220,47 +223,56 @@ pub struct ZellijSessionGuard {
 impl ZellijSessionGuard {
     pub fn spawn(session_name: &str) -> Result<Self, String> {
         let lock = ZellijTestLock::acquire()?;
-        let mut child = Command::new("zellij")
-            .args([
-                "attach",
-                "--create-background",
-                session_name,
-                "options",
-                "--default-layout",
-                "default",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| format!("failed to spawn zellij: {error}"))?;
-        let wait_result = wait_for_zellij_session(session_name);
-        if wait_result.is_ok() {
-            thread::spawn(move || {
-                thread::sleep(Duration::from_secs(3));
-                if let Ok(None) = child.try_wait() {
-                    let _ = child.kill();
-                }
-                let _ = child.wait_with_output();
-            });
-            return Ok(Self { session_name: session_name.to_string(), _lock: lock });
-        }
+        let _ = run_zellij(&["kill-session", session_name]);
+        let mut last_error = None;
 
-        if let Ok(None) = child.try_wait() {
-            let _ = child.kill();
-        }
-        let output = child
-            .wait_with_output()
-            .map_err(|error| format!("failed to collect zellij spawn output: {error}"))?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if !is_headless_zellij_spawn_error(&stderr) {
-                return Err(stderr.trim().to_string());
+        for _ in 0..if cfg!(windows) { 5 } else { 3 } {
+            let child = Command::new("zellij")
+                .args([
+                    "attach",
+                    "--create-background",
+                    session_name,
+                    "options",
+                    "--default-layout",
+                    "default",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|error| format!("failed to spawn zellij: {error}"))?;
+            let wait_result = wait_for_zellij_session(session_name);
+            if wait_result.is_ok() {
+                thread::sleep(if cfg!(windows) {
+                    Duration::from_millis(1000)
+                } else {
+                    Duration::from_millis(500)
+                });
+                drain_zellij_spawn_child(child);
+                return Ok(Self { session_name: session_name.to_string(), _lock: lock });
             }
+
+            let output = collect_zellij_spawn_output(child)
+                .map_err(|error| format!("failed to collect zellij spawn output: {error}"))?;
+            let wait_error = wait_result
+                .expect_err("wait_result should be an error once zellij session discovery fails");
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !is_headless_zellij_spawn_error(&stderr) && !stderr.trim().is_empty() {
+                    last_error = Some(stderr.trim().to_string());
+                } else {
+                    last_error = Some(wait_error);
+                }
+            } else {
+                last_error = Some(wait_error);
+            }
+
+            let _ = run_zellij(&["kill-session", session_name]);
+            thread::sleep(Duration::from_millis(200));
         }
 
-        Err(wait_result
-            .expect_err("wait_result should be an error once zellij session discovery fails"))
+        Err(last_error
+            .unwrap_or_else(|| format!("zellij session never stabilized for {session_name}")))
     }
 }
 
@@ -308,8 +320,21 @@ fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
 }
 
 #[cfg(any(unix, windows))]
+fn drain_zellij_spawn_child(child: Child) {
+    let _ = collect_zellij_spawn_output(child);
+}
+
+#[cfg(any(unix, windows))]
+fn collect_zellij_spawn_output(mut child: Child) -> std::io::Result<std::process::Output> {
+    if matches!(child.try_wait(), Ok(None)) {
+        let _ = child.kill();
+    }
+    child.wait_with_output()
+}
+
+#[cfg(any(unix, windows))]
 fn wait_for_zellij_session(session_name: &str) -> Result<(), String> {
-    let attempts = if cfg!(windows) { 600 } else { 200 };
+    let attempts = if cfg!(windows) { 1200 } else { 400 };
     for _ in 0..attempts {
         match run_zellij(&["list-sessions", "--short", "--no-formatting"]) {
             Ok(sessions) => {
@@ -345,11 +370,15 @@ impl ZellijTestLock {
         let path = std::env::temp_dir().join("terminal-platform-zellij-test.lock");
         for _ in 0..9000 {
             match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(file) => {
-                    drop(file);
+                Ok(mut file) => {
+                    writeln!(file, "pid={}", std::process::id())
+                        .map_err(|error| format!("failed to write zellij test lock: {error}"))?;
                     return Ok(Self { path });
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if clear_stale_zellij_test_lock(&path) {
+                        continue;
+                    }
                     thread::sleep(Duration::from_millis(100));
                 }
                 Err(error) => return Err(format!("failed to acquire zellij test lock: {error}")),
@@ -365,4 +394,52 @@ impl Drop for ZellijTestLock {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
     }
+}
+
+#[cfg(any(unix, windows))]
+fn clear_stale_zellij_test_lock(path: &PathBuf) -> bool {
+    let pid = fs::read_to_string(path).ok().and_then(parse_zellij_test_lock_pid);
+    if let Some(pid) = pid {
+        if pid == std::process::id() || !is_zellij_test_lock_pid_alive(pid) {
+            return fs::remove_file(path).is_ok();
+        }
+        return false;
+    }
+
+    false
+}
+
+#[cfg(any(unix, windows))]
+fn parse_zellij_test_lock_pid(contents: String) -> Option<u32> {
+    contents
+        .lines()
+        .find_map(|line| line.strip_prefix("pid="))
+        .and_then(|value| value.trim().parse::<u32>().ok())
+}
+
+#[cfg(unix)]
+fn is_zellij_test_lock_pid_alive(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(true)
+}
+
+#[cfg(windows)]
+fn is_zellij_test_lock_pid_alive(pid: u32) -> bool {
+    Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &format!(
+                "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}"
+            ),
+        ])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(true)
 }

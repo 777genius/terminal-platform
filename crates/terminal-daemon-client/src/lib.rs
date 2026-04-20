@@ -125,18 +125,25 @@ impl LocalSocketSubscription {
             request: SubscriptionRequest::Close,
         };
         let encoded_request = encode_json_frame(&request)?;
-        self.framed
-            .send(encoded_request)
-            .await
-            .map_err(|error| ProtocolError::io("send_failed", &error))?;
+        if let Err(error) = self.framed.send(encoded_request).await {
+            let error = ProtocolError::io("send_failed", &error);
+            if is_subscription_close_disconnect(&error) {
+                return Ok(());
+            }
+            return Err(error);
+        }
         loop {
-            let Some(frame) = self
-                .framed
-                .next()
-                .await
-                .transpose()
-                .map_err(|error| ProtocolError::io("receive_failed", &error))?
-            else {
+            let frame = match self.framed.next().await.transpose() {
+                Ok(frame) => frame,
+                Err(error) => {
+                    let error = ProtocolError::io("receive_failed", &error);
+                    if is_subscription_close_disconnect(&error) {
+                        break;
+                    }
+                    return Err(error);
+                }
+            };
+            let Some(frame) = frame else {
                 break;
             };
             let envelope = decode_json_frame::<SubscriptionEnvelope>(&frame)?;
@@ -153,6 +160,20 @@ impl LocalSocketSubscription {
 
         Ok(())
     }
+}
+
+fn is_subscription_close_disconnect(error: &ProtocolError) -> bool {
+    if !matches!(error.code.as_str(), "send_failed" | "receive_failed") {
+        return false;
+    }
+
+    let message = error.message.to_ascii_lowercase();
+    message.contains("broken pipe")
+        || message.contains("connection reset")
+        || message.contains("not connected")
+        || message.contains("unexpected eof")
+        || message.contains("the pipe is being closed")
+        || message.contains("the handle is invalid")
 }
 
 impl LocalSocketDaemonClient {
@@ -1546,6 +1567,34 @@ mod tests {
             .expect("subscription should close after server shutdown")
             .expect("recv should succeed");
         assert!(closed.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn closes_topology_subscription_lane_cleanly_after_server_shutdown() {
+        let address = unique_address("sub-close-down");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    ..CreateSessionSpec::default()
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+        let mut subscription = client
+            .open_subscription(created.session.session_id, SubscriptionSpec::SessionTopology)
+            .await
+            .expect("subscription should open");
+
+        let initial = must_recv_subscription_event(&mut subscription).await;
+        assert!(matches!(initial, SubscriptionEvent::TopologySnapshot(_)));
+
+        server.shutdown().await.expect("server shutdown should succeed");
+        subscription.close().await.expect("close should tolerate a shutdown transport disconnect");
     }
 
     #[cfg(unix)]
