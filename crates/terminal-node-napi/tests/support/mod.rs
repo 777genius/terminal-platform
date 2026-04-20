@@ -62,6 +62,71 @@ pub fn stage_node_package(addon_source: &Path) -> std::io::Result<PathBuf> {
     Ok(stage_dir)
 }
 
+pub fn verify_node_package(package_dir: &Path) -> std::io::Result<()> {
+    let script_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("package/scripts/verify-package.mjs");
+    let output = Command::new("node")
+        .arg(script_path)
+        .arg("--package-dir")
+        .arg(package_dir)
+        .output()
+        .expect("package verification should launch");
+
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "package verification failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    Ok(())
+}
+
+pub fn pack_node_package(package_dir: &Path) -> std::io::Result<PathBuf> {
+    let output = Command::new("npm")
+        .arg("pack")
+        .arg("--json")
+        .current_dir(package_dir)
+        .output()
+        .expect("npm pack should launch");
+
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "npm pack failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| {
+        std::io::Error::other(format!("failed to parse npm pack output - {error}"))
+    })?;
+    let filename = payload
+        .as_array()
+        .and_then(|items| items.first())
+        .and_then(|item| item.get("filename"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| std::io::Error::other("npm pack did not return a filename"))?;
+
+    Ok(package_dir.join(filename))
+}
+
+pub fn tar_list(archive_path: &Path) -> std::io::Result<Vec<String>> {
+    let output =
+        Command::new("tar").arg("-tf").arg(archive_path).output().expect("tar should launch");
+
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "tar listing failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).lines().map(ToOwned::to_owned).collect())
+}
+
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     unique_temp_path(prefix, "dir")
 }

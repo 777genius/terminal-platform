@@ -56,6 +56,7 @@ async function stagePackageManifest(outDir) {
   const templateManifestPath = path.join(packageDir, "package.json");
   const packageManifest = JSON.parse(await fs.readFile(templateManifestPath, "utf8"));
   packageManifest.version = await readCrateVersion();
+  delete packageManifest.scripts;
   await fs.writeFile(
     path.join(outDir, "package.json"),
     `${JSON.stringify(packageManifest, null, 2)}\n`,

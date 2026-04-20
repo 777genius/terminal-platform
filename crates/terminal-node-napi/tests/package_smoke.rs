@@ -11,10 +11,27 @@ async fn roundtrips_staged_package_through_cjs_and_esm() {
     let addon_path = support::locate_cdylib().expect("node addon should be built");
     let package_dir =
         support::stage_node_package(&addon_path).expect("package should stage successfully");
+    support::verify_node_package(&package_dir).expect("package should verify successfully");
+    let tarball_path = support::pack_node_package(&package_dir).expect("package should pack");
+    let archive_entries = support::tar_list(&tarball_path).expect("tarball should be readable");
     let (address_kind, address_value) = match fixture.client.address() {
         LocalSocketAddress::Namespaced(value) => ("namespaced", value.clone()),
         LocalSocketAddress::Filesystem(path) => ("filesystem", path.display().to_string()),
     };
+
+    for required_entry in [
+        "package/package.json",
+        "package/README.md",
+        "package/index.cjs",
+        "package/index.mjs",
+        "package/index.d.ts",
+        "package/native/terminal_node_napi.node",
+    ] {
+        assert!(
+            archive_entries.iter().any(|entry| entry == required_entry),
+            "tarball should contain {required_entry}"
+        );
+    }
 
     for script in ["package_smoke.cjs", "package_smoke.mjs"] {
         let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("tests/{script}"));

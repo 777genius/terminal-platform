@@ -15,7 +15,9 @@
   },
   "scripts": {
     "stage": "node ./scripts/stage-package.mjs",
-    "build:local": "node ./scripts/build-local-package.mjs"
+    "build:local": "node ./scripts/build-local-package.mjs",
+    "verify:layout": "node ./scripts/verify-package.mjs",
+    "pack:local": "node ./scripts/pack-local-package.mjs"
   },
   "files": [
     "README.md",
