@@ -1,4 +1,4 @@
-const { runSmoke } = require("./smoke_flow.cjs");
+const { runPackageWatchSmoke, runSmoke } = require("./smoke_flow.cjs");
 
 function createClient(sdk) {
   const kind = process.env.TERMINAL_NODE_ADDRESS_KIND;
@@ -18,6 +18,7 @@ function createClient(sdk) {
 async function main() {
   const sdk = require(process.env.TERMINAL_NODE_PACKAGE);
   await runSmoke(() => createClient(sdk));
+  await runPackageWatchSmoke(() => createClient(sdk));
 }
 
 main().catch((error) => {

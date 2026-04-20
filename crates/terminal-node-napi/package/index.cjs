@@ -140,6 +140,38 @@ class TerminalNodeSubscription {
     await this.#inner.close();
   }
 
+  async pump(options = {}) {
+    const { signal, onEvent } = options;
+
+    if (typeof onEvent !== "function") {
+      throw new TypeError("TerminalNodeSubscription.pump requires an onEvent callback");
+    }
+
+    const abortListener = () => {
+      void this.close();
+    };
+
+    if (signal) {
+      if (signal.aborted) {
+        await this.close();
+        return;
+      }
+
+      signal.addEventListener("abort", abortListener, { once: true });
+    }
+
+    try {
+      for await (const event of this) {
+        await onEvent(event);
+      }
+    } finally {
+      if (signal) {
+        signal.removeEventListener("abort", abortListener);
+      }
+      await this.close().catch(() => {});
+    }
+  }
+
   async *[Symbol.asyncIterator]() {
     try {
       while (true) {
@@ -267,6 +299,16 @@ class TerminalNodeClient {
       kind: "pane_surface",
       pane_id: paneId,
     });
+  }
+
+  async watchTopology(sessionId, options) {
+    const subscription = await this.subscribeTopology(sessionId);
+    return subscription.pump(options);
+  }
+
+  async watchPane(sessionId, paneId, options) {
+    const subscription = await this.subscribePane(sessionId, paneId);
+    return subscription.pump(options);
   }
 }
 

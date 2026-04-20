@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { runSmoke } = require("./smoke_flow.cjs");
+const { runPackageWatchSmoke, runSmoke } = require("./smoke_flow.cjs");
 
 function createClient(sdk) {
   const kind = process.env.TERMINAL_NODE_ADDRESS_KIND;
@@ -24,6 +24,7 @@ async function main() {
   const entrypoint = path.join(process.env.TERMINAL_NODE_PACKAGE, "index.mjs");
   const sdk = await import(pathToFileURL(entrypoint).href);
   await runSmoke(() => createClient(sdk));
+  await runPackageWatchSmoke(() => createClient(sdk));
 }
 
 main().catch((error) => {

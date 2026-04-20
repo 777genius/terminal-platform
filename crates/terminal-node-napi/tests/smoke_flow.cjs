@@ -126,6 +126,78 @@ async function runSmoke(createClient) {
   );
 }
 
+async function runPackageWatchSmoke(createClient) {
+  const client = createClient();
+  const created = await client.createNativeSession({
+    title: "node-package-watch",
+    launch: {
+      program: "/bin/sh",
+      args: ["-lc", "printf 'ready\\n'; exec cat"],
+    },
+  });
+  const attached = await client.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+
+  let dispatchedTopology = false;
+  const topologyEvents = [];
+  const topologyAbort = new AbortController();
+  await client.watchTopology(created.session_id, {
+    signal: topologyAbort.signal,
+    onEvent: async (event) => {
+      topologyEvents.push(event);
+      if (!dispatchedTopology && event.kind === "topology_snapshot") {
+        dispatchedTopology = true;
+        await client.dispatchMuxCommand(created.session_id, {
+          kind: "new_tab",
+          title: "watch",
+        });
+        return;
+      }
+
+      if (event.kind === "topology_snapshot" && event.tabs.length === 2) {
+        topologyAbort.abort();
+      }
+    },
+  });
+
+  const paneSubscription = await client.subscribePane(created.session_id, paneId);
+  const paneEvents = [];
+  const paneAbort = new AbortController();
+  const panePump = paneSubscription.pump({
+    signal: paneAbort.signal,
+    onEvent: async (event) => {
+      paneEvents.push(event);
+      if (
+        event.kind === "screen_delta" &&
+        deltaContainsText(event, "package watch input")
+      ) {
+        paneAbort.abort();
+      }
+    },
+  });
+  await client.dispatchMuxCommand(created.session_id, {
+    kind: "send_input",
+    pane_id: paneId,
+    data: "package watch input\r",
+  });
+  await panePump;
+
+  assert.equal(
+    topologyEvents.some(
+      (event) => event.kind === "topology_snapshot" && event.tabs.length === 2,
+    ),
+    true,
+  );
+  assert.equal(
+    paneEvents.some(
+      (event) =>
+        event.kind === "screen_delta" &&
+        deltaContainsText(event, "package watch input"),
+    ),
+    true,
+  );
+}
+
 async function waitForLine(client, sessionId, paneId, needle) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const snapshot = await client.screenSnapshot(sessionId, paneId);
@@ -152,6 +224,15 @@ async function waitForTopologyTabs(subscription, tabCount) {
   throw new Error(`Timed out waiting for topology with ${tabCount} tabs`);
 }
 
+function deltaContainsText(delta, needle) {
+  return (
+    delta.patch?.line_updates?.some((line) => line.line.text.includes(needle)) ||
+    delta.full_replace?.lines?.some((line) => line.text.includes(needle)) ||
+    false
+  );
+}
+
 module.exports = {
+  runPackageWatchSmoke,
   runSmoke,
 };

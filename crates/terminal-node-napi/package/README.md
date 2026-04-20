@@ -15,6 +15,7 @@ Current client surface includes:
 - foreign backend discovery and import for `tmux` and `Zellij`
 - topology snapshots, screen snapshots and screen deltas
 - live topology and pane subscriptions via async stream handles
+- `watchTopology` and `watchPane` helpers with `AbortSignal` cancellation
 - mux command dispatch for tabs, panes, input and save operations
 
 ## Local staging

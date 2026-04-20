@@ -73,6 +73,11 @@ export interface NativeBindingLoadOptions {
   addonPath?: string | undefined;
 }
 
+export interface TerminalNodeSubscriptionPumpOptions {
+  signal?: AbortSignal | null | undefined;
+  onEvent(event: NodeSubscriptionEvent): void | Promise<void>;
+}
+
 export interface NativeTargetDescriptor {
   platform: string;
   arch: string;
@@ -214,6 +219,15 @@ export declare class TerminalNodeClient
     sessionId: string,
     paneId: string,
   ): Promise<TerminalNodeSubscription>;
+  watchTopology(
+    sessionId: string,
+    options: TerminalNodeSubscriptionPumpOptions,
+  ): Promise<void>;
+  watchPane(
+    sessionId: string,
+    paneId: string,
+    options: TerminalNodeSubscriptionPumpOptions,
+  ): Promise<void>;
 }
 
 export declare class TerminalNodeSubscription
@@ -224,6 +238,7 @@ export declare class TerminalNodeSubscription
   get subscriptionId(): string;
   nextEvent(): Promise<NodeSubscriptionEvent | null>;
   close(): Promise<void>;
+  pump(options: TerminalNodeSubscriptionPumpOptions): Promise<void>;
   [Symbol.asyncIterator](): AsyncIterableIterator<NodeSubscriptionEvent>;
 }
 
