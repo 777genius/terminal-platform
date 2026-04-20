@@ -178,9 +178,8 @@ jobs:
           tool: cargo-fuzz@0.13.1
 
       - name: Run fuzz baseline
-        working-directory: fuzz
         run: |
-          cargo fuzz run protocol_frames -- -max_total_time=2
-          cargo fuzz run tmux_layout -- -max_total_time=2
-          cargo fuzz run zellij_surface -- -max_total_time=2
-          cargo fuzz run screen_delta -- -max_total_time=2
+          cargo fuzz run --fuzz-dir fuzz protocol_frames -- -max_total_time=2
+          cargo fuzz run --fuzz-dir fuzz tmux_layout -- -max_total_time=2
+          cargo fuzz run --fuzz-dir fuzz zellij_surface -- -max_total_time=2
+          cargo fuzz run --fuzz-dir fuzz screen_delta -- -max_total_time=2
