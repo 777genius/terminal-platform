@@ -132,6 +132,199 @@ function focusedPaneId(topology) {
   return focusedTab.focused_pane ?? firstPaneId(focusedTab.root);
 }
 
+function cloneScreenCursor(cursor) {
+  return cursor ? { row: cursor.row, col: cursor.col } : null;
+}
+
+function cloneExternalSessionRef(external) {
+  return external
+    ? { namespace: external.namespace, value: external.value }
+    : null;
+}
+
+function cloneSessionRoute(route) {
+  return {
+    backend: route.backend,
+    authority: route.authority,
+    external: cloneExternalSessionRef(route.external),
+  };
+}
+
+function cloneSessionSummary(session) {
+  return {
+    session_id: session.session_id,
+    route: cloneSessionRoute(session.route),
+    title: session.title ?? null,
+  };
+}
+
+function cloneScreenLine(line) {
+  return { text: line.text };
+}
+
+function cloneScreenSurface(surface) {
+  return {
+    title: surface.title ?? null,
+    cursor: cloneScreenCursor(surface.cursor),
+    lines: Array.isArray(surface.lines) ? surface.lines.map(cloneScreenLine) : [],
+  };
+}
+
+function cloneScreenSnapshot(snapshot) {
+  return {
+    pane_id: snapshot.pane_id,
+    sequence: snapshot.sequence,
+    rows: snapshot.rows,
+    cols: snapshot.cols,
+    source: snapshot.source,
+    surface: cloneScreenSurface(snapshot.surface),
+  };
+}
+
+function clonePaneTreeNode(node) {
+  if (!node) {
+    return null;
+  }
+
+  if (node.kind === "leaf") {
+    return { kind: "leaf", pane_id: node.pane_id };
+  }
+
+  return {
+    kind: "split",
+    direction: node.direction,
+    first: clonePaneTreeNode(node.first),
+    second: clonePaneTreeNode(node.second),
+  };
+}
+
+function cloneTopologySnapshot(topology) {
+  return {
+    session_id: topology.session_id,
+    backend_kind: topology.backend_kind,
+    focused_tab: topology.focused_tab ?? null,
+    tabs: Array.isArray(topology.tabs)
+      ? topology.tabs.map((tab) => ({
+          tab_id: tab.tab_id,
+          title: tab.title ?? null,
+          root: clonePaneTreeNode(tab.root),
+          focused_pane: tab.focused_pane ?? null,
+        }))
+      : [],
+  };
+}
+
+function cloneSessionState(state) {
+  return {
+    session: cloneSessionSummary(state.session),
+    topology: cloneTopologySnapshot(state.topology),
+    focusedScreen: state.focusedScreen ? cloneScreenSnapshot(state.focusedScreen) : null,
+  };
+}
+
+function createSessionState(attached) {
+  return {
+    session: cloneSessionSummary(attached.session),
+    topology: cloneTopologySnapshot(attached.topology),
+    focusedScreen: attached.focused_screen
+      ? cloneScreenSnapshot(attached.focused_screen)
+      : null,
+  };
+}
+
+function applyScreenDelta(snapshot, delta) {
+  if (delta.full_replace) {
+    return {
+      pane_id: delta.pane_id,
+      sequence: delta.to_sequence,
+      rows: delta.rows,
+      cols: delta.cols,
+      source: delta.source,
+      surface: cloneScreenSurface(delta.full_replace),
+    };
+  }
+
+  if (!snapshot) {
+    throw new Error(
+      `terminal-node cannot apply patch delta for pane ${delta.pane_id} without a base snapshot`,
+    );
+  }
+
+  if (snapshot.pane_id !== delta.pane_id) {
+    throw new Error(
+      `terminal-node delta pane mismatch. Expected ${snapshot.pane_id}, got ${delta.pane_id}`,
+    );
+  }
+
+  const next = cloneScreenSnapshot(snapshot);
+  next.sequence = delta.to_sequence;
+  next.rows = delta.rows;
+  next.cols = delta.cols;
+  next.source = delta.source;
+
+  if (!delta.patch) {
+    return next;
+  }
+
+  if (delta.patch.title_changed) {
+    next.surface.title = delta.patch.title ?? null;
+  }
+
+  if (delta.patch.cursor_changed) {
+    next.surface.cursor = cloneScreenCursor(delta.patch.cursor);
+  }
+
+  for (const update of delta.patch.line_updates ?? []) {
+    while (next.surface.lines.length <= update.row) {
+      next.surface.lines.push({ text: "" });
+    }
+    next.surface.lines[update.row] = cloneScreenLine(update.line);
+  }
+
+  return next;
+}
+
+function reduceSessionWatchEvent(state, event) {
+  if (!state) {
+    if (event.kind !== "attached") {
+      throw new Error(
+        `terminal-node session state requires an initial attached event, got ${event.kind}`,
+      );
+    }
+    return createSessionState(event.attached);
+  }
+
+  switch (event.kind) {
+    case "attached":
+      return createSessionState(event.attached);
+    case "topology_snapshot": {
+      const nextFocusedPaneId = focusedPaneId(event.topology);
+      const nextFocusedScreen =
+        state.focusedScreen && state.focusedScreen.pane_id === nextFocusedPaneId
+          ? cloneScreenSnapshot(state.focusedScreen)
+          : null;
+
+      return {
+        session: cloneSessionSummary(state.session),
+        topology: cloneTopologySnapshot(event.topology),
+        focusedScreen: nextFocusedScreen,
+      };
+    }
+    case "focused_screen":
+      return {
+        ...cloneSessionState(state),
+        focusedScreen: cloneScreenSnapshot(event.screen),
+      };
+    case "screen_delta":
+      return {
+        ...cloneSessionState(state),
+        focusedScreen: applyScreenDelta(state.focusedScreen, event.delta),
+      };
+    default:
+      throw new Error(`terminal-node received unsupported session watch event: ${event.kind}`);
+  }
+}
+
 class TerminalNodeSubscription {
   #inner;
   #closed;
@@ -421,10 +614,38 @@ class TerminalNodeClient {
       await stopPane();
     }
   }
+
+  async watchSessionState(sessionId, options = {}) {
+    const { signal, onState } = options;
+
+    if (typeof onState !== "function") {
+      throw new TypeError("TerminalNodeClient.watchSessionState requires an onState callback");
+    }
+
+    let state = null;
+
+    await this.watchSession(sessionId, {
+      signal,
+      onEvent: async (event) => {
+        state = reduceSessionWatchEvent(state, event);
+        if (
+          event.kind === "topology_snapshot" &&
+          focusedPaneId(event.topology) &&
+          !state.focusedScreen
+        ) {
+          return;
+        }
+        await onState(cloneSessionState(state));
+      },
+    });
+  }
 }
 
 module.exports = {
+  applyScreenDelta,
+  createSessionState,
   loadNativeBinding,
+  reduceSessionWatchEvent,
   resolveNativeBindingPath,
   TerminalNodeClient,
   TerminalNodeSubscription,

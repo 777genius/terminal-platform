@@ -24,7 +24,7 @@ async function main() {
   const entrypoint = path.join(process.env.TERMINAL_NODE_PACKAGE, "index.mjs");
   const sdk = await import(pathToFileURL(entrypoint).href);
   await runSmoke(() => createClient(sdk));
-  await runPackageWatchSmoke(() => createClient(sdk));
+  await runPackageWatchSmoke(() => createClient(sdk), sdk);
 }
 
 main().catch((error) => {

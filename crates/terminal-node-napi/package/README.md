@@ -17,6 +17,7 @@ Current client surface includes:
 - live topology and pane subscriptions via async stream handles
 - `watchTopology` and `watchPane` helpers with `AbortSignal` cancellation
 - `watchSession` helper that follows topology plus focused pane updates
+- `watchSessionState` plus pure state reducers for render-ready session state
 - mux command dispatch for tabs, panes, input and save operations
 
 ## Local staging

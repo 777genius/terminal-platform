@@ -18,7 +18,7 @@ function createClient(sdk) {
 async function main() {
   const sdk = require(process.env.TERMINAL_NODE_PACKAGE);
   await runSmoke(() => createClient(sdk));
-  await runPackageWatchSmoke(() => createClient(sdk));
+  await runPackageWatchSmoke(() => createClient(sdk), sdk);
 }
 
 main().catch((error) => {

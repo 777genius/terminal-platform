@@ -89,6 +89,17 @@ export interface TerminalNodeSessionWatchOptions {
   onEvent(event: TerminalNodeSessionWatchEvent): void | Promise<void>;
 }
 
+export interface TerminalNodeSessionState {
+  session: NodeSessionSummary;
+  topology: NodeTopologySnapshot;
+  focusedScreen: NodeScreenSnapshot | null;
+}
+
+export interface TerminalNodeSessionStateWatchOptions {
+  signal?: AbortSignal | null | undefined;
+  onState(state: TerminalNodeSessionState): void | Promise<void>;
+}
+
 export interface NativeTargetDescriptor {
   platform: string;
   arch: string;
@@ -167,6 +178,20 @@ export declare function loadNativeBinding(
   options?: NativeBindingLoadOptions,
 ): NativeBindingModule;
 
+export declare function createSessionState(
+  attached: NodeAttachedSession,
+): TerminalNodeSessionState;
+
+export declare function applyScreenDelta(
+  snapshot: NodeScreenSnapshot | null,
+  delta: NodeScreenDelta,
+): NodeScreenSnapshot;
+
+export declare function reduceSessionWatchEvent(
+  state: TerminalNodeSessionState | null,
+  event: TerminalNodeSessionWatchEvent,
+): TerminalNodeSessionState;
+
 export declare class TerminalNodeClient
   implements NativeTerminalNodeClientHandle
 {
@@ -243,6 +268,10 @@ export declare class TerminalNodeClient
     sessionId: string,
     options: TerminalNodeSessionWatchOptions,
   ): Promise<void>;
+  watchSessionState(
+    sessionId: string,
+    options: TerminalNodeSessionStateWatchOptions,
+  ): Promise<void>;
 }
 
 export declare class TerminalNodeSubscription
@@ -258,7 +287,10 @@ export declare class TerminalNodeSubscription
 }
 
 declare const _default: {
+  applyScreenDelta: typeof applyScreenDelta;
+  createSessionState: typeof createSessionState;
   loadNativeBinding: typeof loadNativeBinding;
+  reduceSessionWatchEvent: typeof reduceSessionWatchEvent;
   resolveNativeBindingPath: typeof resolveNativeBindingPath;
   TerminalNodeClient: typeof TerminalNodeClient;
   TerminalNodeSubscription: typeof TerminalNodeSubscription;

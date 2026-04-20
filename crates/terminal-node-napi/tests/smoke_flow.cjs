@@ -126,7 +126,7 @@ async function runSmoke(createClient) {
   );
 }
 
-async function runPackageWatchSmoke(createClient) {
+async function runPackageWatchSmoke(createClient, sdk) {
   const client = createClient();
   const created = await client.createNativeSession({
     title: "node-package-watch",
@@ -197,6 +197,32 @@ async function runPackageWatchSmoke(createClient) {
     true,
   );
 
+  const baseState = sdk.createSessionState(attached);
+  const paneDelta = await client.screenDelta(
+    created.session_id,
+    paneId,
+    attached.focused_screen.sequence,
+  );
+  const reducedScreen = sdk.applyScreenDelta(attached.focused_screen, paneDelta);
+  const reducedState = sdk.reduceSessionWatchEvent(baseState, {
+    kind: "screen_delta",
+    delta: paneDelta,
+  });
+
+  assert.equal(baseState.session.session_id, created.session_id);
+  assert.equal(baseState.focusedScreen.pane_id, paneId);
+  assert.equal(reducedScreen.pane_id, paneId);
+  assert.equal(
+    reducedScreen.surface.lines.some((line) => line.text.includes("package watch input")),
+    true,
+  );
+  assert.equal(
+    reducedState.focusedScreen.surface.lines.some((line) =>
+      line.text.includes("package watch input"),
+    ),
+    true,
+  );
+
   const sessionCreated = await client.createNativeSession({
     title: "node-package-session-watch",
     launch: {
@@ -206,15 +232,20 @@ async function runPackageWatchSmoke(createClient) {
   });
   const sessionAttached = await client.attachSession(sessionCreated.session_id);
   const sessionPaneId = sessionAttached.focused_screen.pane_id;
-  const sessionEvents = [];
+  const sessionStates = [];
   let sessionDispatched = false;
+  let sessionOpenedTab = false;
   const sessionAbort = new AbortController();
-  await client.watchSession(sessionCreated.session_id, {
+  await client.watchSessionState(sessionCreated.session_id, {
     signal: sessionAbort.signal,
-    onEvent: async (event) => {
-      sessionEvents.push(event.kind);
+    onState: async (state) => {
+      sessionStates.push(state);
 
-      if (!sessionDispatched && event.kind === "topology_snapshot") {
+      if (
+        !sessionDispatched &&
+        state.focusedScreen &&
+        state.topology.tabs.length === 1
+      ) {
         sessionDispatched = true;
         await client.dispatchMuxCommand(sessionCreated.session_id, {
           kind: "send_input",
@@ -225,17 +256,45 @@ async function runPackageWatchSmoke(createClient) {
       }
 
       if (
-        event.kind === "screen_delta" &&
-        deltaContainsText(event.delta, "package session watch input")
+        !sessionOpenedTab &&
+        state.focusedScreen?.surface.lines.some((line) =>
+          line.text.includes("package session watch input"),
+        )
       ) {
+        sessionOpenedTab = true;
+        await client.dispatchMuxCommand(sessionCreated.session_id, {
+          kind: "new_tab",
+          title: "watch-state",
+        });
+        return;
+      }
+
+      if (sessionOpenedTab && state.topology.tabs.length === 2) {
         sessionAbort.abort();
       }
     },
   });
 
-  assert.equal(sessionEvents.includes("attached"), true);
-  assert.equal(sessionEvents.includes("topology_snapshot"), true);
-  assert.equal(sessionEvents.includes("screen_delta"), true);
+  assert.equal(sessionStates.length > 0, true);
+  assert.equal(
+    sessionStates.some((state) =>
+      state.focusedScreen?.surface.lines.some((line) =>
+        line.text.includes("package session watch input"),
+      ),
+    ),
+    true,
+  );
+  assert.equal(
+    sessionStates.some((state) => state.topology.tabs.length === 2),
+    true,
+  );
+  assert.equal(
+    sessionStates.every((state) => {
+      const expectedPaneId = focusedPaneIdFromTopology(state.topology);
+      return expectedPaneId ? state.focusedScreen?.pane_id === expectedPaneId : true;
+    }),
+    true,
+  );
 }
 
 async function waitForLine(client, sessionId, paneId, needle) {
@@ -270,6 +329,29 @@ function deltaContainsText(delta, needle) {
     delta.full_replace?.lines?.some((line) => line.text.includes(needle)) ||
     false
   );
+}
+
+function firstPaneId(node) {
+  if (!node) {
+    return null;
+  }
+
+  if (node.kind === "leaf") {
+    return node.pane_id;
+  }
+
+  return firstPaneId(node.first) ?? firstPaneId(node.second);
+}
+
+function focusedPaneIdFromTopology(topology) {
+  const focusedTab =
+    topology.tabs.find((tab) => tab.tab_id === topology.focused_tab) ?? topology.tabs[0];
+
+  if (!focusedTab) {
+    return null;
+  }
+
+  return focusedTab.focused_pane ?? firstPaneId(focusedTab.root);
 }
 
 module.exports = {
