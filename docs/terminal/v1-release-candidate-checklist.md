@@ -54,28 +54,6 @@ Verify the public v1 promise is still exactly:
 
 ## Release summary template
 
-```md
-## Terminal Platform v1
+Use:
 
-### Support matrix
-- macOS + Linux - Native + tmux + Zellij
-- Windows - Native + Zellij
-- tmux remains Unix-only in v1
-
-### Included in v1
-- daemon-first local transport
-- native PTY runtime with topology and mux control
-- conservative tmux import/control support
-- conservative Zellij import/control support
-- Node/Electron package surface
-
-### Not promised in v1
-- fake parity between Native, tmux, and Zellij
-- Windows tmux support
-- plugin parity or floating-pane parity from Zellij
-- release signing, notarization, or installer families
-
-### Known degraded semantics
-- legacy Zellij 0.43.x import remains explicit `MissingCapability`
-- imported backends are capability-gated, not product truth
-```
+- [`v1-release-summary-template.md`](./v1-release-summary-template.md)

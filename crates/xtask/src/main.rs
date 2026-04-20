@@ -9,11 +9,15 @@ const CAPI_LIBRARY_BASENAME: &str = "terminal_capi";
 const CAPI_PKGCONFIG_NAME: &str = "terminal-platform-capi";
 const CAPI_INSTALL_SHARE_DIR: &str = "share/terminal-capi";
 const CAPI_SCHEMA_VERSION: u64 = 1;
+const LICENSE_PATH: &str = "LICENSE";
+const CONTRIBUTING_PATH: &str = "CONTRIBUTING.md";
+const SECURITY_PATH: &str = "SECURITY.md";
 const ROOT_README_PATH: &str = "README.md";
 const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README.md";
 const MANUAL_DIR: &str = "crates/terminal-testing/manual";
 const MANUAL_RUNS_DIR: &str = "crates/terminal-testing/manual/runs";
 const RELEASE_READINESS_WORKFLOW_PATH: &str = ".github/workflows/release-readiness.yml";
+const RELEASE_SUMMARY_TEMPLATE_PATH: &str = "docs/terminal/v1-release-summary-template.md";
 const MANUAL_RUN_TEMPLATE_DATE_PLACEHOLDER: &str = "Date: YYYY-MM-DD";
 const MANUAL_RUN_TEMPLATE_OS_PLACEHOLDER: &str = "OS: macOS 15.4 / Ubuntu 24.04 / Windows 11 24H2";
 const MANUAL_RUN_TEMPLATE_CHECKLIST_PLACEHOLDER: &str =
@@ -199,17 +203,25 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
 
 fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let workspace_root = workspace_root();
+    let license = workspace_root.join(LICENSE_PATH);
+    let contributing = workspace_root.join(CONTRIBUTING_PATH);
+    let security = workspace_root.join(SECURITY_PATH);
     let root_readme = workspace_root.join(ROOT_README_PATH);
     let node_package_readme = workspace_root.join(NODE_PACKAGE_README_PATH);
     let manual_dir = workspace_root.join(MANUAL_DIR);
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
     let release_readiness_workflow = workspace_root.join(RELEASE_READINESS_WORKFLOW_PATH);
+    let release_summary_template = workspace_root.join(RELEASE_SUMMARY_TEMPLATE_PATH);
 
+    assert_value(license.is_file(), "root LICENSE is missing")?;
+    assert_value(contributing.is_file(), "root CONTRIBUTING.md is missing")?;
+    assert_value(security.is_file(), "root SECURITY.md is missing")?;
     assert_value(root_readme.is_file(), "root README is missing")?;
     assert_value(node_package_readme.is_file(), "Node package README is missing")?;
     assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
     assert_value(manual_runs_dir.is_dir(), "manual run capture directory is missing")?;
     assert_value(release_readiness_workflow.is_file(), "release readiness workflow is missing")?;
+    assert_value(release_summary_template.is_file(), "release summary template is missing")?;
 
     let root_readme_contents = fs::read_to_string(&root_readme)
         .map_err(|error| format!("failed to read {} - {error}", root_readme.display()))?;

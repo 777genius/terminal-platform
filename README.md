@@ -193,6 +193,7 @@ Recommended reading order:
 4. [`docs/terminal/v1-implementation-roadmap-and-task-breakdown.md`](./docs/terminal/v1-implementation-roadmap-and-task-breakdown.md)
 5. [`docs/terminal/v1-verification-and-acceptance-plan.md`](./docs/terminal/v1-verification-and-acceptance-plan.md)
 6. [`docs/terminal/v1-release-candidate-checklist.md`](./docs/terminal/v1-release-candidate-checklist.md)
+7. [`docs/terminal/v1-release-summary-template.md`](./docs/terminal/v1-release-summary-template.md)
 
 ## Node Package
 
