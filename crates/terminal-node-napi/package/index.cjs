@@ -1196,7 +1196,17 @@ function createElectronMainBridge(options = {}) {
     }
 
     const abortController = new AbortController();
-    senderSubscriptions.set(subscriptionId, abortController);
+    let resolveDone = () => {};
+    const subscriptionRecord = {
+      abortController,
+      done: new Promise((resolve) => {
+        resolveDone = resolve;
+      }),
+      finish() {
+        resolveDone();
+      },
+    };
+    senderSubscriptions.set(subscriptionId, subscriptionRecord);
 
     const sendEnvelope = (envelope) => {
       if (!canSendElectronBridgeEnvelope(sender)) {
@@ -1227,6 +1237,7 @@ function createElectronMainBridge(options = {}) {
       .finally(() => {
         sendEnvelope({ subscriptionId, kind: "closed" });
         releaseSenderSubscription(sender, subscriptionId);
+        subscriptionRecord.finish();
       });
 
     return { subscriptionId };
@@ -1240,12 +1251,13 @@ function createElectronMainBridge(options = {}) {
     }
 
     const senderSubscriptions = subscriptionsBySender.get(event?.sender);
-    const abortController = senderSubscriptions?.get(subscriptionId);
-    if (!abortController) {
+    const subscriptionRecord = senderSubscriptions?.get(subscriptionId);
+    if (!subscriptionRecord) {
       return { stopped: false, subscriptionId };
     }
 
-    abortController.abort();
+    subscriptionRecord.abortController.abort();
+    await subscriptionRecord.done;
     return { stopped: true, subscriptionId };
   };
 
@@ -1261,8 +1273,8 @@ function createElectronMainBridge(options = {}) {
       ipcMain.removeHandler(channels.sessionStateStop);
 
       for (const senderSubscriptions of subscriptionsBySender.values()) {
-        for (const abortController of senderSubscriptions.values()) {
-          abortController.abort();
+        for (const subscriptionRecord of senderSubscriptions.values()) {
+          subscriptionRecord.abortController.abort();
         }
       }
       subscriptionsBySender.clear();

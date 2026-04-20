@@ -1008,6 +1008,7 @@ async function runElectronPreloadSmoke(createClient, sdk) {
     "Timed out waiting for Electron preload dispose()",
   );
   bridge.dispose();
+  await runElectronBridgeStopDrainSmoke(sdk);
   await runElectronPreloadDisposeSmoke(createClient, sdk);
 }
 
@@ -1064,6 +1065,71 @@ async function runElectronBridgeDisposeSmoke(createClient, sdk) {
     /Missing fake Electron handler/,
   );
   assert.equal(observedStates >= 1, true);
+}
+
+async function runElectronBridgeStopDrainSmoke(sdk) {
+  const { ipcMain, ipcRenderer } = createFakeElectronIpc();
+  let watchFinished = false;
+  const bridge = sdk.createElectronMainBridge({
+    channelPrefix: "terminal-platform-stop-drain-smoke",
+    client: {
+      async watchSessionState(sessionId, options = {}) {
+        await options.onState({
+          session: {
+            session_id: sessionId,
+            route: {
+              backend: "native",
+              authority: "local_daemon",
+              external: null,
+            },
+            title: "stop-drain",
+          },
+          topology: {
+            session_id: sessionId,
+            backend_kind: "native",
+            focused_tab: null,
+            tabs: [],
+          },
+          focusedScreen: null,
+        });
+
+        if (options.signal?.aborted) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          watchFinished = true;
+          return;
+        }
+
+        await new Promise((resolve) => {
+          options.signal?.addEventListener("abort", resolve, { once: true });
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        watchFinished = true;
+      },
+    },
+    ipcMain,
+  });
+  const rendererClient = new sdk.ElectronTerminalNodeClient({
+    channelPrefix: "terminal-platform-stop-drain-smoke",
+    ipcRenderer,
+  });
+
+  const abortController = new AbortController();
+  const watchPromise = rendererClient.watchSessionState("stop-drain-session", {
+    signal: abortController.signal,
+    onState: async (state) => {
+      assert.equal(state.session.session_id, "stop-drain-session");
+      abortController.abort();
+    },
+  });
+
+  await withTimeout(
+    watchPromise,
+    5000,
+    "Timed out waiting for Electron bridge stop to drain active watcher",
+  );
+  assert.equal(watchFinished, true);
+
+  bridge.dispose();
 }
 
 async function runElectronPreloadDisposeSmoke(createClient, sdk) {
