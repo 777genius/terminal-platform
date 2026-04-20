@@ -378,6 +378,14 @@ function assertElectronIpcRendererLike(ipcRenderer) {
   }
 }
 
+function assertElectronContextBridgeLike(contextBridge) {
+  if (!contextBridge || typeof contextBridge.exposeInMainWorld !== "function") {
+    throw new TypeError(
+      "terminal-node electron preload bridge requires contextBridge.exposeInMainWorld",
+    );
+  }
+}
+
 function canSendElectronBridgeEnvelope(sender) {
   return (
     sender &&
@@ -931,6 +939,158 @@ class ElectronTerminalNodeClient {
   }
 }
 
+function createElectronPreloadApi(options = {}) {
+  const { ipcRenderer, channelPrefix } = options;
+  const client = new ElectronTerminalNodeClient({ ipcRenderer, channelPrefix });
+  const sessionStateSubscriptions = new Map();
+
+  const api = {
+    bindingVersion() {
+      return client.bindingVersion();
+    },
+
+    handshakeInfo() {
+      return client.handshakeInfo();
+    },
+
+    listSessions() {
+      return client.listSessions();
+    },
+
+    listSavedSessions() {
+      return client.listSavedSessions();
+    },
+
+    discoverSessions(backend) {
+      return client.discoverSessions(backend);
+    },
+
+    backendCapabilities(backend) {
+      return client.backendCapabilities(backend);
+    },
+
+    createNativeSession(request) {
+      return client.createNativeSession(request);
+    },
+
+    importSession(route, title = null) {
+      return client.importSession(route, title);
+    },
+
+    savedSession(sessionId) {
+      return client.savedSession(sessionId);
+    },
+
+    deleteSavedSession(sessionId) {
+      return client.deleteSavedSession(sessionId);
+    },
+
+    pruneSavedSessions(keepLatest) {
+      return client.pruneSavedSessions(keepLatest);
+    },
+
+    restoreSavedSession(sessionId) {
+      return client.restoreSavedSession(sessionId);
+    },
+
+    attachSession(sessionId) {
+      return client.attachSession(sessionId);
+    },
+
+    topologySnapshot(sessionId) {
+      return client.topologySnapshot(sessionId);
+    },
+
+    screenSnapshot(sessionId, paneId) {
+      return client.screenSnapshot(sessionId, paneId);
+    },
+
+    screenDelta(sessionId, paneId, fromSequence) {
+      return client.screenDelta(sessionId, paneId, fromSequence);
+    },
+
+    dispatchMuxCommand(sessionId, command) {
+      return client.dispatchMuxCommand(sessionId, command);
+    },
+
+    async subscribeSessionState(sessionId, onState, onError) {
+      if (typeof onState !== "function") {
+        throw new TypeError(
+          "terminal-node electron preload api requires an onState callback for subscribeSessionState",
+        );
+      }
+      if (onError != null && typeof onError !== "function") {
+        throw new TypeError(
+          "terminal-node electron preload api requires onError to be a function when provided",
+        );
+      }
+
+      const subscriptionId = randomUUID();
+      const abortController = new AbortController();
+      const record = {
+        abortController,
+        watchPromise: Promise.resolve(),
+      };
+      sessionStateSubscriptions.set(subscriptionId, record);
+
+      record.watchPromise = client
+        .watchSessionState(sessionId, {
+          signal: abortController.signal,
+          onState,
+        })
+        .catch(async (error) => {
+          if (!abortController.signal.aborted && typeof onError === "function") {
+            await onError(error);
+          }
+        })
+        .finally(() => {
+          if (sessionStateSubscriptions.get(subscriptionId) === record) {
+            sessionStateSubscriptions.delete(subscriptionId);
+          }
+        });
+
+      return subscriptionId;
+    },
+
+    async unsubscribeSessionState(subscriptionId) {
+      const record = sessionStateSubscriptions.get(subscriptionId);
+      if (!record) {
+        return false;
+      }
+
+      sessionStateSubscriptions.delete(subscriptionId);
+      record.abortController.abort();
+      await record.watchPromise;
+      return true;
+    },
+
+    async dispose() {
+      const subscriptionIds = [...sessionStateSubscriptions.keys()];
+      for (const subscriptionId of subscriptionIds) {
+        await api.unsubscribeSessionState(subscriptionId);
+      }
+    },
+  };
+
+  return Object.freeze(api);
+}
+
+function installElectronPreloadBridge(options = {}) {
+  const { contextBridge, exposeKey = "terminalPlatform" } = options;
+
+  assertElectronContextBridgeLike(contextBridge);
+
+  if (typeof exposeKey !== "string" || exposeKey.length === 0) {
+    throw new TypeError(
+      "terminal-node electron preload bridge requires a non-empty exposeKey",
+    );
+  }
+
+  const api = createElectronPreloadApi(options);
+  contextBridge.exposeInMainWorld(exposeKey, api);
+  return api;
+}
+
 function createElectronMainBridge(options = {}) {
   const { ipcMain, client, channelPrefix } = options;
 
@@ -1072,8 +1232,10 @@ function createElectronMainBridge(options = {}) {
 module.exports = {
   applyScreenDelta,
   createElectronMainBridge,
+  createElectronPreloadApi,
   createSessionState,
   ElectronTerminalNodeClient,
+  installElectronPreloadBridge,
   loadNativeBinding,
   reduceSessionWatchEvent,
   resolveNativeBindingPath,

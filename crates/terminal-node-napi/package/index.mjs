@@ -5,8 +5,10 @@ const cjs = require("./index.cjs");
 
 export const applyScreenDelta = cjs.applyScreenDelta;
 export const createElectronMainBridge = cjs.createElectronMainBridge;
+export const createElectronPreloadApi = cjs.createElectronPreloadApi;
 export const createSessionState = cjs.createSessionState;
 export const ElectronTerminalNodeClient = cjs.ElectronTerminalNodeClient;
+export const installElectronPreloadBridge = cjs.installElectronPreloadBridge;
 export const loadNativeBinding = cjs.loadNativeBinding;
 export const reduceSessionWatchEvent = cjs.reduceSessionWatchEvent;
 export const resolveNativeBindingPath = cjs.resolveNativeBindingPath;

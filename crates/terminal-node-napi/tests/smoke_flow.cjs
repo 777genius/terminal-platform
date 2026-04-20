@@ -445,6 +445,8 @@ async function runElectronBridgeSmoke(createClient, sdk) {
   );
 
   bridge.dispose();
+
+  await runElectronPreloadSmoke(createClient, sdk);
 }
 
 function createFakeElectronIpc() {
@@ -486,6 +488,84 @@ function createFakeElectronIpc() {
       },
     },
   };
+}
+
+async function runElectronPreloadSmoke(createClient, sdk) {
+  const client = createClient();
+  const { ipcMain, ipcRenderer } = createFakeElectronIpc();
+  const bridge = sdk.createElectronMainBridge({
+    channelPrefix: "terminal-platform-preload-smoke",
+    client,
+    ipcMain,
+  });
+  const exposed = {};
+  const preloadApi = sdk.installElectronPreloadBridge({
+    channelPrefix: "terminal-platform-preload-smoke",
+    contextBridge: {
+      exposeInMainWorld(key, value) {
+        exposed[key] = value;
+      },
+    },
+    exposeKey: "terminalPlatform",
+    ipcRenderer,
+  });
+
+  assert.equal(exposed.terminalPlatform, preloadApi);
+  assert.equal(typeof exposed.terminalPlatform.subscribeSessionState, "function");
+
+  const handshake = await exposed.terminalPlatform.handshakeInfo();
+  assert.equal(handshake.assessment.can_use, true);
+
+  const created = await exposed.terminalPlatform.createNativeSession({
+    title: "electron-preload-smoke",
+    launch: {
+      program: "/bin/sh",
+      args: ["-lc", "printf 'ready\\n'; exec cat"],
+    },
+  });
+  const attached = await exposed.terminalPlatform.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+  let resolveState;
+  let rejectState;
+  const seenState = new Promise((resolve, reject) => {
+    resolveState = resolve;
+    rejectState = reject;
+  });
+
+  const subscriptionId = await exposed.terminalPlatform.subscribeSessionState(
+    created.session_id,
+    async (state) => {
+      if (
+        state.focusedScreen?.surface.lines.some((line) =>
+          line.text.includes("electron preload input"),
+        )
+      ) {
+        resolveState(state);
+      }
+    },
+    async (error) => {
+      rejectState(error);
+    },
+  );
+
+  await exposed.terminalPlatform.dispatchMuxCommand(created.session_id, {
+    kind: "send_input",
+    pane_id: paneId,
+    data: "electron preload input\r",
+  });
+
+  const observedState = await seenState;
+  assert.equal(observedState.session.session_id, created.session_id);
+  assert.equal(observedState.focusedScreen.pane_id, paneId);
+
+  const stopped = await exposed.terminalPlatform.unsubscribeSessionState(subscriptionId);
+  const stoppedAgain = await exposed.terminalPlatform.unsubscribeSessionState(subscriptionId);
+
+  assert.equal(stopped, true);
+  assert.equal(stoppedAgain, false);
+
+  await exposed.terminalPlatform.dispose();
+  bridge.dispose();
 }
 
 module.exports = {

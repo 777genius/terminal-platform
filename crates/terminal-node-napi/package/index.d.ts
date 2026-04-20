@@ -182,9 +182,70 @@ export interface ElectronTerminalNodeClientOptions {
   channelPrefix?: string | undefined;
 }
 
+export interface ElectronContextBridgeLike {
+  exposeInMainWorld(
+    key: string,
+    api: ElectronTerminalNodePreloadApi,
+  ): void;
+}
+
+export interface ElectronPreloadApiOptions {
+  ipcRenderer: ElectronIpcRendererLike;
+  channelPrefix?: string | undefined;
+}
+
+export interface ElectronPreloadBridgeOptions
+  extends ElectronPreloadApiOptions {
+  contextBridge: ElectronContextBridgeLike;
+  exposeKey?: string | undefined;
+}
+
 export interface ElectronTerminalNodeMainBridge {
   readonly channels: ElectronBridgeChannels;
   dispose(): void;
+}
+
+export interface ElectronTerminalNodePreloadApi {
+  bindingVersion(): Promise<NodeBindingVersion>;
+  handshakeInfo(): Promise<NodeHandshakeInfo>;
+  listSessions(): Promise<NodeSessionSummary[]>;
+  listSavedSessions(): Promise<NodeSavedSessionSummary[]>;
+  discoverSessions(backend: NodeBackendKind): Promise<NodeDiscoveredSession[]>;
+  backendCapabilities(
+    backend: NodeBackendKind,
+  ): Promise<NodeBackendCapabilitiesInfo>;
+  createNativeSession(
+    request?: NodeCreateSessionRequest,
+  ): Promise<NodeSessionSummary>;
+  importSession(
+    route: NodeSessionRoute,
+    title?: string | null,
+  ): Promise<NodeSessionSummary>;
+  savedSession(sessionId: string): Promise<NodeSavedSessionRecord>;
+  deleteSavedSession(sessionId: string): Promise<NodeDeleteSavedSessionResult>;
+  pruneSavedSessions(
+    keepLatest: number,
+  ): Promise<NodePruneSavedSessionsResult>;
+  restoreSavedSession(sessionId: string): Promise<NodeRestoredSession>;
+  attachSession(sessionId: string): Promise<NodeAttachedSession>;
+  topologySnapshot(sessionId: string): Promise<NodeTopologySnapshot>;
+  screenSnapshot(sessionId: string, paneId: string): Promise<NodeScreenSnapshot>;
+  screenDelta(
+    sessionId: string,
+    paneId: string,
+    fromSequence: number,
+  ): Promise<NodeScreenDelta>;
+  dispatchMuxCommand(
+    sessionId: string,
+    command: NodeMuxCommand,
+  ): Promise<NodeMuxCommandResult>;
+  subscribeSessionState(
+    sessionId: string,
+    onState: (state: TerminalNodeSessionState) => void | Promise<void>,
+    onError?: (error: Error) => void | Promise<void>,
+  ): Promise<string>;
+  unsubscribeSessionState(subscriptionId: string): Promise<boolean>;
+  dispose(): Promise<void>;
 }
 
 export type ElectronTerminalNodeSessionStateEnvelope =
@@ -301,6 +362,14 @@ export declare function reduceSessionWatchEvent(
 export declare function createElectronMainBridge(
   options: ElectronMainBridgeOptions,
 ): ElectronTerminalNodeMainBridge;
+
+export declare function createElectronPreloadApi(
+  options: ElectronPreloadApiOptions,
+): ElectronTerminalNodePreloadApi;
+
+export declare function installElectronPreloadBridge(
+  options: ElectronPreloadBridgeOptions,
+): ElectronTerminalNodePreloadApi;
 
 export declare class TerminalNodeClient
   implements NativeTerminalNodeClientHandle
@@ -441,8 +510,10 @@ export declare class ElectronTerminalNodeClient {
 declare const _default: {
   applyScreenDelta: typeof applyScreenDelta;
   createElectronMainBridge: typeof createElectronMainBridge;
+  createElectronPreloadApi: typeof createElectronPreloadApi;
   createSessionState: typeof createSessionState;
   ElectronTerminalNodeClient: typeof ElectronTerminalNodeClient;
+  installElectronPreloadBridge: typeof installElectronPreloadBridge;
   loadNativeBinding: typeof loadNativeBinding;
   reduceSessionWatchEvent: typeof reduceSessionWatchEvent;
   resolveNativeBindingPath: typeof resolveNativeBindingPath;

@@ -19,7 +19,47 @@ Current client surface includes:
 - `watchSession` helper that follows topology plus focused pane updates
 - `watchSessionState` plus pure state reducers for render-ready session state
 - Electron main/renderer bridge helpers over explicit IPC channels
+- Electron preload helpers for `contextIsolation` safe JS exposure
 - mux command dispatch for tabs, panes, input and save operations
+
+## Electron embed seams
+
+Main process:
+
+```js
+const {
+  TerminalNodeClient,
+  createElectronMainBridge,
+} = require("terminal-platform-node");
+
+const client = TerminalNodeClient.fromRuntimeSlug("default");
+const bridge = createElectronMainBridge({ ipcMain, client });
+```
+
+Preload:
+
+```js
+const { installElectronPreloadBridge } = require("terminal-platform-node");
+
+installElectronPreloadBridge({
+  contextBridge,
+  ipcRenderer,
+  exposeKey: "terminalPlatform",
+});
+```
+
+Renderer:
+
+```js
+const subscriptionId = await window.terminalPlatform.subscribeSessionState(
+  sessionId,
+  (state) => {
+    render(state);
+  },
+);
+
+await window.terminalPlatform.unsubscribeSessionState(subscriptionId);
+```
 
 ## Local staging
 
