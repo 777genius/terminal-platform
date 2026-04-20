@@ -61,6 +61,7 @@ Current shape:
 - Rust-owned C string carriers plus explicit free functions
 - checked-in `cbindgen.toml` plus tested header generation path
 - external C consumer smoke that compiles against the generated header and the built `cdylib`
+- `xtask` packaging lane for staging and verifying a local C package layout
 
 ## Quality gates
 

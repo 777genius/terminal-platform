@@ -39,6 +39,13 @@ pub fn read_generated_header() -> std::io::Result<String> {
     fs::read_to_string(&header_path)
 }
 
+pub fn read_json(path: &Path) -> std::io::Result<serde_json::Value> {
+    let payload = fs::read_to_string(path)?;
+    serde_json::from_str(&payload).map_err(|error| {
+        std::io::Error::other(format!("failed to parse json {} - {error}", path.display()))
+    })
+}
+
 pub fn locate_cdylib() -> std::io::Result<PathBuf> {
     let test_binary = std::env::current_exe()?;
     let deps_dir = test_binary
@@ -120,7 +127,7 @@ pub fn configure_runtime_library_path(command: &mut Command, cdylib_path: &Path)
     }
 }
 
-fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
+pub fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
@@ -129,7 +136,7 @@ fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{}-{nanos}.{suffix}", std::process::id()))
 }
 
-fn unique_temp_dir(prefix: &str) -> PathBuf {
+pub fn unique_temp_dir(prefix: &str) -> PathBuf {
     unique_temp_path(prefix, "dir")
 }
 

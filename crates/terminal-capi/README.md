@@ -27,6 +27,7 @@ Current test coverage includes:
 - Rust-side C ABI smoke against a live daemon fixture
 - external C consumer smoke that compiles a real C program against the generated header and links to the built `cdylib`
 - external consumer coverage for native request/subscription flow and `tmux` discover/import flow
+- staged package smoke via `cargo run -p xtask -- stage-capi-package`
 
 ## Local verification
 
@@ -34,6 +35,13 @@ Typical local loop:
 
 ```bash
 cargo test -p terminal-capi -- --nocapture
+```
+
+Stage and verify a local C package layout:
+
+```bash
+cargo run -p xtask -- stage-capi-package --out ./crates/terminal-capi/artifacts/local
+cargo run -p xtask -- verify-capi-package --package-dir ./crates/terminal-capi/artifacts/local
 ```
 
 Full workspace quality gates:
