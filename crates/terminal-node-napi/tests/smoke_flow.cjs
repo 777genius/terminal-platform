@@ -300,6 +300,82 @@ async function runPackageWatchSmoke(createClient, sdk) {
   await runElectronBridgeSmoke(createClient, sdk);
 }
 
+async function runShutdownSmoke(createClient, options = {}) {
+  const { onReady } = options;
+  const client = createClient();
+  const created = await client.createNativeSession({
+    title: "node-package-shutdown",
+    launch: {
+      program: "/bin/sh",
+      args: ["-lc", "printf 'ready\\n'; exec cat"],
+    },
+  });
+  const attached = await client.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+  const paneSubscription = await client.subscribePane(created.session_id, paneId);
+  const initialEvent = await withTimeout(
+    paneSubscription.nextEvent(),
+    5000,
+    "Timed out waiting for initial pane subscription event",
+  );
+
+  assert.equal(initialEvent?.kind, "screen_delta");
+
+  let watchStates = 0;
+  let readyResolve;
+  const ready = new Promise((resolve) => {
+    readyResolve = resolve;
+  });
+  const watchPromise = client.watchSessionState(created.session_id, {
+    onState: async (state) => {
+      watchStates += 1;
+      if (watchStates === 1) {
+        readyResolve(state);
+      }
+    },
+  });
+  const initialState = await withTimeout(
+    ready,
+    5000,
+    "Timed out waiting for initial watchSessionState callback",
+  );
+
+  assert.equal(initialState.session.session_id, created.session_id);
+  assert.equal(initialState.focusedScreen?.pane_id, paneId);
+
+  if (typeof onReady === "function") {
+    await onReady({ sessionId: created.session_id, paneId });
+  }
+
+  let subscriptionClosed = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const event = await withTimeout(
+      paneSubscription.nextEvent(),
+      5000,
+      "Timed out waiting for pane subscription closure after daemon shutdown",
+    );
+    if (event == null) {
+      subscriptionClosed = true;
+      break;
+    }
+  }
+
+  assert.equal(subscriptionClosed, true);
+
+  await withTimeout(
+    watchPromise,
+    5000,
+    "Timed out waiting for watchSessionState to close after daemon shutdown",
+  );
+
+  return {
+    session_id: created.session_id,
+    subscription_closed: subscriptionClosed,
+    watch_closed: true,
+    observed_states: watchStates,
+  };
+}
+
 async function waitForLine(client, sessionId, paneId, needle) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const snapshot = await client.screenSnapshot(sessionId, paneId);
@@ -324,6 +400,25 @@ async function waitForTopologyTabs(subscription, tabCount) {
   }
 
   throw new Error(`Timed out waiting for topology with ${tabCount} tabs`);
+}
+
+async function withTimeout(promise, ms, message) {
+  let timer = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(message));
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timer != null) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function deltaContainsText(delta, needle) {
@@ -570,5 +665,6 @@ async function runElectronPreloadSmoke(createClient, sdk) {
 
 module.exports = {
   runPackageWatchSmoke,
+  runShutdownSmoke,
   runSmoke,
 };

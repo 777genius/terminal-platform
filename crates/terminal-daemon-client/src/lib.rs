@@ -503,7 +503,7 @@ mod tests {
     use terminal_protocol::{
         DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion, SubscriptionEvent,
     };
-    use tokio::time::sleep;
+    use tokio::time::{sleep, timeout};
 
     use super::{HandshakeAssessmentStatus, LocalSocketDaemonClient};
 
@@ -1316,6 +1316,42 @@ mod tests {
         assert!(subscription.recv().await.expect("recv should succeed").is_none());
 
         server.shutdown().await.expect("server shutdown should succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn closes_topology_subscription_lane_when_server_shuts_down() {
+        let address = unique_address("daemon-client-sub-server-shutdown");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+        let created = client
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    ..CreateSessionSpec::default()
+                },
+            )
+            .await
+            .expect("create_session should succeed");
+        let mut subscription = client
+            .open_subscription(created.session.session_id, SubscriptionSpec::SessionTopology)
+            .await
+            .expect("subscription should open");
+
+        let initial = subscription.recv().await.expect("recv should succeed").expect("event");
+        match initial {
+            SubscriptionEvent::TopologySnapshot(_) => {}
+            other => panic!("unexpected initial event: {other:?}"),
+        }
+
+        server.shutdown().await.expect("server shutdown should succeed");
+
+        let closed = timeout(Duration::from_secs(3), subscription.recv())
+            .await
+            .expect("subscription should close after server shutdown")
+            .expect("recv should succeed");
+        assert!(closed.is_none());
     }
 
     #[cfg(unix)]

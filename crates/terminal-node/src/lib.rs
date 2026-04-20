@@ -378,7 +378,7 @@ mod tests {
         TmuxServerGuard, daemon_fixture, daemon_fixture_with_state, tmux_daemon_state,
         unique_tmux_session_name, unique_tmux_socket_name,
     };
-    use tokio::time::sleep;
+    use tokio::time::{sleep, timeout};
 
     use super::{
         NodeBackendKind, NodeCreateSessionRequest, NodeHostClient, NodeMuxCommand,
@@ -628,6 +628,41 @@ mod tests {
         fixture.shutdown().await.expect("fixture should stop cleanly");
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn closes_subscription_stream_when_daemon_shuts_down() {
+        let fixture = daemon_fixture("terminal-node-close").expect("fixture should start");
+        let node = NodeHostClient::new(fixture.client.address().clone());
+        let created = node
+            .create_native_session(&cat_launch_request("shutdown"))
+            .await
+            .expect("create_native_session should succeed");
+        let attached =
+            node.attach_session(&created.session_id).await.expect("attach_session should succeed");
+        let pane_id =
+            attached.focused_screen.as_ref().expect("focused screen should exist").pane_id.clone();
+        let pane_subscription = node
+            .open_subscription(
+                &created.session_id,
+                &NodeSubscriptionSpec::PaneSurface { pane_id: pane_id.clone() },
+            )
+            .await
+            .expect("pane subscription should open");
+
+        let initial = pane_subscription
+            .next_event()
+            .await
+            .expect("initial pane event should arrive")
+            .expect("initial pane event should exist");
+        assert!(matches!(
+            initial,
+            NodeSubscriptionEvent::ScreenDelta(delta) if delta.full_replace.is_some()
+        ));
+
+        fixture.shutdown().await.expect("fixture should stop cleanly");
+
+        assert!(wait_for_subscription_close(&pane_subscription).await);
+    }
+
     #[test]
     fn exports_typescript_bindings_for_node_surface() {
         let export_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("bindings");
@@ -710,6 +745,25 @@ mod tests {
         }
 
         None
+    }
+
+    async fn wait_for_subscription_close(subscription: &super::NodeSubscriptionHandle) -> bool {
+        timeout(Duration::from_secs(5), async {
+            for _ in 0..50 {
+                match subscription
+                    .next_event()
+                    .await
+                    .expect("subscription should stay healthy until closure")
+                {
+                    Some(_) => continue,
+                    None => return true,
+                }
+            }
+
+            false
+        })
+        .await
+        .unwrap_or(false)
     }
 
     fn subscription_delta_contains(delta: &super::NodeScreenDelta, needle: &str) -> bool {

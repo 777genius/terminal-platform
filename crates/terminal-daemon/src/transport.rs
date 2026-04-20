@@ -3,8 +3,8 @@ use std::{io, sync::Arc};
 use futures_util::{SinkExt as _, StreamExt as _};
 use interprocess::local_socket::{ListenerOptions, tokio::Stream, traits::tokio::Listener as _};
 use tokio::{
-    sync::oneshot,
-    task::{JoinError, JoinHandle},
+    sync::{oneshot, watch},
+    task::{JoinError, JoinHandle, JoinSet},
 };
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
@@ -45,56 +45,89 @@ pub fn spawn_local_socket_server(
         ListenerOptions::new().name(address.to_name()?).try_overwrite(true).create_tokio()?;
     let daemon = Arc::new(daemon);
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    let (connection_shutdown_tx, connection_shutdown_rx) = watch::channel(false);
 
     let task = tokio::spawn(async move {
-        loop {
+        let mut connection_tasks = JoinSet::new();
+
+        let result = loop {
             tokio::select! {
                 _ = &mut shutdown_rx => break Ok(()),
                 accept_result = listener.accept() => {
                     let stream = accept_result?;
                     let daemon = Arc::clone(&daemon);
+                    let connection_shutdown_rx = connection_shutdown_rx.clone();
 
-                    tokio::spawn(async move {
-                        let _ = handle_connection(daemon, stream).await;
+                    connection_tasks.spawn(async move {
+                        let _ = handle_connection(daemon, stream, connection_shutdown_rx).await;
                     });
                 }
+                Some(join_result) = connection_tasks.join_next(), if !connection_tasks.is_empty() => {
+                    if let Err(error) = join_result
+                        && !error.is_cancelled()
+                    {
+                        break Err(join_error_to_io(error));
+                    }
+                }
             }
-        }
+        };
+
+        let _ = connection_shutdown_tx.send(true);
+        drain_connection_tasks(&mut connection_tasks).await?;
+
+        result
     });
 
     Ok(LocalSocketServerHandle { address, shutdown_tx: Some(shutdown_tx), task })
 }
 
-async fn handle_connection(daemon: Arc<TerminalDaemon>, stream: Stream) -> io::Result<()> {
+async fn handle_connection(
+    daemon: Arc<TerminalDaemon>,
+    stream: Stream,
+    mut shutdown_rx: watch::Receiver<bool>,
+) -> io::Result<()> {
     let mut framed = Framed::new(stream, LengthDelimitedCodec::new());
 
-    while let Some(frame_result) = framed.next().await {
-        let frame = frame_result?;
-        let reply = match decode_json_frame::<RequestEnvelope>(&frame) {
-            Ok(request) => {
-                if matches!(
-                    &request.payload,
-                    terminal_protocol::RequestPayload::OpenSubscription(_)
-                ) {
-                    return handle_subscription_connection(daemon, request, framed).await;
-                }
-                TransportResponse::from_result(daemon.handle_request(request).await)
+    loop {
+        tokio::select! {
+            _ = shutdown_rx.changed() => break Ok(()),
+            frame_result = framed.next() => {
+                let Some(frame_result) = frame_result else {
+                    break Ok(());
+                };
+                let frame = frame_result?;
+                let reply = match decode_json_frame::<RequestEnvelope>(&frame) {
+                    Ok(request) => {
+                        if matches!(
+                            &request.payload,
+                            terminal_protocol::RequestPayload::OpenSubscription(_)
+                        ) {
+                            return handle_subscription_connection(
+                                daemon,
+                                request,
+                                framed,
+                                shutdown_rx,
+                            )
+                            .await;
+                        }
+                        TransportResponse::from_result(daemon.handle_request(request).await)
+                    }
+                    Err(error) => TransportResponse::Error(error),
+                };
+                let encoded_reply =
+                    encode_json_frame(&reply).map_err(|error| io::Error::other(error.to_string()))?;
+
+                framed.send(encoded_reply).await?;
             }
-            Err(error) => TransportResponse::Error(error),
-        };
-        let encoded_reply =
-            encode_json_frame(&reply).map_err(|error| io::Error::other(error.to_string()))?;
-
-        framed.send(encoded_reply).await?;
+        }
     }
-
-    Ok(())
 }
 
 async fn handle_subscription_connection(
     daemon: Arc<TerminalDaemon>,
     request: RequestEnvelope,
     mut framed: Framed<Stream, LengthDelimitedCodec>,
+    mut shutdown_rx: watch::Receiver<bool>,
 ) -> io::Result<()> {
     let terminal_protocol::RequestPayload::OpenSubscription(open_request) = request.payload else {
         return Err(io::Error::other("subscription connection requires open_subscription request"));
@@ -117,6 +150,7 @@ async fn handle_subscription_connection(
     let result = loop {
         tokio::select! {
             biased;
+            _ = shutdown_rx.changed() => break Ok(()),
             inbound = framed.next() => {
                 match inbound {
                     Some(Ok(frame)) => {
@@ -157,6 +191,18 @@ async fn handle_subscription_connection(
     subscription.cancel();
 
     result
+}
+
+async fn drain_connection_tasks(connection_tasks: &mut JoinSet<()>) -> io::Result<()> {
+    while let Some(join_result) = connection_tasks.join_next().await {
+        if let Err(error) = join_result
+            && !error.is_cancelled()
+        {
+            return Err(join_error_to_io(error));
+        }
+    }
+
+    Ok(())
 }
 
 fn map_subscription_event(

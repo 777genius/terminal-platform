@@ -49,6 +49,7 @@ Current workspace shape:
 - `index.cjs` and `index.mjs` loader entrypoints
 - `index.d.ts` plus generated `bindings/*.d.ts`
 - publish/install smoke through a packed local tarball in a temp Node project
+- shutdown smoke for staged Node package watch/subscription helpers
 
 ## C ABI surface
 

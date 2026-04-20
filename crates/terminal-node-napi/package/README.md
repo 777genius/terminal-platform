@@ -86,6 +86,9 @@ node ./scripts/pack-local-package.mjs --out /tmp/terminal-platform-node
 The publish smoke lane also installs the packed tarball into a temporary Node project
 and exercises both the CJS and ESM entrypoints through normal package resolution.
 
+Integration smoke also verifies that package-level subscription and watch helpers
+close cleanly when the daemon shuts down underneath an active session.
+
 The staged directory contains:
 
 - `index.cjs`
