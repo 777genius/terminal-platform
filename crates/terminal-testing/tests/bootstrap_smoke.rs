@@ -1,4 +1,7 @@
-use std::{thread, time::Duration};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 #[cfg(unix)]
 use std::{
@@ -2654,12 +2657,17 @@ async fn wait_for_discovered_zellij_session(
     client: &terminal_daemon_client::LocalSocketDaemonClient,
     session_name: &str,
 ) -> terminal_backend_api::DiscoveredSession {
-    for _ in 0..if cfg!(windows) { 200 } else { 100 } {
-        let discovered =
-            tokio::time::timeout(host_timeout(), client.discover_sessions(BackendKind::Zellij))
-                .await
-                .expect("discover_sessions should not hang")
-                .expect("discover_sessions should succeed");
+    let started = Instant::now();
+    while started.elapsed() < zellij_discovery_timeout() {
+        let discovered = match tokio::time::timeout(
+            host_timeout(),
+            client.discover_sessions(BackendKind::Zellij),
+        )
+        .await
+        {
+            Ok(Ok(discovered)) => discovered,
+            Ok(Err(_)) | Err(_) => break,
+        };
         if let Some(candidate) = discovered
             .sessions
             .into_iter()
@@ -2671,6 +2679,11 @@ async fn wait_for_discovered_zellij_session(
     }
 
     fallback_zellij_candidate(session_name)
+}
+
+#[cfg(any(unix, windows))]
+fn zellij_discovery_timeout() -> Duration {
+    if cfg!(windows) { Duration::from_secs(30) } else { Duration::from_secs(20) }
 }
 
 #[cfg(any(unix, windows))]

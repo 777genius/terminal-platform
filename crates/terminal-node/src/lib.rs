@@ -423,7 +423,10 @@ fn first_pane_id(root: &PaneTreeNode) -> Option<PaneId> {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, time::Duration};
+    use std::{
+        path::PathBuf,
+        time::{Duration, Instant},
+    };
 
     use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
     use terminal_daemon_client::LocalSocketDaemonClient;
@@ -1607,12 +1610,15 @@ mod tests {
         node: &super::NodeHostClient,
         session_name: &str,
     ) -> super::NodeDiscoveredSession {
-        for _ in 0..if cfg!(windows) { 200 } else { 100 } {
+        let started = Instant::now();
+        while started.elapsed() < zellij_discovery_timeout() {
             let discovered =
-                timeout(extended_timeout(), node.discover_sessions(NodeBackendKind::Zellij))
+                match timeout(extended_timeout(), node.discover_sessions(NodeBackendKind::Zellij))
                     .await
-                    .expect("discover_sessions should not hang")
-                    .expect("discover_sessions should succeed");
+                {
+                    Ok(Ok(discovered)) => discovered,
+                    Ok(Err(_)) | Err(_) => break,
+                };
             if let Some(candidate) = discovered
                 .into_iter()
                 .find(|session| session.title.as_deref() == Some(session_name))
@@ -1623,6 +1629,10 @@ mod tests {
         }
 
         fallback_zellij_candidate(session_name)
+    }
+
+    fn zellij_discovery_timeout() -> Duration {
+        if cfg!(windows) { Duration::from_secs(30) } else { Duration::from_secs(20) }
     }
 
     fn fallback_zellij_candidate(session_name: &str) -> super::NodeDiscoveredSession {

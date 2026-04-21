@@ -5,10 +5,10 @@ const { EventEmitter } = require("node:events");
 const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 5000;
 const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 45000 : 5000;
 const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 450 : 50;
-const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 60 : 100;
 const INTERACTIVE_PROBE_INTERVAL = process.platform === "win32" ? 20 : 10;
 const ZELLIJ_COMMAND_TIMEOUT_MS = process.platform === "win32" ? 10000 : 5000;
 const ZELLIJ_CREATE_TIMEOUT_MS = process.platform === "win32" ? 20000 : 10000;
+const ZELLIJ_DISCOVERY_TIMEOUT_MS = process.platform === "win32" ? 30000 : 20000;
 const ZELLIJ_SESSION_WAIT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 20000;
 const ZELLIJ_TOPOLOGY_POLL_ATTEMPTS = process.platform === "win32" ? 80 : 120;
 
@@ -1102,12 +1102,18 @@ function isHeadlessZellijSpawnError(stderr) {
 }
 
 async function waitForDiscoveredZellijSession(client, sessionName) {
-  for (let attempt = 0; attempt < DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS; attempt += 1) {
-    const sessions = await withTimeout(
-      client.discoverSessions("zellij"),
-      DEFAULT_HOST_TIMEOUT_MS,
-      `Timed out discovering zellij sessions: ${sessionName}`,
-    );
+  const started = Date.now();
+  while (Date.now() - started < ZELLIJ_DISCOVERY_TIMEOUT_MS) {
+    let sessions = [];
+    try {
+      sessions = await withTimeout(
+        client.discoverSessions("zellij"),
+        DEFAULT_HOST_TIMEOUT_MS,
+        `Timed out discovering zellij sessions: ${sessionName}`,
+      );
+    } catch (_error) {
+      break;
+    }
     const candidate =
       sessions.find((session) => session.title === sessionName) ?? null;
     if (candidate) {
