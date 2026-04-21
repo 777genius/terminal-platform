@@ -19,7 +19,7 @@ function readyEchoLaunch() {
       "cmd.exe";
     return {
       program: comspec,
-      args: ["/D", "/Q", "/K", "prompt TP$G & echo ready"],
+      args: ["/D", "/Q", "/K", "echo ready"],
     };
   }
 

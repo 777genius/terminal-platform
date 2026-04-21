@@ -125,7 +125,7 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "cmd.exe".to_string());
 
-        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "prompt TP$G & echo ready"])
+        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
     }
 }
 
