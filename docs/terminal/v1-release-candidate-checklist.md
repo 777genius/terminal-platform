@@ -54,6 +54,27 @@ After the recorded manual pass files are added:
 cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
 ```
 
+## Offline handoff when push is unavailable
+
+If the working environment cannot reach GitHub, do not treat local commits as shipped.
+Create both a patch stream and a Git bundle, verify the bundle, then apply one of them from a
+network-enabled checkout before running hosted CI.
+
+```bash
+git format-patch origin/main..HEAD --stdout > terminal-platform-v1-closeout-local.patch
+git bundle create terminal-platform-v1-closeout.bundle origin/main..HEAD
+git bundle verify terminal-platform-v1-closeout.bundle
+```
+
+In the network-enabled checkout, apply the handoff and push only after the local readiness
+audit still passes:
+
+```bash
+git am terminal-platform-v1-closeout-local.patch
+cargo run -p xtask -- verify-v1-readiness
+git push origin main
+```
+
 ## GitHub closeout steps
 
 1. Push `main` to the canonical GitHub remote.

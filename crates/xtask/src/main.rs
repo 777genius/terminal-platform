@@ -597,6 +597,9 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
             "install-capi-package",
             "verify-capi-install",
             "verify-v1-readiness --require-recorded-passes",
+            "git format-patch origin/main..HEAD --stdout",
+            "git bundle create terminal-platform-v1-closeout.bundle origin/main..HEAD",
+            "git bundle verify terminal-platform-v1-closeout.bundle",
         ],
     )?;
     assert_contains_all(
@@ -624,6 +627,11 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
             "verify-capi-package",
             "install-capi-package",
             "verify-capi-install",
+            "Offline handoff when push is unavailable",
+            "git format-patch origin/main..HEAD --stdout",
+            "git bundle create terminal-platform-v1-closeout.bundle origin/main..HEAD",
+            "git bundle verify terminal-platform-v1-closeout.bundle",
+            "git am terminal-platform-v1-closeout-local.patch",
         ],
     )?;
     verify_windows_zellij_package_smoke(

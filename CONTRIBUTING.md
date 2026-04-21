@@ -56,6 +56,16 @@ Strict release handoff gate:
 cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
 ```
 
+Offline handoff when GitHub is unavailable from the working environment:
+
+```bash
+git format-patch origin/main..HEAD --stdout > terminal-platform-v1-closeout-local.patch
+git bundle create terminal-platform-v1-closeout.bundle origin/main..HEAD
+git bundle verify terminal-platform-v1-closeout.bundle
+```
+
+Apply the patch or bundle from a network-enabled checkout, rerun `verify-v1-readiness`, then push.
+
 ## Pull Requests
 
 - keep changes narrow and intentional
