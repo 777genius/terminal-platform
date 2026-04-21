@@ -17,6 +17,14 @@ const CODE_OF_CONDUCT_PATH: &str = "CODE_OF_CONDUCT.md";
 const PULL_REQUEST_TEMPLATE_PATH: &str = ".github/pull_request_template.md";
 const ROOT_README_PATH: &str = "README.md";
 const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README.md";
+const NODE_PACKAGE_STAGE_SCRIPT_PATH: &str =
+    "crates/terminal-node-napi/package/scripts/stage-package.mjs";
+const NODE_PACKAGE_BUILD_SCRIPT_PATH: &str =
+    "crates/terminal-node-napi/package/scripts/build-local-package.mjs";
+const NODE_PACKAGE_PACK_SCRIPT_PATH: &str =
+    "crates/terminal-node-napi/package/scripts/pack-local-package.mjs";
+const NODE_PACKAGE_VERIFY_SCRIPT_PATH: &str =
+    "crates/terminal-node-napi/package/scripts/verify-package.mjs";
 const NODE_SMOKE_TEST_PATH: &str = "crates/terminal-node-napi/tests/node_smoke.rs";
 const NODE_PACKAGE_SMOKE_TEST_PATH: &str = "crates/terminal-node-napi/tests/package_smoke.rs";
 const NODE_PACKAGE_INSTALL_SMOKE_TEST_PATH: &str =
@@ -349,6 +357,10 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let pull_request_template = workspace_root.join(PULL_REQUEST_TEMPLATE_PATH);
     let root_readme = workspace_root.join(ROOT_README_PATH);
     let node_package_readme = workspace_root.join(NODE_PACKAGE_README_PATH);
+    let node_package_stage_script = workspace_root.join(NODE_PACKAGE_STAGE_SCRIPT_PATH);
+    let node_package_build_script = workspace_root.join(NODE_PACKAGE_BUILD_SCRIPT_PATH);
+    let node_package_pack_script = workspace_root.join(NODE_PACKAGE_PACK_SCRIPT_PATH);
+    let node_package_verify_script = workspace_root.join(NODE_PACKAGE_VERIFY_SCRIPT_PATH);
     let node_smoke_test = workspace_root.join(NODE_SMOKE_TEST_PATH);
     let node_package_smoke_test = workspace_root.join(NODE_PACKAGE_SMOKE_TEST_PATH);
     let node_package_install_smoke_test = workspace_root.join(NODE_PACKAGE_INSTALL_SMOKE_TEST_PATH);
@@ -375,6 +387,10 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(pull_request_template.is_file(), "pull request template is missing")?;
     assert_value(root_readme.is_file(), "root README is missing")?;
     assert_value(node_package_readme.is_file(), "Node package README is missing")?;
+    assert_value(node_package_stage_script.is_file(), "Node package stage script is missing")?;
+    assert_value(node_package_build_script.is_file(), "Node package build script is missing")?;
+    assert_value(node_package_pack_script.is_file(), "Node package pack script is missing")?;
+    assert_value(node_package_verify_script.is_file(), "Node package verify script is missing")?;
     assert_value(node_smoke_test.is_file(), "Node addon smoke test is missing")?;
     assert_value(node_package_smoke_test.is_file(), "Node package smoke test is missing")?;
     assert_value(
@@ -402,6 +418,22 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         .map_err(|error| format!("failed to read {} - {error}", contributing.display()))?;
     let node_package_readme_contents = fs::read_to_string(&node_package_readme)
         .map_err(|error| format!("failed to read {} - {error}", node_package_readme.display()))?;
+    let node_package_stage_script_contents = fs::read_to_string(&node_package_stage_script)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", node_package_stage_script.display())
+        })?;
+    let node_package_build_script_contents = fs::read_to_string(&node_package_build_script)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", node_package_build_script.display())
+        })?;
+    let node_package_pack_script_contents =
+        fs::read_to_string(&node_package_pack_script).map_err(|error| {
+            format!("failed to read {} - {error}", node_package_pack_script.display())
+        })?;
+    let node_package_verify_script_contents = fs::read_to_string(&node_package_verify_script)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", node_package_verify_script.display())
+        })?;
     let node_smoke_test_contents = fs::read_to_string(&node_smoke_test)
         .map_err(|error| format!("failed to read {} - {error}", node_smoke_test.display()))?;
     let node_package_smoke_test_contents =
@@ -478,6 +510,12 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
             "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
             "node --input-type=module",
         ],
+    )?;
+    verify_node_package_scripts(
+        &node_package_stage_script_contents,
+        &node_package_build_script_contents,
+        &node_package_pack_script_contents,
+        &node_package_verify_script_contents,
     )?;
 
     for expected_line in [
@@ -818,6 +856,46 @@ fn verify_v1_release_configs(release_plz_config: &str, deny_config: &str) -> Res
             "unknown-registry = \"deny\"",
             "unknown-git = \"deny\"",
         ],
+    )?;
+
+    Ok(())
+}
+
+fn verify_node_package_scripts(
+    stage_script: &str,
+    build_script: &str,
+    pack_script: &str,
+    verify_script: &str,
+) -> Result<(), String> {
+    assert_contains_all(
+        stage_script,
+        "Node package stage script guardrails",
+        &[
+            "assertSafeOutputDir(outDir)",
+            "Refusing to stage package into unsafe output directory",
+            "options.out = readFlagValue(argv, index, arg)",
+            "options.addon = readFlagValue(argv, index, arg)",
+            "Missing value for ${flag}",
+        ],
+    )?;
+    assert_contains_all(
+        build_script,
+        "Node package build script guardrails",
+        &["options.out = readFlagValue(argv, index, arg)", "Missing value for ${flag}"],
+    )?;
+    assert_contains_all(
+        pack_script,
+        "Node package pack script guardrails",
+        &[
+            "options.out = path.resolve(readFlagValue(argv, index, arg))",
+            "Missing value for ${flag}",
+            "npm_config_cache",
+        ],
+    )?;
+    assert_contains_all(
+        verify_script,
+        "Node package verify script guardrails",
+        &["options.packageDir = readFlagValue(argv, index, arg)", "Missing value for ${flag}"],
     )?;
 
     Ok(())
@@ -1587,8 +1665,8 @@ fn assert_value(value: bool, message: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        verify_recorded_passes, verify_v1_release_configs, verify_v1_workflows,
-        verify_windows_zellij_package_smoke,
+        verify_node_package_scripts, verify_recorded_passes, verify_v1_release_configs,
+        verify_v1_workflows, verify_windows_zellij_package_smoke,
     };
     use std::{
         fs,
@@ -2098,6 +2176,35 @@ none
     }
 
     #[test]
+    fn verify_node_package_scripts_accepts_expected_guardrails() {
+        if let Err(error) = verify_node_package_scripts(
+            VALID_NODE_PACKAGE_STAGE_SCRIPT,
+            VALID_NODE_PACKAGE_BUILD_SCRIPT,
+            VALID_NODE_PACKAGE_PACK_SCRIPT,
+            VALID_NODE_PACKAGE_VERIFY_SCRIPT,
+        ) {
+            panic!("expected Node package script guardrails to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_node_package_scripts_rejects_missing_stage_output_guard() {
+        let invalid_stage_script = VALID_NODE_PACKAGE_STAGE_SCRIPT
+            .replace("assertSafeOutputDir(outDir)", "/* unsafe output accepted */");
+        let error = match verify_node_package_scripts(
+            &invalid_stage_script,
+            VALID_NODE_PACKAGE_BUILD_SCRIPT,
+            VALID_NODE_PACKAGE_PACK_SCRIPT,
+            VALID_NODE_PACKAGE_VERIFY_SCRIPT,
+        ) {
+            Ok(()) => panic!("expected missing stage output guard to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("assertSafeOutputDir(outDir)"), "got: {error}");
+    }
+
+    #[test]
     fn verify_windows_zellij_package_smoke_accepts_expected_markers() {
         if let Err(error) = verify_windows_zellij_package_smoke(
             VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
@@ -2123,6 +2230,30 @@ none
 
         assert!(error.contains("staged package smoke"), "got: {error}");
     }
+
+    const VALID_NODE_PACKAGE_STAGE_SCRIPT: &str = r#"
+assertSafeOutputDir(outDir);
+throw new Error(`Refusing to stage package into unsafe output directory: ${outDir}`);
+options.out = readFlagValue(argv, index, arg);
+options.addon = readFlagValue(argv, index, arg);
+throw new Error(`Missing value for ${flag}`);
+"#;
+
+    const VALID_NODE_PACKAGE_BUILD_SCRIPT: &str = r#"
+options.out = readFlagValue(argv, index, arg);
+throw new Error(`Missing value for ${flag}`);
+"#;
+
+    const VALID_NODE_PACKAGE_PACK_SCRIPT: &str = r#"
+options.out = path.resolve(readFlagValue(argv, index, arg));
+throw new Error(`Missing value for ${flag}`);
+npm_config_cache: process.env.npm_config_cache ?? path.join(options.out, ".npm-cache"),
+"#;
+
+    const VALID_NODE_PACKAGE_VERIFY_SCRIPT: &str = r#"
+options.packageDir = readFlagValue(argv, index, arg);
+throw new Error(`Missing value for ${flag}`);
+"#;
 
     const VALID_CI_WORKFLOW: &str = r#"
 jobs:
