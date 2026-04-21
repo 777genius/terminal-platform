@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import platform
+import re
 import shutil
 import stat
 import sys
@@ -90,6 +91,22 @@ def select_asset(release: dict) -> dict:
     raise RuntimeError(f"failed to locate zellij asset for {suffixes}: {names}")
 
 
+def zellij_version_tuple(release: dict) -> tuple[int, int, int]:
+    version_text = str(release.get("tag_name") or release.get("name") or "")
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", version_text)
+    if not match:
+        raise RuntimeError(f"failed to parse zellij release version from: {version_text!r}")
+
+    return tuple(int(part) for part in match.groups())
+
+
+def assert_supported_zellij_release(release: dict) -> None:
+    version = zellij_version_tuple(release)
+    if version < (0, 44, 0):
+        formatted = ".".join(str(part) for part in version)
+        raise RuntimeError(f"zellij {formatted} is below the v1 minimum 0.44.0")
+
+
 def extract_binary(archive_path: pathlib.Path, out_dir: pathlib.Path) -> pathlib.Path:
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -130,6 +147,7 @@ def main() -> int:
     args = parser.parse_args()
 
     release = download_json("https://api.github.com/repos/zellij-org/zellij/releases/latest")
+    assert_supported_zellij_release(release)
     asset = select_asset(release)
 
     out_dir = pathlib.Path(args.out).resolve()

@@ -20,6 +20,7 @@ const NODE_SMOKE_TEST_PATH: &str = "crates/terminal-node-napi/tests/node_smoke.r
 const NODE_PACKAGE_SMOKE_TEST_PATH: &str = "crates/terminal-node-napi/tests/package_smoke.rs";
 const NODE_PACKAGE_INSTALL_SMOKE_TEST_PATH: &str =
     "crates/terminal-node-napi/tests/package_install_smoke.rs";
+const ZELLIJ_INSTALLER_PATH: &str = ".github/scripts/install_zellij.py";
 const MANUAL_DIR: &str = "crates/terminal-testing/manual";
 const MANUAL_DRAFTS_DIR: &str = "crates/terminal-testing/manual/drafts";
 const MANUAL_RUNS_DIR: &str = "crates/terminal-testing/manual/runs";
@@ -348,6 +349,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let node_smoke_test = workspace_root.join(NODE_SMOKE_TEST_PATH);
     let node_package_smoke_test = workspace_root.join(NODE_PACKAGE_SMOKE_TEST_PATH);
     let node_package_install_smoke_test = workspace_root.join(NODE_PACKAGE_INSTALL_SMOKE_TEST_PATH);
+    let zellij_installer = workspace_root.join(ZELLIJ_INSTALLER_PATH);
     let manual_dir = workspace_root.join(MANUAL_DIR);
     let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
@@ -374,6 +376,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         node_package_install_smoke_test.is_file(),
         "Node installed package smoke test is missing",
     )?;
+    assert_value(zellij_installer.is_file(), "Zellij installer script is missing")?;
     assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
     assert_value(manual_readme.is_file(), "manual QA README is missing")?;
     assert_value(manual_drafts_dir.is_dir(), "manual draft capture directory is missing")?;
@@ -401,6 +404,8 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         fs::read_to_string(&node_package_install_smoke_test).map_err(|error| {
             format!("failed to read {} - {error}", node_package_install_smoke_test.display())
         })?;
+    let zellij_installer_contents = fs::read_to_string(&zellij_installer)
+        .map_err(|error| format!("failed to read {} - {error}", zellij_installer.display()))?;
     let manual_readme_contents = fs::read_to_string(&manual_readme)
         .map_err(|error| format!("failed to read {} - {error}", manual_readme.display()))?;
     let windows_native_zellij_checklist_contents =
@@ -499,6 +504,11 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         &node_smoke_test_contents,
         &node_package_smoke_test_contents,
         &node_package_install_smoke_test_contents,
+    )?;
+    assert_contains_all(
+        &zellij_installer_contents,
+        "Zellij installer",
+        &["assert_supported_zellij_release", "below the v1 minimum 0.44.0"],
     )?;
     assert_value(
         manual_readme_contents.contains("one Windows `Native + Zellij` pass"),
