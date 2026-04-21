@@ -2096,6 +2096,12 @@ fn fullscreen_fzf_command(path: &std::path::Path) -> String {
 }
 
 #[cfg(any(unix, windows))]
+fn fullscreen_less_command(path: &std::path::Path, prefix: &str) -> String {
+    let quoted = quoted_command_path(path);
+    format!("less +/{prefix}-less-gamma {quoted}")
+}
+
+#[cfg(any(unix, windows))]
 async fn run_fullscreen_viewport_flow(
     fixture: &terminal_testing::DaemonFixture,
     session_id: terminal_domain::SessionId,
@@ -2132,7 +2138,7 @@ async fn run_fullscreen_viewport_flow(
         fixture,
         session_id,
         pane_id,
-        submitted_input(&format!("less {}", quoted_command_path(&viewport_file))),
+        submitted_input(&fullscreen_less_command(&viewport_file, prefix)),
     )
     .await;
     wait_for_screen_line(fixture, session_id, pane_id, &format!("{prefix}-less-gamma")).await;
