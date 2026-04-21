@@ -19,9 +19,14 @@ const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README
 const MANUAL_DIR: &str = "crates/terminal-testing/manual";
 const MANUAL_DRAFTS_DIR: &str = "crates/terminal-testing/manual/drafts";
 const MANUAL_RUNS_DIR: &str = "crates/terminal-testing/manual/runs";
+const CI_WORKFLOW_PATH: &str = ".github/workflows/ci.yml";
 const RELEASE_READINESS_WORKFLOW_PATH: &str = ".github/workflows/release-readiness.yml";
+const RELEASE_PLZ_WORKFLOW_PATH: &str = ".github/workflows/release-plz.yml";
 const RELEASE_CANDIDATE_SUMMARY_PATH: &str = "docs/terminal/v1-release-candidate-summary.md";
 const RELEASE_SUMMARY_TEMPLATE_PATH: &str = "docs/terminal/v1-release-summary-template.md";
+const RELEASE_PLZ_CONFIG_PATH: &str = "release-plz.toml";
+const DENY_CONFIG_PATH: &str = "deny.toml";
+const FUZZ_DIR: &str = "fuzz";
 const MANUAL_RUN_TEMPLATE_DATE_PLACEHOLDER: &str = "Date: YYYY-MM-DD";
 const MANUAL_RUN_TEMPLATE_OS_PLACEHOLDER: &str = "OS: macOS 15.4 / Ubuntu 24.04 / Windows 11 24H2";
 const MANUAL_RUN_TEMPLATE_CHECKLIST_PLACEHOLDER: &str =
@@ -339,9 +344,14 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let manual_dir = workspace_root.join(MANUAL_DIR);
     let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
+    let ci_workflow = workspace_root.join(CI_WORKFLOW_PATH);
     let release_readiness_workflow = workspace_root.join(RELEASE_READINESS_WORKFLOW_PATH);
+    let release_plz_workflow = workspace_root.join(RELEASE_PLZ_WORKFLOW_PATH);
     let release_candidate_summary = workspace_root.join(RELEASE_CANDIDATE_SUMMARY_PATH);
     let release_summary_template = workspace_root.join(RELEASE_SUMMARY_TEMPLATE_PATH);
+    let release_plz_config = workspace_root.join(RELEASE_PLZ_CONFIG_PATH);
+    let deny_config = workspace_root.join(DENY_CONFIG_PATH);
+    let fuzz_dir = workspace_root.join(FUZZ_DIR);
 
     assert_value(license.is_file(), "root LICENSE is missing")?;
     assert_value(contributing.is_file(), "root CONTRIBUTING.md is missing")?;
@@ -352,9 +362,14 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
     assert_value(manual_drafts_dir.is_dir(), "manual draft capture directory is missing")?;
     assert_value(manual_runs_dir.is_dir(), "manual run capture directory is missing")?;
+    assert_value(ci_workflow.is_file(), "ci workflow is missing")?;
     assert_value(release_readiness_workflow.is_file(), "release readiness workflow is missing")?;
+    assert_value(release_plz_workflow.is_file(), "release-plz workflow is missing")?;
     assert_value(release_candidate_summary.is_file(), "release candidate summary is missing")?;
     assert_value(release_summary_template.is_file(), "release summary template is missing")?;
+    assert_value(release_plz_config.is_file(), "release-plz config is missing")?;
+    assert_value(deny_config.is_file(), "cargo-deny config is missing")?;
+    assert_value(fuzz_dir.is_dir(), "fuzz directory is missing")?;
 
     let root_readme_contents = fs::read_to_string(&root_readme)
         .map_err(|error| format!("failed to read {} - {error}", root_readme.display()))?;
@@ -364,6 +379,14 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         .map_err(|error| {
             format!("failed to read {} - {error}", release_candidate_summary.display())
         })?;
+    let ci_workflow_contents = fs::read_to_string(&ci_workflow)
+        .map_err(|error| format!("failed to read {} - {error}", ci_workflow.display()))?;
+    let release_readiness_workflow_contents = fs::read_to_string(&release_readiness_workflow)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", release_readiness_workflow.display())
+        })?;
+    let release_plz_workflow_contents = fs::read_to_string(&release_plz_workflow)
+        .map_err(|error| format!("failed to read {} - {error}", release_plz_workflow.display()))?;
 
     for expected_line in [
         "- `macOS + Linux` - `Native + tmux + Zellij`",
@@ -405,6 +428,12 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(
         !release_candidate_summary_contents.contains("TBD"),
         "release candidate summary still contains TBD placeholders",
+    )?;
+
+    verify_v1_workflows(
+        &ci_workflow_contents,
+        &release_readiness_workflow_contents,
+        &release_plz_workflow_contents,
     )?;
 
     for relative_path in [
@@ -490,6 +519,85 @@ fn verify_recorded_passes(manual_runs_dir: &Path) -> Result<(), String> {
     assert_value(
         has_windows_zellij_pass,
         "missing recorded Windows Native + Zellij pass in manual/runs",
+    )?;
+
+    Ok(())
+}
+
+fn verify_v1_workflows(
+    ci_workflow: &str,
+    release_readiness_workflow: &str,
+    release_plz_workflow: &str,
+) -> Result<(), String> {
+    assert_contains_all(
+        ci_workflow,
+        "ci workflow",
+        &[
+            "ubuntu-latest",
+            "macos-latest",
+            "windows-latest",
+            "name: unix-${{ matrix.os }}",
+            "name: windows-v1",
+            "name: governance",
+            "name: fuzz-baseline",
+            "cargo clippy --workspace --all-targets --all-features",
+            "cargo nextest run --profile ci --workspace",
+            "cargo-deny",
+            "cargo-public-api",
+            "cargo-semver-checks",
+            "release-plz",
+            "cargo-fuzz",
+            "protocol_frames",
+            "tmux_layout",
+            "zellij_surface",
+            "screen_delta",
+            "zellij --version",
+        ],
+    )?;
+
+    let unix_job = section_between(ci_workflow, "  unix-matrix:", "\n  windows-v1:")
+        .ok_or_else(|| "ci workflow is missing unix-matrix job section".to_string())?;
+    assert_contains_all(unix_job, "ci unix-matrix job", &["tmux -V", "zellij --version"])?;
+
+    let windows_job = section_between(ci_workflow, "  windows-v1:", "\n  governance:")
+        .ok_or_else(|| "ci workflow is missing windows-v1 job section".to_string())?;
+    assert_contains_all(
+        windows_job,
+        "ci windows-v1 job",
+        &[
+            "windows-latest",
+            "cargo nextest run",
+            "--test-threads 1",
+            "-p terminal-backend-native",
+            "-p terminal-daemon",
+            "-p terminal-daemon-client",
+            "-p terminal-node",
+            "-p terminal-node-napi",
+            "-p terminal-protocol",
+            "-p terminal-testing",
+            "zellij --version",
+        ],
+    )?;
+    assert_value(
+        !windows_job.contains("tmux"),
+        "ci windows-v1 job must not include tmux lanes or tooling",
+    )?;
+
+    assert_contains_all(
+        release_readiness_workflow,
+        "release readiness workflow",
+        &[
+            "workflow_dispatch",
+            "verify-v1-readiness --require-recorded-passes",
+            "cargo-public-api",
+            "cargo-semver-checks",
+            "release-plz",
+        ],
+    )?;
+    assert_contains_all(
+        release_plz_workflow,
+        "release-plz workflow",
+        &["contents: write", "pull-requests: write", "release-plz release-pr --git-token"],
     )?;
 
     Ok(())
@@ -721,6 +829,22 @@ fn section_body<'a>(contents: &'a str, heading: &str) -> &'a str {
         return "";
     };
     tail.split_once("\n## ").map_or(tail, |(body, _)| body)
+}
+
+fn section_between<'a>(contents: &'a str, start: &str, end: &str) -> Option<&'a str> {
+    let (_, tail) = contents.split_once(start)?;
+    let (section, _) = tail.split_once(end)?;
+    Some(section)
+}
+
+fn assert_contains_all(contents: &str, label: &str, needles: &[&str]) -> Result<(), String> {
+    for needle in needles {
+        assert_value(
+            contents.contains(needle),
+            &format!("{label} is missing required marker: {needle}"),
+        )?;
+    }
+    Ok(())
 }
 
 fn require_line_value<'a>(contents: &'a str, prefix: &str, path: &Path) -> Result<&'a str, String> {
@@ -1203,7 +1327,7 @@ fn assert_value(value: bool, message: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::verify_recorded_passes;
+    use super::{verify_recorded_passes, verify_v1_workflows};
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -1589,4 +1713,119 @@ none
             "expected runtime value error, got: {error}"
         );
     }
+
+    #[test]
+    fn verify_v1_workflows_accepts_expected_support_matrix() {
+        if let Err(error) = verify_v1_workflows(
+            VALID_CI_WORKFLOW,
+            VALID_RELEASE_READINESS_WORKFLOW,
+            VALID_RELEASE_PLZ_WORKFLOW,
+        ) {
+            panic!("expected workflow readiness to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_v1_workflows_rejects_tmux_in_windows_job() {
+        let invalid_ci =
+            VALID_CI_WORKFLOW.replace("zellij --version\n", "zellij --version\ntmux -V\n");
+        let error = match verify_v1_workflows(
+            &invalid_ci,
+            VALID_RELEASE_READINESS_WORKFLOW,
+            VALID_RELEASE_PLZ_WORKFLOW,
+        ) {
+            Ok(()) => panic!("expected Windows tmux marker to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("windows-v1 job must not include tmux"), "got: {error}");
+    }
+
+    #[test]
+    fn verify_v1_workflows_rejects_missing_fuzz_target() {
+        let invalid_ci = VALID_CI_WORKFLOW.replace("zellij_surface", "zellij_missing");
+        let error = match verify_v1_workflows(
+            &invalid_ci,
+            VALID_RELEASE_READINESS_WORKFLOW,
+            VALID_RELEASE_PLZ_WORKFLOW,
+        ) {
+            Ok(()) => panic!("expected missing fuzz target to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("zellij_surface"), "got: {error}");
+    }
+
+    const VALID_CI_WORKFLOW: &str = r#"
+jobs:
+  unix-matrix:
+    name: unix-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - run: tmux -V
+      - run: zellij --version
+      - run: cargo clippy --workspace --all-targets --all-features
+      - run: cargo nextest run --profile ci --workspace
+  windows-v1:
+    name: windows-v1
+    runs-on: windows-latest
+    steps:
+      - run: zellij --version
+      - run: cargo clippy --workspace --all-targets --all-features
+      - run: >
+          cargo nextest run
+          --profile ci
+          --test-threads 1
+          -p terminal-backend-native
+          -p terminal-daemon
+          -p terminal-daemon-client
+          -p terminal-node
+          -p terminal-node-napi
+          -p terminal-protocol
+          -p terminal-testing
+  governance:
+    name: governance
+    steps:
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-public-api,cargo-semver-checks,release-plz
+  fuzz-baseline:
+    name: fuzz-baseline
+    steps:
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - run: |
+          cargo fuzz run protocol_frames
+          cargo fuzz run tmux_layout
+          cargo fuzz run zellij_surface
+          cargo fuzz run screen_delta
+"#;
+
+    const VALID_RELEASE_READINESS_WORKFLOW: &str = r#"
+on:
+  workflow_dispatch:
+jobs:
+  release-readiness:
+    steps:
+      - run: cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api,cargo-semver-checks,release-plz
+"#;
+
+    const VALID_RELEASE_PLZ_WORKFLOW: &str = r#"
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  release-pr:
+    steps:
+      - run: release-plz release-pr --git-token "$GITHUB_TOKEN"
+"#;
 }
