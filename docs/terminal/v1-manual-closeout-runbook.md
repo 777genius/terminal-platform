@@ -46,6 +46,8 @@ Minimum expectations:
 - record the real OS and tool versions
 - write real findings, even if the value is `no issues found`
 - keep the checklist path accurate
+- remove unresolved draft text such as `fill from workflow log`, `fill after hosted run completes`,
+  `placeholder`, `YYYY-MM-DD`, `rustc 1.xx.x`, or `vxx.x.x`
 
 ## 3. Promote a completed draft into recorded evidence
 

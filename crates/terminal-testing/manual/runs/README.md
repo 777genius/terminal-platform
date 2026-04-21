@@ -20,6 +20,9 @@ Every recorded pass must:
 - keep the `## Scope`, `## Findings`, and `## Notes` headings from the template
 - list findings explicitly, even if the value is `no issues found`
 - replace every template placeholder with a real value
+- remove draft helper text and placeholder versions such as `fill from workflow log`,
+  `fill after hosted run completes`, `placeholder`, `YYYY-MM-DD`, `rustc 1.xx.x`,
+  or `vxx.x.x`
 
 Do not add fake or placeholder pass files. If a manual run fails, capture the failure outside
 this directory until it is resolved or explicitly documented as degraded behavior.
