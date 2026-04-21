@@ -352,6 +352,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
     let manual_readme = manual_dir.join("README.md");
+    let windows_native_zellij_checklist = manual_dir.join("windows-native-zellij.md");
     let ci_workflow = workspace_root.join(CI_WORKFLOW_PATH);
     let release_readiness_workflow = workspace_root.join(RELEASE_READINESS_WORKFLOW_PATH);
     let release_plz_workflow = workspace_root.join(RELEASE_PLZ_WORKFLOW_PATH);
@@ -402,6 +403,10 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         })?;
     let manual_readme_contents = fs::read_to_string(&manual_readme)
         .map_err(|error| format!("failed to read {} - {error}", manual_readme.display()))?;
+    let windows_native_zellij_checklist_contents =
+        fs::read_to_string(&windows_native_zellij_checklist).map_err(|error| {
+            format!("failed to read {} - {error}", windows_native_zellij_checklist.display())
+        })?;
     let release_candidate_summary_contents = fs::read_to_string(&release_candidate_summary)
         .map_err(|error| {
             format!("failed to read {} - {error}", release_candidate_summary.display())
@@ -475,6 +480,11 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(
         manual_readme_contents.contains("one Windows `Native + Zellij` pass"),
         "manual QA README must require a Windows Native + Zellij pass",
+    )?;
+    assert_value(
+        windows_native_zellij_checklist_contents
+            .contains("live `Zellij` import/control path through the package surface"),
+        "Windows Native + Zellij checklist must cover Zellij through package smoke",
     )?;
 
     for relative_path in [
