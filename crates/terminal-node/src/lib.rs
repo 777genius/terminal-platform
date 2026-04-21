@@ -1526,7 +1526,7 @@ mod tests {
     }
 
     fn screen_wait_attempts() -> usize {
-        if cfg!(windows) { 900 } else { 50 }
+        if cfg!(windows) { 450 } else { 50 }
     }
 
     fn interactive_probe_interval() -> usize {

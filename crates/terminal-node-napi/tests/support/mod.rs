@@ -221,7 +221,7 @@ pub fn wait_child_output_with_timeout(
 }
 
 pub fn process_timeout() -> Duration {
-    if cfg!(windows) { Duration::from_secs(300) } else { Duration::from_secs(180) }
+    if cfg!(windows) { Duration::from_secs(120) } else { Duration::from_secs(180) }
 }
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {

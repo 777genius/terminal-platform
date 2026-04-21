@@ -287,7 +287,7 @@ fn spawn_zellij_session_with_lock(
 ) -> Result<ZellijSessionGuard, String> {
     let mut last_error = None;
 
-    for _ in 0..3 {
+    for _ in 0..1 {
         match spawn_windows_zellij_pty(session_name) {
             Ok(pty) => {
                 let wait_result = wait_for_zellij_session(session_name);
@@ -306,40 +306,6 @@ fn spawn_zellij_session_with_lock(
                 drop(pty);
             }
             Err(error) => last_error = Some(error),
-        }
-
-        let _ = run_zellij(&["kill-session", session_name]);
-        thread::sleep(Duration::from_millis(200));
-    }
-
-    for _ in 0..2 {
-        match run_zellij_with_timeout(
-            &["attach", "--create-background", session_name],
-            zellij_create_timeout(),
-        ) {
-            Ok(output) if output.status.success() => {}
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if !is_headless_zellij_spawn_error(&stderr) && !stderr.trim().is_empty() {
-                    last_error = Some(stderr.trim().to_string());
-                }
-            }
-            Err(error) => last_error = Some(error),
-        }
-
-        let wait_result = wait_for_zellij_session(session_name);
-        if wait_result.is_ok() {
-            return Ok(ZellijSessionGuard {
-                session_name: session_name.to_string(),
-                _lock: lock,
-                _pty: None,
-            });
-        }
-
-        let wait_error = wait_result
-            .expect_err("wait_result should be an error once zellij session discovery fails");
-        if last_error.is_none() {
-            last_error = Some(wait_error);
         }
 
         let _ = run_zellij(&["kill-session", session_name]);
@@ -390,7 +356,7 @@ fn spawn_windows_zellij_pty(session_name: &str) -> Result<WindowsZellijPtyGuard,
         .map_err(|error| format!("failed to open zellij test pty: {error}"))?;
 
     let mut command = CommandBuilder::new(resolve_windows_executable("zellij"));
-    command.args(["--session", session_name]);
+    command.args(["attach", "--create", session_name]);
     command.env("TERM", "xterm-256color");
 
     let child = pty_pair
@@ -567,7 +533,7 @@ fn wait_for_zellij_session(session_name: &str) -> Result<(), String> {
 
 #[cfg(any(unix, windows))]
 fn zellij_session_wait_timeout() -> Duration {
-    if cfg!(windows) { Duration::from_secs(45) } else { Duration::from_secs(20) }
+    if cfg!(windows) { Duration::from_secs(30) } else { Duration::from_secs(20) }
 }
 
 #[cfg(any(unix, windows))]
