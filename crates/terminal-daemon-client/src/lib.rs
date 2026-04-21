@@ -727,12 +727,14 @@ mod tests {
 
         #[cfg(windows)]
         {
-            let program = std::env::var("COMSPEC")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "cmd.exe".to_string());
-
-            ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready & more"])
+            ShellLaunchSpec::new("powershell.exe").with_args([
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
+            ])
         }
     }
 

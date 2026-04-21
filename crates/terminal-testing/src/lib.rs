@@ -120,12 +120,14 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        let program = std::env::var("COMSPEC")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "cmd.exe".to_string());
-
-        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready & more"])
+        ShellLaunchSpec::new("powershell.exe").with_args([
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
+        ])
     }
 }
 
@@ -387,7 +389,7 @@ fn spawn_windows_zellij_pty(session_name: &str) -> Result<WindowsZellijPtyGuard,
         .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
         .map_err(|error| format!("failed to open zellij test pty: {error}"))?;
 
-    let mut command = CommandBuilder::new("zellij");
+    let mut command = CommandBuilder::new(resolve_windows_executable("zellij"));
     command.args(["--session", session_name]);
     command.env("TERM", "xterm-256color");
 
@@ -423,6 +425,33 @@ fn spawn_windows_zellij_pty(session_name: &str) -> Result<WindowsZellijPtyGuard,
     });
 
     Ok(WindowsZellijPtyGuard { child, _master: pty_pair.master, output })
+}
+
+#[cfg(windows)]
+fn resolve_windows_executable(program: &str) -> String {
+    let has_path_separator = program.contains('\\') || program.contains('/');
+    if has_path_separator {
+        return program.to_string();
+    }
+
+    let candidates = if program.to_ascii_lowercase().ends_with(".exe") {
+        vec![program.to_string()]
+    } else {
+        vec![program.to_string(), format!("{program}.exe")]
+    };
+
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            for candidate in &candidates {
+                let path = dir.join(candidate);
+                if path.is_file() {
+                    return path.display().to_string();
+                }
+            }
+        }
+    }
+
+    program.to_string()
 }
 
 #[cfg(any(unix, windows))]
