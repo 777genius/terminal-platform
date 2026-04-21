@@ -469,7 +469,10 @@ fn verify_recorded_passes(manual_runs_dir: &Path) -> Result<(), String> {
             .iter()
             .find(|expectation| name.starts_with(expectation.file_prefix))
         else {
-            continue;
+            return Err(format!(
+                "unexpected manual run artifact in strict v1 gate: {}",
+                path.display()
+            ));
         };
 
         verify_recorded_pass(&path, name, &contents, *expectation)?;
@@ -637,6 +640,18 @@ fn verify_recorded_pass(
         contents.contains("## Findings"),
         &format!("manual run artifact {} is missing ## Findings", path.display()),
     )?;
+    assert_value(
+        contents.contains("## Notes"),
+        &format!("manual run artifact {} is missing ## Notes", path.display()),
+    )?;
+    assert_value(
+        !contents.contains("Result: pending"),
+        &format!("manual run artifact {} still says Result: pending", path.display()),
+    )?;
+    assert_value(
+        !contents.contains("TODO") && !contents.contains("TBD"),
+        &format!("manual run artifact {} still contains TODO/TBD placeholders", path.display()),
+    )?;
 
     for template_placeholder in [
         MANUAL_RUN_TEMPLATE_DATE_PLACEHOLDER,
@@ -651,6 +666,13 @@ fn verify_recorded_pass(
                 "manual run artifact {} still contains template placeholder: {template_placeholder}",
                 path.display()
             ),
+        )?;
+    }
+
+    for section in ["## Scope", "## Findings", "## Notes"] {
+        assert_value(
+            !section_body(contents, section).trim().is_empty(),
+            &format!("manual run artifact {} has an empty {section} section", path.display()),
         )?;
     }
 
@@ -692,6 +714,13 @@ fn verify_recorded_pass(
     }
 
     Ok(())
+}
+
+fn section_body<'a>(contents: &'a str, heading: &str) -> &'a str {
+    let Some((_, tail)) = contents.split_once(heading) else {
+        return "";
+    };
+    tail.split_once("\n## ").map_or(tail, |(body, _)| body)
 }
 
 fn require_line_value<'a>(contents: &'a str, prefix: &str, path: &Path) -> Result<&'a str, String> {
@@ -1343,6 +1372,86 @@ none
             Err(error) => error,
         };
         assert!(error.contains("template placeholder"), "expected placeholder error, got: {error}");
+    }
+
+    #[test]
+    fn verify_recorded_passes_rejects_unexpected_artifacts() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "scratch-notes-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: macOS 15.4
+Checklist: crates/terminal-testing/manual/electron.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+not a canonical v1 pass artifact.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+
+        let error = match verify_recorded_passes(dir.path()) {
+            Ok(()) => panic!("expected unexpected artifact to fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("unexpected manual run artifact"),
+            "expected unexpected artifact error, got: {error}"
+        );
+    }
+
+    #[test]
+    fn verify_recorded_passes_rejects_empty_required_sections() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "electron-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: macOS 15.4
+Checklist: crates/terminal-testing/manual/electron.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+Electron embed lifecycle.
+
+## Findings
+
+no issues found
+
+## Notes
+
+",
+        );
+
+        let error = match verify_recorded_passes(dir.path()) {
+            Ok(()) => panic!("expected empty notes section to fail"),
+            Err(error) => error,
+        };
+        assert!(error.contains("empty ## Notes"), "expected empty notes error, got: {error}");
     }
 
     #[test]
