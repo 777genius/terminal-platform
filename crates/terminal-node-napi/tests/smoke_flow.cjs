@@ -19,7 +19,7 @@ function readyEchoLaunch() {
       "cmd.exe";
     return {
       program: comspec,
-      args: ["/D", "/Q", "/K", "echo ready"],
+      args: ["/D", "/K", "echo ready"],
     };
   }
 
@@ -963,6 +963,7 @@ async function waitForLine(client, sessionId, paneId, needle) {
 }
 
 async function waitForInteractiveScreen(client, sessionId, paneId, label) {
+  await waitForLine(client, sessionId, paneId, "ready");
   const marker = `node-interactive-probe-${label}-${process.pid}`;
   let lastLines = [];
 

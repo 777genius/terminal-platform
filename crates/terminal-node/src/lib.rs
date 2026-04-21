@@ -1387,6 +1387,7 @@ mod tests {
         pane_id: &str,
         label: &str,
     ) -> super::NodeScreenSnapshot {
+        let _ = wait_for_screen_line(node, session_id, pane_id, "ready").await;
         let marker = format!("node-interactive-probe-{label}-{}", std::process::id());
         let mut last_lines = Vec::new();
 
