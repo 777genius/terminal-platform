@@ -778,6 +778,7 @@ fn verify_v1_workflows(
             "cargo +nightly public-api -p terminal-domain",
             "cargo +nightly public-api -p terminal-protocol",
             "cargo +nightly public-api -p terminal-node",
+            "cargo semver-checks --version",
         ],
     )?;
     assert_contains_all(
@@ -2210,6 +2211,7 @@ jobs:
           cargo +nightly public-api -p terminal-domain
           cargo +nightly public-api -p terminal-protocol
           cargo +nightly public-api -p terminal-node
+      - run: cargo semver-checks --version
 "#;
 
     const VALID_RELEASE_PLZ_WORKFLOW: &str = r#"

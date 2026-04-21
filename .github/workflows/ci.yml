@@ -225,7 +225,9 @@ jobs:
           cargo +nightly public-api -p terminal-node > /dev/null
 
       - name: release-plz config smoke
-        run: release-plz --version
+        run: |
+          cargo semver-checks --version
+          release-plz --version
 
       - name: cargo-semver-checks
         if: github.event_name == 'pull_request'
