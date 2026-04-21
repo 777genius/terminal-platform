@@ -1212,7 +1212,7 @@ function fallbackZellijCandidate(sessionName) {
 }
 
 function submittedInput(text) {
-  return process.platform === "win32" ? `echo ${text}\r` : `${text}\r`;
+  return process.platform === "win32" ? `echo ${text}\r\n` : `${text}\r`;
 }
 
 function delay(ms) {

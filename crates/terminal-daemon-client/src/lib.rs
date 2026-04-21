@@ -732,7 +732,7 @@ mod tests {
     }
 
     fn submitted_input(text: &str) -> String {
-        if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\r") }
+        if cfg!(windows) { format!("echo {text}\r\n") } else { format!("{text}\r") }
     }
 
     async fn wait_for_screen_line(

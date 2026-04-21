@@ -122,6 +122,7 @@ jobs:
         run: >
           cargo nextest run
           --profile ci
+          --test-threads 1
           -p terminal-backend-native
           -p terminal-daemon
           -p terminal-daemon-client
