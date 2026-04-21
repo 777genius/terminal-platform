@@ -101,13 +101,9 @@ def extract_binary(archive_path: pathlib.Path, out_dir: pathlib.Path) -> pathlib
                 filename = pathlib.Path(member).name
                 if filename not in {"zellij", "zellij.exe"}:
                     continue
-                archive.extract(member, out_dir)
-                extracted = out_dir / member
                 target = out_dir / filename
-                if extracted != target:
-                    if target.exists():
-                        target.unlink()
-                    shutil.move(str(extracted), str(target))
+                with archive.open(member) as source, target.open("wb") as output:
+                    shutil.copyfileobj(source, output)
                 return target
         raise RuntimeError("zellij executable not found in zip archive")
 
@@ -116,13 +112,12 @@ def extract_binary(archive_path: pathlib.Path, out_dir: pathlib.Path) -> pathlib
             filename = pathlib.Path(member.name).name
             if filename != "zellij":
                 continue
-            archive.extract(member, out_dir)
-            extracted = out_dir / member.name
             target = out_dir / filename
-            if extracted != target:
-                if target.exists():
-                    target.unlink()
-                shutil.move(str(extracted), str(target))
+            source = archive.extractfile(member)
+            if source is None:
+                continue
+            with source, target.open("wb") as output:
+                shutil.copyfileobj(source, output)
             target.chmod(target.stat().st_mode | stat.S_IEXEC)
             return target
 
