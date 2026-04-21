@@ -120,10 +120,12 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        ShellLaunchSpec::new(resolve_windows_executable("node")).with_args([
-            "-e",
-            "process.stdout.write('ready\\n'); process.stdin.resume(); process.stdin.on('data', chunk => process.stdout.write(chunk));",
-        ])
+        let program = std::env::var("COMSPEC")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "cmd.exe".to_string());
+
+        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "prompt TP$G & echo ready"])
     }
 }
 

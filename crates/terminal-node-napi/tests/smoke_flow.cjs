@@ -11,14 +11,15 @@ const ZELLIJ_CREATE_TIMEOUT_MS = process.platform === "win32" ? 20000 : 10000;
 const ZELLIJ_DISCOVERY_TIMEOUT_MS = process.platform === "win32" ? 30000 : 20000;
 const ZELLIJ_SESSION_WAIT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 20000;
 const ZELLIJ_TOPOLOGY_POLL_ATTEMPTS = process.platform === "win32" ? 80 : 120;
-const WINDOWS_ECHO_SCRIPT =
-  "process.stdout.write('ready\\n'); process.stdin.resume(); process.stdin.on('data', chunk => process.stdout.write(chunk));";
-
 function readyEchoLaunch() {
   if (process.platform === "win32") {
+    const comspec =
+      process.env.ComSpec ??
+      process.env.COMSPEC ??
+      "cmd.exe";
     return {
-      program: process.execPath,
-      args: ["-e", WINDOWS_ECHO_SCRIPT],
+      program: comspec,
+      args: ["/D", "/Q", "/K", "prompt TP$G & echo ready"],
     };
   }
 
