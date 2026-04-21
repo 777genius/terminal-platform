@@ -15,11 +15,10 @@ fn rejects_incompatible_native_manifest_targets() {
 
     let script_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/package_incompatible_smoke.cjs");
-    let output = Command::new("node")
-        .arg(script_path)
-        .env("TERMINAL_NODE_PACKAGE", &package_dir)
-        .output()
-        .expect("incompatible package smoke should launch");
+    let mut command = Command::new("node");
+    command.arg(script_path).env("TERMINAL_NODE_PACKAGE", &package_dir);
+    let output = support::command_output(&mut command, "incompatible package smoke")
+        .expect("incompatible package smoke should run");
 
     assert!(
         output.status.success(),

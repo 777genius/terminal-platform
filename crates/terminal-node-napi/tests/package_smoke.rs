@@ -45,13 +45,14 @@ async fn roundtrips_staged_package_through_cjs_and_esm() {
 
     for script in ["package_smoke.cjs", "package_smoke.mjs"] {
         let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("tests/{script}"));
-        let output = Command::new("node")
+        let mut command = Command::new("node");
+        command
             .arg(script_path)
             .env("TERMINAL_NODE_PACKAGE", &package_dir)
             .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
-            .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value)
-            .output()
-            .expect("package smoke should launch");
+            .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value);
+        let output = support::command_output(&mut command, "package smoke")
+            .expect("package smoke should run");
 
         assert!(
             output.status.success(),

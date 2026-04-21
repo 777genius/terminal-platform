@@ -306,14 +306,15 @@ async fn roundtrips_installed_tarball_through_cjs_and_esm() {
     };
 
     for script in ["install_smoke.cjs", "install_smoke.mjs"] {
-        let output = Command::new("node")
+        let mut command = Command::new("node");
+        command
             .arg(install_dir.join(script))
             .current_dir(&install_dir)
             .env("TERMINAL_NODE_SMOKE_FLOW", &smoke_flow_path)
             .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
-            .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value)
-            .output()
-            .expect("installed package smoke should launch");
+            .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value);
+        let output = support::command_output(&mut command, "installed package smoke")
+            .expect("installed package smoke should run");
 
         assert!(
             output.status.success(),
@@ -362,7 +363,7 @@ async fn installed_tarball_handles_shutdown_and_restart_flows() {
             LocalSocketAddress::Filesystem(path) => ("filesystem", path.display().to_string()),
         };
         let ready_file = unique_temp_path("terminal-node-install-close", "ready");
-        let child = spawn_install_script(
+        let mut child = spawn_install_script(
             &install_dir,
             script,
             &[
@@ -372,10 +373,20 @@ async fn installed_tarball_handles_shutdown_and_restart_flows() {
                 ("TERMINAL_NODE_ADDRESS_VALUE", Path::new(&address_value)),
             ],
         );
-        wait_for_file(&ready_file).await;
+        if !wait_for_file(&ready_file).await {
+            let _ = child.kill();
+            let output = support::wait_child_output(child, "installed shutdown smoke")
+                .expect("installed shutdown smoke should collect output");
+            panic!(
+                "installed package shutdown smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
+                ready_file.display(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
         fixture.shutdown().await.expect("fixture should stop cleanly");
-        let output =
-            child.wait_with_output().expect("installed shutdown smoke should collect output");
+        let output = support::wait_child_output(child, "installed shutdown smoke")
+            .expect("installed shutdown smoke should collect output");
 
         assert!(
             output.status.success(),
@@ -415,7 +426,7 @@ async fn installed_tarball_handles_shutdown_and_restart_flows() {
         let stale_ready_file = unique_temp_path("terminal-node-install-restart", "stale");
         let restart_file = unique_temp_path("terminal-node-install-restart", "restart");
 
-        let child = spawn_install_script(
+        let mut child = spawn_install_script(
             &install_dir,
             script,
             &[
@@ -429,10 +440,30 @@ async fn installed_tarball_handles_shutdown_and_restart_flows() {
             ],
         );
 
-        wait_for_file(&initial_ready_file).await;
+        if !wait_for_file(&initial_ready_file).await {
+            let _ = child.kill();
+            let output = support::wait_child_output(child, "installed restart smoke")
+                .expect("installed restart smoke should collect output");
+            panic!(
+                "installed package restart smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
+                initial_ready_file.display(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
         server.shutdown().await.expect("initial daemon should stop cleanly");
         std::fs::write(&stop_file, "stopped\n").expect("stop signal file should write");
-        wait_for_file(&stale_ready_file).await;
+        if !wait_for_file(&stale_ready_file).await {
+            let _ = child.kill();
+            let output = support::wait_child_output(child, "installed restart smoke")
+                .expect("installed restart smoke should collect output");
+            panic!(
+                "installed package restart smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
+                stale_ready_file.display(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
 
         let restarted_client = LocalSocketDaemonClient::new(address.clone());
         server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
@@ -440,8 +471,8 @@ async fn installed_tarball_handles_shutdown_and_restart_flows() {
         wait_for_daemon_ready(&restarted_client).await;
         std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");
 
-        let output =
-            child.wait_with_output().expect("installed restart smoke should collect output");
+        let output = support::wait_child_output(child, "installed restart smoke")
+            .expect("installed restart smoke should collect output");
         server.shutdown().await.expect("replacement daemon should stop cleanly");
 
         assert!(
@@ -483,15 +514,15 @@ fn spawn_install_script(
     command.spawn().expect("installed package smoke script should launch")
 }
 
-async fn wait_for_file(path: &Path) {
+async fn wait_for_file(path: &Path) -> bool {
     for _ in 0..600 {
         if path.is_file() {
-            return;
+            return true;
         }
         sleep(Duration::from_millis(50)).await;
     }
 
-    panic!("installed package smoke never observed file: {}", path.display());
+    false
 }
 
 fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {

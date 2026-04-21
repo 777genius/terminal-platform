@@ -39,7 +39,7 @@ async fn recovers_staged_package_client_after_daemon_restart() {
         let restart_file = unique_temp_path("terminal-node-package-restart", "restart");
         let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("tests/{script}"));
 
-        let child = std::process::Command::new("node")
+        let mut child = std::process::Command::new("node")
             .arg(script_path)
             .env("TERMINAL_NODE_PACKAGE", &package_dir)
             .env("TERMINAL_NODE_INITIAL_READY_FILE", &initial_ready_file)
@@ -53,10 +53,30 @@ async fn recovers_staged_package_client_after_daemon_restart() {
             .spawn()
             .expect("package restart smoke should launch");
 
-        wait_for_file(&initial_ready_file).await;
+        if !wait_for_file(&initial_ready_file).await {
+            let _ = child.kill();
+            let output = support::wait_child_output(child, "package restart smoke")
+                .expect("package restart smoke should collect output");
+            panic!(
+                "package restart smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
+                initial_ready_file.display(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
         server.shutdown().await.expect("initial daemon should stop cleanly");
         std::fs::write(&stop_file, "stopped\n").expect("stop signal file should write");
-        wait_for_file(&stale_ready_file).await;
+        if !wait_for_file(&stale_ready_file).await {
+            let _ = child.kill();
+            let output = support::wait_child_output(child, "package restart smoke")
+                .expect("package restart smoke should collect output");
+            panic!(
+                "package restart smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
+                stale_ready_file.display(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
 
         let restarted_client = LocalSocketDaemonClient::new(address.clone());
         server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
@@ -64,7 +84,8 @@ async fn recovers_staged_package_client_after_daemon_restart() {
         wait_for_daemon_ready(&restarted_client).await;
         std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");
 
-        let output = child.wait_with_output().expect("package restart smoke should collect output");
+        let output = support::wait_child_output(child, "package restart smoke")
+            .expect("package restart smoke should collect output");
         server.shutdown().await.expect("replacement daemon should stop cleanly");
 
         assert!(
@@ -90,15 +111,15 @@ async fn recovers_staged_package_client_after_daemon_restart() {
     }
 }
 
-async fn wait_for_file(path: &Path) {
+async fn wait_for_file(path: &Path) -> bool {
     for _ in 0..600 {
         if path.is_file() {
-            return;
+            return true;
         }
         sleep(Duration::from_millis(50)).await;
     }
 
-    panic!("restart smoke never observed file: {}", path.display());
+    false
 }
 
 fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {

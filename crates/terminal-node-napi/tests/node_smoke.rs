@@ -43,7 +43,8 @@ async fn roundtrips_node_addon_against_daemon_fixture() {
         .env("TERMINAL_NODE_RUN_ZELLIJ_SMOKE", "1")
         .env("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", &zellij_smoke.session_name);
 
-    let output = command.output().expect("node smoke should launch");
+    let output =
+        support::command_output(&mut command, "node addon smoke").expect("node smoke should run");
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 
@@ -100,7 +101,8 @@ async fn closes_node_addon_subscriptions_when_daemon_stops() {
 
     if !wait_for_file(&ready_file).await {
         let _ = child.kill();
-        let output = child.wait_with_output().expect("node shutdown smoke should collect output");
+        let output = support::wait_child_output(child, "node shutdown smoke")
+            .expect("node shutdown smoke should collect output");
         panic!(
             "node addon smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
             ready_file.display(),
@@ -110,7 +112,8 @@ async fn closes_node_addon_subscriptions_when_daemon_stops() {
     }
     fixture.shutdown().await.expect("fixture should stop cleanly");
 
-    let output = child.wait_with_output().expect("node shutdown smoke should collect output");
+    let output = support::wait_child_output(child, "node shutdown smoke")
+        .expect("node shutdown smoke should collect output");
 
     assert!(
         output.status.success(),
@@ -138,14 +141,15 @@ async fn repeatedly_reopens_subscriptions_through_node_addon() {
         LocalSocketAddress::Filesystem(path) => ("filesystem", path.display().to_string()),
     };
 
-    let output = Command::new("node")
+    let mut command = Command::new("node");
+    command
         .arg(script_path)
         .env("TERMINAL_NODE_ADDON", &addon_path)
         .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
         .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value)
-        .env("TERMINAL_NODE_SMOKE_MODE", "repeat-subscriptions")
-        .output()
-        .expect("node repeat smoke should launch");
+        .env("TERMINAL_NODE_SMOKE_MODE", "repeat-subscriptions");
+    let output = support::command_output(&mut command, "node repeat smoke")
+        .expect("node repeat smoke should run");
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 
@@ -202,7 +206,8 @@ async fn recovers_node_addon_client_after_daemon_restart() {
 
     if !wait_for_file(&initial_ready_file).await {
         let _ = child.kill();
-        let output = child.wait_with_output().expect("node restart smoke should collect output");
+        let output = support::wait_child_output(child, "node restart smoke")
+            .expect("node restart smoke should collect output");
         panic!(
             "node addon smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
             initial_ready_file.display(),
@@ -214,7 +219,8 @@ async fn recovers_node_addon_client_after_daemon_restart() {
     std::fs::write(&stop_file, "stopped\n").expect("stop signal file should write");
     if !wait_for_file(&stale_ready_file).await {
         let _ = child.kill();
-        let output = child.wait_with_output().expect("node restart smoke should collect output");
+        let output = support::wait_child_output(child, "node restart smoke")
+            .expect("node restart smoke should collect output");
         panic!(
             "node addon smoke never observed file: {}\nstdout:\n{}\nstderr:\n{}",
             stale_ready_file.display(),
@@ -229,7 +235,8 @@ async fn recovers_node_addon_client_after_daemon_restart() {
     wait_for_daemon_ready(&restarted_client).await;
     std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");
 
-    let output = child.wait_with_output().expect("node restart smoke should collect output");
+    let output = support::wait_child_output(child, "node restart smoke")
+        .expect("node restart smoke should collect output");
     server.shutdown().await.expect("replacement daemon should stop cleanly");
 
     assert!(

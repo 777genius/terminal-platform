@@ -30,7 +30,7 @@ async fn closes_staged_package_subscriptions_when_daemon_stops() {
         let ready_file = unique_temp_path("terminal-node-package-close", "ready");
         let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("tests/{script}"));
 
-        let child = std::process::Command::new("node")
+        let mut child = std::process::Command::new("node")
             .arg(script_path)
             .env("TERMINAL_NODE_PACKAGE", &package_dir)
             .env("TERMINAL_NODE_READY_FILE", &ready_file)
@@ -41,11 +41,21 @@ async fn closes_staged_package_subscriptions_when_daemon_stops() {
             .spawn()
             .expect("package shutdown smoke should launch");
 
-        wait_for_ready_file(&ready_file).await;
+        if !wait_for_ready_file(&ready_file).await {
+            let _ = child.kill();
+            let output = support::wait_child_output(child, "package shutdown smoke")
+                .expect("package shutdown smoke should collect output");
+            panic!(
+                "node package shutdown smoke never became ready: {}\nstdout:\n{}\nstderr:\n{}",
+                ready_file.display(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
         fixture.shutdown().await.expect("fixture should stop cleanly");
 
-        let output =
-            child.wait_with_output().expect("package shutdown smoke should collect output");
+        let output = support::wait_child_output(child, "package shutdown smoke")
+            .expect("package shutdown smoke should collect output");
 
         assert!(
             output.status.success(),
@@ -67,15 +77,15 @@ async fn closes_staged_package_subscriptions_when_daemon_stops() {
     }
 }
 
-async fn wait_for_ready_file(path: &std::path::Path) {
+async fn wait_for_ready_file(path: &std::path::Path) -> bool {
     for _ in 0..600 {
         if path.is_file() {
-            return;
+            return true;
         }
         sleep(Duration::from_millis(50)).await;
     }
 
-    panic!("node package shutdown smoke never became ready: {}", path.display());
+    false
 }
 
 fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
