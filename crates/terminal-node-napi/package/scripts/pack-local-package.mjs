@@ -48,7 +48,7 @@ function parseArgs(argv) {
     const arg = argv[index];
 
     if (arg === "--out") {
-      options.out = path.resolve(argv[index + 1]);
+      options.out = path.resolve(readFlagValue(argv, index, arg));
       index += 1;
       continue;
     }
@@ -62,6 +62,14 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function readFlagValue(argv, index, flag) {
+  const value = argv[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
 }
 
 function run(command, args, cwd) {
