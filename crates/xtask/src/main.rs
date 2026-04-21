@@ -351,6 +351,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let manual_dir = workspace_root.join(MANUAL_DIR);
     let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
+    let manual_readme = manual_dir.join("README.md");
     let ci_workflow = workspace_root.join(CI_WORKFLOW_PATH);
     let release_readiness_workflow = workspace_root.join(RELEASE_READINESS_WORKFLOW_PATH);
     let release_plz_workflow = workspace_root.join(RELEASE_PLZ_WORKFLOW_PATH);
@@ -373,6 +374,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         "Node installed package smoke test is missing",
     )?;
     assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
+    assert_value(manual_readme.is_file(), "manual QA README is missing")?;
     assert_value(manual_drafts_dir.is_dir(), "manual draft capture directory is missing")?;
     assert_value(manual_runs_dir.is_dir(), "manual run capture directory is missing")?;
     assert_value(ci_workflow.is_file(), "ci workflow is missing")?;
@@ -398,6 +400,8 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         fs::read_to_string(&node_package_install_smoke_test).map_err(|error| {
             format!("failed to read {} - {error}", node_package_install_smoke_test.display())
         })?;
+    let manual_readme_contents = fs::read_to_string(&manual_readme)
+        .map_err(|error| format!("failed to read {} - {error}", manual_readme.display()))?;
     let release_candidate_summary_contents = fs::read_to_string(&release_candidate_summary)
         .map_err(|error| {
             format!("failed to read {} - {error}", release_candidate_summary.display())
@@ -467,6 +471,10 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         &node_smoke_test_contents,
         &node_package_smoke_test_contents,
         &node_package_install_smoke_test_contents,
+    )?;
+    assert_value(
+        manual_readme_contents.contains("one Windows `Native + Zellij` pass"),
+        "manual QA README must require a Windows Native + Zellij pass",
     )?;
 
     for relative_path in [
