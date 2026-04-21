@@ -387,6 +387,10 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         })?;
     let release_plz_workflow_contents = fs::read_to_string(&release_plz_workflow)
         .map_err(|error| format!("failed to read {} - {error}", release_plz_workflow.display()))?;
+    let release_plz_config_contents = fs::read_to_string(&release_plz_config)
+        .map_err(|error| format!("failed to read {} - {error}", release_plz_config.display()))?;
+    let deny_config_contents = fs::read_to_string(&deny_config)
+        .map_err(|error| format!("failed to read {} - {error}", deny_config.display()))?;
 
     for expected_line in [
         "- `macOS + Linux` - `Native + tmux + Zellij`",
@@ -435,6 +439,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         &release_readiness_workflow_contents,
         &release_plz_workflow_contents,
     )?;
+    verify_v1_release_configs(&release_plz_config_contents, &deny_config_contents)?;
 
     for relative_path in [
         "README.md",
@@ -602,6 +607,34 @@ fn verify_v1_workflows(
         release_plz_workflow,
         "release-plz workflow",
         &["contents: write", "pull-requests: write", "release-plz release-pr --git-token"],
+    )?;
+
+    Ok(())
+}
+
+fn verify_v1_release_configs(release_plz_config: &str, deny_config: &str) -> Result<(), String> {
+    assert_contains_all(
+        release_plz_config,
+        "release-plz config",
+        &[
+            "[workspace]",
+            "allow_dirty = false",
+            "git_release_enable = false",
+            "pr_branch_prefix = \"release-plz-\"",
+            "semver_check = false",
+        ],
+    )?;
+    assert_contains_all(
+        deny_config,
+        "cargo-deny config",
+        &[
+            "[advisories]",
+            "yanked = \"deny\"",
+            "[licenses]",
+            "[sources]",
+            "unknown-registry = \"deny\"",
+            "unknown-git = \"deny\"",
+        ],
     )?;
 
     Ok(())
@@ -1331,12 +1364,15 @@ fn assert_value(value: bool, message: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{verify_recorded_passes, verify_v1_workflows};
+    use super::{verify_recorded_passes, verify_v1_release_configs, verify_v1_workflows};
     use std::{
         fs,
         path::{Path, PathBuf},
+        sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     struct TestDir {
         path: PathBuf,
@@ -1348,8 +1384,11 @@ mod tests {
                 Ok(duration) => duration.as_nanos(),
                 Err(error) => panic!("failed to get test timestamp - {error}"),
             };
-            let path = std::env::temp_dir()
-                .join(format!("terminal-platform-xtask-test-{}-{timestamp}", std::process::id()));
+            let counter = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "terminal-platform-xtask-test-{}-{timestamp}-{counter}",
+                std::process::id()
+            ));
             if let Err(error) = fs::create_dir_all(&path) {
                 panic!("failed to create {} - {error}", path.display());
             }
@@ -1760,6 +1799,37 @@ none
         assert!(error.contains("zellij_surface"), "got: {error}");
     }
 
+    #[test]
+    fn verify_v1_release_configs_accepts_expected_governance() {
+        if let Err(error) = verify_v1_release_configs(VALID_RELEASE_PLZ_CONFIG, VALID_DENY_CONFIG) {
+            panic!("expected release configs to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_v1_release_configs_rejects_dirty_release_plz() {
+        let invalid_release_plz =
+            VALID_RELEASE_PLZ_CONFIG.replace("allow_dirty = false", "allow_dirty = true");
+        let error = match verify_v1_release_configs(&invalid_release_plz, VALID_DENY_CONFIG) {
+            Ok(()) => panic!("expected dirty release-plz config to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("allow_dirty = false"), "got: {error}");
+    }
+
+    #[test]
+    fn verify_v1_release_configs_rejects_weak_deny_sources() {
+        let invalid_deny =
+            VALID_DENY_CONFIG.replace("unknown-git = \"deny\"", "unknown-git = \"warn\"");
+        let error = match verify_v1_release_configs(VALID_RELEASE_PLZ_CONFIG, &invalid_deny) {
+            Ok(()) => panic!("expected weak cargo-deny config to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("unknown-git = \"deny\""), "got: {error}");
+    }
+
     const VALID_CI_WORKFLOW: &str = r#"
 jobs:
   unix-matrix:
@@ -1836,5 +1906,24 @@ jobs:
   release-pr:
     steps:
       - run: release-plz release-pr --git-token "$GITHUB_TOKEN"
+"#;
+
+    const VALID_RELEASE_PLZ_CONFIG: &str = r#"
+[workspace]
+allow_dirty = false
+git_release_enable = false
+pr_branch_prefix = "release-plz-"
+semver_check = false
+"#;
+
+    const VALID_DENY_CONFIG: &str = r#"
+[advisories]
+yanked = "deny"
+
+[licenses]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
 "#;
 }
