@@ -515,6 +515,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
             "verify-package.mjs",
             "pack-local-package.mjs",
             "npm_config_cache",
+            "test -f \"$TARBALL\"",
             "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
             "stage-capi-package",
             "verify-capi-package",
@@ -679,6 +680,7 @@ fn verify_v1_workflows(
             "verify-package.mjs",
             "pack-local-package.mjs",
             "npm_config_cache",
+            "test -f \"$TARBALL\"",
             "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
             "stage-capi-package",
             "verify-capi-package",
@@ -708,6 +710,7 @@ fn verify_v1_workflows(
             "verify-package.mjs",
             "pack-local-package.mjs",
             "npm_config_cache",
+            "Test-Path -Path $tarball -PathType Leaf",
             "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
         ],
     )?;
@@ -2089,6 +2092,7 @@ jobs:
           node crates/terminal-node-napi/package/scripts/verify-package.mjs
           export npm_config_cache="$RUNNER_TEMP/npm-cache"
           node crates/terminal-node-napi/package/scripts/pack-local-package.mjs
+          test -f "$TARBALL"
           npm install --ignore-scripts --no-audit --no-fund --no-package-lock
       - run: |
           cargo run -p xtask -- stage-capi-package
@@ -2117,6 +2121,7 @@ jobs:
           node crates/terminal-node-napi/package/scripts/verify-package.mjs
           $env:npm_config_cache = Join-Path $env:RUNNER_TEMP "npm-cache"
           node crates/terminal-node-napi/package/scripts/pack-local-package.mjs
+          Test-Path -Path $tarball -PathType Leaf
           npm install --ignore-scripts --no-audit --no-fund --no-package-lock
   governance:
     name: governance

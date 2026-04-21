@@ -91,6 +91,7 @@ jobs:
           PACKAGE_WORK_DIR="$RUNNER_TEMP/terminal-platform-node-install"
           export npm_config_cache="$PACKAGE_WORK_DIR/npm-cache"
           TARBALL="$(node crates/terminal-node-napi/package/scripts/pack-local-package.mjs --out "$PACKAGE_WORK_DIR/package" | tail -n 1)"
+          test -f "$TARBALL"
           INSTALL_DIR="$PACKAGE_WORK_DIR/consumer"
           mkdir -p "$INSTALL_DIR"
           printf '{ "name": "terminal-platform-node-install-smoke", "private": true }\n' > "$INSTALL_DIR/package.json"
@@ -172,10 +173,14 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $workDir = Join-Path $env:RUNNER_TEMP "terminal-platform-node-install"
           $env:npm_config_cache = Join-Path $workDir "npm-cache"
           $packageDir = Join-Path $workDir "package"
           $tarball = node crates/terminal-node-napi/package/scripts/pack-local-package.mjs --out $packageDir | Select-Object -Last 1
+          if (-not (Test-Path -Path $tarball -PathType Leaf)) {
+            throw "Packed terminal-platform-node tarball was not created: $tarball"
+          }
           $installDir = Join-Path $workDir "consumer"
           New-Item -ItemType Directory -Force -Path $installDir | Out-Null
           '{ "name": "terminal-platform-node-install-smoke", "private": true }' | Out-File -FilePath (Join-Path $installDir "package.json") -Encoding utf8

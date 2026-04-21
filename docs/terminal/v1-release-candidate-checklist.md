@@ -32,11 +32,12 @@ Package layout and install proof:
 node crates/terminal-node-napi/package/scripts/build-local-package.mjs --out /tmp/terminal-platform-node
 node crates/terminal-node-napi/package/scripts/verify-package.mjs --package-dir /tmp/terminal-platform-node
 export npm_config_cache=/tmp/terminal-platform-node-npm-cache
-tarball="$(node crates/terminal-node-napi/package/scripts/pack-local-package.mjs --out /tmp/terminal-platform-node-pack | tail -n 1)"
+TARBALL="$(node crates/terminal-node-napi/package/scripts/pack-local-package.mjs --out /tmp/terminal-platform-node-pack | tail -n 1)"
+test -f "$TARBALL"
 mkdir -p /tmp/terminal-platform-node-consumer
 printf '{ "name": "terminal-platform-node-install-smoke", "private": true }\n' > /tmp/terminal-platform-node-consumer/package.json
 cd /tmp/terminal-platform-node-consumer
-npm install --ignore-scripts --no-audit --no-fund --no-package-lock "$tarball"
+npm install --ignore-scripts --no-audit --no-fund --no-package-lock "$TARBALL"
 node -e "const sdk = require('terminal-platform-node'); if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
 node --input-type=module -e "import sdk from 'terminal-platform-node'; if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
 cd -
