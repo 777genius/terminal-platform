@@ -411,6 +411,10 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         .map_err(|error| {
             format!("failed to read {} - {error}", release_candidate_summary.display())
         })?;
+    let release_summary_template_contents =
+        fs::read_to_string(&release_summary_template).map_err(|error| {
+            format!("failed to read {} - {error}", release_summary_template.display())
+        })?;
     let ci_workflow_contents = fs::read_to_string(&ci_workflow)
         .map_err(|error| format!("failed to read {} - {error}", ci_workflow.display()))?;
     let release_readiness_workflow_contents = fs::read_to_string(&release_readiness_workflow)
@@ -456,6 +460,17 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
             &format!("release candidate summary is missing support matrix line: {expected_line}"),
         )?;
     }
+    for expected_line in [
+        "- `macOS + Linux` - `Native + tmux + Zellij`",
+        "- `Windows` - `Native + Zellij`",
+        "- `tmux` remains Unix-only in docs, CI, and acceptance",
+        "- recorded manual pass artifacts captured for Electron embed, Unix `tmux`, and Windows `Native + Zellij`",
+    ] {
+        assert_value(
+            release_summary_template_contents.contains(expected_line),
+            &format!("release summary template is missing v1 line: {expected_line}"),
+        )?;
+    }
 
     assert_value(
         !release_candidate_summary_contents.contains("TODO"),
@@ -464,6 +479,14 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(
         !release_candidate_summary_contents.contains("TBD"),
         "release candidate summary still contains TBD placeholders",
+    )?;
+    assert_value(
+        !release_summary_template_contents.contains("TODO"),
+        "release summary template still contains TODO placeholders",
+    )?;
+    assert_value(
+        !release_summary_template_contents.contains("TBD"),
+        "release summary template still contains TBD placeholders",
     )?;
 
     verify_v1_workflows(
