@@ -27,6 +27,7 @@ const MANUAL_RUNS_DIR: &str = "crates/terminal-testing/manual/runs";
 const CI_WORKFLOW_PATH: &str = ".github/workflows/ci.yml";
 const RELEASE_READINESS_WORKFLOW_PATH: &str = ".github/workflows/release-readiness.yml";
 const RELEASE_PLZ_WORKFLOW_PATH: &str = ".github/workflows/release-plz.yml";
+const RELEASE_CANDIDATE_CHECKLIST_PATH: &str = "docs/terminal/v1-release-candidate-checklist.md";
 const RELEASE_CANDIDATE_SUMMARY_PATH: &str = "docs/terminal/v1-release-candidate-summary.md";
 const RELEASE_SUMMARY_TEMPLATE_PATH: &str = "docs/terminal/v1-release-summary-template.md";
 const RELEASE_PLZ_CONFIG_PATH: &str = "release-plz.toml";
@@ -358,6 +359,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let ci_workflow = workspace_root.join(CI_WORKFLOW_PATH);
     let release_readiness_workflow = workspace_root.join(RELEASE_READINESS_WORKFLOW_PATH);
     let release_plz_workflow = workspace_root.join(RELEASE_PLZ_WORKFLOW_PATH);
+    let release_candidate_checklist = workspace_root.join(RELEASE_CANDIDATE_CHECKLIST_PATH);
     let release_candidate_summary = workspace_root.join(RELEASE_CANDIDATE_SUMMARY_PATH);
     let release_summary_template = workspace_root.join(RELEASE_SUMMARY_TEMPLATE_PATH);
     let release_plz_config = workspace_root.join(RELEASE_PLZ_CONFIG_PATH);
@@ -384,6 +386,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(ci_workflow.is_file(), "ci workflow is missing")?;
     assert_value(release_readiness_workflow.is_file(), "release readiness workflow is missing")?;
     assert_value(release_plz_workflow.is_file(), "release-plz workflow is missing")?;
+    assert_value(release_candidate_checklist.is_file(), "release candidate checklist is missing")?;
     assert_value(release_candidate_summary.is_file(), "release candidate summary is missing")?;
     assert_value(release_summary_template.is_file(), "release summary template is missing")?;
     assert_value(release_plz_config.is_file(), "release-plz config is missing")?;
@@ -428,6 +431,10 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         })?;
     let release_plz_workflow_contents = fs::read_to_string(&release_plz_workflow)
         .map_err(|error| format!("failed to read {} - {error}", release_plz_workflow.display()))?;
+    let release_candidate_checklist_contents = fs::read_to_string(&release_candidate_checklist)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", release_candidate_checklist.display())
+        })?;
     let release_plz_config_contents = fs::read_to_string(&release_plz_config)
         .map_err(|error| format!("failed to read {} - {error}", release_plz_config.display()))?;
     let deny_config_contents = fs::read_to_string(&deny_config)
@@ -500,6 +507,18 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         &release_plz_workflow_contents,
     )?;
     verify_v1_release_configs(&release_plz_config_contents, &deny_config_contents)?;
+    assert_contains_all(
+        &release_candidate_checklist_contents,
+        "release candidate checklist package proof",
+        &[
+            "build-local-package.mjs",
+            "verify-package.mjs",
+            "stage-capi-package",
+            "verify-capi-package",
+            "install-capi-package",
+            "verify-capi-install",
+        ],
+    )?;
     verify_windows_zellij_package_smoke(
         &node_smoke_test_contents,
         &node_package_smoke_test_contents,

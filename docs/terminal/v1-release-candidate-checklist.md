@@ -26,6 +26,18 @@ cargo nextest run --workspace
 cargo run -p xtask -- verify-v1-readiness
 ```
 
+Package layout and install proof:
+
+```bash
+node crates/terminal-node-napi/package/scripts/build-local-package.mjs --out /tmp/terminal-platform-node
+node crates/terminal-node-napi/package/scripts/verify-package.mjs --package-dir /tmp/terminal-platform-node
+cargo build -p terminal-capi
+cargo run -p xtask -- stage-capi-package --out /tmp/terminal-capi
+cargo run -p xtask -- verify-capi-package --package-dir /tmp/terminal-capi
+cargo run -p xtask -- install-capi-package --package-dir /tmp/terminal-capi --prefix /tmp/terminal-capi-install
+cargo run -p xtask -- verify-capi-install --prefix /tmp/terminal-capi-install
+```
+
 After the recorded manual pass files are added:
 
 ```bash
