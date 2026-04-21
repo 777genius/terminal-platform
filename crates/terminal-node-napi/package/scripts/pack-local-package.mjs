@@ -20,7 +20,7 @@ function main() {
 
   const packResult = spawnSync("npm", ["pack", "--json"], {
     cwd: options.out,
-    env: process.env,
+    env: packageManagerEnv(options),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
   });
@@ -74,6 +74,13 @@ function run(command, args, cwd) {
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);
   }
+}
+
+function packageManagerEnv(options) {
+  return {
+    ...process.env,
+    npm_config_cache: process.env.npm_config_cache ?? path.join(options.out, ".npm-cache"),
+  };
 }
 
 main();
