@@ -16,6 +16,10 @@ const SECURITY_PATH: &str = "SECURITY.md";
 const CODE_OF_CONDUCT_PATH: &str = "CODE_OF_CONDUCT.md";
 const ROOT_README_PATH: &str = "README.md";
 const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README.md";
+const NODE_SMOKE_TEST_PATH: &str = "crates/terminal-node-napi/tests/node_smoke.rs";
+const NODE_PACKAGE_SMOKE_TEST_PATH: &str = "crates/terminal-node-napi/tests/package_smoke.rs";
+const NODE_PACKAGE_INSTALL_SMOKE_TEST_PATH: &str =
+    "crates/terminal-node-napi/tests/package_install_smoke.rs";
 const MANUAL_DIR: &str = "crates/terminal-testing/manual";
 const MANUAL_DRAFTS_DIR: &str = "crates/terminal-testing/manual/drafts";
 const MANUAL_RUNS_DIR: &str = "crates/terminal-testing/manual/runs";
@@ -341,6 +345,9 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let code_of_conduct = workspace_root.join(CODE_OF_CONDUCT_PATH);
     let root_readme = workspace_root.join(ROOT_README_PATH);
     let node_package_readme = workspace_root.join(NODE_PACKAGE_README_PATH);
+    let node_smoke_test = workspace_root.join(NODE_SMOKE_TEST_PATH);
+    let node_package_smoke_test = workspace_root.join(NODE_PACKAGE_SMOKE_TEST_PATH);
+    let node_package_install_smoke_test = workspace_root.join(NODE_PACKAGE_INSTALL_SMOKE_TEST_PATH);
     let manual_dir = workspace_root.join(MANUAL_DIR);
     let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
@@ -359,6 +366,12 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(code_of_conduct.is_file(), "root CODE_OF_CONDUCT.md is missing")?;
     assert_value(root_readme.is_file(), "root README is missing")?;
     assert_value(node_package_readme.is_file(), "Node package README is missing")?;
+    assert_value(node_smoke_test.is_file(), "Node addon smoke test is missing")?;
+    assert_value(node_package_smoke_test.is_file(), "Node package smoke test is missing")?;
+    assert_value(
+        node_package_install_smoke_test.is_file(),
+        "Node installed package smoke test is missing",
+    )?;
     assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
     assert_value(manual_drafts_dir.is_dir(), "manual draft capture directory is missing")?;
     assert_value(manual_runs_dir.is_dir(), "manual run capture directory is missing")?;
@@ -375,6 +388,16 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         .map_err(|error| format!("failed to read {} - {error}", root_readme.display()))?;
     let node_package_readme_contents = fs::read_to_string(&node_package_readme)
         .map_err(|error| format!("failed to read {} - {error}", node_package_readme.display()))?;
+    let node_smoke_test_contents = fs::read_to_string(&node_smoke_test)
+        .map_err(|error| format!("failed to read {} - {error}", node_smoke_test.display()))?;
+    let node_package_smoke_test_contents =
+        fs::read_to_string(&node_package_smoke_test).map_err(|error| {
+            format!("failed to read {} - {error}", node_package_smoke_test.display())
+        })?;
+    let node_package_install_smoke_test_contents =
+        fs::read_to_string(&node_package_install_smoke_test).map_err(|error| {
+            format!("failed to read {} - {error}", node_package_install_smoke_test.display())
+        })?;
     let release_candidate_summary_contents = fs::read_to_string(&release_candidate_summary)
         .map_err(|error| {
             format!("failed to read {} - {error}", release_candidate_summary.display())
@@ -440,6 +463,11 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         &release_plz_workflow_contents,
     )?;
     verify_v1_release_configs(&release_plz_config_contents, &deny_config_contents)?;
+    verify_windows_zellij_package_smoke(
+        &node_smoke_test_contents,
+        &node_package_smoke_test_contents,
+        &node_package_install_smoke_test_contents,
+    )?;
 
     for relative_path in [
         "README.md",
@@ -637,6 +665,31 @@ fn verify_v1_release_configs(release_plz_config: &str, deny_config: &str) -> Res
             "unknown-git = \"deny\"",
         ],
     )?;
+
+    Ok(())
+}
+
+fn verify_windows_zellij_package_smoke(
+    node_smoke_test: &str,
+    package_smoke_test: &str,
+    package_install_smoke_test: &str,
+) -> Result<(), String> {
+    for (label, contents) in [
+        ("node addon smoke", node_smoke_test),
+        ("staged package smoke", package_smoke_test),
+        ("installed package smoke", package_install_smoke_test),
+    ] {
+        assert_contains_all(
+            contents,
+            label,
+            &[
+                "#[cfg(windows)]",
+                "windows_zellij_smoke_env",
+                "TERMINAL_NODE_RUN_ZELLIJ_SMOKE",
+                "TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION",
+            ],
+        )?;
+    }
 
     Ok(())
 }
@@ -1365,7 +1418,10 @@ fn assert_value(value: bool, message: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{verify_recorded_passes, verify_v1_release_configs, verify_v1_workflows};
+    use super::{
+        verify_recorded_passes, verify_v1_release_configs, verify_v1_workflows,
+        verify_windows_zellij_package_smoke,
+    };
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -1831,6 +1887,33 @@ none
         assert!(error.contains("unknown-git = \"deny\""), "got: {error}");
     }
 
+    #[test]
+    fn verify_windows_zellij_package_smoke_accepts_expected_markers() {
+        if let Err(error) = verify_windows_zellij_package_smoke(
+            VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
+            VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
+            VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
+        ) {
+            panic!("expected Windows Zellij smoke markers to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_windows_zellij_package_smoke_rejects_missing_package_marker() {
+        let invalid_package_smoke = VALID_WINDOWS_ZELLIJ_SMOKE_TEST
+            .replace("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", "TERMINAL_NODE_ZELLIJ_DISABLED");
+        let error = match verify_windows_zellij_package_smoke(
+            VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
+            &invalid_package_smoke,
+            VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
+        ) {
+            Ok(()) => panic!("expected missing staged package marker to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("staged package smoke"), "got: {error}");
+    }
+
     const VALID_CI_WORKFLOW: &str = r#"
 jobs:
   unix-matrix:
@@ -1927,5 +2010,15 @@ yanked = "deny"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+"#;
+
+    const VALID_WINDOWS_ZELLIJ_SMOKE_TEST: &str = r#"
+#[cfg(windows)]
+let zellij_smoke = support::windows_zellij_smoke_env("package");
+
+#[cfg(windows)]
+command
+    .env("TERMINAL_NODE_RUN_ZELLIJ_SMOKE", "1")
+    .env("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", &zellij_smoke.session_name);
 "#;
 }

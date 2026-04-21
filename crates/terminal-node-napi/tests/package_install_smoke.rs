@@ -8,9 +8,9 @@ use std::{
 use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
 use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_protocol::LocalSocketAddress;
-use terminal_testing::{
-    ZellijTestLock, daemon_fixture, unique_socket_address, wait_for_daemon_ready,
-};
+#[cfg(not(windows))]
+use terminal_testing::ZellijTestLock;
+use terminal_testing::{daemon_fixture, unique_socket_address, wait_for_daemon_ready};
 use tokio::time::{Duration, sleep};
 
 mod support;
@@ -264,7 +264,11 @@ main().catch((error) => {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn roundtrips_installed_tarball_through_cjs_and_esm() {
+    #[cfg(windows)]
+    let zellij_smoke = support::windows_zellij_smoke_env("package-installed");
+    #[cfg(not(windows))]
     let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
+
     let fixture = daemon_fixture("node-npm-install").expect("fixture should start");
     wait_for_daemon_ready(&fixture.client).await;
     let addon_path = support::locate_cdylib().expect("node addon should be built");
@@ -313,6 +317,10 @@ async fn roundtrips_installed_tarball_through_cjs_and_esm() {
             .env("TERMINAL_NODE_SMOKE_FLOW", &smoke_flow_path)
             .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
             .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value);
+        #[cfg(windows)]
+        command
+            .env("TERMINAL_NODE_RUN_ZELLIJ_SMOKE", "1")
+            .env("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", &zellij_smoke.session_name);
         let output = support::command_output(&mut command, "installed package smoke")
             .expect("installed package smoke should run");
 
@@ -333,6 +341,7 @@ async fn roundtrips_installed_tarball_through_cjs_and_esm() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn installed_tarball_handles_shutdown_and_restart_flows() {
+    #[cfg(not(windows))]
     let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
     let addon_path = support::locate_cdylib().expect("node addon should be built");
     let package_dir =
