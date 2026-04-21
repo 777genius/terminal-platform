@@ -138,6 +138,20 @@ Build, verify, and pack a local tarball:
 node ./scripts/pack-local-package.mjs --out /tmp/terminal-platform-node
 ```
 
+Verify a local install from the produced tarball:
+
+```bash
+export npm_config_cache=/tmp/terminal-platform-node-npm-cache
+TARBALL="$(node ./scripts/pack-local-package.mjs --out /tmp/terminal-platform-node-pack | tail -n 1)"
+test -f "$TARBALL"
+mkdir -p /tmp/terminal-platform-node-consumer
+printf '{ "name": "terminal-platform-node-install-smoke", "private": true }\n' > /tmp/terminal-platform-node-consumer/package.json
+cd /tmp/terminal-platform-node-consumer
+npm install --ignore-scripts --no-audit --no-fund --no-package-lock "$TARBALL"
+node -e "const sdk = require('terminal-platform-node'); if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+node --input-type=module -e "import sdk from 'terminal-platform-node'; if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+```
+
 The staged package contains:
 
 - `index.cjs`

@@ -468,6 +468,17 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
             &format!("Node package README is missing support matrix line: {expected_line}"),
         )?;
     }
+    assert_contains_all(
+        &node_package_readme_contents,
+        "Node package README install proof",
+        &[
+            "pack-local-package.mjs",
+            "npm_config_cache",
+            "test -f \"$TARBALL\"",
+            "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
+            "node --input-type=module",
+        ],
+    )?;
 
     for expected_line in [
         "- `macOS + Linux` - `Native + tmux + Zellij`",
