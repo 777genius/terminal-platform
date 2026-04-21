@@ -647,7 +647,20 @@ fn verify_v1_workflows(
 
     let unix_job = section_between(ci_workflow, "  unix-matrix:", "\n  windows-v1:")
         .ok_or_else(|| "ci workflow is missing unix-matrix job section".to_string())?;
-    assert_contains_all(unix_job, "ci unix-matrix job", &["tmux -V", "zellij --version"])?;
+    assert_contains_all(
+        unix_job,
+        "ci unix-matrix job",
+        &[
+            "tmux -V",
+            "zellij --version",
+            "build-local-package.mjs",
+            "verify-package.mjs",
+            "stage-capi-package",
+            "verify-capi-package",
+            "install-capi-package",
+            "verify-capi-install",
+        ],
+    )?;
 
     let windows_job = section_between(ci_workflow, "  windows-v1:", "\n  governance:")
         .ok_or_else(|| "ci workflow is missing windows-v1 job section".to_string())?;
@@ -666,6 +679,8 @@ fn verify_v1_workflows(
             "-p terminal-protocol",
             "-p terminal-testing",
             "zellij --version",
+            "build-local-package.mjs",
+            "verify-package.mjs",
         ],
     )?;
     assert_value(
@@ -2041,6 +2056,14 @@ jobs:
       - run: zellij --version
       - run: cargo clippy --workspace --all-targets --all-features
       - run: cargo nextest run --profile ci --workspace
+      - run: |
+          node crates/terminal-node-napi/package/scripts/build-local-package.mjs
+          node crates/terminal-node-napi/package/scripts/verify-package.mjs
+      - run: |
+          cargo run -p xtask -- stage-capi-package
+          cargo run -p xtask -- verify-capi-package
+          cargo run -p xtask -- install-capi-package
+          cargo run -p xtask -- verify-capi-install
   windows-v1:
     name: windows-v1
     runs-on: windows-latest
@@ -2058,6 +2081,9 @@ jobs:
           -p terminal-node-napi
           -p terminal-protocol
           -p terminal-testing
+      - run: |
+          node crates/terminal-node-napi/package/scripts/build-local-package.mjs
+          node crates/terminal-node-napi/package/scripts/verify-package.mjs
   governance:
     name: governance
     steps:

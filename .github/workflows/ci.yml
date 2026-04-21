@@ -78,6 +78,21 @@ jobs:
       - name: Nextest
         run: cargo nextest run --profile ci --workspace
 
+      - name: Node staged package layout smoke
+        shell: bash
+        run: |
+          node crates/terminal-node-napi/package/scripts/build-local-package.mjs --out "$RUNNER_TEMP/terminal-platform-node"
+          node crates/terminal-node-napi/package/scripts/verify-package.mjs --package-dir "$RUNNER_TEMP/terminal-platform-node"
+
+      - name: C ABI package stage/install smoke
+        shell: bash
+        run: |
+          cargo build -p terminal-capi
+          cargo run -p xtask -- stage-capi-package --out "$RUNNER_TEMP/terminal-capi"
+          cargo run -p xtask -- verify-capi-package --package-dir "$RUNNER_TEMP/terminal-capi"
+          cargo run -p xtask -- install-capi-package --package-dir "$RUNNER_TEMP/terminal-capi" --prefix "$RUNNER_TEMP/terminal-capi-install"
+          cargo run -p xtask -- verify-capi-install --prefix "$RUNNER_TEMP/terminal-capi-install"
+
   windows-v1:
     name: windows-v1
     runs-on: windows-latest
@@ -130,6 +145,13 @@ jobs:
           -p terminal-node-napi
           -p terminal-protocol
           -p terminal-testing
+
+      - name: Node staged package layout smoke
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:RUNNER_TEMP "terminal-platform-node"
+          node crates/terminal-node-napi/package/scripts/build-local-package.mjs --out $packageDir
+          node crates/terminal-node-napi/package/scripts/verify-package.mjs --package-dir $packageDir
 
   governance:
     name: governance
