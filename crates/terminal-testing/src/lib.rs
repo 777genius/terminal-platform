@@ -426,33 +426,6 @@ fn spawn_windows_zellij_pty(session_name: &str) -> Result<WindowsZellijPtyGuard,
     Ok(WindowsZellijPtyGuard { child, _master: pty_pair.master, output })
 }
 
-#[cfg(windows)]
-fn resolve_windows_executable(program: &str) -> String {
-    let has_path_separator = program.contains('\\') || program.contains('/');
-    if has_path_separator {
-        return program.to_string();
-    }
-
-    let candidates = if program.to_ascii_lowercase().ends_with(".exe") {
-        vec![program.to_string()]
-    } else {
-        vec![program.to_string(), format!("{program}.exe")]
-    };
-
-    if let Some(paths) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&paths) {
-            for candidate in &candidates {
-                let path = dir.join(candidate);
-                if path.is_file() {
-                    return path.display().to_string();
-                }
-            }
-        }
-    }
-
-    program.to_string()
-}
-
 #[cfg(any(unix, windows))]
 impl Drop for ZellijSessionGuard {
     fn drop(&mut self) {
