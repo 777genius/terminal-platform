@@ -1369,18 +1369,7 @@ mod tests {
 
         #[cfg(windows)]
         {
-            let program = std::env::var("COMSPEC")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "cmd.exe".to_string());
-
-            // Hosted Windows node surface smoke is more reliable with the real command shell.
-            terminal_backend_api::ShellLaunchSpec::new(program).with_args([
-                "/D",
-                "/Q",
-                "/K",
-                "echo ready",
-            ])
+            echo_shell_launch_spec()
         }
     }
 
@@ -1400,18 +1389,12 @@ mod tests {
 
         #[cfg(windows)]
         {
-            let comspec = std::env::var("COMSPEC")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "cmd.exe".to_string());
-            assert_eq!(launch.program, comspec);
+            assert!(launch.program.to_ascii_lowercase().ends_with("node.exe"));
             assert_eq!(
                 launch.args,
                 vec![
-                    "/D".to_string(),
-                    "/Q".to_string(),
-                    "/K".to_string(),
-                    "echo ready".to_string(),
+                    "-e".to_string(),
+                    "process.stdout.write('ready\\n'); process.stdin.resume(); process.stdin.on('data', chunk => process.stdout.write(chunk));".to_string(),
                 ]
             );
         }

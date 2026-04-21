@@ -13,13 +13,14 @@ const ZELLIJ_SESSION_WAIT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 20
 const ZELLIJ_TOPOLOGY_POLL_ATTEMPTS = process.platform === "win32" ? 80 : 120;
 function readyEchoLaunch() {
   if (process.platform === "win32") {
-    const comspec =
-      process.env.ComSpec ??
-      process.env.COMSPEC ??
-      "cmd.exe";
     return {
-      program: comspec,
-      args: ["/D", "/Q", "/K", "echo ready"],
+      // Reuse the exact Node runtime that is already executing the smoke. This
+      // is more reliable than `cmd /K "echo ready"` on hosted Windows PTYs.
+      program: process.execPath,
+      args: [
+        "-e",
+        "process.stdout.write('ready\\n'); process.stdin.resume(); process.stdin.on('data', chunk => process.stdout.write(chunk));",
+      ],
     };
   }
 
@@ -688,6 +689,7 @@ async function runPackageWatchSmoke(createClient, sdk) {
     true,
   );
   await runSessionStateFocusChurnSmoke(createClient);
+  await runResizeChurnSmoke(() => createClient(), "package-watch");
 
   await runElectronBridgeSmoke(createClient, sdk);
 }
@@ -780,6 +782,218 @@ async function runSessionStateFocusChurnSmoke(createClient) {
     observedStates.some((state) => state.topology.focused_tab === expectedFinalTab),
     true,
   );
+}
+
+function buildResizeSequence(initialRows, initialCols) {
+  const candidates = [
+    {
+      rows: Math.max(8, initialRows > 12 ? initialRows - 4 : initialRows),
+      cols: Math.max(30, initialCols > 50 ? initialCols - 12 : initialCols),
+    },
+    {
+      rows: Math.min(120, initialRows + 3),
+      cols: Math.min(240, initialCols + 12),
+    },
+    {
+      rows: initialRows,
+      cols: initialCols,
+    },
+  ];
+  const seen = new Set();
+
+  return candidates.filter((candidate) => {
+    const key = `${candidate.rows}x${candidate.cols}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+async function waitForScreenSize(client, sessionId, paneId, rows, cols, label) {
+  let lastSize = null;
+
+  for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
+    const snapshot = await client.screenSnapshot(sessionId, paneId);
+    if (snapshot.rows === rows && snapshot.cols === cols) {
+      return snapshot;
+    }
+    lastSize = { rows: snapshot.rows, cols: snapshot.cols };
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(
+    `Timed out waiting for screen size ${rows}x${cols}: ${label}; last size: ${JSON.stringify(lastSize)}`,
+  );
+}
+
+async function waitForPaneSize(subscription, rows, cols, label) {
+  for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
+    const event = await withTimeout(
+      subscription.nextEvent(),
+      DEFAULT_EVENT_TIMEOUT_MS,
+      `Timed out waiting for pane resize delta: ${label}`,
+    );
+    if (event?.kind === "screen_delta" && event.rows === rows && event.cols === cols) {
+      return event;
+    }
+  }
+
+  throw new Error(`Timed out waiting for pane resize delta ${rows}x${cols}: ${label}`);
+}
+
+async function runResizeChurnSmoke(createClient, label) {
+  const client = createClient();
+  const created = await client.createNativeSession({
+    title: `resize-churn-${label}`,
+    launch: readyEchoLaunch(),
+  });
+  const attached = await client.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+  const initialScreen = await waitForInteractiveScreen(
+    client,
+    created.session_id,
+    paneId,
+    `resize-${label}`,
+  );
+  const sizeSequence = buildResizeSequence(initialScreen.rows, initialScreen.cols);
+  const observedStateSizes = new Set();
+  const observedPaneSizes = new Set();
+  const marker = `resize churn ${label}`;
+  const expectedFinalSize = sizeSequence[sizeSequence.length - 1];
+  const watchAbort = new AbortController();
+  const watchPromise = client.watchSessionState(created.session_id, {
+    signal: watchAbort.signal,
+    onState: async (state) => {
+      const focusedScreen = state.focusedScreen;
+      const expectedPaneId = focusedPaneIdFromTopology(state.topology);
+
+      assert.equal(
+        expectedPaneId ? focusedScreen?.pane_id === expectedPaneId : true,
+        true,
+      );
+
+      if (!focusedScreen) {
+        return;
+      }
+
+      observedStateSizes.add(`${focusedScreen.rows}x${focusedScreen.cols}`);
+      if (
+        focusedScreen.rows === expectedFinalSize.rows &&
+        focusedScreen.cols === expectedFinalSize.cols &&
+        focusedScreen.surface.lines.some((line) => line.text.includes(marker))
+      ) {
+        watchAbort.abort();
+      }
+    },
+  });
+  const paneSubscription =
+    typeof client.subscribePane === "function"
+      ? await client.subscribePane(created.session_id, paneId)
+      : null;
+
+  try {
+    if (paneSubscription) {
+      const initialEvent = await withTimeout(
+        paneSubscription.nextEvent(),
+        DEFAULT_EVENT_TIMEOUT_MS,
+        `Timed out waiting for initial pane event before resize churn: ${label}`,
+      );
+      assert.equal(initialEvent?.kind, "screen_delta");
+    }
+
+    let previousSequence = initialScreen.sequence;
+    for (let index = 0; index < sizeSequence.length; index += 1) {
+      const target = sizeSequence[index];
+      const resized = await client.dispatchMuxCommand(created.session_id, {
+        kind: "resize_pane",
+        pane_id: paneId,
+        rows: target.rows,
+        cols: target.cols,
+      });
+
+      assert.equal(resized.changed, true);
+
+      if (paneSubscription) {
+        const paneUpdate = await waitForPaneSize(
+          paneSubscription,
+          target.rows,
+          target.cols,
+          `${label} cycle ${index}`,
+        );
+        observedPaneSizes.add(`${paneUpdate.rows}x${paneUpdate.cols}`);
+      }
+
+      const screen = await waitForScreenSize(
+        client,
+        created.session_id,
+        paneId,
+        target.rows,
+        target.cols,
+        `${label} cycle ${index}`,
+      );
+      const delta = await client.screenDelta(
+        created.session_id,
+        paneId,
+        previousSequence,
+      );
+
+      assert.equal(screen.rows, target.rows);
+      assert.equal(screen.cols, target.cols);
+      assert.equal(delta.rows, target.rows);
+      assert.equal(delta.cols, target.cols);
+      assert.equal(delta.to_sequence >= delta.from_sequence, true);
+      assert.equal(delta.patch !== null || delta.full_replace !== null, true);
+
+      previousSequence = screen.sequence;
+    }
+
+    await client.dispatchMuxCommand(created.session_id, {
+      kind: "send_input",
+      pane_id: paneId,
+      data: submittedInput(marker),
+    });
+
+    if (paneSubscription) {
+      const markerEvent = await waitForSubscriptionText(paneSubscription, marker, label);
+      assert.equal(deltaContainsText(markerEvent, marker), true);
+    }
+
+    const finalScreen = await waitForLine(client, created.session_id, paneId, marker);
+    const finalDelta = await client.screenDelta(
+      created.session_id,
+      paneId,
+      previousSequence,
+    );
+
+    assert.equal(finalScreen.rows, expectedFinalSize.rows);
+    assert.equal(finalScreen.cols, expectedFinalSize.cols);
+    assert.equal(deltaContainsText(finalDelta, marker), true);
+
+    await withTimeout(
+      watchPromise,
+      DEFAULT_HOST_TIMEOUT_MS,
+      `Timed out waiting for resize churn watcher to finish: ${label}`,
+    );
+
+    assert.equal(observedStateSizes.size >= 2, true);
+    assert.equal(
+      observedStateSizes.has(`${expectedFinalSize.rows}x${expectedFinalSize.cols}`),
+      true,
+    );
+    if (paneSubscription) {
+      assert.equal(observedPaneSizes.size >= 2, true);
+      assert.equal(
+        observedPaneSizes.has(`${expectedFinalSize.rows}x${expectedFinalSize.cols}`),
+        true,
+      );
+    }
+  } finally {
+    if (paneSubscription) {
+      await paneSubscription.close();
+    }
+  }
 }
 
 async function runShutdownSmoke(createClient, options = {}) {
@@ -1398,6 +1612,7 @@ async function runElectronBridgeSmoke(createClient, sdk) {
     }),
     true,
   );
+  await runResizeChurnSmoke(() => rendererClient, "electron-bridge");
 
   bridge.dispose();
   await runElectronBridgeDisposeSmoke(createClient, sdk);
