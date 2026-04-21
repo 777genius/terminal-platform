@@ -592,6 +592,10 @@ fn verify_v1_workflows(
             "cargo-public-api",
             "cargo-semver-checks",
             "release-plz",
+            "rustup toolchain install nightly --profile minimal",
+            "cargo public-api -p terminal-domain",
+            "cargo public-api -p terminal-protocol",
+            "cargo public-api -p terminal-node",
         ],
     )?;
     assert_contains_all(
@@ -1817,6 +1821,11 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-public-api,cargo-semver-checks,release-plz
+      - run: rustup toolchain install nightly --profile minimal
+      - run: |
+          cargo public-api -p terminal-domain
+          cargo public-api -p terminal-protocol
+          cargo public-api -p terminal-node
 "#;
 
     const VALID_RELEASE_PLZ_WORKFLOW: &str = r#"
