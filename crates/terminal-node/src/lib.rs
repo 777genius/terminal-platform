@@ -1367,6 +1367,7 @@ mod tests {
         pane_id: &str,
         needle: &str,
     ) -> super::NodeScreenSnapshot {
+        let mut last_lines = Vec::new();
         for _ in 0..screen_wait_attempts() {
             let snapshot = node
                 .screen_snapshot(session_id, pane_id)
@@ -1375,10 +1376,12 @@ mod tests {
             if snapshot.surface.lines.iter().any(|line| line.text.contains(needle)) {
                 return snapshot;
             }
+            last_lines =
+                snapshot.surface.lines.iter().map(|line| line.text.clone()).take(12).collect();
             sleep(Duration::from_millis(100)).await;
         }
 
-        panic!("screen never contained expected line: {needle}");
+        panic!("screen never contained expected line: {needle}; last lines: {last_lines:?}");
     }
 
     async fn wait_for_interactive_screen(

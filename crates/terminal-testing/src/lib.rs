@@ -120,13 +120,40 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        let program = std::env::var("COMSPEC")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "cmd.exe".to_string());
-
-        ShellLaunchSpec::new(program).with_args(["/D", "/K", "echo ready"])
+        // `cmd /K "echo ready"` is flaky through the daemon screen path on hosted Windows.
+        // Reuse the Node-based echo loop that already passes in daemon-client smoke coverage.
+        ShellLaunchSpec::new(resolve_windows_executable("node")).with_args([
+            "-e",
+            "process.stdout.write('ready\\n'); process.stdin.resume(); process.stdin.on('data', chunk => process.stdout.write(chunk));",
+        ])
     }
+}
+
+#[cfg(windows)]
+fn resolve_windows_executable(program: &str) -> String {
+    let has_path_separator = program.contains('\\') || program.contains('/');
+    if has_path_separator {
+        return program.to_string();
+    }
+
+    let candidates = if program.to_ascii_lowercase().ends_with(".exe") {
+        vec![program.to_string()]
+    } else {
+        vec![program.to_string(), format!("{program}.exe")]
+    };
+
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            for candidate in &candidates {
+                let path = dir.join(candidate);
+                if path.is_file() {
+                    return path.display().to_string();
+                }
+            }
+        }
+    }
+
+    program.to_string()
 }
 
 #[cfg(unix)]

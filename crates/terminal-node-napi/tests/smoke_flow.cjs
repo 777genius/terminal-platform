@@ -13,13 +13,12 @@ const ZELLIJ_SESSION_WAIT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 20
 const ZELLIJ_TOPOLOGY_POLL_ATTEMPTS = process.platform === "win32" ? 80 : 120;
 function readyEchoLaunch() {
   if (process.platform === "win32") {
-    const comspec =
-      process.env.ComSpec ??
-      process.env.COMSPEC ??
-      "cmd.exe";
     return {
-      program: comspec,
-      args: ["/D", "/K", "echo ready"],
+      program: process.execPath,
+      args: [
+        "-e",
+        "process.stdout.write('ready\\n'); process.stdin.resume(); process.stdin.on('data', chunk => process.stdout.write(chunk));",
+      ],
     };
   }
 
@@ -951,15 +950,21 @@ async function runRestartRecoverySmoke(createClient, options = {}) {
 }
 
 async function waitForLine(client, sessionId, paneId, needle) {
+  let lastLines = [];
   for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
     const snapshot = await client.screenSnapshot(sessionId, paneId);
     if (snapshot.surface.lines.some((line) => line.text.includes(needle))) {
       return snapshot;
     }
+    lastLines = snapshot.surface.lines
+      .slice(0, 12)
+      .map((line) => line.text);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  throw new Error(`Timed out waiting for screen line: ${needle}`);
+  throw new Error(
+    `Timed out waiting for screen line: ${needle}; last lines: ${JSON.stringify(lastLines)}`,
+  );
 }
 
 async function waitForInteractiveScreen(client, sessionId, paneId, label) {
