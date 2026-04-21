@@ -727,18 +727,12 @@ mod tests {
 
         #[cfg(windows)]
         {
-            ShellLaunchSpec::new("cmd.exe").with_args([
-                "/D",
-                "/Q",
-                "/V:ON",
-                "/K",
-                "echo ready & for /L %i in (1,1,2147483647) do @(set line= & set /P line= & if defined line echo(!line!))",
-            ])
+            ShellLaunchSpec::new("cmd.exe").with_args(["/D", "/Q", "/K", "echo ready"])
         }
     }
 
     fn submitted_input(text: &str) -> String {
-        if cfg!(windows) { format!("{text}\r\n") } else { format!("{text}\r") }
+        if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\r") }
     }
 
     async fn wait_for_screen_line(

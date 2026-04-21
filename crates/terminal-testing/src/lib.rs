@@ -113,13 +113,7 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        ShellLaunchSpec::new("cmd.exe").with_args([
-            "/D",
-            "/Q",
-            "/V:ON",
-            "/K",
-            "echo ready & for /L %i in (1,1,2147483647) do @(set line= & set /P line= & if defined line echo(!line!))",
-        ])
+        ShellLaunchSpec::new("cmd.exe").with_args(["/D", "/Q", "/K", "echo ready"])
     }
 }
 

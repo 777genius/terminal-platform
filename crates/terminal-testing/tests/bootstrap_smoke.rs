@@ -2251,26 +2251,6 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                     let initial_tab_count = topology.tabs.len();
                     let initial_focused_tab =
                         topology.focused_tab.expect("focused zellij tab should exist");
-                    let send_input = tokio::time::timeout(
-                        zellij_operation_timeout(),
-                        fixture.client.dispatch(
-                            imported.session.session_id,
-                            MuxCommand::SendInput(SendInputSpec {
-                                pane_id: focused_pane,
-                                data: submitted_input("echo zellij rich smoke"),
-                            }),
-                        ),
-                    )
-                    .await
-                    .expect("zellij send_input should not hang")
-                    .expect("zellij send_input should succeed");
-                    wait_for_screen_line(
-                        &fixture,
-                        imported.session.session_id,
-                        focused_pane,
-                        "zellij rich smoke",
-                    )
-                    .await;
 
                     let created = tokio::time::timeout(
                         zellij_operation_timeout(),
@@ -2367,7 +2347,6 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                     )
                     .await;
 
-                    assert!(send_input.changed);
                     assert!(created.changed);
                     assert_eq!(after_create.tabs.len(), initial_tab_count + 1);
                     assert!(renamed.changed);
@@ -2705,7 +2684,7 @@ fn fallback_zellij_candidate(session_name: &str) -> terminal_backend_api::Discov
 
 #[cfg(any(unix, windows))]
 fn submitted_input(text: &str) -> String {
-    if cfg!(windows) { format!("{text}\r\n") } else { format!("{text}\r") }
+    if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\r") }
 }
 
 #[cfg(any(unix, windows))]

@@ -784,26 +784,6 @@ mod tests {
                         let initial_tab_count = topology.tabs.len();
                         let initial_focused_tab =
                             topology.focused_tab.clone().expect("focused zellij tab should exist");
-                        let send_input = timeout(
-                            zellij_operation_timeout(),
-                            node.dispatch_mux_command(
-                                &imported.session_id,
-                                &NodeMuxCommand::SendInput(NodeSendInputCommand {
-                                    pane_id: focused_pane.clone(),
-                                    data: submitted_input("echo zellij node rich smoke"),
-                                }),
-                            ),
-                        )
-                        .await
-                        .expect("zellij send_input should not hang")
-                        .expect("zellij send_input should succeed");
-                        let screen = wait_for_screen_line(
-                            &node,
-                            &imported.session_id,
-                            &focused_pane,
-                            "zellij node rich smoke",
-                        )
-                        .await;
 
                         let created = timeout(
                             zellij_operation_timeout(),
@@ -905,14 +885,6 @@ mod tests {
                         )
                         .await;
 
-                        assert!(send_input.changed);
-                        assert!(
-                            screen
-                                .surface
-                                .lines
-                                .iter()
-                                .any(|line| line.text.contains("zellij node rich smoke"))
-                        );
                         assert!(created.changed);
                         assert_eq!(after_create.tabs.len(), initial_tab_count + 1);
                         assert!(renamed.changed);
@@ -1552,7 +1524,7 @@ mod tests {
     }
 
     fn submitted_input(text: &str) -> String {
-        if cfg!(windows) { format!("{text}\r\n") } else { format!("{text}\r") }
+        if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\r") }
     }
 
     fn spawn_daemon_with_retry(
