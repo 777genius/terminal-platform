@@ -14,16 +14,11 @@ const ZELLIJ_TOPOLOGY_POLL_ATTEMPTS = process.platform === "win32" ? 80 : 120;
 
 function readyEchoLaunch() {
   if (process.platform === "win32") {
+    const program =
+      process.env.COMSPEC && process.env.COMSPEC.trim() ? process.env.COMSPEC : "cmd.exe";
     return {
-      program: "powershell.exe",
-      args: [
-        "-NoLogo",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
-      ],
+      program,
+      args: ["/D", "/Q", "/K", "echo ready"],
     };
   }
 
@@ -1293,6 +1288,10 @@ function fallbackZellijCandidate(sessionName) {
 }
 
 function submittedInput(text) {
+  if (process.platform === "win32") {
+    return `echo ${text}\r`;
+  }
+
   return `${text}\r`;
 }
 

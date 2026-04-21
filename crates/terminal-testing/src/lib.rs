@@ -120,14 +120,12 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        ShellLaunchSpec::new("powershell.exe").with_args([
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
-        ])
+        let program = std::env::var("COMSPEC")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "cmd.exe".to_string());
+
+        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
     }
 }
 
@@ -367,6 +365,10 @@ fn spawn_windows_zellij_pty(session_name: &str) -> Result<WindowsZellijPtyGuard,
         .master
         .try_clone_reader()
         .map_err(|error| format!("failed to clone zellij test pty reader: {error}"))?;
+    let mut writer = pty_pair
+        .master
+        .take_writer()
+        .map_err(|error| format!("failed to open zellij test pty writer: {error}"))?;
     let output = Arc::new(Mutex::new(Vec::new()));
     let output_reader = Arc::clone(&output);
 
@@ -376,6 +378,10 @@ fn spawn_windows_zellij_pty(session_name: &str) -> Result<WindowsZellijPtyGuard,
             match reader.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(read) => {
+                    if chunk[..read].windows(4).any(|window| window == b"\x1b[6n") {
+                        let _ = writer.write_all(b"\x1b[1;1R");
+                        let _ = writer.flush();
+                    }
                     if let Ok(mut output) = output_reader.lock() {
                         output.extend_from_slice(&chunk[..read]);
                         let overflow = output.len().saturating_sub(16 * 1024);

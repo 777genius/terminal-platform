@@ -727,19 +727,17 @@ mod tests {
 
         #[cfg(windows)]
         {
-            ShellLaunchSpec::new("powershell.exe").with_args([
-                "-NoLogo",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output 'ready'; while (($line = [Console]::In.ReadLine()) -ne $null) { Write-Output $line }",
-            ])
+            let program = std::env::var("COMSPEC")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "cmd.exe".to_string());
+
+            ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
         }
     }
 
     fn submitted_input(text: &str) -> String {
-        format!("{text}\r")
+        if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\n") }
     }
 
     async fn wait_for_screen_line(
