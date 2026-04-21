@@ -1289,7 +1289,7 @@ function fallbackZellijCandidate(sessionName) {
 
 function submittedInput(text) {
   if (process.platform === "win32") {
-    return `echo ${text}\r`;
+    return `echo ${text}\r\n`;
   }
 
   return `${text}\r`;

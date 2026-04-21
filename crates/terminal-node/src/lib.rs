@@ -1538,7 +1538,7 @@ mod tests {
     }
 
     fn submitted_input(text: &str) -> String {
-        if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\n") }
+        if cfg!(windows) { format!("echo {text}\r\n") } else { format!("{text}\n") }
     }
 
     fn spawn_daemon_with_retry(
