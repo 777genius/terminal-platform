@@ -724,6 +724,7 @@ fn verify_v1_workflows(
         "release readiness workflow",
         &[
             "workflow_dispatch",
+            "timeout-minutes: 45",
             "verify-v1-readiness --require-recorded-passes",
             "cargo-public-api",
             "cargo-semver-checks",
@@ -737,7 +738,12 @@ fn verify_v1_workflows(
     assert_contains_all(
         release_plz_workflow,
         "release-plz workflow",
-        &["contents: write", "pull-requests: write", "release-plz release-pr --git-token"],
+        &[
+            "contents: write",
+            "pull-requests: write",
+            "timeout-minutes: 30",
+            "release-plz release-pr --git-token",
+        ],
     )?;
 
     Ok(())
@@ -2148,6 +2154,7 @@ on:
   workflow_dispatch:
 jobs:
   release-readiness:
+    timeout-minutes: 45
     steps:
       - run: cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
       - uses: taiki-e/install-action@v2
@@ -2166,6 +2173,7 @@ permissions:
   pull-requests: write
 jobs:
   release-pr:
+    timeout-minutes: 30
     steps:
       - run: release-plz release-pr --git-token "$GITHUB_TOKEN"
 "#;
