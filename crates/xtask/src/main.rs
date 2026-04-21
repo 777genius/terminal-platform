@@ -14,6 +14,7 @@ const LICENSE_PATH: &str = "LICENSE";
 const CONTRIBUTING_PATH: &str = "CONTRIBUTING.md";
 const SECURITY_PATH: &str = "SECURITY.md";
 const CODE_OF_CONDUCT_PATH: &str = "CODE_OF_CONDUCT.md";
+const PULL_REQUEST_TEMPLATE_PATH: &str = ".github/pull_request_template.md";
 const ROOT_README_PATH: &str = "README.md";
 const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README.md";
 const NODE_SMOKE_TEST_PATH: &str = "crates/terminal-node-napi/tests/node_smoke.rs";
@@ -345,6 +346,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let contributing = workspace_root.join(CONTRIBUTING_PATH);
     let security = workspace_root.join(SECURITY_PATH);
     let code_of_conduct = workspace_root.join(CODE_OF_CONDUCT_PATH);
+    let pull_request_template = workspace_root.join(PULL_REQUEST_TEMPLATE_PATH);
     let root_readme = workspace_root.join(ROOT_README_PATH);
     let node_package_readme = workspace_root.join(NODE_PACKAGE_README_PATH);
     let node_smoke_test = workspace_root.join(NODE_SMOKE_TEST_PATH);
@@ -370,6 +372,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(contributing.is_file(), "root CONTRIBUTING.md is missing")?;
     assert_value(security.is_file(), "root SECURITY.md is missing")?;
     assert_value(code_of_conduct.is_file(), "root CODE_OF_CONDUCT.md is missing")?;
+    assert_value(pull_request_template.is_file(), "pull request template is missing")?;
     assert_value(root_readme.is_file(), "root README is missing")?;
     assert_value(node_package_readme.is_file(), "Node package README is missing")?;
     assert_value(node_smoke_test.is_file(), "Node addon smoke test is missing")?;
@@ -439,6 +442,8 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         .map_err(|error| format!("failed to read {} - {error}", release_plz_config.display()))?;
     let deny_config_contents = fs::read_to_string(&deny_config)
         .map_err(|error| format!("failed to read {} - {error}", deny_config.display()))?;
+    let pull_request_template_contents = fs::read_to_string(&pull_request_template)
+        .map_err(|error| format!("failed to read {} - {error}", pull_request_template.display()))?;
 
     for expected_line in [
         "- `macOS + Linux` - `Native + tmux + Zellij`",
@@ -507,6 +512,17 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         &release_plz_workflow_contents,
     )?;
     verify_v1_release_configs(&release_plz_config_contents, &deny_config_contents)?;
+    assert_contains_all(
+        &pull_request_template_contents,
+        "pull request template v1 gates",
+        &[
+            "Node staged package smoke",
+            "Node installed package smoke",
+            "C ABI package stage/install smoke",
+            "verify-v1-readiness --require-recorded-passes",
+            "Windows Native + Zellij recorded pass",
+        ],
+    )?;
     assert_contains_all(
         &release_candidate_checklist_contents,
         "release candidate checklist package proof",
