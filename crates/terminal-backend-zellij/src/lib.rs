@@ -35,6 +35,7 @@ const ZELLIJ_ROUTE_NAMESPACE: &str = "zellij_session";
 const ZELLIJ_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const ZELLIJ_TRANSIENT_RETRY_ATTEMPTS: usize = 2;
 const ZELLIJ_ACTION_SETTLE_ATTEMPTS: usize = 600;
+const ZELLIJ_ACTION_SETTLE_TIMEOUT: Duration = Duration::from_secs(15);
 const ZELLIJ_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const ZELLIJ_COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
@@ -820,6 +821,7 @@ impl ZellijAttachedSession {
         action: &ZellijAction,
     ) -> Result<ZellijSessionSnapshot, BackendError> {
         let mut last_error = None;
+        let started = Instant::now();
         for _ in 0..ZELLIJ_ACTION_SETTLE_ATTEMPTS {
             match self.snapshot() {
                 Ok(snapshot) if action.settled(previous, &snapshot) => return Ok(snapshot),
@@ -829,11 +831,17 @@ impl ZellijAttachedSession {
                 }
                 Err(error) => return Err(error),
             }
+            if started.elapsed() >= ZELLIJ_ACTION_SETTLE_TIMEOUT {
+                break;
+            }
             time::sleep(ZELLIJ_POLL_INTERVAL).await;
         }
 
         Err(last_error.unwrap_or_else(|| {
-            BackendError::transport("zellij action did not settle within the retry window")
+            BackendError::transport(format!(
+                "zellij action did not settle within {} ms",
+                ZELLIJ_ACTION_SETTLE_TIMEOUT.as_millis()
+            ))
         }))
     }
 }

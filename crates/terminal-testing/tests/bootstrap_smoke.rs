@@ -2106,7 +2106,7 @@ tmux-less-delta\n",
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
     let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
-    let attempts = 3;
+    let attempts = if cfg!(windows) { 1 } else { 3 };
     let mut last_error = None;
 
     for attempt in 0..attempts {
@@ -2585,13 +2585,14 @@ async fn wait_for_topology(
     predicate: impl Fn(&TopologySnapshot) -> bool,
     label: &str,
 ) -> TopologySnapshot {
+    let attempts = if label.contains("zellij") { zellij_topology_wait_attempts() } else { 120 };
     let mut last_snapshot = None;
-    for _ in 0..120 {
-        let snapshot = fixture
-            .client
-            .topology_snapshot(session_id)
-            .await
-            .expect("topology_snapshot should succeed");
+    for _ in 0..attempts {
+        let snapshot =
+            tokio::time::timeout(host_timeout(), fixture.client.topology_snapshot(session_id))
+                .await
+                .expect("topology_snapshot should not hang")
+                .expect("topology_snapshot should succeed");
         if predicate(&snapshot) {
             return snapshot;
         }
@@ -2614,17 +2615,22 @@ async fn recv_subscription_event(
 
 #[cfg(any(unix, windows))]
 fn zellij_operation_timeout() -> Duration {
-    Duration::from_secs(90)
+    if cfg!(windows) { Duration::from_secs(60) } else { Duration::from_secs(90) }
 }
 
 #[cfg(any(unix, windows))]
 fn zellij_attempt_timeout() -> Duration {
-    if cfg!(windows) { Duration::from_secs(240) } else { Duration::from_secs(90) }
+    if cfg!(windows) { Duration::from_secs(120) } else { Duration::from_secs(90) }
 }
 
 #[cfg(any(unix, windows))]
 fn host_timeout() -> Duration {
-    if cfg!(windows) { Duration::from_secs(90) } else { Duration::from_secs(10) }
+    if cfg!(windows) { Duration::from_secs(45) } else { Duration::from_secs(10) }
+}
+
+#[cfg(any(unix, windows))]
+fn zellij_topology_wait_attempts() -> usize {
+    if cfg!(windows) { 80 } else { 120 }
 }
 
 #[cfg(any(unix, windows))]
@@ -2684,7 +2690,7 @@ fn fallback_zellij_candidate(session_name: &str) -> terminal_backend_api::Discov
 
 #[cfg(any(unix, windows))]
 fn submitted_input(text: &str) -> String {
-    format!("{text}\r")
+    if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\r") }
 }
 
 #[cfg(any(unix, windows))]

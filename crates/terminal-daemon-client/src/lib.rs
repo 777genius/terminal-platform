@@ -727,15 +727,12 @@ mod tests {
 
         #[cfg(windows)]
         {
-            ShellLaunchSpec::new("node").with_args([
-                "-e",
-                "console.log('ready'); process.stdin.setEncoding('utf8'); try { if (process.stdin.isTTY) process.stdin.setRawMode(true); } catch (_error) {} process.stdin.on('data', data => process.stdout.write(data)); process.stdin.resume(); setInterval(() => {}, 1000000);",
-            ])
+            ShellLaunchSpec::new("cmd.exe").with_args(["/D", "/Q", "/K", "echo ready"])
         }
     }
 
     fn submitted_input(text: &str) -> String {
-        format!("{text}\r")
+        if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\r") }
     }
 
     async fn wait_for_screen_line(

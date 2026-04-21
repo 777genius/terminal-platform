@@ -113,10 +113,7 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        ShellLaunchSpec::new("node").with_args([
-            "-e",
-            "console.log('ready'); process.stdin.setEncoding('utf8'); try { if (process.stdin.isTTY) process.stdin.setRawMode(true); } catch (_error) {} process.stdin.on('data', data => process.stdout.write(data)); process.stdin.resume(); setInterval(() => {}, 1000000);",
-        ])
+        ShellLaunchSpec::new("cmd.exe").with_args(["/D", "/Q", "/K", "echo ready"])
     }
 }
 
@@ -348,8 +345,8 @@ fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
 
 #[cfg(any(unix, windows))]
 fn wait_for_zellij_session(session_name: &str) -> Result<(), String> {
-    let attempts = if cfg!(windows) { 1200 } else { 400 };
-    for _ in 0..attempts {
+    let started = Instant::now();
+    while started.elapsed() < zellij_session_wait_timeout() {
         match run_zellij(&["list-sessions", "--short", "--no-formatting"]) {
             Ok(sessions) => {
                 if sessions.lines().map(str::trim).any(|line| line == session_name)
@@ -364,7 +361,15 @@ fn wait_for_zellij_session(session_name: &str) -> Result<(), String> {
         thread::sleep(Duration::from_millis(100));
     }
 
-    Err(format!("zellij session never appeared: {session_name}"))
+    Err(format!(
+        "zellij session never appeared within {}ms: {session_name}",
+        zellij_session_wait_timeout().as_millis()
+    ))
+}
+
+#[cfg(any(unix, windows))]
+fn zellij_session_wait_timeout() -> Duration {
+    if cfg!(windows) { Duration::from_secs(45) } else { Duration::from_secs(20) }
 }
 
 #[cfg(any(unix, windows))]

@@ -2,22 +2,21 @@ const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
-const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 90000 : 5000;
-const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 90000 : 5000;
-const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 900 : 50;
-const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 200 : 100;
+const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 5000;
+const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 45000 : 5000;
+const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 450 : 50;
+const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 60 : 100;
 const INTERACTIVE_PROBE_INTERVAL = process.platform === "win32" ? 20 : 10;
 const ZELLIJ_COMMAND_TIMEOUT_MS = process.platform === "win32" ? 10000 : 5000;
 const ZELLIJ_CREATE_TIMEOUT_MS = process.platform === "win32" ? 20000 : 10000;
+const ZELLIJ_SESSION_WAIT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 20000;
+const ZELLIJ_TOPOLOGY_POLL_ATTEMPTS = process.platform === "win32" ? 80 : 120;
 
 function readyEchoLaunch() {
   if (process.platform === "win32") {
     return {
-      program: "node",
-      args: [
-        "-e",
-        "console.log('ready'); process.stdin.setEncoding('utf8'); try { if (process.stdin.isTTY) process.stdin.setRawMode(true); } catch (_error) {} process.stdin.on('data', data => process.stdout.write(data)); process.stdin.resume(); setInterval(() => {}, 1000000);",
-      ],
+      program: "cmd.exe",
+      args: ["/D", "/Q", "/K", "echo ready"],
     };
   }
 
@@ -191,7 +190,7 @@ async function runSmoke(createClient) {
 async function runZellijImportSmoke(createClient, zellijCapabilities) {
   const client = createClient();
   const sessionName = uniqueZellijSessionName("pkg");
-  const attempts = process.platform === "win32" ? 3 : 3;
+  const attempts = process.platform === "win32" ? 1 : 3;
   let sessionProcess = null;
   let candidate = null;
   let lastError = null;
@@ -990,8 +989,15 @@ async function waitForSubscriptionText(subscription, needle, cycle) {
 }
 
 async function waitForTopologyState(client, sessionId, predicate, label) {
-  for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
-    const snapshot = await client.topologySnapshot(sessionId);
+  const attempts = label.toLowerCase().includes("zellij")
+    ? ZELLIJ_TOPOLOGY_POLL_ATTEMPTS
+    : DEFAULT_POLL_ATTEMPTS;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const snapshot = await withTimeout(
+      client.topologySnapshot(sessionId),
+      DEFAULT_HOST_TIMEOUT_MS,
+      `Timed out polling topology state: ${label}`,
+    );
     if (predicate(snapshot)) {
       return snapshot;
     }
@@ -1097,7 +1103,11 @@ function isHeadlessZellijSpawnError(stderr) {
 
 async function waitForDiscoveredZellijSession(client, sessionName) {
   for (let attempt = 0; attempt < DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS; attempt += 1) {
-    const sessions = await client.discoverSessions("zellij");
+    const sessions = await withTimeout(
+      client.discoverSessions("zellij"),
+      DEFAULT_HOST_TIMEOUT_MS,
+      `Timed out discovering zellij sessions: ${sessionName}`,
+    );
     const candidate =
       sessions.find((session) => session.title === sessionName) ?? null;
     if (candidate) {
@@ -1110,7 +1120,8 @@ async function waitForDiscoveredZellijSession(client, sessionName) {
 }
 
 async function waitForRawZellijSession(sessionName) {
-  for (let attempt = 0; attempt < DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS; attempt += 1) {
+  const started = Date.now();
+  while (Date.now() - started < ZELLIJ_SESSION_WAIT_TIMEOUT_MS) {
     const sessions = listZellijSessionsRaw();
     if (sessions.includes(sessionName) && zellijSessionControlReady(sessionName)) {
       return;
@@ -1118,7 +1129,9 @@ async function waitForRawZellijSession(sessionName) {
     await delay(100);
   }
 
-  throw new Error(`Timed out waiting for raw zellij session: ${sessionName}`);
+  throw new Error(
+    `Timed out waiting for raw zellij session within ${ZELLIJ_SESSION_WAIT_TIMEOUT_MS}ms: ${sessionName}`,
+  );
 }
 
 function listZellijSessionsRaw() {
@@ -1233,7 +1246,7 @@ function fallbackZellijCandidate(sessionName) {
 }
 
 function submittedInput(text) {
-  return `${text}\r`;
+  return process.platform === "win32" ? `echo ${text}\r` : `${text}\r`;
 }
 
 function delay(ms) {

@@ -652,7 +652,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn discovers_zellij_sessions_and_handles_import_surface_through_node_surface() {
         let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
-        let attempts = 3;
+        let attempts = if cfg!(windows) { 1 } else { 3 };
         let mut last_error = None;
 
         for attempt in 0..attempts {
@@ -1445,9 +1445,11 @@ mod tests {
         predicate: impl Fn(&super::NodeTopologySnapshot) -> bool,
         label: &str,
     ) -> super::NodeTopologySnapshot {
-        for _ in 0..screen_wait_attempts() {
-            let snapshot =
-                node.topology_snapshot(session_id).await.expect("topology_snapshot should succeed");
+        for _ in 0..zellij_topology_wait_attempts() {
+            let snapshot = timeout(extended_timeout(), node.topology_snapshot(session_id))
+                .await
+                .expect("topology_snapshot should not hang")
+                .expect("topology_snapshot should succeed");
             if predicate(&snapshot) {
                 return snapshot;
             }
@@ -1509,15 +1511,15 @@ mod tests {
     }
 
     fn extended_timeout() -> Duration {
-        if cfg!(windows) { Duration::from_secs(90) } else { Duration::from_secs(10) }
+        if cfg!(windows) { Duration::from_secs(45) } else { Duration::from_secs(10) }
     }
 
     fn zellij_operation_timeout() -> Duration {
-        Duration::from_secs(90)
+        if cfg!(windows) { Duration::from_secs(60) } else { Duration::from_secs(90) }
     }
 
     fn zellij_attempt_timeout() -> Duration {
-        if cfg!(windows) { Duration::from_secs(240) } else { Duration::from_secs(90) }
+        if cfg!(windows) { Duration::from_secs(120) } else { Duration::from_secs(90) }
     }
 
     fn screen_wait_attempts() -> usize {
@@ -1528,8 +1530,12 @@ mod tests {
         if cfg!(windows) { 20 } else { 10 }
     }
 
+    fn zellij_topology_wait_attempts() -> usize {
+        if cfg!(windows) { 80 } else { 120 }
+    }
+
     fn submitted_input(text: &str) -> String {
-        format!("{text}\r")
+        if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\r") }
     }
 
     fn spawn_daemon_with_retry(
