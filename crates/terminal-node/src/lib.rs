@@ -1350,7 +1350,7 @@ mod tests {
     }
 
     fn cat_launch_request(title: &str) -> NodeCreateSessionRequest {
-        let launch = echo_shell_launch_spec();
+        let launch = node_host_launch_spec();
         NodeCreateSessionRequest {
             title: Some(title.to_string()),
             launch: Some(super::NodeShellLaunchSpec {
@@ -1358,6 +1358,62 @@ mod tests {
                 args: launch.args,
                 cwd: launch.cwd.map(|cwd| cwd.display().to_string()),
             }),
+        }
+    }
+
+    fn node_host_launch_spec() -> terminal_backend_api::ShellLaunchSpec {
+        #[cfg(unix)]
+        {
+            echo_shell_launch_spec()
+        }
+
+        #[cfg(windows)]
+        {
+            let program = std::env::var("COMSPEC")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "cmd.exe".to_string());
+
+            // Hosted Windows node surface smoke is more reliable with the real command shell.
+            terminal_backend_api::ShellLaunchSpec::new(program).with_args([
+                "/D",
+                "/Q",
+                "/K",
+                "echo ready",
+            ])
+        }
+    }
+
+    #[test]
+    fn uses_platform_appropriate_launch_contract_for_node_host_smoke() {
+        let launch =
+            cat_launch_request("shell").launch.expect("cat launch request should include launch");
+
+        #[cfg(unix)]
+        {
+            assert_eq!(launch.program, "/bin/sh");
+            assert_eq!(
+                launch.args,
+                vec!["-lc".to_string(), "printf 'ready\\n'; exec cat".to_string()]
+            );
+        }
+
+        #[cfg(windows)]
+        {
+            let comspec = std::env::var("COMSPEC")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "cmd.exe".to_string());
+            assert_eq!(launch.program, comspec);
+            assert_eq!(
+                launch.args,
+                vec![
+                    "/D".to_string(),
+                    "/Q".to_string(),
+                    "/K".to_string(),
+                    "echo ready".to_string(),
+                ]
+            );
         }
     }
 

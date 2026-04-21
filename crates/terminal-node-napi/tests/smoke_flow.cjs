@@ -13,12 +13,13 @@ const ZELLIJ_SESSION_WAIT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 20
 const ZELLIJ_TOPOLOGY_POLL_ATTEMPTS = process.platform === "win32" ? 80 : 120;
 function readyEchoLaunch() {
   if (process.platform === "win32") {
+    const comspec =
+      process.env.ComSpec ??
+      process.env.COMSPEC ??
+      "cmd.exe";
     return {
-      program: process.execPath,
-      args: [
-        "-e",
-        "process.stdout.write('ready\\n'); process.stdin.resume(); process.stdin.on('data', chunk => process.stdout.write(chunk));",
-      ],
+      program: comspec,
+      args: ["/D", "/Q", "/K", "echo ready"],
     };
   }
 
