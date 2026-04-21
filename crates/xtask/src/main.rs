@@ -729,9 +729,9 @@ fn verify_v1_workflows(
             "cargo-semver-checks",
             "release-plz",
             "rustup toolchain install nightly --profile minimal",
-            "cargo public-api -p terminal-domain",
-            "cargo public-api -p terminal-protocol",
-            "cargo public-api -p terminal-node",
+            "cargo +nightly public-api -p terminal-domain",
+            "cargo +nightly public-api -p terminal-protocol",
+            "cargo +nightly public-api -p terminal-node",
         ],
     )?;
     assert_contains_all(
@@ -2155,9 +2155,9 @@ jobs:
           tool: cargo-public-api,cargo-semver-checks,release-plz
       - run: rustup toolchain install nightly --profile minimal
       - run: |
-          cargo public-api -p terminal-domain
-          cargo public-api -p terminal-protocol
-          cargo public-api -p terminal-node
+          cargo +nightly public-api -p terminal-domain
+          cargo +nightly public-api -p terminal-protocol
+          cargo +nightly public-api -p terminal-node
 "#;
 
     const VALID_RELEASE_PLZ_WORKFLOW: &str = r#"

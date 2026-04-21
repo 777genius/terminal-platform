@@ -38,9 +38,9 @@ jobs:
 
       - name: Public API smoke
         run: |
-          cargo public-api -p terminal-domain > /dev/null
-          cargo public-api -p terminal-protocol > /dev/null
-          cargo public-api -p terminal-node > /dev/null
+          cargo +nightly public-api -p terminal-domain > /dev/null
+          cargo +nightly public-api -p terminal-protocol > /dev/null
+          cargo +nightly public-api -p terminal-node > /dev/null
 
       - name: Tooling smoke
         run: |
