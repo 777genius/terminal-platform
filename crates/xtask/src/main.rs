@@ -369,6 +369,10 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
     let manual_readme = manual_dir.join("README.md");
+    let electron_checklist = manual_dir.join("electron.md");
+    let native_checklist = manual_dir.join("native.md");
+    let tmux_checklist = manual_dir.join("tmux.md");
+    let zellij_checklist = manual_dir.join("zellij.md");
     let windows_native_zellij_checklist = manual_dir.join("windows-native-zellij.md");
     let ci_workflow = workspace_root.join(CI_WORKFLOW_PATH);
     let release_readiness_workflow = workspace_root.join(RELEASE_READINESS_WORKFLOW_PATH);
@@ -400,6 +404,14 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(zellij_installer.is_file(), "Zellij installer script is missing")?;
     assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
     assert_value(manual_readme.is_file(), "manual QA README is missing")?;
+    assert_value(electron_checklist.is_file(), "Electron manual checklist is missing")?;
+    assert_value(native_checklist.is_file(), "native manual checklist is missing")?;
+    assert_value(tmux_checklist.is_file(), "tmux manual checklist is missing")?;
+    assert_value(zellij_checklist.is_file(), "Zellij manual checklist is missing")?;
+    assert_value(
+        windows_native_zellij_checklist.is_file(),
+        "Windows Native + Zellij manual checklist is missing",
+    )?;
     assert_value(manual_drafts_dir.is_dir(), "manual draft capture directory is missing")?;
     assert_value(manual_runs_dir.is_dir(), "manual run capture directory is missing")?;
     assert_value(ci_workflow.is_file(), "ci workflow is missing")?;
@@ -448,6 +460,14 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         .map_err(|error| format!("failed to read {} - {error}", zellij_installer.display()))?;
     let manual_readme_contents = fs::read_to_string(&manual_readme)
         .map_err(|error| format!("failed to read {} - {error}", manual_readme.display()))?;
+    let electron_checklist_contents = fs::read_to_string(&electron_checklist)
+        .map_err(|error| format!("failed to read {} - {error}", electron_checklist.display()))?;
+    let native_checklist_contents = fs::read_to_string(&native_checklist)
+        .map_err(|error| format!("failed to read {} - {error}", native_checklist.display()))?;
+    let tmux_checklist_contents = fs::read_to_string(&tmux_checklist)
+        .map_err(|error| format!("failed to read {} - {error}", tmux_checklist.display()))?;
+    let zellij_checklist_contents = fs::read_to_string(&zellij_checklist)
+        .map_err(|error| format!("failed to read {} - {error}", zellij_checklist.display()))?;
     let windows_native_zellij_checklist_contents =
         fs::read_to_string(&windows_native_zellij_checklist).map_err(|error| {
             format!("failed to read {} - {error}", windows_native_zellij_checklist.display())
@@ -629,6 +649,13 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         windows_native_zellij_checklist_contents
             .contains("live `Zellij` import/control path through the package surface"),
         "Windows Native + Zellij checklist must cover Zellij through package smoke",
+    )?;
+    verify_manual_qa_scope(
+        &electron_checklist_contents,
+        &native_checklist_contents,
+        &tmux_checklist_contents,
+        &zellij_checklist_contents,
+        &windows_native_zellij_checklist_contents,
     )?;
 
     for relative_path in [
@@ -896,6 +923,66 @@ fn verify_node_package_scripts(
         verify_script,
         "Node package verify script guardrails",
         &["options.packageDir = readFlagValue(argv, index, arg)", "Missing value for ${flag}"],
+    )?;
+
+    Ok(())
+}
+
+fn verify_manual_qa_scope(
+    electron_checklist: &str,
+    native_checklist: &str,
+    tmux_checklist: &str,
+    zellij_checklist: &str,
+    windows_native_zellij_checklist: &str,
+) -> Result<(), String> {
+    assert_contains_all(
+        electron_checklist,
+        "Electron manual checklist",
+        &["main-process bridge", "preload API", "resize churn"],
+    )?;
+    assert_contains_all(
+        native_checklist,
+        "native manual checklist",
+        &["`vim`", "`less`", "`fzf`", "resize churn"],
+    )?;
+    assert_contains_all(
+        tmux_checklist,
+        "tmux manual checklist",
+        &["Import a `tmux` session", "detach/reattach", "`vim`", "`less`", "`fzf`"],
+    )?;
+    assert_contains_all(
+        zellij_checklist,
+        "Zellij manual checklist",
+        &[
+            "import a live `Zellij` session",
+            "ordered mutation lane",
+            "viewport observation",
+            "detach/reattach",
+            "`vim`",
+            "`less`",
+            "`fzf`",
+        ],
+    )?;
+    assert_contains_all(
+        windows_native_zellij_checklist,
+        "Windows Native + Zellij manual checklist",
+        &[
+            "live `Zellij` import/control path through the package surface",
+            "topology snapshot",
+            "screen snapshot",
+            "screen delta",
+            "live viewport observation",
+            "`new_tab`",
+            "`rename_tab`",
+            "`focus_tab`",
+            "`close_tab`",
+            "`vim`",
+            "`less`",
+            "`fzf`",
+            "resize churn",
+            "Electron bridge lifecycle",
+            "`tmux` is absent",
+        ],
     )?;
 
     Ok(())
@@ -1665,8 +1752,8 @@ fn assert_value(value: bool, message: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        verify_node_package_scripts, verify_recorded_passes, verify_v1_release_configs,
-        verify_v1_workflows, verify_windows_zellij_package_smoke,
+        verify_manual_qa_scope, verify_node_package_scripts, verify_recorded_passes,
+        verify_v1_release_configs, verify_v1_workflows, verify_windows_zellij_package_smoke,
     };
     use std::{
         fs,
@@ -2205,6 +2292,37 @@ none
     }
 
     #[test]
+    fn verify_manual_qa_scope_accepts_expected_markers() {
+        if let Err(error) = verify_manual_qa_scope(
+            VALID_ELECTRON_CHECKLIST,
+            VALID_NATIVE_CHECKLIST,
+            VALID_TMUX_CHECKLIST,
+            VALID_ZELLIJ_CHECKLIST,
+            VALID_WINDOWS_NATIVE_ZELLIJ_CHECKLIST,
+        ) {
+            panic!("expected manual QA scope to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_manual_qa_scope_rejects_missing_windows_resize_churn() {
+        let invalid_windows_checklist =
+            VALID_WINDOWS_NATIVE_ZELLIJ_CHECKLIST.replace("resize churn", "size changes");
+        let error = match verify_manual_qa_scope(
+            VALID_ELECTRON_CHECKLIST,
+            VALID_NATIVE_CHECKLIST,
+            VALID_TMUX_CHECKLIST,
+            VALID_ZELLIJ_CHECKLIST,
+            &invalid_windows_checklist,
+        ) {
+            Ok(()) => panic!("expected missing Windows resize churn marker to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("resize churn"), "got: {error}");
+    }
+
+    #[test]
     fn verify_windows_zellij_package_smoke_accepts_expected_markers() {
         if let Err(error) = verify_windows_zellij_package_smoke(
             VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
@@ -2253,6 +2371,50 @@ npm_config_cache: process.env.npm_config_cache ?? path.join(options.out, ".npm-c
     const VALID_NODE_PACKAGE_VERIFY_SCRIPT: &str = r#"
 options.packageDir = readFlagValue(argv, index, arg);
 throw new Error(`Missing value for ${flag}`);
+"#;
+
+    const VALID_ELECTRON_CHECKLIST: &str = r#"
+# Electron Embed Checklist
+
+- Create the main-process bridge and preload API against a live daemon.
+- Stress renderer resize churn while the bridge is streaming screen updates.
+"#;
+
+    const VALID_NATIVE_CHECKLIST: &str = r#"
+# Native Checklist
+
+- Exercise `vim`, `less`, and `fzf`.
+- Stress resize churn and confirm subscriptions stay healthy.
+"#;
+
+    const VALID_TMUX_CHECKLIST: &str = r#"
+# tmux Checklist
+
+- Import a `tmux` session and verify topology plus screen snapshot.
+- Exercise detach/reattach around an imported `tmux` session.
+- Run `vim`, `less`, and `fzf` inside imported panes and confirm viewport fidelity.
+"#;
+
+    const VALID_ZELLIJ_CHECKLIST: &str = r#"
+# Zellij Checklist
+
+- Discover and import a live `Zellij` session through the daemon.
+- For rich `0.44+`, verify topology, focused pane screen, subscriptions, and ordered mutation lane.
+- Exercise viewport observation while switching tabs rapidly.
+- Exercise detach/reattach around an imported `Zellij` session when the host environment supports it.
+- Run `vim`, `less`, and `fzf` in a terminal pane and confirm render stability.
+"#;
+
+    const VALID_WINDOWS_NATIVE_ZELLIJ_CHECKLIST: &str = r#"
+# Windows Native + Zellij Checklist
+
+- Verify staged and installed Node package flows on Windows, including the live `Zellij` import/control path through the package surface.
+- Verify topology snapshot, screen snapshot, screen delta, and live viewport observation.
+- Verify ordered mutation lane for `new_tab`, `rename_tab`, `focus_tab`, and `close_tab`.
+- Run `vim`, `less`, and `fzf` in Windows native and imported `Zellij` panes when available, and confirm viewport fidelity.
+- Stress resize churn while screen delta and live viewport observation remain active.
+- Exercise Electron bridge lifecycle on Windows.
+- Confirm `tmux` is absent from Windows acceptance and docs.
 "#;
 
     const VALID_CI_WORKFLOW: &str = r#"
