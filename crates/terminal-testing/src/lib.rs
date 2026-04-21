@@ -11,9 +11,9 @@ use std::{
 use std::sync::Arc;
 #[cfg(any(unix, windows))]
 use std::{
-    process::{Child, Command, Stdio},
+    process::{Command, Output, Stdio},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(unix)]
@@ -113,7 +113,10 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        ShellLaunchSpec::new("cmd.exe").with_args(["/D", "/Q", "/K", "echo ready"])
+        ShellLaunchSpec::new("node").with_args([
+            "-e",
+            "console.log('ready'); process.stdin.setEncoding('utf8'); process.stdin.on('data', data => process.stdout.write(data)); process.stdin.resume(); setInterval(() => {}, 1000000);",
+        ])
     }
 }
 
@@ -209,7 +212,6 @@ pub fn unique_zellij_session_name(label: &str) -> String {
 #[derive(Debug)]
 pub struct ZellijSessionGuard {
     session_name: String,
-    spawn_child: Option<Child>,
     _lock: ZellijTestLock,
 }
 
@@ -221,34 +223,30 @@ impl ZellijSessionGuard {
         let mut last_error = None;
 
         for _ in 0..if cfg!(windows) { 5 } else { 3 } {
-            let child = Command::new("zellij")
-                .args(["attach", "--create-background", session_name])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|error| format!("failed to spawn zellij: {error}"))?;
-            let wait_result = wait_for_zellij_session(session_name);
-            if wait_result.is_ok() {
-                return Ok(Self {
-                    session_name: session_name.to_string(),
-                    spawn_child: Some(child),
-                    _lock: lock,
-                });
+            match run_zellij_with_timeout(
+                &["attach", "--create-background", session_name],
+                zellij_create_timeout(),
+            ) {
+                Ok(output) if output.status.success() => {}
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if !is_headless_zellij_spawn_error(&stderr) && !stderr.trim().is_empty() {
+                        last_error = Some(stderr.trim().to_string());
+                    }
+                }
+                Err(error) => {
+                    last_error = Some(error);
+                }
             }
 
-            let output = collect_zellij_spawn_output(child)
-                .map_err(|error| format!("failed to collect zellij spawn output: {error}"))?;
+            let wait_result = wait_for_zellij_session(session_name);
+            if wait_result.is_ok() {
+                return Ok(Self { session_name: session_name.to_string(), _lock: lock });
+            }
+
             let wait_error = wait_result
                 .expect_err("wait_result should be an error once zellij session discovery fails");
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if !is_headless_zellij_spawn_error(&stderr) && !stderr.trim().is_empty() {
-                    last_error = Some(stderr.trim().to_string());
-                } else {
-                    last_error = Some(wait_error);
-                }
-            } else {
+            if last_error.is_none() {
                 last_error = Some(wait_error);
             }
 
@@ -265,9 +263,6 @@ impl ZellijSessionGuard {
 impl Drop for ZellijSessionGuard {
     fn drop(&mut self) {
         let _ = run_zellij(&["kill-session", &self.session_name]);
-        if let Some(child) = self.spawn_child.take() {
-            let _ = collect_zellij_spawn_output(child);
-        }
     }
 }
 
@@ -288,10 +283,7 @@ fn run_tmux(socket_name: &str, args: &[&str]) -> Result<String, String> {
 
 #[cfg(any(unix, windows))]
 fn run_zellij(args: &[&str]) -> Result<String, String> {
-    let output = Command::new("zellij")
-        .args(args)
-        .output()
-        .map_err(|error| format!("failed to spawn zellij: {error}"))?;
+    let output = run_zellij_with_timeout(args, zellij_command_timeout())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
@@ -300,19 +292,58 @@ fn run_zellij(args: &[&str]) -> Result<String, String> {
 }
 
 #[cfg(any(unix, windows))]
+fn run_zellij_with_timeout(args: &[&str], timeout: Duration) -> Result<Output, String> {
+    let mut child = Command::new("zellij")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("failed to spawn zellij: {error}"))?;
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|error| format!("failed to collect zellij output: {error}"));
+            }
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let output = child.wait_with_output().map_err(|error| {
+                    format!("failed to collect timed-out zellij output: {error}")
+                })?;
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!(
+                    "zellij command timed out after {}ms: zellij {}; stderr: {}",
+                    timeout.as_millis(),
+                    args.join(" "),
+                    stderr.trim()
+                ));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(25)),
+            Err(error) => return Err(format!("failed while waiting for zellij: {error}")),
+        }
+    }
+}
+
+#[cfg(any(unix, windows))]
+fn zellij_command_timeout() -> Duration {
+    if cfg!(windows) { Duration::from_secs(10) } else { Duration::from_secs(5) }
+}
+
+#[cfg(any(unix, windows))]
+fn zellij_create_timeout() -> Duration {
+    if cfg!(windows) { Duration::from_secs(20) } else { Duration::from_secs(10) }
+}
+
+#[cfg(any(unix, windows))]
 fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
     stderr.contains("could not get terminal attribute")
         || stderr.contains("could not enable raw mode")
         || stderr.contains("No such device or address")
         || stderr.contains("The handle is invalid")
-}
-
-#[cfg(any(unix, windows))]
-fn collect_zellij_spawn_output(mut child: Child) -> std::io::Result<std::process::Output> {
-    if matches!(child.try_wait(), Ok(None)) {
-        let _ = child.kill();
-    }
-    child.wait_with_output()
 }
 
 #[cfg(any(unix, windows))]
@@ -351,12 +382,12 @@ fn is_legacy_zellij_action_error(error: &str) -> bool {
 
 #[cfg(any(unix, windows))]
 fn run_zellij_in_session(session_name: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("zellij")
-        .arg("--session")
-        .arg(session_name)
-        .args(args)
-        .output()
-        .map_err(|error| format!("failed to spawn zellij: {error}"))?;
+    let mut command_args = Vec::with_capacity(args.len() + 2);
+    command_args.push("--session");
+    command_args.push(session_name);
+    command_args.extend_from_slice(args);
+
+    let output = run_zellij_with_timeout(&command_args, zellij_command_timeout())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }

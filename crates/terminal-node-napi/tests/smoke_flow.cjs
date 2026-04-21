@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { spawn, spawnSync } = require("node:child_process");
+const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
 const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 90000 : 5000;
@@ -7,12 +7,17 @@ const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 90000 : 5000;
 const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 900 : 50;
 const DEFAULT_ZELLIJ_DISCOVERY_ATTEMPTS = process.platform === "win32" ? 200 : 100;
 const INTERACTIVE_PROBE_INTERVAL = process.platform === "win32" ? 20 : 10;
+const ZELLIJ_COMMAND_TIMEOUT_MS = process.platform === "win32" ? 10000 : 5000;
+const ZELLIJ_CREATE_TIMEOUT_MS = process.platform === "win32" ? 20000 : 10000;
 
 function readyEchoLaunch() {
   if (process.platform === "win32") {
     return {
-      program: "cmd.exe",
-      args: ["/D", "/Q", "/K", "echo ready"],
+      program: "node",
+      args: [
+        "-e",
+        "console.log('ready'); process.stdin.setEncoding('utf8'); process.stdin.on('data', data => process.stdout.write(data)); process.stdin.resume(); setInterval(() => {}, 1000000);",
+      ],
     };
   }
 
@@ -1047,25 +1052,34 @@ function uniqueZellijSessionName(label) {
 }
 
 function spawnZellijSession(sessionName) {
-  const child = spawn("zellij", ["attach", "--create-background", sessionName], {
-    stdio: "ignore",
+  const result = spawnSync("zellij", ["attach", "--create-background", sessionName], {
+    encoding: "utf8",
+    timeout: ZELLIJ_CREATE_TIMEOUT_MS,
     windowsHide: true,
   });
-  child.on("error", () => {});
-  child.unref();
-  return child;
-}
 
-function stopZellijSpawnProcess(child) {
-  if (!child || child.exitCode != null || child.killed) {
-    return;
+  if (result.error && result.error.code !== "ETIMEDOUT") {
+    throw result.error;
   }
 
-  child.kill();
+  if (result.status !== 0 && result.status != null) {
+    const stderr = (result.stderr ?? "").trim();
+    if (stderr && !isHeadlessZellijSpawnError(stderr)) {
+      throw new Error(`zellij create-background failed: ${stderr}`);
+    }
+  }
+
+  return null;
 }
 
+function stopZellijSpawnProcess(_child) {}
+
 function stopZellijSession(sessionName) {
-  spawnSync("zellij", ["kill-session", sessionName], { encoding: "utf8" });
+  spawnSync("zellij", ["kill-session", sessionName], {
+    encoding: "utf8",
+    timeout: ZELLIJ_COMMAND_TIMEOUT_MS,
+    windowsHide: true,
+  });
 }
 
 function isHeadlessZellijSpawnError(stderr) {
@@ -1109,6 +1123,7 @@ function listZellijSessionsRaw() {
     ["list-sessions", "--short", "--no-formatting"],
     {
       encoding: "utf8",
+      timeout: ZELLIJ_COMMAND_TIMEOUT_MS,
       windowsHide: true,
     },
   );
@@ -1152,6 +1167,7 @@ function zellijSessionControlReady(sessionName) {
     ["--session", sessionName, "action", "list-tabs", "--json"],
     {
       encoding: "utf8",
+      timeout: ZELLIJ_COMMAND_TIMEOUT_MS,
       windowsHide: true,
     },
   );
@@ -1177,6 +1193,7 @@ function zellijSessionControlReady(sessionName) {
     ["--session", sessionName, "action", "list-panes", "--json"],
     {
       encoding: "utf8",
+      timeout: ZELLIJ_COMMAND_TIMEOUT_MS,
       windowsHide: true,
     },
   );
@@ -1212,7 +1229,7 @@ function fallbackZellijCandidate(sessionName) {
 }
 
 function submittedInput(text) {
-  return process.platform === "win32" ? `echo ${text}\r\n` : `${text}\r`;
+  return process.platform === "win32" ? `${text}\n` : `${text}\r`;
 }
 
 function delay(ms) {
