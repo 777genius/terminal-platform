@@ -21,7 +21,7 @@ This package gives JavaScript hosts a typed client surface over the Rust runtime
 
 - `macOS + Linux` - `Native + tmux + Zellij`
 - `Windows` - `Native + Zellij`
-- `tmux` stays Unix-only in v1 acceptance and docs
+- `tmux` stays Unix-only in v1 docs, tests, CI, and acceptance
 
 ## Current Package Surface
 
