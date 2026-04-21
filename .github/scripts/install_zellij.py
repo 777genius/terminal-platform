@@ -13,8 +13,13 @@ import stat
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 import zipfile
+
+REQUEST_TIMEOUT_SECONDS = 30
+REQUEST_ATTEMPTS = 3
 
 
 def request_headers(accept: str = "application/vnd.github+json") -> dict[str, str]:
@@ -30,7 +35,7 @@ def request_headers(accept: str = "application/vnd.github+json") -> dict[str, st
 
 def download_json(url: str) -> dict:
     request = urllib.request.Request(url, headers=request_headers())
-    with urllib.request.urlopen(request) as response:
+    with open_url_with_retries(request, url) as response:
         return json.load(response)
 
 
@@ -39,8 +44,25 @@ def download_file(url: str, destination: pathlib.Path) -> None:
         url,
         headers=request_headers(accept="application/octet-stream"),
     )
-    with urllib.request.urlopen(request) as response, destination.open("wb") as output:
+    with open_url_with_retries(request, url) as response, destination.open("wb") as output:
         shutil.copyfileobj(response, output)
+
+
+def open_url_with_retries(request: urllib.request.Request, url: str):
+    last_error: BaseException | None = None
+
+    for attempt in range(1, REQUEST_ATTEMPTS + 1):
+        try:
+            return urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS)
+        except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as error:
+            last_error = error
+            if attempt == REQUEST_ATTEMPTS:
+                break
+            time.sleep(attempt)
+
+    raise RuntimeError(
+        f"failed to download {url} after {REQUEST_ATTEMPTS} attempts: {last_error}"
+    ) from last_error
 
 
 def candidate_suffixes() -> tuple[str, ...]:

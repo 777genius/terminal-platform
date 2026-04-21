@@ -510,6 +510,11 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         "Zellij installer",
         &["assert_supported_zellij_release", "below the v1 minimum 0.44.0"],
     )?;
+    assert_contains_all(
+        &zellij_installer_contents,
+        "Zellij installer retry policy",
+        &["REQUEST_TIMEOUT_SECONDS", "REQUEST_ATTEMPTS", "open_url_with_retries"],
+    )?;
     assert_value(
         manual_readme_contents.contains("one Windows `Native + Zellij` pass"),
         "manual QA README must require a Windows Native + Zellij pass",
