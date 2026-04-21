@@ -547,6 +547,7 @@ fn verify_v1_workflows(
             "name: fuzz-baseline",
             "cargo clippy --workspace --all-targets --all-features",
             "cargo nextest run --profile ci --workspace",
+            "cargo run -p xtask -- verify-v1-readiness",
             "cargo-deny",
             "cargo-public-api",
             "cargo-semver-checks",
@@ -1865,6 +1866,7 @@ jobs:
   governance:
     name: governance
     steps:
+      - run: cargo run -p xtask -- verify-v1-readiness
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny,cargo-public-api,cargo-semver-checks,release-plz

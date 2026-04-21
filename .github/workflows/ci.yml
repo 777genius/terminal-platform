@@ -150,6 +150,9 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
+      - name: Readiness audit
+        run: cargo run -p xtask -- verify-v1-readiness
+
       - name: cargo-deny
         run: cargo deny check bans licenses advisories sources
 
