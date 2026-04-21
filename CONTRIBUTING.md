@@ -35,6 +35,27 @@ Readiness audit:
 cargo run -p xtask -- verify-v1-readiness
 ```
 
+Package proof for release-facing changes:
+
+```bash
+node crates/terminal-node-napi/package/scripts/build-local-package.mjs --out /tmp/terminal-platform-node
+node crates/terminal-node-napi/package/scripts/verify-package.mjs --package-dir /tmp/terminal-platform-node
+export npm_config_cache=/tmp/terminal-platform-node-npm-cache
+TARBALL="$(node crates/terminal-node-napi/package/scripts/pack-local-package.mjs --out /tmp/terminal-platform-node-pack | tail -n 1)"
+test -f "$TARBALL"
+cargo build -p terminal-capi
+cargo run -p xtask -- stage-capi-package --out /tmp/terminal-capi
+cargo run -p xtask -- verify-capi-package --package-dir /tmp/terminal-capi
+cargo run -p xtask -- install-capi-package --package-dir /tmp/terminal-capi --prefix /tmp/terminal-capi-install
+cargo run -p xtask -- verify-capi-install --prefix /tmp/terminal-capi-install
+```
+
+Strict release handoff gate:
+
+```bash
+cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
+```
+
 ## Pull Requests
 
 - keep changes narrow and intentional

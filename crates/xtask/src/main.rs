@@ -398,6 +398,8 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
 
     let root_readme_contents = fs::read_to_string(&root_readme)
         .map_err(|error| format!("failed to read {} - {error}", root_readme.display()))?;
+    let contributing_contents = fs::read_to_string(&contributing)
+        .map_err(|error| format!("failed to read {} - {error}", contributing.display()))?;
     let node_package_readme_contents = fs::read_to_string(&node_package_readme)
         .map_err(|error| format!("failed to read {} - {error}", node_package_readme.display()))?;
     let node_smoke_test_contents = fs::read_to_string(&node_smoke_test)
@@ -512,6 +514,22 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         &release_plz_workflow_contents,
     )?;
     verify_v1_release_configs(&release_plz_config_contents, &deny_config_contents)?;
+    assert_contains_all(
+        &contributing_contents,
+        "contributing v1 package proof",
+        &[
+            "build-local-package.mjs",
+            "verify-package.mjs",
+            "pack-local-package.mjs",
+            "npm_config_cache",
+            "test -f \"$TARBALL\"",
+            "stage-capi-package",
+            "verify-capi-package",
+            "install-capi-package",
+            "verify-capi-install",
+            "verify-v1-readiness --require-recorded-passes",
+        ],
+    )?;
     assert_contains_all(
         &pull_request_template_contents,
         "pull request template v1 gates",
