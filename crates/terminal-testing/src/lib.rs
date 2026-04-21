@@ -115,7 +115,7 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
     {
         ShellLaunchSpec::new("node").with_args([
             "-e",
-            "console.log('ready'); process.stdin.setEncoding('utf8'); process.stdin.on('data', data => process.stdout.write(data)); process.stdin.resume(); setInterval(() => {}, 1000000);",
+            "console.log('ready'); process.stdin.setEncoding('utf8'); try { if (process.stdin.isTTY) process.stdin.setRawMode(true); } catch (_error) {} process.stdin.on('data', data => process.stdout.write(data)); process.stdin.resume(); setInterval(() => {}, 1000000);",
         ])
     }
 }

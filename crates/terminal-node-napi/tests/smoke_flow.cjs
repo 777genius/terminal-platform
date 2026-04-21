@@ -16,7 +16,7 @@ function readyEchoLaunch() {
       program: "node",
       args: [
         "-e",
-        "console.log('ready'); process.stdin.setEncoding('utf8'); process.stdin.on('data', data => process.stdout.write(data)); process.stdin.resume(); setInterval(() => {}, 1000000);",
+        "console.log('ready'); process.stdin.setEncoding('utf8'); try { if (process.stdin.isTTY) process.stdin.setRawMode(true); } catch (_error) {} process.stdin.on('data', data => process.stdout.write(data)); process.stdin.resume(); setInterval(() => {}, 1000000);",
       ],
     };
   }
@@ -928,6 +928,7 @@ async function waitForLine(client, sessionId, paneId, needle) {
 
 async function waitForInteractiveScreen(client, sessionId, paneId, label) {
   const marker = `node-interactive-probe-${label}-${process.pid}`;
+  let lastLines = [];
 
   for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
     if (attempt % INTERACTIVE_PROBE_INTERVAL === 0) {
@@ -946,10 +947,13 @@ async function waitForInteractiveScreen(client, sessionId, paneId, label) {
     if (snapshot.surface.lines.some((line) => line.text.includes(marker))) {
       return snapshot;
     }
+    lastLines = snapshot.surface.lines.map((line) => line.text).slice(0, 12);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  throw new Error(`Timed out waiting for interactive probe marker: ${marker}`);
+  throw new Error(
+    `Timed out waiting for interactive probe marker: ${marker}; last lines: ${JSON.stringify(lastLines)}`,
+  );
 }
 
 async function waitForTopologyTabs(subscription, tabCount) {
@@ -1229,7 +1233,7 @@ function fallbackZellijCandidate(sessionName) {
 }
 
 function submittedInput(text) {
-  return process.platform === "win32" ? `${text}\n` : `${text}\r`;
+  return `${text}\r`;
 }
 
 function delay(ms) {

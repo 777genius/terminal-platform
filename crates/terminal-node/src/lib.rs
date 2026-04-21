@@ -1385,6 +1385,7 @@ mod tests {
         label: &str,
     ) -> super::NodeScreenSnapshot {
         let marker = format!("node-interactive-probe-{label}-{}", std::process::id());
+        let mut last_lines = Vec::new();
 
         for attempt in 0..screen_wait_attempts() {
             if attempt % interactive_probe_interval() == 0 {
@@ -1410,10 +1411,14 @@ mod tests {
             if snapshot.surface.lines.iter().any(|line| line.text.contains(&marker)) {
                 return snapshot;
             }
+            last_lines =
+                snapshot.surface.lines.iter().map(|line| line.text.clone()).take(12).collect();
             sleep(Duration::from_millis(100)).await;
         }
 
-        panic!("screen never reached interactive probe marker: {marker}");
+        panic!(
+            "screen never reached interactive probe marker: {marker}; last lines: {last_lines:?}"
+        );
     }
 
     async fn next_topology_snapshot(
@@ -1524,7 +1529,7 @@ mod tests {
     }
 
     fn submitted_input(text: &str) -> String {
-        if cfg!(windows) { format!("{text}\n") } else { format!("{text}\r") }
+        format!("{text}\r")
     }
 
     fn spawn_daemon_with_retry(

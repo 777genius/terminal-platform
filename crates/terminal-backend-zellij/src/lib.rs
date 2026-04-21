@@ -33,9 +33,9 @@ use uuid::Uuid;
 
 const ZELLIJ_ROUTE_NAMESPACE: &str = "zellij_session";
 const ZELLIJ_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const ZELLIJ_TRANSIENT_RETRY_ATTEMPTS: usize = 4;
+const ZELLIJ_TRANSIENT_RETRY_ATTEMPTS: usize = 2;
 const ZELLIJ_ACTION_SETTLE_ATTEMPTS: usize = 600;
-const ZELLIJ_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+const ZELLIJ_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const ZELLIJ_COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone, Default)]
@@ -49,7 +49,7 @@ impl ZellijBackend {
 
     fn run(&self, target: Option<&ZellijTarget>, args: &[&str]) -> Result<String, BackendError> {
         let mut last_error = None;
-        'attempts: for attempt in 0..ZELLIJ_TRANSIENT_RETRY_ATTEMPTS {
+        for attempt in 0..ZELLIJ_TRANSIENT_RETRY_ATTEMPTS {
             let mut command = Command::new("zellij");
             if let Some(target) = target {
                 command.arg("--session").arg(&target.session_name);
@@ -74,16 +74,11 @@ impl ZellijBackend {
                         if started.elapsed() >= ZELLIJ_COMMAND_TIMEOUT {
                             let _ = child.kill();
                             let _ = child.wait();
-                            let error = BackendError::transport(format!(
-                                "zellij command timed out after {} ms",
-                                ZELLIJ_COMMAND_TIMEOUT.as_millis()
-                            ));
-                            if attempt + 1 < ZELLIJ_TRANSIENT_RETRY_ATTEMPTS {
-                                last_error = Some(error);
-                                thread::sleep(ZELLIJ_POLL_INTERVAL);
-                                continue 'attempts;
-                            }
-                            return Err(error);
+                            return Err(BackendError::transport(format!(
+                                "zellij command timed out after {} ms: zellij {}",
+                                ZELLIJ_COMMAND_TIMEOUT.as_millis(),
+                                args.join(" ")
+                            )));
                         }
                         thread::sleep(ZELLIJ_COMMAND_POLL_INTERVAL);
                     }
