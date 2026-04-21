@@ -60,12 +60,12 @@ function main() {
   }
 
   process.stdout.write(
-    JSON.stringify({
+    `${JSON.stringify({
       packageDir: rootDir,
       version: packageJson.version,
       bindings: bindingFiles.length,
       targets: nativeManifest.targets.length,
-    }),
+    })}\n`,
   );
 }
 

@@ -84,6 +84,21 @@ jobs:
           node crates/terminal-node-napi/package/scripts/build-local-package.mjs --out "$RUNNER_TEMP/terminal-platform-node"
           node crates/terminal-node-napi/package/scripts/verify-package.mjs --package-dir "$RUNNER_TEMP/terminal-platform-node"
 
+      - name: Node installed package smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_WORK_DIR="$RUNNER_TEMP/terminal-platform-node-install"
+          export npm_config_cache="$PACKAGE_WORK_DIR/npm-cache"
+          TARBALL="$(node crates/terminal-node-napi/package/scripts/pack-local-package.mjs --out "$PACKAGE_WORK_DIR/package" | tail -n 1)"
+          INSTALL_DIR="$PACKAGE_WORK_DIR/consumer"
+          mkdir -p "$INSTALL_DIR"
+          printf '{ "name": "terminal-platform-node-install-smoke", "private": true }\n' > "$INSTALL_DIR/package.json"
+          cd "$INSTALL_DIR"
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock "$TARBALL"
+          node -e "const sdk = require('terminal-platform-node'); if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+          node --input-type=module -e "import sdk from 'terminal-platform-node'; if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+
       - name: C ABI package stage/install smoke
         shell: bash
         run: |
@@ -152,6 +167,23 @@ jobs:
           $packageDir = Join-Path $env:RUNNER_TEMP "terminal-platform-node"
           node crates/terminal-node-napi/package/scripts/build-local-package.mjs --out $packageDir
           node crates/terminal-node-napi/package/scripts/verify-package.mjs --package-dir $packageDir
+
+      - name: Node installed package smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $workDir = Join-Path $env:RUNNER_TEMP "terminal-platform-node-install"
+          $env:npm_config_cache = Join-Path $workDir "npm-cache"
+          $packageDir = Join-Path $workDir "package"
+          $tarball = node crates/terminal-node-napi/package/scripts/pack-local-package.mjs --out $packageDir | Select-Object -Last 1
+          $installDir = Join-Path $workDir "consumer"
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          '{ "name": "terminal-platform-node-install-smoke", "private": true }' | Out-File -FilePath (Join-Path $installDir "package.json") -Encoding utf8
+          Push-Location $installDir
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock $tarball
+          node -e "const sdk = require('terminal-platform-node'); if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+          node --input-type=module -e "import sdk from 'terminal-platform-node'; if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+          Pop-Location
 
   governance:
     name: governance

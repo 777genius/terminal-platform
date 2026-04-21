@@ -513,6 +513,9 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         &[
             "build-local-package.mjs",
             "verify-package.mjs",
+            "pack-local-package.mjs",
+            "npm_config_cache",
+            "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
             "stage-capi-package",
             "verify-capi-package",
             "install-capi-package",
@@ -674,6 +677,9 @@ fn verify_v1_workflows(
             "zellij --version",
             "build-local-package.mjs",
             "verify-package.mjs",
+            "pack-local-package.mjs",
+            "npm_config_cache",
+            "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
             "stage-capi-package",
             "verify-capi-package",
             "install-capi-package",
@@ -700,6 +706,9 @@ fn verify_v1_workflows(
             "zellij --version",
             "build-local-package.mjs",
             "verify-package.mjs",
+            "pack-local-package.mjs",
+            "npm_config_cache",
+            "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
         ],
     )?;
     assert_value(
@@ -2078,6 +2087,9 @@ jobs:
       - run: |
           node crates/terminal-node-napi/package/scripts/build-local-package.mjs
           node crates/terminal-node-napi/package/scripts/verify-package.mjs
+          export npm_config_cache="$RUNNER_TEMP/npm-cache"
+          node crates/terminal-node-napi/package/scripts/pack-local-package.mjs
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock
       - run: |
           cargo run -p xtask -- stage-capi-package
           cargo run -p xtask -- verify-capi-package
@@ -2103,6 +2115,9 @@ jobs:
       - run: |
           node crates/terminal-node-napi/package/scripts/build-local-package.mjs
           node crates/terminal-node-napi/package/scripts/verify-package.mjs
+          $env:npm_config_cache = Join-Path $env:RUNNER_TEMP "npm-cache"
+          node crates/terminal-node-napi/package/scripts/pack-local-package.mjs
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock
   governance:
     name: governance
     steps:
