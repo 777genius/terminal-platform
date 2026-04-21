@@ -1557,6 +1557,7 @@ dependencies = [
 name = "terminal-testing"
 version = "0.1.0"
 dependencies = [
+ "portable-pty",
  "terminal-application",
  "terminal-backend-api",
  "terminal-backend-native",

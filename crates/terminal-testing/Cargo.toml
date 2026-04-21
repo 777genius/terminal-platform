@@ -5,6 +5,7 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
+portable-pty = { workspace = true }
 terminal-application = { path = "../terminal-application" }
 terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-backend-native = { path = "../terminal-backend-native" }

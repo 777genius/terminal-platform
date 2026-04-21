@@ -9,6 +9,11 @@ use std::{
 
 #[cfg(unix)]
 use std::sync::Arc;
+#[cfg(windows)]
+use std::{
+    io::Read as _,
+    sync::{Arc, Mutex},
+};
 #[cfg(any(unix, windows))]
 use std::{
     process::{Command, Output, Stdio},
@@ -16,6 +21,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(windows)]
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 #[cfg(unix)]
 use terminal_application::BackendCatalog;
 #[cfg(unix)]
@@ -113,7 +120,12 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        ShellLaunchSpec::new("cmd.exe").with_args(["/D", "/Q", "/K", "echo ready"])
+        let program = std::env::var("COMSPEC")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "cmd.exe".to_string());
+
+        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready & more"])
     }
 }
 
@@ -210,6 +222,8 @@ pub fn unique_zellij_session_name(label: &str) -> String {
 pub struct ZellijSessionGuard {
     session_name: String,
     _lock: ZellijTestLock,
+    #[cfg(windows)]
+    _pty: Option<WindowsZellijPtyGuard>,
 }
 
 #[cfg(any(unix, windows))]
@@ -217,43 +231,198 @@ impl ZellijSessionGuard {
     pub fn spawn(session_name: &str) -> Result<Self, String> {
         let lock = ZellijTestLock::acquire()?;
         let _ = run_zellij(&["kill-session", session_name]);
-        let mut last_error = None;
 
-        for _ in 0..if cfg!(windows) { 5 } else { 3 } {
-            match run_zellij_with_timeout(
-                &["attach", "--create-background", session_name],
-                zellij_create_timeout(),
-            ) {
-                Ok(output) if output.status.success() => {}
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    if !is_headless_zellij_spawn_error(&stderr) && !stderr.trim().is_empty() {
-                        last_error = Some(stderr.trim().to_string());
-                    }
+        spawn_zellij_session_with_lock(session_name, lock)
+    }
+}
+
+#[cfg(unix)]
+fn spawn_zellij_session_with_lock(
+    session_name: &str,
+    lock: ZellijTestLock,
+) -> Result<ZellijSessionGuard, String> {
+    let mut last_error = None;
+
+    for _ in 0..3 {
+        match run_zellij_with_timeout(
+            &["attach", "--create-background", session_name],
+            zellij_create_timeout(),
+        ) {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !is_headless_zellij_spawn_error(&stderr) && !stderr.trim().is_empty() {
+                    last_error = Some(stderr.trim().to_string());
                 }
-                Err(error) => {
-                    last_error = Some(error);
-                }
             }
-
-            let wait_result = wait_for_zellij_session(session_name);
-            if wait_result.is_ok() {
-                return Ok(Self { session_name: session_name.to_string(), _lock: lock });
+            Err(error) => {
+                last_error = Some(error);
             }
-
-            let wait_error = wait_result
-                .expect_err("wait_result should be an error once zellij session discovery fails");
-            if last_error.is_none() {
-                last_error = Some(wait_error);
-            }
-
-            let _ = run_zellij(&["kill-session", session_name]);
-            thread::sleep(Duration::from_millis(200));
         }
 
-        Err(last_error
-            .unwrap_or_else(|| format!("zellij session never stabilized for {session_name}")))
+        let wait_result = wait_for_zellij_session(session_name);
+        if wait_result.is_ok() {
+            return Ok(ZellijSessionGuard { session_name: session_name.to_string(), _lock: lock });
+        }
+
+        let wait_error = wait_result
+            .expect_err("wait_result should be an error once zellij session discovery fails");
+        if last_error.is_none() {
+            last_error = Some(wait_error);
+        }
+
+        let _ = run_zellij(&["kill-session", session_name]);
+        thread::sleep(Duration::from_millis(200));
     }
+
+    Err(last_error.unwrap_or_else(|| format!("zellij session never stabilized for {session_name}")))
+}
+
+#[cfg(windows)]
+fn spawn_zellij_session_with_lock(
+    session_name: &str,
+    lock: ZellijTestLock,
+) -> Result<ZellijSessionGuard, String> {
+    let mut last_error = None;
+
+    for _ in 0..3 {
+        match spawn_windows_zellij_pty(session_name) {
+            Ok(pty) => {
+                let wait_result = wait_for_zellij_session(session_name);
+                if wait_result.is_ok() {
+                    return Ok(ZellijSessionGuard {
+                        session_name: session_name.to_string(),
+                        _lock: lock,
+                        _pty: Some(pty),
+                    });
+                }
+
+                let wait_error = wait_result.expect_err(
+                    "wait_result should be an error once zellij session discovery fails",
+                );
+                last_error = Some(format!("{wait_error}; zellij pty tail: {}", pty.output_tail()));
+                drop(pty);
+            }
+            Err(error) => last_error = Some(error),
+        }
+
+        let _ = run_zellij(&["kill-session", session_name]);
+        thread::sleep(Duration::from_millis(200));
+    }
+
+    for _ in 0..2 {
+        match run_zellij_with_timeout(
+            &["attach", "--create-background", session_name],
+            zellij_create_timeout(),
+        ) {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !is_headless_zellij_spawn_error(&stderr) && !stderr.trim().is_empty() {
+                    last_error = Some(stderr.trim().to_string());
+                }
+            }
+            Err(error) => last_error = Some(error),
+        }
+
+        let wait_result = wait_for_zellij_session(session_name);
+        if wait_result.is_ok() {
+            return Ok(ZellijSessionGuard {
+                session_name: session_name.to_string(),
+                _lock: lock,
+                _pty: None,
+            });
+        }
+
+        let wait_error = wait_result
+            .expect_err("wait_result should be an error once zellij session discovery fails");
+        if last_error.is_none() {
+            last_error = Some(wait_error);
+        }
+
+        let _ = run_zellij(&["kill-session", session_name]);
+        thread::sleep(Duration::from_millis(200));
+    }
+
+    Err(last_error.unwrap_or_else(|| format!("zellij session never stabilized for {session_name}")))
+}
+
+#[cfg(windows)]
+struct WindowsZellijPtyGuard {
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    _master: Box<dyn portable_pty::MasterPty + Send>,
+    output: Arc<Mutex<Vec<u8>>>,
+}
+
+#[cfg(windows)]
+impl std::fmt::Debug for WindowsZellijPtyGuard {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("WindowsZellijPtyGuard").finish_non_exhaustive()
+    }
+}
+
+#[cfg(windows)]
+impl WindowsZellijPtyGuard {
+    fn output_tail(&self) -> String {
+        let output = self.output.lock().ok().map_or_else(Vec::new, |buffer| buffer.clone());
+        let text = String::from_utf8_lossy(&output);
+        let mut lines = text.lines().rev().take(8).collect::<Vec<_>>();
+        lines.reverse();
+        let tail = lines.join(" | ");
+        if tail.trim().is_empty() { "<empty>".to_string() } else { tail }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsZellijPtyGuard {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
+#[cfg(windows)]
+fn spawn_windows_zellij_pty(session_name: &str) -> Result<WindowsZellijPtyGuard, String> {
+    let pty_system = native_pty_system();
+    let pty_pair = pty_system
+        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+        .map_err(|error| format!("failed to open zellij test pty: {error}"))?;
+
+    let mut command = CommandBuilder::new("zellij");
+    command.args(["--session", session_name]);
+    command.env("TERM", "xterm-256color");
+
+    let child = pty_pair
+        .slave
+        .spawn_command(command)
+        .map_err(|error| format!("failed to spawn zellij in test pty: {error}"))?;
+    let mut reader = pty_pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| format!("failed to clone zellij test pty reader: {error}"))?;
+    let output = Arc::new(Mutex::new(Vec::new()));
+    let output_reader = Arc::clone(&output);
+
+    thread::spawn(move || {
+        let mut chunk = [0_u8; 4096];
+        loop {
+            match reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(read) => {
+                    if let Ok(mut output) = output_reader.lock() {
+                        output.extend_from_slice(&chunk[..read]);
+                        let overflow = output.len().saturating_sub(16 * 1024);
+                        if overflow > 0 {
+                            output.drain(..overflow);
+                        }
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+    });
+
+    Ok(WindowsZellijPtyGuard { child, _master: pty_pair.master, output })
 }
 
 #[cfg(any(unix, windows))]

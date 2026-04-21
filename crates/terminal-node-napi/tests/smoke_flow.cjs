@@ -14,9 +14,11 @@ const ZELLIJ_TOPOLOGY_POLL_ATTEMPTS = process.platform === "win32" ? 80 : 120;
 
 function readyEchoLaunch() {
   if (process.platform === "win32") {
+    const program =
+      process.env.COMSPEC && process.env.COMSPEC.trim() ? process.env.COMSPEC : "cmd.exe";
     return {
-      program: "cmd.exe",
-      args: ["/D", "/Q", "/K", "echo ready"],
+      program,
+      args: ["/D", "/Q", "/K", "echo ready & more"],
     };
   }
 
@@ -164,7 +166,9 @@ async function runSmoke(createClient) {
   assert.equal(savedAfterDelete.some((session) => session.session_id === created.session_id), false);
 
   await runSubscriptionBackpressureSmoke(createClient);
-  await runZellijImportSmoke(createClient, zellijCapabilities);
+  if (shouldRunZellijSmoke()) {
+    await runZellijImportSmoke(createClient, zellijCapabilities);
+  }
 
   await topologySubscription.close();
   await paneSubscription.close();
@@ -189,16 +193,20 @@ async function runSmoke(createClient) {
 
 async function runZellijImportSmoke(createClient, zellijCapabilities) {
   const client = createClient();
-  const sessionName = uniqueZellijSessionName("pkg");
-  const attempts = process.platform === "win32" ? 1 : 3;
+  const externalSessionName = process.env.TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION ?? "";
+  const hasExternalSession = externalSessionName.trim().length > 0;
+  const sessionName = hasExternalSession ? externalSessionName : uniqueZellijSessionName("pkg");
+  const attempts = hasExternalSession ? 1 : process.platform === "win32" ? 1 : 3;
   let sessionProcess = null;
   let candidate = null;
   let lastError = null;
 
   try {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      stopZellijSession(sessionName);
-      sessionProcess = spawnZellijSession(sessionName);
+      if (!hasExternalSession) {
+        stopZellijSession(sessionName);
+        sessionProcess = spawnZellijSession(sessionName);
+      }
 
       try {
         await waitForRawZellijSession(sessionName);
@@ -213,7 +221,9 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
         lastError = error;
         stopZellijSpawnProcess(sessionProcess);
         sessionProcess = null;
-        stopZellijSession(sessionName);
+        if (!hasExternalSession) {
+          stopZellijSession(sessionName);
+        }
         await delay(200);
       }
     }
@@ -230,8 +240,16 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
       return;
     }
 
-    const imported = await client.importSession(candidate.route, candidate.title);
-    const topology = await client.topologySnapshot(imported.session_id);
+    const imported = await withTimeout(
+      client.importSession(candidate.route, candidate.title),
+      DEFAULT_HOST_TIMEOUT_MS,
+      `Timed out importing zellij session: ${sessionName}`,
+    );
+    const topology = await withTimeout(
+      client.topologySnapshot(imported.session_id),
+      DEFAULT_HOST_TIMEOUT_MS,
+      `Timed out reading imported zellij topology: ${sessionName}`,
+    );
     const initialTabCount = topology.tabs.length;
     const initialFocusedTab = topology.focused_tab ?? topology.tabs[0]?.tab_id ?? null;
     const focusedPaneId = focusedPaneIdFromTopology(topology);
@@ -241,10 +259,14 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
     assert.equal(typeof initialFocusedTab, "string");
     assert.equal(typeof focusedPaneId, "string");
 
-    const newTab = await client.dispatchMuxCommand(imported.session_id, {
-      kind: "new_tab",
-      title: "package-rich",
-    });
+    const newTab = await withTimeout(
+      client.dispatchMuxCommand(imported.session_id, {
+        kind: "new_tab",
+        title: "package-rich",
+      }),
+      DEFAULT_HOST_TIMEOUT_MS,
+      "Timed out creating zellij package tab",
+    );
     const topologyAfterCreate = await waitForTopologyState(
       client,
       imported.session_id,
@@ -259,11 +281,15 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
     assert.equal(newTab.changed, true);
     assert.equal(typeof richTabId, "string");
 
-    const renameTab = await client.dispatchMuxCommand(imported.session_id, {
-      kind: "rename_tab",
-      tab_id: richTabId,
-      title: "package-rich-renamed",
-    });
+    const renameTab = await withTimeout(
+      client.dispatchMuxCommand(imported.session_id, {
+        kind: "rename_tab",
+        tab_id: richTabId,
+        title: "package-rich-renamed",
+      }),
+      DEFAULT_HOST_TIMEOUT_MS,
+      "Timed out renaming zellij package tab",
+    );
     const topologyAfterRename = await waitForTopologyState(
       client,
       imported.session_id,
@@ -274,20 +300,28 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
         ),
       "zellij package rename tab",
     );
-    const focusTab = await client.dispatchMuxCommand(imported.session_id, {
-      kind: "focus_tab",
-      tab_id: initialFocusedTab,
-    });
+    const focusTab = await withTimeout(
+      client.dispatchMuxCommand(imported.session_id, {
+        kind: "focus_tab",
+        tab_id: initialFocusedTab,
+      }),
+      DEFAULT_HOST_TIMEOUT_MS,
+      "Timed out focusing zellij package tab",
+    );
     const topologyAfterFocus = await waitForTopologyState(
       client,
       imported.session_id,
       (snapshot) => snapshot.focused_tab === initialFocusedTab,
       "zellij package focus tab",
     );
-    const closeTab = await client.dispatchMuxCommand(imported.session_id, {
-      kind: "close_tab",
-      tab_id: richTabId,
-    });
+    const closeTab = await withTimeout(
+      client.dispatchMuxCommand(imported.session_id, {
+        kind: "close_tab",
+        tab_id: richTabId,
+      }),
+      DEFAULT_HOST_TIMEOUT_MS,
+      "Timed out closing zellij package tab",
+    );
     const topologyAfterClose = await waitForTopologyState(
       client,
       imported.session_id,
@@ -310,7 +344,9 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
     assert.equal(topologyAfterClose.tabs.length, initialTabCount);
   } finally {
     stopZellijSpawnProcess(sessionProcess);
-    stopZellijSession(sessionName);
+    if (!hasExternalSession) {
+      stopZellijSession(sessionName);
+    }
   }
 }
 
@@ -1252,7 +1288,11 @@ function fallbackZellijCandidate(sessionName) {
 }
 
 function submittedInput(text) {
-  return process.platform === "win32" ? `echo ${text}\r` : `${text}\r`;
+  return `${text}\r`;
+}
+
+function shouldRunZellijSmoke() {
+  return process.env.TERMINAL_NODE_RUN_ZELLIJ_SMOKE === "1" || process.platform !== "win32";
 }
 
 function delay(ms) {

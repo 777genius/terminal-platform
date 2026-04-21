@@ -2703,7 +2703,7 @@ fn fallback_zellij_candidate(session_name: &str) -> terminal_backend_api::Discov
 
 #[cfg(any(unix, windows))]
 fn submitted_input(text: &str) -> String {
-    if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\r") }
+    format!("{text}\r")
 }
 
 #[cfg(any(unix, windows))]

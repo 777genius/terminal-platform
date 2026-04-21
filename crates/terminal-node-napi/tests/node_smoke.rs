@@ -7,16 +7,22 @@ use std::{
 use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
 use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_protocol::LocalSocketAddress;
-use terminal_testing::{
-    ZellijTestLock, daemon_fixture, unique_socket_address, wait_for_daemon_ready,
-};
+#[cfg(not(windows))]
+use terminal_testing::ZellijTestLock;
+#[cfg(windows)]
+use terminal_testing::{ZellijSessionGuard, unique_zellij_session_name};
+use terminal_testing::{daemon_fixture, unique_socket_address, wait_for_daemon_ready};
 use tokio::time::{Duration, sleep};
 
 mod support;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn roundtrips_node_addon_against_daemon_fixture() {
+    #[cfg(not(windows))]
     let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
+    #[cfg(windows)]
+    let zellij_smoke = windows_zellij_smoke_env("node-addon");
+
     let fixture = daemon_fixture("terminal-node-napi-smoke").expect("fixture should start");
     wait_for_daemon_ready(&fixture.client).await;
     let addon_path = support::materialize_node_addon().expect("node addon should be materialized");
@@ -26,13 +32,18 @@ async fn roundtrips_node_addon_against_daemon_fixture() {
         LocalSocketAddress::Filesystem(path) => ("filesystem", path.display().to_string()),
     };
 
-    let output = Command::new("node")
+    let mut command = Command::new("node");
+    command
         .arg(script_path)
         .env("TERMINAL_NODE_ADDON", &addon_path)
         .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
-        .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value)
-        .output()
-        .expect("node smoke should launch");
+        .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value);
+    #[cfg(windows)]
+    command
+        .env("TERMINAL_NODE_RUN_ZELLIJ_SMOKE", "1")
+        .env("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", &zellij_smoke.session_name);
+
+    let output = command.output().expect("node smoke should launch");
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 
@@ -46,6 +57,21 @@ async fn roundtrips_node_addon_against_daemon_fixture() {
         String::from_utf8_lossy(&output.stdout).contains("\"session_id\""),
         "node smoke should emit structured confirmation"
     );
+}
+
+#[cfg(windows)]
+struct WindowsZellijSmokeEnv {
+    session_name: String,
+    _guard: ZellijSessionGuard,
+}
+
+#[cfg(windows)]
+fn windows_zellij_smoke_env(label: &str) -> WindowsZellijSmokeEnv {
+    let session_name = unique_zellij_session_name(label);
+    let guard = ZellijSessionGuard::spawn(&session_name)
+        .expect("windows node addon zellij smoke session should start");
+
+    WindowsZellijSmokeEnv { session_name, _guard: guard }
 }
 
 #[tokio::test(flavor = "multi_thread")]

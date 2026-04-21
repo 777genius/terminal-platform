@@ -727,12 +727,17 @@ mod tests {
 
         #[cfg(windows)]
         {
-            ShellLaunchSpec::new("cmd.exe").with_args(["/D", "/Q", "/K", "echo ready"])
+            let program = std::env::var("COMSPEC")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "cmd.exe".to_string());
+
+            ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready & more"])
         }
     }
 
     fn submitted_input(text: &str) -> String {
-        if cfg!(windows) { format!("echo {text}\r") } else { format!("{text}\r") }
+        format!("{text}\r")
     }
 
     async fn wait_for_screen_line(
