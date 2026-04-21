@@ -35,6 +35,11 @@ If you use a hosted run, capture:
 - the executed commands or checklist-equivalent coverage
 - the real tool versions printed by that run
 
+For the required Windows `Native + Zellij` artifact, record those as explicit top-level lines:
+
+- `Workflow: https://github.com/<owner>/<repo>/actions/runs/<run-id>`
+- `Job: windows-v1 (...)`
+
 The readiness audit command enforces the required structure:
 
 ```bash

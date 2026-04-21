@@ -1127,6 +1127,15 @@ fn scaffold_manual_run(
         .replace("tmux: 3.x or n/a", &format!("tmux: {resolved_tmux}"))
         .replace("Zellij: 0.44.x or n/a", &format!("Zellij: {resolved_zellij}"))
         .replace("Result: pass", "Result: pending");
+    let payload = if matches!(kind, ManualRunKind::WindowsNativeZellij) {
+        payload.replacen(
+            "\n## Scope",
+            "\nWorkflow: fill from workflow log\nJob: fill from workflow log\n\n## Scope",
+            1,
+        )
+    } else {
+        payload
+    };
 
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)
@@ -1241,6 +1250,26 @@ fn verify_recorded_pass(
             runtime_value != "n/a",
             &format!(
                 "manual run artifact {} must record a real value for {runtime_marker}",
+                path.display()
+            ),
+        )?;
+    }
+
+    if expectation.file_prefix == "windows-native-zellij-" {
+        let workflow_value = require_line_value(contents, "Workflow: ", path)?;
+        let job_value = require_line_value(contents, "Job: ", path)?;
+        assert_value(
+            workflow_value.contains("https://github.com/")
+                && workflow_value.contains("/actions/runs/"),
+            &format!(
+                "manual run artifact {} must record the exact hosted workflow URL",
+                path.display()
+            ),
+        )?;
+        assert_value(
+            job_value.to_ascii_lowercase().contains("windows-v1"),
+            &format!(
+                "manual run artifact {} must record the exact hosted windows-v1 job",
                 path.display()
             ),
         )?;
@@ -1880,6 +1909,8 @@ Rust: rustc 1.88.0
 Node: v20.19.0
 tmux: n/a
 Zellij: 0.44.1
+Workflow: https://github.com/example/terminal-platform/actions/runs/123456789
+Job: windows-v1 (https://github.com/example/terminal-platform/actions/runs/123456789/job/987654321)
 
 ## Scope
 
@@ -1956,6 +1987,8 @@ Rust: fill from workflow log
 Node: v20.19.0
 tmux: n/a
 Zellij: fill from workflow log
+Workflow: fill from workflow log
+Job: fill from workflow log
 
 ## Scope
 
@@ -1978,6 +2011,100 @@ none
         assert!(
             error.contains("unresolved placeholder text"),
             "expected unresolved placeholder error, got: {error}"
+        );
+    }
+
+    #[test]
+    fn verify_recorded_passes_rejects_windows_hosted_artifact_without_workflow_metadata() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "electron-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: macOS 15.4
+Checklist: crates/terminal-testing/manual/electron.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+Electron embed lifecycle and resize churn.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+        dir.write_file(
+            "unix-tmux-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: Ubuntu 24.04
+Checklist: crates/terminal-testing/manual/tmux.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: 3.5a
+Zellij: n/a
+
+## Scope
+
+tmux import and detach or reattach.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+        dir.write_file(
+            "windows-native-zellij-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: Windows 11 24H2
+Checklist: crates/terminal-testing/manual/windows-native-zellij.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: 0.44.1
+
+## Scope
+
+Native create or attach plus imported zellij mutation lane.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+
+        let error = match verify_recorded_passes(dir.path()) {
+            Ok(()) => panic!("expected missing workflow metadata to fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("Workflow: "),
+            "expected hosted workflow marker error, got: {error}"
         );
     }
 
@@ -2172,6 +2299,8 @@ Rust: rustc 1.88.0
 Node: v20.19.0
 tmux: n/a
 Zellij: 0.44.1
+Workflow: https://github.com/example/terminal-platform/actions/runs/123456789
+Job: windows-v1 (https://github.com/example/terminal-platform/actions/runs/123456789/job/987654321)
 
 ## Scope
 

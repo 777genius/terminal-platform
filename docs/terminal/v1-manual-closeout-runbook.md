@@ -17,6 +17,10 @@ Use draft files first, complete the real run, then promote the finished artifact
 For Windows or other target environments where hosted CI is the strongest source of truth,
 you may promote a hosted acceptance run instead of a local hands-on run, but the artifact must
 link the workflow URL, identify the exact job, and record the printed tool versions.
+For the required Windows `Native + Zellij` pass, keep those as explicit top-level lines:
+
+- `Workflow: https://github.com/<owner>/<repo>/actions/runs/<run-id>`
+- `Job: windows-v1 (...)`
 
 ## 1. Scaffold draft files
 
@@ -44,6 +48,7 @@ Minimum expectations:
 
 - actually run the listed flows
 - record the real OS and tool versions
+- for hosted Windows evidence, replace the scaffolded `Workflow:` and `Job:` placeholders with the real run URL and exact `windows-v1` job
 - write real findings, even if the value is `no issues found`
 - keep the checklist path accurate
 - remove unresolved draft text such as `fill from workflow log`, `fill after hosted run completes`,
