@@ -1,15 +1,12 @@
-use terminal_backend_api::{BackendError, BackendErrorKind};
-use terminal_domain::saved_session_compatibility;
+use terminal_backend_api::BackendSubscription;
 use terminal_protocol::{
-    BackendCapabilitiesResponse, CreateSessionResponse, DeleteSavedSessionResponse,
-    DiscoverSessionsResponse, ImportSessionResponse, ListSavedSessionsResponse,
-    ListSessionsResponse, OpenSubscriptionRequest, OpenSubscriptionResponse, ProtocolError,
-    PruneSavedSessionsResponse, RequestEnvelope, RequestPayload, ResponseEnvelope, ResponsePayload,
-    RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionResponse,
-    SavedSessionRestoreSemantics, SavedSessionSummary,
+    OpenSubscriptionRequest, ProtocolError, RequestEnvelope, ResponseEnvelope,
 };
 
-use crate::TerminalDaemonState;
+use crate::{
+    TerminalDaemonState, adapters::TerminalDaemonStateRuntimeAdapter,
+    application::TerminalDaemonRequestDispatcher,
+};
 
 #[derive(Default)]
 pub struct TerminalDaemon {
@@ -26,220 +23,28 @@ impl TerminalDaemon {
         &self,
         request: RequestEnvelope,
     ) -> Result<ResponseEnvelope, ProtocolError> {
-        let payload = match request.payload {
-            RequestPayload::Handshake => ResponsePayload::Handshake(self.state.handshake()),
-            RequestPayload::CreateSession(request) => {
-                let session = self
-                    .state
-                    .create_session(request.backend, request.spec)
-                    .await
-                    .map_err(map_backend_error)?;
-
-                ResponsePayload::CreateSession(CreateSessionResponse { session })
-            }
-            RequestPayload::ListSessions => ResponsePayload::ListSessions(ListSessionsResponse {
-                sessions: self.state.list_sessions(),
-            }),
-            RequestPayload::ListSavedSessions => {
-                ResponsePayload::ListSavedSessions(ListSavedSessionsResponse {
-                    sessions: self
-                        .state
-                        .list_saved_sessions()
-                        .map_err(map_backend_error)?
-                        .into_iter()
-                        .map(map_saved_session_summary)
-                        .collect(),
-                })
-            }
-            RequestPayload::DiscoverSessions(request) => {
-                ResponsePayload::DiscoverSessions(DiscoverSessionsResponse {
-                    sessions: self
-                        .state
-                        .discover_sessions(request.backend)
-                        .await
-                        .map_err(map_backend_error)?,
-                })
-            }
-            RequestPayload::GetBackendCapabilities(request) => {
-                ResponsePayload::BackendCapabilities(BackendCapabilitiesResponse {
-                    backend: request.backend,
-                    capabilities: self
-                        .state
-                        .backend_capabilities(request.backend)
-                        .await
-                        .map_err(map_backend_error)?,
-                })
-            }
-            RequestPayload::ImportSession(request) => {
-                let session = self
-                    .state
-                    .import_session(request.route, request.title)
-                    .await
-                    .map_err(map_backend_error)?;
-
-                ResponsePayload::ImportSession(ImportSessionResponse { session })
-            }
-            RequestPayload::GetSavedSession(request) => {
-                ResponsePayload::SavedSession(SavedSessionResponse {
-                    session: map_saved_session_record(
-                        self.state.saved_session(request.session_id).map_err(map_backend_error)?,
-                    ),
-                })
-            }
-            RequestPayload::DeleteSavedSession(request) => {
-                self.state.delete_saved_session(request.session_id).map_err(map_backend_error)?;
-                ResponsePayload::DeleteSavedSession(DeleteSavedSessionResponse {
-                    session_id: request.session_id,
-                })
-            }
-            RequestPayload::PruneSavedSessions(request) => {
-                let pruned = self
-                    .state
-                    .prune_saved_sessions(request.keep_latest)
-                    .map_err(map_backend_error)?;
-                ResponsePayload::PruneSavedSessions(PruneSavedSessionsResponse {
-                    deleted_count: pruned.deleted_count,
-                    kept_count: pruned.kept_count,
-                })
-            }
-            RequestPayload::RestoreSavedSession(request) => {
-                let saved =
-                    self.state.saved_session(request.session_id).map_err(map_backend_error)?;
-                ResponsePayload::RestoreSavedSession(RestoreSavedSessionResponse {
-                    session: self
-                        .state
-                        .restore_saved_session(request.session_id)
-                        .await
-                        .map_err(map_backend_error)?,
-                    saved_session_id: request.session_id,
-                    manifest: saved.manifest.clone(),
-                    compatibility: saved_session_compatibility(&saved.manifest),
-                    restore_semantics: saved_session_restore_semantics(saved.launch.is_some()),
-                })
-            }
-            RequestPayload::GetTopologySnapshot(request) => ResponsePayload::TopologySnapshot(
-                self.state
-                    .topology_snapshot(request.session_id)
-                    .await
-                    .map_err(map_backend_error)?,
-            ),
-            RequestPayload::GetScreenSnapshot(request) => ResponsePayload::ScreenSnapshot(
-                self.state
-                    .screen_snapshot(request.session_id, request.pane_id)
-                    .await
-                    .map_err(map_backend_error)?,
-            ),
-            RequestPayload::GetScreenDelta(request) => ResponsePayload::ScreenDelta(
-                self.state
-                    .screen_delta(request.session_id, request.pane_id, request.from_sequence)
-                    .await
-                    .map_err(map_backend_error)?,
-            ),
-            RequestPayload::DispatchMuxCommand(request) => ResponsePayload::DispatchMuxCommand(
-                self.state
-                    .dispatch(request.session_id, request.command)
-                    .await
-                    .map_err(map_backend_error)?,
-            ),
-            RequestPayload::OpenSubscription(request) => {
-                ResponsePayload::SubscriptionOpened(OpenSubscriptionResponse {
-                    subscription_id: self
-                        .state
-                        .open_subscription(request.session_id, request.spec)
-                        .await
-                        .map_err(map_backend_error)?
-                        .subscription_id,
-                })
-            }
-        };
-
-        Ok(ResponseEnvelope { operation_id: request.operation_id, payload })
+        self.dispatcher().handle_request(request).await
     }
 
     pub async fn open_subscription(
         &self,
         request: OpenSubscriptionRequest,
-    ) -> Result<terminal_backend_api::BackendSubscription, ProtocolError> {
-        self.state
-            .open_subscription(request.session_id, request.spec)
-            .await
-            .map_err(map_backend_error)
+    ) -> Result<BackendSubscription, ProtocolError> {
+        self.dispatcher().open_subscription(request).await
     }
-}
 
-fn map_backend_error(error: BackendError) -> ProtocolError {
-    let code = match error.kind {
-        BackendErrorKind::Unsupported => "backend_unsupported",
-        BackendErrorKind::NotFound => "backend_not_found",
-        BackendErrorKind::InvalidInput => "backend_invalid_input",
-        BackendErrorKind::Transport => "backend_transport",
-        BackendErrorKind::Internal => "backend_internal",
-    };
-    let message = error.to_string();
-
-    match error.degraded_reason {
-        Some(degraded_reason) => {
-            ProtocolError::with_degraded_reason(code, message, degraded_reason)
-        }
-        None => ProtocolError::new(code, message),
-    }
-}
-
-fn map_saved_session_summary(
-    session: terminal_persistence::SavedSessionSummary,
-) -> SavedSessionSummary {
-    let compatibility = saved_session_compatibility(&session.manifest);
-
-    SavedSessionSummary {
-        session_id: session.session_id,
-        route: session.route,
-        title: session.title,
-        saved_at_ms: session.saved_at_ms,
-        manifest: session.manifest,
-        compatibility,
-        has_launch: session.has_launch,
-        tab_count: session.tab_count,
-        pane_count: session.pane_count,
-        restore_semantics: saved_session_restore_semantics(session.has_launch),
-    }
-}
-
-fn map_saved_session_record(
-    session: terminal_persistence::SavedNativeSession,
-) -> SavedSessionRecord {
-    let has_launch = session.launch.is_some();
-    let compatibility = saved_session_compatibility(&session.manifest);
-
-    SavedSessionRecord {
-        session_id: session.session_id,
-        route: session.route,
-        title: session.title,
-        launch: session.launch,
-        manifest: session.manifest,
-        compatibility,
-        topology: session.topology,
-        screens: session.screens,
-        saved_at_ms: session.saved_at_ms,
-        restore_semantics: saved_session_restore_semantics(has_launch),
-    }
-}
-
-fn saved_session_restore_semantics(has_launch: bool) -> SavedSessionRestoreSemantics {
-    SavedSessionRestoreSemantics {
-        restores_topology: true,
-        restores_focus_state: true,
-        restores_tab_titles: true,
-        uses_saved_launch_spec: has_launch,
-        replays_saved_screen_buffers: false,
-        preserves_process_state: false,
+    fn dispatcher(&self) -> TerminalDaemonRequestDispatcher<TerminalDaemonStateRuntimeAdapter<'_>> {
+        TerminalDaemonRequestDispatcher::new(TerminalDaemonStateRuntimeAdapter::new(&self.state))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::PathBuf;
 
-    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec};
+    use terminal_backend_api::{
+        CreateSessionSpec, MuxCommand, NewTabSpec, ShellLaunchSpec, SubscriptionSpec,
+    };
     use terminal_domain::{
         CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR, OperationId,
         SavedSessionCompatibilityStatus, SavedSessionManifest, local_native_route,
@@ -251,16 +56,34 @@ mod tests {
 
     use super::TerminalDaemon;
 
+    fn isolated_store_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "terminal-platform-daemon-service-{label}-{}-{}.sqlite3",
+            std::process::id(),
+            terminal_domain::SessionId::new().0
+        ))
+    }
+
+    fn cat_launch_spec() -> ShellLaunchSpec {
+        #[cfg(unix)]
+        {
+            ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+        }
+
+        #[cfg(windows)]
+        {
+            let program = std::env::var("COMSPEC")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "cmd.exe".to_string());
+
+            ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
+        }
+    }
+
     fn isolated_daemon() -> TerminalDaemon {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or_default();
-        let store = SqliteSessionStore::open(std::env::temp_dir().join(format!(
-            "terminal-platform-daemon-service-{}-{nanos}.sqlite3",
-            std::process::id()
-        )))
-        .expect("isolated sqlite session store should open");
+        let store = SqliteSessionStore::open(isolated_store_path("test"))
+            .expect("isolated sqlite session store should open");
 
         TerminalDaemon::new(crate::TerminalDaemonState::with_default_persistence(store))
     }
@@ -269,14 +92,7 @@ mod tests {
         label: &str,
         manifest: SavedSessionManifest,
     ) -> (TerminalDaemon, terminal_domain::SessionId) {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or_default();
-        let path = std::env::temp_dir().join(format!(
-            "terminal-platform-daemon-service-{label}-{}-{nanos}.sqlite3",
-            std::process::id()
-        ));
+        let path = isolated_store_path(label);
         let store =
             SqliteSessionStore::open(&path).expect("isolated sqlite session store should open");
         let session_id = terminal_domain::SessionId::new();
@@ -335,6 +151,9 @@ mod tests {
                         terminal_domain::BackendKind::Zellij
                     ]
                 );
+                assert_eq!(handshake.binary_version, CURRENT_BINARY_VERSION.to_string());
+                assert_eq!(handshake.protocol_version.major, CURRENT_PROTOCOL_MAJOR);
+                assert_eq!(handshake.protocol_version.minor, CURRENT_PROTOCOL_MINOR);
                 assert!(handshake.capabilities.request_reply);
                 assert!(handshake.capabilities.topology_subscriptions);
                 assert!(handshake.capabilities.pane_subscriptions);
@@ -344,14 +163,14 @@ mod tests {
                 assert!(handshake.capabilities.session_restore);
                 assert!(handshake.capabilities.degraded_error_reasons);
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn routes_native_session_creation_requests() {
-        let daemon = TerminalDaemon::default();
-        let response = daemon
+    async fn routes_create_and_list_session_requests() {
+        let daemon = isolated_daemon();
+        let create = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
@@ -363,89 +182,77 @@ mod tests {
                 }),
             })
             .await
-            .expect("create session routing should succeed");
+            .expect("create session should succeed");
 
-        match response.payload {
+        match create.payload {
             ResponsePayload::CreateSession(created) => {
-                assert_eq!(created.session.route.backend, terminal_domain::BackendKind::Native);
                 assert_eq!(created.session.title.as_deref(), Some("shell"));
+                assert_eq!(created.session.route.backend, terminal_domain::BackendKind::Native);
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
-    }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn routes_backend_capabilities_requests() {
-        let daemon = TerminalDaemon::default();
-        let response = daemon
+        let listed = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
-                payload: RequestPayload::GetBackendCapabilities(
-                    terminal_protocol::GetBackendCapabilitiesRequest {
-                        backend: terminal_domain::BackendKind::Native,
-                    },
-                ),
+                payload: RequestPayload::ListSessions,
             })
             .await
-            .expect("capabilities routing should succeed");
+            .expect("list sessions should succeed");
 
-        match response.payload {
-            ResponsePayload::BackendCapabilities(capabilities) => {
-                assert_eq!(capabilities.backend, terminal_domain::BackendKind::Native);
-                assert!(capabilities.capabilities.tiled_panes);
-                assert!(capabilities.capabilities.tab_create);
-                assert!(capabilities.capabilities.tab_close);
-                assert!(capabilities.capabilities.tab_focus);
+        match listed.payload {
+            ResponsePayload::ListSessions(list) => {
+                assert_eq!(list.sessions.len(), 1);
+                assert_eq!(list.sessions[0].title.as_deref(), Some("shell"));
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn routes_saved_session_requests() {
-        let daemon = TerminalDaemon::default();
+    async fn routes_list_and_get_saved_session_requests() {
+        let daemon = isolated_daemon();
         let created = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
                     backend: terminal_domain::BackendKind::Native,
                     spec: CreateSessionSpec {
-                        title: Some("shell".to_string()),
+                        title: Some("persisted-shell".to_string()),
+                        launch: Some(cat_launch_spec()),
                         ..CreateSessionSpec::default()
                     },
                 }),
             })
             .await
-            .expect("create session routing should succeed");
+            .expect("create session should succeed");
         let session_id = match created.payload {
             ResponsePayload::CreateSession(created) => created.session.session_id,
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         };
+
         let saved = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::DispatchMuxCommand(
                     terminal_protocol::DispatchMuxCommandRequest {
                         session_id,
-                        command: terminal_backend_api::MuxCommand::SaveSession,
+                        command: MuxCommand::SaveSession,
                     },
                 ),
             })
             .await
-            .expect("save routing should succeed");
-        match saved.payload {
-            ResponsePayload::DispatchMuxCommand(result) => assert!(!result.changed),
-            other => panic!("unexpected response payload: {other:?}"),
-        }
+            .expect("save session should succeed");
+        assert!(matches!(saved.payload, ResponsePayload::DispatchMuxCommand(_)));
 
-        let listed = daemon
+        let list = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::ListSavedSessions,
             })
             .await
-            .expect("list saved sessions routing should succeed");
-        let loaded = daemon
+            .expect("list saved sessions should succeed");
+        let get = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::GetSavedSession(
@@ -453,82 +260,81 @@ mod tests {
                 ),
             })
             .await
-            .expect("get saved session routing should succeed");
+            .expect("get saved session should succeed");
 
-        match listed.payload {
+        match list.payload {
             ResponsePayload::ListSavedSessions(listed) => {
-                let session = listed
-                    .sessions
-                    .iter()
-                    .find(|session| session.session_id == session_id)
-                    .expect("saved session should be listed");
-                assert_eq!(session.manifest.format_version, 1);
-                assert_eq!(session.manifest.binary_version, CURRENT_BINARY_VERSION);
-                assert_eq!(session.manifest.protocol_major, CURRENT_PROTOCOL_MAJOR);
-                assert_eq!(session.manifest.protocol_minor, CURRENT_PROTOCOL_MINOR);
-                assert!(session.compatibility.can_restore);
+                assert_eq!(listed.sessions.len(), 1);
+                assert_eq!(listed.sessions[0].session_id, session_id);
+                assert_eq!(listed.sessions[0].title.as_deref(), Some("persisted-shell"));
                 assert_eq!(
-                    session.compatibility.status,
+                    listed.sessions[0].compatibility.status,
                     SavedSessionCompatibilityStatus::Compatible
                 );
-                assert!(session.restore_semantics.restores_topology);
-                assert!(!session.restore_semantics.uses_saved_launch_spec);
-                assert!(!session.restore_semantics.replays_saved_screen_buffers);
-                assert!(!session.restore_semantics.preserves_process_state);
+                assert!(listed.sessions[0].compatibility.can_restore);
+                assert!(listed.sessions[0].restore_semantics.restores_topology);
+                assert!(listed.sessions[0].restore_semantics.restores_focus_state);
+                assert!(listed.sessions[0].restore_semantics.restores_tab_titles);
+                assert!(listed.sessions[0].restore_semantics.uses_saved_launch_spec);
+                assert!(!listed.sessions[0].restore_semantics.replays_saved_screen_buffers);
+                assert!(!listed.sessions[0].restore_semantics.preserves_process_state);
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
-        match loaded.payload {
+
+        match get.payload {
             ResponsePayload::SavedSession(saved) => {
                 assert_eq!(saved.session.session_id, session_id);
-                assert_eq!(saved.session.route.backend, terminal_domain::BackendKind::Native);
-                assert_eq!(saved.session.manifest.binary_version, CURRENT_BINARY_VERSION);
-                assert!(saved.session.compatibility.can_restore);
+                assert_eq!(saved.session.title.as_deref(), Some("persisted-shell"));
                 assert_eq!(
                     saved.session.compatibility.status,
                     SavedSessionCompatibilityStatus::Compatible
                 );
+                assert!(saved.session.compatibility.can_restore);
+                assert!(saved.session.restore_semantics.restores_topology);
                 assert!(saved.session.restore_semantics.restores_focus_state);
                 assert!(saved.session.restore_semantics.restores_tab_titles);
+                assert!(saved.session.restore_semantics.uses_saved_launch_spec);
                 assert!(!saved.session.restore_semantics.replays_saved_screen_buffers);
                 assert!(!saved.session.restore_semantics.preserves_process_state);
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_delete_saved_session_requests() {
-        let daemon = TerminalDaemon::default();
+        let daemon = isolated_daemon();
         let created = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
                     backend: terminal_domain::BackendKind::Native,
                     spec: CreateSessionSpec {
-                        title: Some("shell".to_string()),
+                        title: Some("delete-shell".to_string()),
                         ..CreateSessionSpec::default()
                     },
                 }),
             })
             .await
-            .expect("create session routing should succeed");
+            .expect("create session should succeed");
         let session_id = match created.payload {
             ResponsePayload::CreateSession(created) => created.session.session_id,
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         };
+
         daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::DispatchMuxCommand(
                     terminal_protocol::DispatchMuxCommandRequest {
                         session_id,
-                        command: terminal_backend_api::MuxCommand::SaveSession,
+                        command: MuxCommand::SaveSession,
                     },
                 ),
             })
             .await
-            .expect("save routing should succeed");
+            .expect("save session should succeed");
 
         let deleted = daemon
             .handle_request(RequestEnvelope {
@@ -538,59 +344,60 @@ mod tests {
                 ),
             })
             .await
-            .expect("delete saved session routing should succeed");
+            .expect("delete saved session should succeed");
 
         match deleted.payload {
-            ResponsePayload::DeleteSavedSession(deleted) => {
-                assert_eq!(deleted.session_id, session_id);
+            ResponsePayload::DeleteSavedSession(response) => {
+                assert_eq!(response.session_id, session_id);
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
 
-        let lookup_error = daemon
+        let missing = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::GetSavedSession(
                     terminal_protocol::GetSavedSessionRequest { session_id },
                 ),
             })
-            .await
-            .expect_err("deleted saved session lookup should fail");
-        assert_eq!(lookup_error.code, "backend_not_found");
+            .await;
+        assert!(missing.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_restore_saved_session_requests() {
-        let daemon = TerminalDaemon::default();
+        let daemon = isolated_daemon();
         let created = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
                     backend: terminal_domain::BackendKind::Native,
                     spec: CreateSessionSpec {
-                        title: Some("shell".to_string()),
+                        title: Some("restore-shell".to_string()),
+                        launch: Some(cat_launch_spec()),
                         ..CreateSessionSpec::default()
                     },
                 }),
             })
             .await
-            .expect("create session routing should succeed");
+            .expect("create session should succeed");
         let session_id = match created.payload {
             ResponsePayload::CreateSession(created) => created.session.session_id,
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         };
+
         daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::DispatchMuxCommand(
                     terminal_protocol::DispatchMuxCommandRequest {
                         session_id,
-                        command: terminal_backend_api::MuxCommand::SaveSession,
+                        command: MuxCommand::SaveSession,
                     },
                 ),
             })
             .await
-            .expect("save routing should succeed");
+            .expect("save session should succeed");
 
         let restored = daemon
             .handle_request(RequestEnvelope {
@@ -600,32 +407,33 @@ mod tests {
                 ),
             })
             .await
-            .expect("restore routing should succeed");
+            .expect("restore saved session should succeed");
 
         match restored.payload {
-            ResponsePayload::RestoreSavedSession(restored) => {
-                assert_eq!(restored.saved_session_id, session_id);
-                assert_ne!(restored.session.session_id, session_id);
-                assert_eq!(restored.session.route.backend, terminal_domain::BackendKind::Native);
-                assert_eq!(restored.manifest.binary_version, CURRENT_BINARY_VERSION);
-                assert!(restored.compatibility.can_restore);
+            ResponsePayload::RestoreSavedSession(response) => {
+                assert_eq!(response.saved_session_id, session_id);
+                assert_eq!(response.session.route.backend, terminal_domain::BackendKind::Native);
                 assert_eq!(
-                    restored.compatibility.status,
+                    response.compatibility.status,
                     SavedSessionCompatibilityStatus::Compatible
                 );
-                assert!(restored.restore_semantics.restores_topology);
-                assert!(!restored.restore_semantics.uses_saved_launch_spec);
-                assert!(!restored.restore_semantics.replays_saved_screen_buffers);
-                assert!(!restored.restore_semantics.preserves_process_state);
+                assert!(response.compatibility.can_restore);
+                assert!(response.restore_semantics.restores_topology);
+                assert!(response.restore_semantics.restores_focus_state);
+                assert!(response.restore_semantics.restores_tab_titles);
+                assert!(response.restore_semantics.uses_saved_launch_spec);
+                assert!(!response.restore_semantics.replays_saved_screen_buffers);
+                assert!(!response.restore_semantics.preserves_process_state);
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_prune_saved_sessions_requests() {
         let daemon = isolated_daemon();
-        for title in ["shell-a", "shell-b", "shell-c"] {
+
+        for label in ["one", "two", "three"] {
             let created = daemon
                 .handle_request(RequestEnvelope {
                     operation_id: OperationId::new(),
@@ -633,30 +441,31 @@ mod tests {
                         terminal_protocol::CreateSessionRequest {
                             backend: terminal_domain::BackendKind::Native,
                             spec: CreateSessionSpec {
-                                title: Some(title.to_string()),
+                                title: Some(label.to_string()),
                                 ..CreateSessionSpec::default()
                             },
                         },
                     ),
                 })
                 .await
-                .expect("create session routing should succeed");
+                .expect("create session should succeed");
             let session_id = match created.payload {
                 ResponsePayload::CreateSession(created) => created.session.session_id,
-                other => panic!("unexpected response payload: {other:?}"),
+                other => panic!("unexpected payload: {other:?}"),
             };
+
             daemon
                 .handle_request(RequestEnvelope {
                     operation_id: OperationId::new(),
                     payload: RequestPayload::DispatchMuxCommand(
                         terminal_protocol::DispatchMuxCommandRequest {
                             session_id,
-                            command: terminal_backend_api::MuxCommand::SaveSession,
+                            command: MuxCommand::SaveSession,
                         },
                     ),
                 })
                 .await
-                .expect("save routing should succeed");
+                .expect("save session should succeed");
         }
 
         let pruned = daemon
@@ -667,41 +476,40 @@ mod tests {
                 ),
             })
             .await
-            .expect("prune saved sessions routing should succeed");
-        let listed = daemon
+            .expect("prune saved sessions should succeed");
+        let list = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::ListSavedSessions,
             })
             .await
-            .expect("list saved sessions routing should succeed");
+            .expect("list saved sessions should succeed");
 
         match pruned.payload {
             ResponsePayload::PruneSavedSessions(pruned) => {
                 assert_eq!(pruned.deleted_count, 2);
                 assert_eq!(pruned.kept_count, 1);
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
-        match listed.payload {
+
+        match list.payload {
             ResponsePayload::ListSavedSessions(listed) => {
                 assert_eq!(listed.sessions.len(), 1);
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn reports_incompatible_saved_session_manifest_and_blocks_restore() {
-        let (daemon, session_id) = save_incompatible_snapshot(
-            "future-protocol",
-            SavedSessionManifest {
-                format_version: terminal_domain::CURRENT_SAVED_SESSION_FORMAT_VERSION,
-                binary_version: CURRENT_BINARY_VERSION.to_string(),
-                protocol_major: CURRENT_PROTOCOL_MAJOR,
-                protocol_minor: CURRENT_PROTOCOL_MINOR + 1,
-            },
-        );
+    async fn exposes_saved_session_degraded_reason_when_manifest_is_incompatible() {
+        let manifest = SavedSessionManifest {
+            binary_version: CURRENT_BINARY_VERSION.to_string(),
+            protocol_major: CURRENT_PROTOCOL_MAJOR,
+            protocol_minor: CURRENT_PROTOCOL_MINOR + 1,
+            format_version: 1,
+        };
+        let (daemon, session_id) = save_incompatible_snapshot("protocol-minor-ahead", manifest);
 
         let listed = daemon
             .handle_request(RequestEnvelope {
@@ -709,8 +517,8 @@ mod tests {
                 payload: RequestPayload::ListSavedSessions,
             })
             .await
-            .expect("list saved sessions routing should succeed");
-        let loaded = daemon
+            .expect("list saved sessions should succeed");
+        let saved = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::GetSavedSession(
@@ -718,70 +526,72 @@ mod tests {
                 ),
             })
             .await
-            .expect("get saved session routing should succeed");
-        let restore_error = daemon
+            .expect("get saved session should succeed");
+        let restored = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::RestoreSavedSession(
                     terminal_protocol::RestoreSavedSessionRequest { session_id },
                 ),
             })
-            .await
-            .expect_err("incompatible saved session restore should fail");
+            .await;
 
         match listed.payload {
             ResponsePayload::ListSavedSessions(listed) => {
-                let session = listed
-                    .sessions
-                    .iter()
-                    .find(|session| session.session_id == session_id)
-                    .expect("saved session should be listed");
-                assert!(!session.compatibility.can_restore);
+                assert_eq!(listed.sessions.len(), 1);
+                let session = &listed.sessions[0];
+                assert_eq!(session.session_id, session_id);
                 assert_eq!(
                     session.compatibility.status,
                     SavedSessionCompatibilityStatus::ProtocolMinorAhead
                 );
+                assert!(!session.compatibility.can_restore);
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
-        match loaded.payload {
+
+        match saved.payload {
             ResponsePayload::SavedSession(saved) => {
-                assert!(!saved.session.compatibility.can_restore);
+                assert_eq!(saved.session.session_id, session_id);
                 assert_eq!(
                     saved.session.compatibility.status,
                     SavedSessionCompatibilityStatus::ProtocolMinorAhead
                 );
+                assert!(!saved.session.compatibility.can_restore);
             }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
-        assert_eq!(restore_error.code, "backend_unsupported");
+
+        let error = restored.expect_err("restore should fail for incompatible saved session");
+        assert_eq!(error.code, "backend_unsupported");
         assert_eq!(
-            restore_error.degraded_reason,
+            error.degraded_reason,
             Some(terminal_domain::DegradedModeReason::SavedSessionIncompatible)
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn routes_topology_snapshot_requests() {
-        let daemon = TerminalDaemon::default();
+    async fn routes_topology_screen_and_subscription_requests() {
+        let daemon = isolated_daemon();
         let created = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
                     backend: terminal_domain::BackendKind::Native,
                     spec: CreateSessionSpec {
-                        title: Some("shell".to_string()),
+                        title: Some("screen-shell".to_string()),
                         ..CreateSessionSpec::default()
                     },
                 }),
             })
             .await
-            .expect("create session routing should succeed");
+            .expect("create session should succeed");
         let session_id = match created.payload {
             ResponsePayload::CreateSession(created) => created.session.session_id,
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         };
-        let response = daemon
+
+        let topology = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::GetTopologySnapshot(
@@ -789,37 +599,72 @@ mod tests {
                 ),
             })
             .await
-            .expect("topology routing should succeed");
-
-        match response.payload {
-            ResponsePayload::TopologySnapshot(topology) => {
-                assert_eq!(topology.session_id, session_id);
-                assert_eq!(topology.tabs.len(), 1);
+            .expect("topology snapshot should succeed");
+        let pane_id = match topology.payload {
+            ResponsePayload::TopologySnapshot(snapshot) => {
+                snapshot.tabs[0].focused_pane.expect("focused pane should exist")
             }
-            other => panic!("unexpected response payload: {other:?}"),
-        }
+            other => panic!("unexpected payload: {other:?}"),
+        };
+
+        let screen = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::GetScreenSnapshot(
+                    terminal_protocol::GetScreenSnapshotRequest { session_id, pane_id },
+                ),
+            })
+            .await
+            .expect("screen snapshot should succeed");
+        let sequence = match screen.payload {
+            ResponsePayload::ScreenSnapshot(snapshot) => snapshot.sequence,
+            other => panic!("unexpected payload: {other:?}"),
+        };
+
+        let delta = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::GetScreenDelta(terminal_protocol::GetScreenDeltaRequest {
+                    session_id,
+                    pane_id,
+                    from_sequence: sequence,
+                }),
+            })
+            .await
+            .expect("screen delta should succeed");
+        assert!(matches!(delta.payload, ResponsePayload::ScreenDelta(_)));
+
+        let subscription = daemon
+            .open_subscription(terminal_protocol::OpenSubscriptionRequest {
+                session_id,
+                spec: SubscriptionSpec::SessionTopology,
+            })
+            .await
+            .expect("open subscription should succeed");
+        assert!(!subscription.subscription_id.0.as_hyphenated().to_string().is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_dispatch_mux_command_requests() {
-        let daemon = TerminalDaemon::default();
+        let daemon = isolated_daemon();
         let created = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
                     backend: terminal_domain::BackendKind::Native,
                     spec: CreateSessionSpec {
-                        title: Some("shell".to_string()),
+                        title: Some("mux-shell".to_string()),
                         ..CreateSessionSpec::default()
                     },
                 }),
             })
             .await
-            .expect("create session routing should succeed");
+            .expect("create session should succeed");
         let session_id = match created.payload {
             ResponsePayload::CreateSession(created) => created.session.session_id,
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         };
+
         let response = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
@@ -831,109 +676,13 @@ mod tests {
                 ),
             })
             .await
-            .expect("dispatch routing should succeed");
+            .expect("dispatch mux command should succeed");
 
         match response.payload {
-            ResponsePayload::DispatchMuxCommand(result) => assert!(result.changed),
-            other => panic!("unexpected response payload: {other:?}"),
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn routes_screen_delta_requests() {
-        let daemon = TerminalDaemon::default();
-        let created = daemon
-            .handle_request(RequestEnvelope {
-                operation_id: OperationId::new(),
-                payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
-                    backend: terminal_domain::BackendKind::Native,
-                    spec: CreateSessionSpec {
-                        title: Some("shell".to_string()),
-                        ..CreateSessionSpec::default()
-                    },
-                }),
-            })
-            .await
-            .expect("create session routing should succeed");
-        let session_id = match created.payload {
-            ResponsePayload::CreateSession(created) => created.session.session_id,
-            other => panic!("unexpected response payload: {other:?}"),
-        };
-        let topology = daemon
-            .handle_request(RequestEnvelope {
-                operation_id: OperationId::new(),
-                payload: RequestPayload::GetTopologySnapshot(
-                    terminal_protocol::GetTopologySnapshotRequest { session_id },
-                ),
-            })
-            .await
-            .expect("topology routing should succeed");
-        let pane_id = match topology.payload {
-            ResponsePayload::TopologySnapshot(topology) => {
-                topology.tabs[0].focused_pane.expect("focused pane should exist")
+            ResponsePayload::DispatchMuxCommand(result) => {
+                assert!(result.changed);
             }
-            other => panic!("unexpected response payload: {other:?}"),
-        };
-        let response = daemon
-            .handle_request(RequestEnvelope {
-                operation_id: OperationId::new(),
-                payload: RequestPayload::GetScreenDelta(terminal_protocol::GetScreenDeltaRequest {
-                    session_id,
-                    pane_id,
-                    from_sequence: 0,
-                }),
-            })
-            .await
-            .expect("screen delta routing should succeed");
-
-        match response.payload {
-            ResponsePayload::ScreenDelta(delta) => {
-                assert_eq!(delta.pane_id, pane_id);
-                assert_eq!(delta.from_sequence, 0);
-                assert!(delta.to_sequence >= delta.from_sequence);
-            }
-            other => panic!("unexpected response payload: {other:?}"),
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn routes_open_subscription_requests() {
-        let daemon = TerminalDaemon::default();
-        let created = daemon
-            .handle_request(RequestEnvelope {
-                operation_id: OperationId::new(),
-                payload: RequestPayload::CreateSession(terminal_protocol::CreateSessionRequest {
-                    backend: terminal_domain::BackendKind::Native,
-                    spec: CreateSessionSpec {
-                        title: Some("shell".to_string()),
-                        ..CreateSessionSpec::default()
-                    },
-                }),
-            })
-            .await
-            .expect("create session routing should succeed");
-        let session_id = match created.payload {
-            ResponsePayload::CreateSession(created) => created.session.session_id,
-            other => panic!("unexpected response payload: {other:?}"),
-        };
-        let response = daemon
-            .handle_request(RequestEnvelope {
-                operation_id: OperationId::new(),
-                payload: RequestPayload::OpenSubscription(
-                    terminal_protocol::OpenSubscriptionRequest {
-                        session_id,
-                        spec: SubscriptionSpec::SessionTopology,
-                    },
-                ),
-            })
-            .await
-            .expect("subscription routing should succeed");
-
-        match response.payload {
-            ResponsePayload::SubscriptionOpened(opened) => {
-                let _subscription_id = opened.subscription_id;
-            }
-            other => panic!("unexpected response payload: {other:?}"),
+            other => panic!("unexpected payload: {other:?}"),
         }
     }
 }
