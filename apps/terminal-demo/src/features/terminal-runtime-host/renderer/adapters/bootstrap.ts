@@ -131,9 +131,9 @@ function normalizeBootstrapConfig(
     return null;
   }
 
-  const runtimeSlug = raw.runtimeSlug?.trim();
-  const controlPlaneUrl = raw.controlPlaneUrl?.trim() ?? raw.gatewayUrl?.trim() ?? null;
-  const sessionStreamUrl = raw.sessionStreamUrl?.trim()
+  const runtimeSlug = normalizeBootstrapScalar(raw.runtimeSlug);
+  const controlPlaneUrl = normalizeBootstrapScalar(raw.controlPlaneUrl) ?? normalizeBootstrapScalar(raw.gatewayUrl);
+  const sessionStreamUrl = normalizeBootstrapScalar(raw.sessionStreamUrl)
     ?? (controlPlaneUrl ? deriveTerminalRuntimeSessionStreamUrl(controlPlaneUrl) : null);
 
   if (!runtimeSlug || !controlPlaneUrl || !sessionStreamUrl) {
@@ -145,4 +145,17 @@ function normalizeBootstrapConfig(
     sessionStreamUrl,
     runtimeSlug,
   };
+}
+
+function normalizeBootstrapScalar(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === "undefined" || normalized === "null") {
+    return null;
+  }
+
+  return normalized;
 }
