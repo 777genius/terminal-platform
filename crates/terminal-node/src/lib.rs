@@ -1350,10 +1350,9 @@ mod tests {
     }
 
     fn cat_launch_request(title: &str) -> NodeCreateSessionRequest {
-        let launch = node_host_launch_spec();
         NodeCreateSessionRequest {
             title: Some(title.to_string()),
-            launch: Some(super::NodeShellLaunchSpec {
+            launch: node_host_launch_spec().map(|launch| super::NodeShellLaunchSpec {
                 program: launch.program,
                 args: launch.args,
                 cwd: launch.cwd.map(|cwd| cwd.display().to_string()),
@@ -1361,29 +1360,25 @@ mod tests {
         }
     }
 
-    fn node_host_launch_spec() -> terminal_backend_api::ShellLaunchSpec {
+    fn node_host_launch_spec() -> Option<terminal_backend_api::ShellLaunchSpec> {
         #[cfg(unix)]
         {
-            echo_shell_launch_spec()
+            Some(echo_shell_launch_spec())
         }
 
         #[cfg(windows)]
         {
-            let program = std::env::var("COMSPEC")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "cmd.exe".to_string());
-            terminal_backend_api::ShellLaunchSpec::new(program)
+            None
         }
     }
 
     #[test]
     fn uses_platform_appropriate_launch_contract_for_node_host_smoke() {
-        let launch =
-            cat_launch_request("shell").launch.expect("cat launch request should include launch");
+        let request = cat_launch_request("shell");
 
         #[cfg(unix)]
         {
+            let launch = request.launch.expect("cat launch request should include launch");
             assert_eq!(launch.program, "/bin/sh");
             assert_eq!(
                 launch.args,
@@ -1393,8 +1388,7 @@ mod tests {
 
         #[cfg(windows)]
         {
-            assert!(launch.program.to_ascii_lowercase().ends_with("cmd.exe"));
-            assert!(launch.args.is_empty());
+            assert!(request.launch.is_none());
         }
     }
 

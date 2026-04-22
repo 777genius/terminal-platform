@@ -2216,15 +2216,6 @@ async fn run_fullscreen_viewport_flow(
     let _ = fs::remove_file(fzf_file);
 }
 
-#[cfg(windows)]
-fn native_fullscreen_shell_launch_spec() -> ShellLaunchSpec {
-    let program = std::env::var("COMSPEC")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "cmd.exe".to_string());
-    ShellLaunchSpec::new(program)
-}
-
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_preserves_tmux_fullscreen_viewports_for_vim_less_and_fzf() {
@@ -2360,7 +2351,7 @@ async fn bootstrap_smoke_preserves_native_fullscreen_viewports_for_vim_less_and_
             BackendKind::Native,
             CreateSessionSpec {
                 title: Some("shell".to_string()),
-                launch: Some(native_fullscreen_shell_launch_spec()),
+                launch: None,
             },
         )
         .await
