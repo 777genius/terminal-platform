@@ -47,10 +47,9 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           </div>
           <div class="content" part="content">
             <tp-terminal-pane-tree .kernel=${this.kernel}></tp-terminal-pane-tree>
-            <tp-terminal-screen .kernel=${this.kernel}></tp-terminal-screen>
-            <div class="panel diagnostics" part="diagnostics">
-              ${this.snapshot.diagnostics.length > 0
-                ? html`
+            ${this.snapshot.diagnostics.length > 0
+              ? html`
+                  <div class="panel diagnostics" part="diagnostics">
                     <ul>
                       ${this.snapshot.diagnostics.map(
                         (item) => html`
@@ -61,9 +60,10 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                         `,
                       )}
                     </ul>
-                  `
-                : html`<div class="muted">No diagnostics</div>`}
-            </div>
+                  </div>
+                `
+              : null}
+            <tp-terminal-screen .kernel=${this.kernel}></tp-terminal-screen>
           </div>
         </div>
       </div>

@@ -74,7 +74,62 @@ async function linkSdkPackages() {
     const packageBasename = packageJson.name.slice("@terminal-platform/".length);
     const linkPath = path.join(sdkScopeRoot, packageBasename);
     const stagedDir = await createSiblingStagingDirectory(linkPath, "sdk-package");
-    await fs.cp(packageRoot, stagedDir, { recursive: true });
+    await copyDirectoryStable(packageRoot, stagedDir);
     await replaceDirectoryAtomically(linkPath, stagedDir);
   }
+}
+
+async function copyDirectoryStable(sourceDir, targetDir) {
+  await fs.mkdir(targetDir, { recursive: true });
+
+  let entries;
+  try {
+    entries = await fs.readdir(sourceDir, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return;
+    }
+    throw error;
+  }
+
+  for (const entry of entries) {
+    if (shouldSkipPackageArtifact(entry.name)) {
+      continue;
+    }
+
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirectoryStable(sourcePath, targetPath);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    try {
+      await fs.copyFile(sourcePath, targetPath);
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+function shouldSkipPackageArtifact(name) {
+  return (
+    name.endsWith(".lock")
+    || name.includes(".generate.")
+    || name.includes(".stage.")
+    || name === ".DS_Store"
+    || name.endsWith(".tsbuildinfo")
+  );
+}
+
+function isMissingPathError(error) {
+  return Boolean(error) && typeof error === "object" && "code" in error && error.code === "ENOENT";
 }

@@ -1,6 +1,12 @@
 import process from "node:process";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
-import { buildTerminalRuntimeBrowserUrl } from "@features/terminal-runtime-host/contracts";
+import {
+  buildTerminalRuntimeBrowserUrl,
+  TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH,
+} from "@features/terminal-runtime-host/contracts";
 import {
   DEFAULT_TERMINAL_RUNTIME_SLUG,
   startTerminalRuntimeHost,
@@ -14,13 +20,17 @@ let hostHandle: TerminalRuntimeHostHandle | null = null;
 let shuttingDown = false;
 
 async function bootstrap(): Promise<void> {
-  hostHandle = await startTerminalRuntimeHost({ runtimeSlug });
+  hostHandle = await startTerminalRuntimeHost({
+    runtimeSlug,
+    forceRestartReadyDaemon: true,
+  });
 
   const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,
   };
+  await writeBrowserBootstrapConfig(config);
   const browserUrl = buildTerminalRuntimeBrowserUrl(rendererUrl, config);
 
   console.log(`[terminal-demo-browser] runtime ${config.runtimeSlug}`);
@@ -63,3 +73,19 @@ void bootstrap().catch((error) => {
   console.error(error);
   void shutdown(1);
 });
+
+async function writeBrowserBootstrapConfig(config: TerminalRuntimeBootstrapConfig): Promise<void> {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const appRoot = path.resolve(moduleDir, "../../..");
+  const relativeTarget = TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH.replace(/^\/+/, "");
+  const targets = [
+    path.join(appRoot, "public", relativeTarget),
+    path.join(appRoot, "dist", "renderer", relativeTarget),
+  ];
+  const payload = `${JSON.stringify(config, null, 2)}\n`;
+
+  await Promise.all(targets.map(async (targetPath) => {
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.writeFile(targetPath, payload, "utf8");
+  }));
+}

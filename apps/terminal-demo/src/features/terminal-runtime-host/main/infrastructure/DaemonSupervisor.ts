@@ -1,24 +1,31 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { once } from "node:events";
 import { loadTerminalPlatformSdk } from "./terminal-platform-sdk.js";
 
 interface DaemonSupervisorOptions {
   runtimeSlug: string;
+  forceRestartReadyDaemon?: boolean;
 }
 
 export class DaemonSupervisor {
   readonly #runtimeSlug: string;
+  readonly #forceRestartReadyDaemon: boolean;
   #child: ChildProcess | null = null;
   #ownsProcess = false;
 
   constructor(options: DaemonSupervisorOptions) {
     this.#runtimeSlug = options.runtimeSlug;
+    this.#forceRestartReadyDaemon = options.forceRestartReadyDaemon ?? false;
   }
 
   async ensureRunning(): Promise<void> {
     if (await this.isReady()) {
-      return;
+      if (!this.#forceRestartReadyDaemon) {
+        return;
+      }
+
+      this.stopExistingDaemonProcesses();
     }
 
     this.spawnDaemon();
@@ -68,6 +75,16 @@ export class DaemonSupervisor {
     });
   }
 
+  private stopExistingDaemonProcesses(): void {
+    for (const pid of findDaemonProcesses(this.#runtimeSlug)) {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // Ignore races where the matched daemon exited before we could signal it.
+      }
+    }
+  }
+
   private async waitUntilReady(): Promise<void> {
     const startedAt = Date.now();
 
@@ -97,4 +114,49 @@ function resolveDaemonBinaryPath(): string {
     : "terminal-daemon";
 
   return path.resolve(resolveRepoRoot(), "target", "debug", filename);
+}
+
+function findDaemonProcesses(runtimeSlug: string): number[] {
+  if (process.platform === "win32") {
+    return [];
+  }
+
+  const result = spawnSync("ps", ["-ax", "-o", "pid=,command="], {
+    cwd: resolveRepoRoot(),
+    env: process.env,
+    encoding: "utf8",
+  });
+
+  if (result.status !== 0 || !result.stdout) {
+    return [];
+  }
+
+  return result.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(/^(\d+)\s+(.*)$/);
+      const pidText = match?.[1];
+      const command = match?.[2];
+      if (!pidText || !command) {
+        return null;
+      }
+
+      const pid = Number.parseInt(pidText, 10);
+      if (!Number.isInteger(pid)) {
+        return null;
+      }
+
+      if (
+        !command.includes("terminal-daemon")
+        || !command.includes(`--runtime-slug ${runtimeSlug}`)
+        || pid === process.pid
+      ) {
+        return null;
+      }
+
+      return pid;
+    })
+    .filter((pid): pid is number => pid != null);
 }

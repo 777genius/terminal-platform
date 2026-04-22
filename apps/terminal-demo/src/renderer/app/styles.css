@@ -169,6 +169,12 @@ button {
   align-content: start;
 }
 
+.workspace-stack {
+  display: grid;
+  gap: 18px;
+  min-height: 0;
+}
+
 .panel--workspace tp-terminal-workspace {
   display: block;
   min-height: 0;
@@ -258,6 +264,13 @@ textarea {
   resize: vertical;
 }
 
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: rgba(248, 184, 76, 0.48);
+  box-shadow: 0 0 0 3px rgba(248, 184, 76, 0.14);
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -265,6 +278,10 @@ textarea {
 }
 
 .button-row--compact {
+  justify-content: flex-end;
+}
+
+.button-row--dock {
   justify-content: flex-end;
 }
 
@@ -508,6 +525,79 @@ textarea {
   color: #ffe7b7;
 }
 
+.terminal-dock {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(130, 162, 196, 0.16);
+  background:
+    linear-gradient(180deg, rgba(11, 17, 25, 0.96), rgba(8, 13, 20, 0.98)),
+    radial-gradient(circle at top right, rgba(248, 184, 76, 0.14), transparent 28%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.terminal-dock__header,
+.terminal-dock__footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.terminal-dock__title {
+  margin: 4px 0 0;
+  font-size: clamp(1.1rem, 1.6vw, 1.35rem);
+}
+
+.terminal-dock__composer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(130, 162, 196, 0.16);
+  background: linear-gradient(180deg, rgba(9, 14, 21, 0.92), rgba(5, 9, 14, 0.96));
+}
+
+.terminal-dock__prompt {
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 52px;
+  padding-top: 14px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(248, 184, 76, 0.16), rgba(248, 184, 76, 0.06));
+  border: 1px solid rgba(248, 184, 76, 0.24);
+  color: #ffd890;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.92rem;
+  letter-spacing: 0.12em;
+}
+
+.terminal-dock__textarea {
+  min-height: 92px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.16);
+  padding: 14px 16px;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.terminal-dock__textarea::placeholder {
+  color: rgba(146, 164, 188, 0.68);
+}
+
+.terminal-dock__hint {
+  max-width: 36rem;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 .empty-state {
   border: 1px dashed rgba(130, 162, 196, 0.18);
   border-radius: 16px;
@@ -542,5 +632,22 @@ textarea {
 
   .workspace-grid {
     grid-template-columns: 1fr;
+  }
+
+  .terminal-dock__header,
+  .terminal-dock__footer {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 760px) {
+  .terminal-dock__composer {
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-dock__prompt {
+    min-width: 0;
+    justify-content: flex-start;
+    padding: 10px 12px;
   }
 }

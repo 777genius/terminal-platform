@@ -4,6 +4,8 @@ export interface TerminalRuntimeBootstrapConfig {
   runtimeSlug: string;
 }
 
+export const TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH = "/terminal-runtime-bootstrap.json";
+
 export function buildTerminalRuntimeBrowserUrl(
   rendererUrl: string,
   config: TerminalRuntimeBootstrapConfig,

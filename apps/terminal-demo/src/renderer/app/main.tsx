@@ -9,7 +9,20 @@ import {
 import { TerminalDemoWorkspaceApp } from "./TerminalDemoWorkspaceApp.js";
 
 const root = createRoot(document.getElementById("root")!);
-const bootstrap = resolveTerminalRuntimeBootstrapConfig();
+
+root.render(
+  <StrictMode>
+    <main className="shell shell--error">
+      <section className="panel panel--surface panel--error">
+        <div className="section__eyebrow">SDK Bootstrap</div>
+        <h1 className="section__title">Terminal Platform Demo</h1>
+        <p className="section__copy">Resolving runtime host and latest workspace gateway...</p>
+      </section>
+    </main>
+  </StrictMode>,
+);
+
+const bootstrap = await resolveTerminalRuntimeBootstrapConfig();
 
 if (!bootstrap.config) {
   root.render(

@@ -356,52 +356,6 @@ export function TerminalDemoWorkspaceScreen(props: {
           </div>
         </section>
 
-        <section className="panel panel--surface section">
-          <div className="section__header">
-            <div>
-              <div className="section__eyebrow">Command Lane</div>
-              <h2 className="section__title">Focused Pane Input</h2>
-            </div>
-            <span className="section__meta">{activePaneId ?? "no focused pane"}</span>
-          </div>
-
-          <label className="composer">
-            <span>Input</span>
-            <textarea
-              value={inputDraft}
-              disabled={!activePaneId || commandPending}
-              onChange={(event) => {
-                setInputDraft(event.target.value);
-              }}
-              placeholder={"printf \"hello from sdk demo\\n\""}
-            />
-          </label>
-
-          <div className="button-row">
-            <button
-              className="button button--primary"
-              disabled={!canSendInput}
-              onClick={() => void handleSendInput()}
-            >
-              Send + Enter
-            </button>
-            <button
-              className="button"
-              disabled={!canIssueSessionCommand}
-              onClick={() => void handleSaveSession()}
-            >
-              Save Session
-            </button>
-            <button
-              className="button"
-              disabled={!canIssueSessionCommand}
-              onClick={() => void handleResyncScreen()}
-            >
-              Re-sync Screen
-            </button>
-          </div>
-        </section>
-
         {hasDiagnostics ? (
           <section className="panel panel--surface section">
             <div className="section__header">
@@ -411,8 +365,11 @@ export function TerminalDemoWorkspaceScreen(props: {
               </div>
             </div>
             <div className="degraded-list">
-              {snapshot.diagnostics.map((diagnostic) => (
-                <div className="degraded-list__item" key={`${diagnostic.code}-${diagnostic.timestampMs}`}>
+              {snapshot.diagnostics.map((diagnostic, index) => (
+                <div
+                  className="degraded-list__item"
+                  key={`${diagnostic.code}-${diagnostic.timestampMs}-${index}`}
+                >
                   <strong>{diagnostic.code}</strong>
                   <small>{diagnostic.message}</small>
                 </div>
@@ -448,7 +405,72 @@ export function TerminalDemoWorkspaceScreen(props: {
             </div>
           </div>
 
-          <TerminalWorkspace kernel={props.kernel} />
+          <div className="workspace-stack">
+            <TerminalWorkspace kernel={props.kernel} />
+
+            <section className="terminal-dock" aria-label="Focused pane command lane">
+              <div className="terminal-dock__header">
+                <div>
+                  <div className="section__eyebrow">Command Lane</div>
+                  <h3 className="terminal-dock__title">Focused Pane Input</h3>
+                </div>
+
+                <div className="meta-stack meta-stack--inline">
+                  <span className="badge badge--neutral">
+                    {activePaneId ? `pane ${activePaneId}` : "no focused pane"}
+                  </span>
+                  <span className="badge badge--neutral">
+                    {commandPending ? "dispatching" : "ready to send"}
+                  </span>
+                </div>
+              </div>
+
+              <label className="terminal-dock__composer">
+                <span className="terminal-dock__prompt" aria-hidden="true">
+                  &gt;_
+                </span>
+                <textarea
+                  className="terminal-dock__textarea"
+                  value={inputDraft}
+                  disabled={!activePaneId || commandPending}
+                  onChange={(event) => {
+                    setInputDraft(event.target.value);
+                  }}
+                  placeholder={"printf \"hello from sdk demo\\n\""}
+                />
+              </label>
+
+              <div className="terminal-dock__footer">
+                <div className="terminal-dock__hint">
+                  Input is injected into the focused pane and sent with a trailing newline.
+                </div>
+
+                <div className="button-row button-row--dock">
+                  <button
+                    className="button button--primary"
+                    disabled={!canSendInput}
+                    onClick={() => void handleSendInput()}
+                  >
+                    Send + Enter
+                  </button>
+                  <button
+                    className="button"
+                    disabled={!canIssueSessionCommand}
+                    onClick={() => void handleSaveSession()}
+                  >
+                    Save Session
+                  </button>
+                  <button
+                    className="button"
+                    disabled={!canIssueSessionCommand}
+                    onClick={() => void handleResyncScreen()}
+                  >
+                    Re-sync Screen
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
         </section>
       </main>
     </div>

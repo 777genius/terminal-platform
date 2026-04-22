@@ -13,7 +13,10 @@ let hostHandle: TerminalRuntimeHostHandle | null = null;
 async function bootstrap(): Promise<void> {
   await app.whenReady();
 
-  hostHandle = await startTerminalRuntimeHost({ runtimeSlug });
+  hostHandle = await startTerminalRuntimeHost({
+    runtimeSlug,
+    forceRestartReadyDaemon: true,
+  });
   const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,
     sessionStreamUrl: hostHandle.sessionStreamUrl,

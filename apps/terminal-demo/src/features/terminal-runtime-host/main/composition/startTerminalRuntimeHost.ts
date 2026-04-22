@@ -19,9 +19,13 @@ export interface TerminalRuntimeHostHandle {
 
 export async function startTerminalRuntimeHost(options?: {
   runtimeSlug?: string;
+  forceRestartReadyDaemon?: boolean;
 }): Promise<TerminalRuntimeHostHandle> {
   const runtimeSlug = options?.runtimeSlug ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
-  const daemonSupervisor = new DaemonSupervisor({ runtimeSlug });
+  const daemonSupervisor = new DaemonSupervisor({
+    runtimeSlug,
+    forceRestartReadyDaemon: options?.forceRestartReadyDaemon ?? false,
+  });
   await daemonSupervisor.ensureRunning();
 
   const clientProvider = new TerminalPlatformClientProvider(runtimeSlug);
