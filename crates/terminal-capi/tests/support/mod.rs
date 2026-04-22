@@ -3,12 +3,14 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::{Child, Command},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(unix)]
-use std::time::Duration;
+use std::{
+    process::{Child, Command},
+    time::Duration,
+};
 
 pub fn generate_header() -> std::io::Result<PathBuf> {
     let header_dir = unique_temp_dir("terminal-capi-header");
