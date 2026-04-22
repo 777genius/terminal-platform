@@ -502,12 +502,12 @@ fn zellij_command_timeout() -> Duration {
     if cfg!(windows) { Duration::from_secs(10) } else { Duration::from_secs(5) }
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 fn zellij_create_timeout() -> Duration {
     if cfg!(windows) { Duration::from_secs(20) } else { Duration::from_secs(10) }
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
     stderr.contains("could not get terminal attribute")
         || stderr.contains("could not enable raw mode")

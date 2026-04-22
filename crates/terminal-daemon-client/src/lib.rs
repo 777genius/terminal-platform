@@ -512,21 +512,21 @@ impl LocalSocketDaemonClient {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        thread,
-        time::{Duration, SystemTime, UNIX_EPOCH},
-    };
+    #[cfg(unix)]
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use rusqlite::{Connection, params};
-    use terminal_backend_api::{
-        CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SubscriptionSpec,
-    };
+    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec};
+    #[cfg(unix)]
+    use terminal_backend_api::{SendInputSpec, ShellLaunchSpec};
     use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+    use terminal_domain::{BackendKind, PaneId};
+    #[cfg(unix)]
     use terminal_domain::{
-        BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
-        CURRENT_SAVED_SESSION_FORMAT_VERSION, DegradedModeReason, PaneId,
-        SavedSessionCompatibilityStatus, SavedSessionManifest, SessionId, TabId,
-        local_native_route,
+        CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
+        CURRENT_SAVED_SESSION_FORMAT_VERSION, DegradedModeReason, SavedSessionCompatibilityStatus,
+        SavedSessionManifest, SessionId, TabId, local_native_route,
     };
     use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
     use terminal_persistence::SqliteSessionStore;
@@ -573,6 +573,7 @@ mod tests {
         Err(last_error.unwrap_or_else(|| std::io::Error::other("daemon never rebound on address")))
     }
 
+    #[cfg(unix)]
     fn isolated_daemon() -> TerminalDaemon {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -587,6 +588,7 @@ mod tests {
         TerminalDaemon::new(terminal_daemon::TerminalDaemonState::with_default_persistence(store))
     }
 
+    #[cfg(unix)]
     fn isolated_daemon_with_saved_snapshot(
         label: &str,
         manifest: SavedSessionManifest,
@@ -636,6 +638,7 @@ mod tests {
         )
     }
 
+    #[cfg(unix)]
     fn isolated_daemon_with_valid_and_corrupted_saved_rows(
         label: &str,
     ) -> (TerminalDaemon, SessionId, SessionId) {
@@ -719,52 +722,17 @@ mod tests {
         )
     }
 
+    #[cfg(unix)]
     fn cat_launch_spec() -> ShellLaunchSpec {
-        #[cfg(unix)]
-        {
-            ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
-        }
-
-        #[cfg(windows)]
-        {
-            ShellLaunchSpec::new(resolve_windows_executable("node")).with_args([
-                "-e",
-                "process.stdout.write('ready\\n'); process.stdin.resume(); process.stdin.on('data', chunk => process.stdout.write(chunk));",
-            ])
-        }
+        ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
     }
 
-    #[cfg(windows)]
-    fn resolve_windows_executable(program: &str) -> String {
-        let has_path_separator = program.contains('\\') || program.contains('/');
-        if has_path_separator {
-            return program.to_string();
-        }
-
-        let candidates = if program.to_ascii_lowercase().ends_with(".exe") {
-            vec![program.to_string()]
-        } else {
-            vec![program.to_string(), format!("{program}.exe")]
-        };
-
-        if let Some(paths) = std::env::var_os("PATH") {
-            for dir in std::env::split_paths(&paths) {
-                for candidate in &candidates {
-                    let path = dir.join(candidate);
-                    if path.is_file() {
-                        return path.display().to_string();
-                    }
-                }
-            }
-        }
-
-        program.to_string()
-    }
-
+    #[cfg(unix)]
     fn submitted_input(text: &str) -> String {
         if cfg!(windows) { format!("{text}\r\n") } else { format!("{text}\n") }
     }
 
+    #[cfg(unix)]
     async fn wait_for_screen_line(
         client: &LocalSocketDaemonClient,
         session_id: terminal_domain::SessionId,
