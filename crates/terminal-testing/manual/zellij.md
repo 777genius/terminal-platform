@@ -7,4 +7,5 @@
 - Exercise viewport observation while switching tabs rapidly.
 - Exercise detach/reattach around an imported `Zellij` session when the host environment supports it.
 - Run `vim`, `less`, and `fzf` in a terminal pane and confirm render stability.
+- For imported Unix `Zellij` viewport validation, use `less -X` if plain `less` would hide the pager buffer behind alternate-screen-only `dump-screen` output.
 - Confirm legacy `0.43.x` imports fail with explicit `MissingCapability`.

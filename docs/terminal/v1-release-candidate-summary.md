@@ -41,6 +41,7 @@ and capability-gated `tmux` and `Zellij` adapters for Electron and other hosts.
 ## Known degraded semantics
 
 - legacy `Zellij 0.43.x` import remains explicit `MissingCapability`
+- imported Unix `Zellij` pager validation may require `less -X` because `dump-screen` is not a trustworthy alternate-screen proof source there
 - imported backends are capability-gated foreign adapters, not product truth
 - backend-specific behavior is exposed through capability truth instead of hidden fallback behavior
 

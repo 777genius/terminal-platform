@@ -2098,7 +2098,13 @@ fn fullscreen_fzf_command(path: &std::path::Path) -> String {
 #[cfg(any(unix, windows))]
 fn fullscreen_less_command(path: &std::path::Path, prefix: &str) -> String {
     let quoted = quoted_command_path(path);
-    format!("less +/{prefix}-less-gamma {quoted}")
+    if cfg!(unix) && prefix == "zellij" {
+        // Zellij `dump-screen` is not a truthful proof source for `less` in alternate screen mode
+        // on hosted Linux, so keep the pager in the main buffer for imported-backend acceptance.
+        format!("less -X +/{prefix}-less-gamma {quoted}")
+    } else {
+        format!("less +/{prefix}-less-gamma {quoted}")
+    }
 }
 
 #[cfg(any(unix, windows))]
