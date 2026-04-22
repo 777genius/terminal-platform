@@ -41,6 +41,7 @@ and capability-gated `tmux` and `Zellij` adapters for Electron and other hosts.
 
 - legacy `Zellij 0.43.x` import remains explicit `MissingCapability`
 - imported Unix `Zellij` pager validation for plain `less` is manual/degraded because `dump-screen` is not a trustworthy alternate-screen proof source there, so hosted automated proof uses `vim` plus `fzf`
+- imported Windows `Zellij` fullscreen `fzf` validation remains manual/degraded because the hosted imported-screen path is not yet a trustworthy proof source there, so automated proof currently uses `vim` plus `less`
 - imported backends are capability-gated foreign adapters, not product truth
 - backend-specific behavior is exposed through capability truth instead of hidden fallback behavior
 

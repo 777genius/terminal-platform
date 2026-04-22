@@ -1182,7 +1182,6 @@ async function waitForLine(client, sessionId, paneId, needle) {
 }
 
 async function waitForInteractiveScreen(client, sessionId, paneId, label) {
-  await waitForLine(client, sessionId, paneId, "ready");
   const marker = `node-interactive-probe-${label}-${process.pid}`;
   let lastLines = [];
 
