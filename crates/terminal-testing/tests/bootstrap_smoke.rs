@@ -2349,10 +2349,7 @@ async fn bootstrap_smoke_preserves_native_fullscreen_viewports_for_vim_less_and_
         .client
         .create_session(
             BackendKind::Native,
-            CreateSessionSpec {
-                title: Some("shell".to_string()),
-                launch: None,
-            },
+            CreateSessionSpec { title: Some("shell".to_string()), launch: None },
         )
         .await
         .expect("native fullscreen session should create");
