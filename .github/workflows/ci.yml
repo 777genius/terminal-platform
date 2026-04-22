@@ -144,7 +144,18 @@ jobs:
       - name: Install fullscreen TUI tools
         shell: pwsh
         run: |
-          choco install -y vim less fzf
+          choco install -y vim less
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Chocolatey failed to provision one or more Windows TUI tools; continuing with explicit verification and direct fzf install."
+          }
+          $fzfBinDir = python .github/scripts/install_fzf.py --out "$env:RUNNER_TEMP\fzf-bin"
+          $fzfBinDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:PATH = "$fzfBinDir;$env:PATH"
+          foreach ($tool in @("vim", "less", "fzf")) {
+            if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+              throw "Required fullscreen TUI tool is missing from PATH after provisioning: $tool"
+            }
+          }
 
       - name: Print tool versions
         shell: pwsh

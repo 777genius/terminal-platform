@@ -814,6 +814,8 @@ fn verify_v1_workflows(
         "ci windows-v1 job",
         &[
             "windows-latest",
+            "install_fzf.py",
+            "Get-Command $tool",
             "cargo nextest run",
             "--test-threads 1",
             "-p terminal-backend-native",
@@ -2585,6 +2587,13 @@ jobs:
     name: windows-v1
     runs-on: windows-latest
     steps:
+      - run: python .github/scripts/install_fzf.py --out $env:RUNNER_TEMP\\fzf-bin
+      - run: |
+          foreach ($tool in @("vim", "less", "fzf")) {
+            if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+              throw "missing tool $tool"
+            }
+          }
       - run: zellij --version
       - run: cargo clippy --workspace --all-targets --all-features
       - run: >
