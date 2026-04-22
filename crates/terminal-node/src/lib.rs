@@ -432,13 +432,15 @@ mod tests {
     use terminal_daemon_client::LocalSocketDaemonClient;
     use terminal_domain::DegradedModeReason;
     #[cfg(unix)]
+    use terminal_testing::echo_shell_launch_spec;
+    #[cfg(unix)]
     use terminal_testing::{
         TmuxServerGuard, daemon_fixture_with_state, tmux_daemon_state, unique_tmux_session_name,
         unique_tmux_socket_name,
     };
     use terminal_testing::{
-        ZellijSessionGuard, ZellijTestLock, daemon_fixture, daemon_state, echo_shell_launch_spec,
-        unique_socket_address, unique_zellij_session_name, wait_for_daemon_ready,
+        ZellijSessionGuard, ZellijTestLock, daemon_fixture, daemon_state, unique_socket_address,
+        unique_zellij_session_name, wait_for_daemon_ready,
     };
     use tokio::time::{sleep, timeout};
 
@@ -586,12 +588,9 @@ mod tests {
         assert!(saved.iter().any(|session| session.session_id == created.session_id));
         assert_eq!(loaded.session_id, created.session_id);
         assert!(loaded.compatibility.can_restore);
-        let expected_launch =
-            cat_launch_request("shell").launch.expect("cat launch request should include launch");
-        assert_eq!(
-            loaded.launch.as_ref().map(|launch| launch.program.as_str()),
-            Some(expected_launch.program.as_str())
-        );
+        let expected_launch = cat_launch_request("shell").launch;
+        assert_eq!(loaded.launch, expected_launch);
+        assert_eq!(loaded.restore_semantics.uses_saved_launch_spec, loaded.launch.is_some());
         assert!(after_input.sequence >= ready_screen.sequence);
         assert!(after_input.surface.lines.iter().any(|line| line.text.contains("node host input")));
         assert_eq!(delta.pane_id, focused_pane_id);
