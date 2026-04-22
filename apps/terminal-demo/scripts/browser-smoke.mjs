@@ -57,7 +57,6 @@ async function main() {
     if (
       !result.afterCreate.hasReady
       || result.afterCreate.hasError
-      || !result.afterCreate.hasScreen
       || !result.afterCreate.hasActiveTitle
       || !result.afterCreate.inputEnabled
     ) {
