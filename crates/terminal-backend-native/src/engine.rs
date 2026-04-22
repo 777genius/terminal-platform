@@ -7,9 +7,8 @@ use std::{
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use terminal_backend_api::{
-    BackendError, BackendSessionSummary, CreateSessionSpec, MuxCommand, MuxCommandResult,
-    NewTabSpec, OverrideLayoutSpec, ResizePaneSpec, SendInputSpec, SendPasteSpec, ShellLaunchSpec,
-    SplitPaneSpec,
+    BackendError, BackendSessionSummary, CreateSessionSpec, NewTabSpec, OverrideLayoutSpec,
+    ResizePaneSpec, SendInputSpec, SendPasteSpec, ShellLaunchSpec, SplitPaneSpec,
 };
 use terminal_domain::{PaneId, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
@@ -24,7 +23,7 @@ const SNAPSHOT_HISTORY_LIMIT: usize = 64;
 const SPLIT_RATIO_SCALE: u16 = 10_000;
 const DEFAULT_SPLIT_RATIO_BPS: u16 = SPLIT_RATIO_SCALE / 2;
 
-pub(super) struct NativeSessionRuntime {
+pub(crate) struct NativeSessionEngine {
     session_id: SessionId,
     state: Mutex<NativeSessionState>,
     topology_tick: watch::Sender<u64>,
@@ -93,8 +92,8 @@ struct NativePtyProcess {
     child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
-impl NativeSessionRuntime {
-    pub(super) fn spawn(
+impl NativeSessionEngine {
+    pub(crate) fn spawn(
         session_id: SessionId,
         route: SessionRoute,
         spec: CreateSessionSpec,
@@ -118,11 +117,11 @@ impl NativeSessionRuntime {
         })
     }
 
-    pub(super) fn summary(&self) -> Result<BackendSessionSummary, BackendError> {
+    pub(crate) fn summary(&self) -> Result<BackendSessionSummary, BackendError> {
         Ok(self.lock_state()?.summary.clone())
     }
 
-    pub(super) fn topology_snapshot(&self) -> Result<TopologySnapshot, BackendError> {
+    pub(crate) fn topology_snapshot(&self) -> Result<TopologySnapshot, BackendError> {
         let state = self.lock_state()?;
 
         Ok(TopologySnapshot {
@@ -142,7 +141,7 @@ impl NativeSessionRuntime {
         })
     }
 
-    pub(super) fn screen_snapshot(&self, pane_id: PaneId) -> Result<ScreenSnapshot, BackendError> {
+    pub(crate) fn screen_snapshot(&self, pane_id: PaneId) -> Result<ScreenSnapshot, BackendError> {
         let state = self.lock_state()?;
         let (tab, pane) = state
             .tabs
@@ -153,7 +152,7 @@ impl NativeSessionRuntime {
         pane.render_snapshot(tab.title.clone().or_else(|| state.summary.title.clone()))
     }
 
-    pub(super) fn screen_delta(
+    pub(crate) fn screen_delta(
         &self,
         pane_id: PaneId,
         from_sequence: u64,
@@ -168,68 +167,87 @@ impl NativeSessionRuntime {
         pane.screen_delta(tab.title.clone().or_else(|| state.summary.title.clone()), from_sequence)
     }
 
-    pub(super) fn dispatch(&self, command: MuxCommand) -> Result<MuxCommandResult, BackendError> {
+    pub(crate) fn new_tab(&self, spec: NewTabSpec) -> Result<bool, BackendError> {
         let mut state = self.lock_state()?;
-
-        let (changed, surface_updates) = match command {
-            MuxCommand::NewTab(spec) => (dispatch_new_tab(&mut state, spec)?, Vec::new()),
-            MuxCommand::SplitPane(spec) => (dispatch_split_pane(&mut state, spec)?, Vec::new()),
-            MuxCommand::FocusTab { tab_id } => {
-                (dispatch_focus_tab(&mut state, tab_id)?, Vec::new())
-            }
-            MuxCommand::RenameTab { tab_id, title } => {
-                dispatch_rename_tab(&mut state, tab_id, title)?
-            }
-            MuxCommand::FocusPane { pane_id } => {
-                (dispatch_focus_pane(&mut state, pane_id)?, Vec::new())
-            }
-            MuxCommand::ClosePane { pane_id } => {
-                (dispatch_close_pane(&mut state, pane_id)?, Vec::new())
-            }
-            MuxCommand::CloseTab { tab_id } => {
-                (dispatch_close_tab(&mut state, tab_id)?, Vec::new())
-            }
-            MuxCommand::ResizePane(spec) => {
-                let pane_id = spec.pane_id;
-                let changed = dispatch_resize_pane(&mut state, spec)?;
-                let surface_updates = if changed {
-                    state
-                        .tabs
-                        .iter()
-                        .find(|tab| tab.contains_pane(pane_id))
-                        .map_or_else(Vec::new, NativeTabRuntime::pane_ids)
-                } else {
-                    Vec::new()
-                };
-                (changed, surface_updates)
-            }
-            MuxCommand::OverrideLayout(spec) => dispatch_override_layout(&mut state, spec)?,
-            MuxCommand::SendInput(spec) => (dispatch_send_input(&state, spec)?, Vec::new()),
-            MuxCommand::SendPaste(spec) => (dispatch_send_paste(&state, spec)?, Vec::new()),
-            MuxCommand::Detach | MuxCommand::SaveSession => {
-                return Err(BackendError::unsupported(
-                    "native mux command is not wired in v1 start phase",
-                    terminal_domain::DegradedModeReason::NotYetImplemented,
-                ));
-            }
-        };
-
-        if changed {
-            bump_watch(&self.topology_tick);
-        }
-        for pane_id in surface_updates {
-            if let Some(pane) = state.tabs.iter().find_map(|tab| tab.pane(pane_id)) {
-                pane.mark_surface_dirty();
-            }
-        }
-        Ok(MuxCommandResult { changed })
+        let changed = dispatch_new_tab(&mut state, spec)?;
+        self.finish_mutation(&state, changed, Vec::new());
+        Ok(changed)
     }
 
-    pub(super) fn subscribe_topology(&self) -> watch::Receiver<u64> {
+    pub(crate) fn split_pane(&self, spec: SplitPaneSpec) -> Result<bool, BackendError> {
+        let mut state = self.lock_state()?;
+        let changed = dispatch_split_pane(&mut state, spec)?;
+        self.finish_mutation(&state, changed, Vec::new());
+        Ok(changed)
+    }
+
+    pub(crate) fn focus_tab(&self, tab_id: TabId) -> Result<bool, BackendError> {
+        let mut state = self.lock_state()?;
+        let changed = dispatch_focus_tab(&mut state, tab_id)?;
+        self.finish_mutation(&state, changed, Vec::new());
+        Ok(changed)
+    }
+
+    pub(crate) fn rename_tab(&self, tab_id: TabId, title: String) -> Result<bool, BackendError> {
+        let mut state = self.lock_state()?;
+        let (changed, surface_updates) = dispatch_rename_tab(&mut state, tab_id, title)?;
+        self.finish_mutation(&state, changed, surface_updates);
+        Ok(changed)
+    }
+
+    pub(crate) fn focus_pane(&self, pane_id: PaneId) -> Result<bool, BackendError> {
+        let mut state = self.lock_state()?;
+        let changed = dispatch_focus_pane(&mut state, pane_id)?;
+        self.finish_mutation(&state, changed, Vec::new());
+        Ok(changed)
+    }
+
+    pub(crate) fn close_pane(&self, pane_id: PaneId) -> Result<bool, BackendError> {
+        let mut state = self.lock_state()?;
+        let changed = dispatch_close_pane(&mut state, pane_id)?;
+        self.finish_mutation(&state, changed, Vec::new());
+        Ok(changed)
+    }
+
+    pub(crate) fn close_tab(&self, tab_id: TabId) -> Result<bool, BackendError> {
+        let mut state = self.lock_state()?;
+        let changed = dispatch_close_tab(&mut state, tab_id)?;
+        self.finish_mutation(&state, changed, Vec::new());
+        Ok(changed)
+    }
+
+    pub(crate) fn resize_pane(&self, spec: ResizePaneSpec) -> Result<bool, BackendError> {
+        let mut state = self.lock_state()?;
+        let pane_id = spec.pane_id;
+        let changed = dispatch_resize_pane(&mut state, spec)?;
+        let surface_updates =
+            if changed { collect_surface_updates(&state, pane_id) } else { Vec::new() };
+        self.finish_mutation(&state, changed, surface_updates);
+        Ok(changed)
+    }
+
+    pub(crate) fn override_layout(&self, spec: OverrideLayoutSpec) -> Result<bool, BackendError> {
+        let mut state = self.lock_state()?;
+        let (changed, surface_updates) = dispatch_override_layout(&mut state, spec)?;
+        self.finish_mutation(&state, changed, surface_updates);
+        Ok(changed)
+    }
+
+    pub(crate) fn send_input(&self, spec: SendInputSpec) -> Result<bool, BackendError> {
+        let state = self.lock_state()?;
+        dispatch_send_input(&state, spec)
+    }
+
+    pub(crate) fn send_paste(&self, spec: SendPasteSpec) -> Result<bool, BackendError> {
+        let state = self.lock_state()?;
+        dispatch_send_paste(&state, spec)
+    }
+
+    pub(crate) fn subscribe_topology(&self) -> watch::Receiver<u64> {
         self.topology_tick.subscribe()
     }
 
-    pub(super) fn subscribe_pane_surface(
+    pub(crate) fn subscribe_pane_surface(
         &self,
         pane_id: PaneId,
     ) -> Result<watch::Receiver<u64>, BackendError> {
@@ -241,6 +259,22 @@ impl NativeSessionRuntime {
             .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
 
         Ok(pane.surface_tick.subscribe())
+    }
+
+    fn finish_mutation(
+        &self,
+        state: &NativeSessionState,
+        changed: bool,
+        surface_updates: Vec<PaneId>,
+    ) {
+        if changed {
+            bump_watch(&self.topology_tick);
+        }
+        for pane_id in surface_updates {
+            if let Some(pane) = state.tabs.iter().find_map(|tab| tab.pane(pane_id)) {
+                pane.mark_surface_dirty();
+            }
+        }
     }
 
     fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, NativeSessionState>, BackendError> {
@@ -744,6 +778,14 @@ fn partition_dimension_by_ratio(total: u16, ratio_bps: u16) -> (u16, u16) {
 
 fn reflow_tab_layout(tab: &NativeTabRuntime, rows: u16, cols: u16) -> Result<(), BackendError> {
     apply_pane_layout(&tab.root, tab, rows.max(1), cols.max(1))
+}
+
+fn collect_surface_updates(state: &NativeSessionState, pane_id: PaneId) -> Vec<PaneId> {
+    state
+        .tabs
+        .iter()
+        .find(|tab| tab.contains_pane(pane_id))
+        .map_or_else(Vec::new, NativeTabRuntime::pane_ids)
 }
 
 fn apply_pane_layout(
