@@ -15,6 +15,7 @@ const CONTRIBUTING_PATH: &str = "CONTRIBUTING.md";
 const SECURITY_PATH: &str = "SECURITY.md";
 const CODE_OF_CONDUCT_PATH: &str = "CODE_OF_CONDUCT.md";
 const PULL_REQUEST_TEMPLATE_PATH: &str = ".github/pull_request_template.md";
+const WORKSPACE_MANIFEST_PATH: &str = "Cargo.toml";
 const ROOT_README_PATH: &str = "README.md";
 const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README.md";
 const NODE_PACKAGE_STAGE_SCRIPT_PATH: &str =
@@ -42,6 +43,7 @@ const RELEASE_SUMMARY_TEMPLATE_PATH: &str = "docs/terminal/v1-release-summary-te
 const RELEASE_PLZ_CONFIG_PATH: &str = "release-plz.toml";
 const DENY_CONFIG_PATH: &str = "deny.toml";
 const FUZZ_DIR: &str = "fuzz";
+const VENDORED_PORTABLE_PTY_PSEUDOCON_PATH: &str = "vendor/portable-pty/src/win/psuedocon.rs";
 const MANUAL_RUN_TEMPLATE_DATE_PLACEHOLDER: &str = "Date: YYYY-MM-DD";
 const MANUAL_RUN_TEMPLATE_OS_PLACEHOLDER: &str = "OS: macOS 15.4 / Ubuntu 24.04 / Windows 11 24H2";
 const MANUAL_RUN_TEMPLATE_CHECKLIST_PLACEHOLDER: &str =
@@ -355,6 +357,7 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let security = workspace_root.join(SECURITY_PATH);
     let code_of_conduct = workspace_root.join(CODE_OF_CONDUCT_PATH);
     let pull_request_template = workspace_root.join(PULL_REQUEST_TEMPLATE_PATH);
+    let workspace_manifest = workspace_root.join(WORKSPACE_MANIFEST_PATH);
     let root_readme = workspace_root.join(ROOT_README_PATH);
     let node_package_readme = workspace_root.join(NODE_PACKAGE_README_PATH);
     let node_package_stage_script = workspace_root.join(NODE_PACKAGE_STAGE_SCRIPT_PATH);
@@ -383,12 +386,14 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let release_plz_config = workspace_root.join(RELEASE_PLZ_CONFIG_PATH);
     let deny_config = workspace_root.join(DENY_CONFIG_PATH);
     let fuzz_dir = workspace_root.join(FUZZ_DIR);
+    let vendored_portable_pty_psuedocon = workspace_root.join(VENDORED_PORTABLE_PTY_PSEUDOCON_PATH);
 
     assert_value(license.is_file(), "root LICENSE is missing")?;
     assert_value(contributing.is_file(), "root CONTRIBUTING.md is missing")?;
     assert_value(security.is_file(), "root SECURITY.md is missing")?;
     assert_value(code_of_conduct.is_file(), "root CODE_OF_CONDUCT.md is missing")?;
     assert_value(pull_request_template.is_file(), "pull request template is missing")?;
+    assert_value(workspace_manifest.is_file(), "workspace Cargo.toml is missing")?;
     assert_value(root_readme.is_file(), "root README is missing")?;
     assert_value(node_package_readme.is_file(), "Node package README is missing")?;
     assert_value(node_package_stage_script.is_file(), "Node package stage script is missing")?;
@@ -423,7 +428,13 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(release_plz_config.is_file(), "release-plz config is missing")?;
     assert_value(deny_config.is_file(), "cargo-deny config is missing")?;
     assert_value(fuzz_dir.is_dir(), "fuzz directory is missing")?;
+    assert_value(
+        vendored_portable_pty_psuedocon.is_file(),
+        "vendored portable-pty Windows ConPTY source is missing",
+    )?;
 
+    let workspace_manifest_contents = fs::read_to_string(&workspace_manifest)
+        .map_err(|error| format!("failed to read {} - {error}", workspace_manifest.display()))?;
     let root_readme_contents = fs::read_to_string(&root_readme)
         .map_err(|error| format!("failed to read {} - {error}", root_readme.display()))?;
     let contributing_contents = fs::read_to_string(&contributing)
@@ -498,6 +509,10 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         .map_err(|error| format!("failed to read {} - {error}", deny_config.display()))?;
     let pull_request_template_contents = fs::read_to_string(&pull_request_template)
         .map_err(|error| format!("failed to read {} - {error}", pull_request_template.display()))?;
+    let vendored_portable_pty_psuedocon_contents =
+        fs::read_to_string(&vendored_portable_pty_psuedocon).map_err(|error| {
+            format!("failed to read {} - {error}", vendored_portable_pty_psuedocon.display())
+        })?;
 
     for expected_line in [
         "- `macOS + Linux` - `Native + tmux + Zellij`",
@@ -583,6 +598,10 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
         &release_plz_workflow_contents,
     )?;
     verify_v1_release_configs(&release_plz_config_contents, &deny_config_contents)?;
+    verify_windows_conpty_vendor_patch(
+        &workspace_manifest_contents,
+        &vendored_portable_pty_psuedocon_contents,
+    )?;
     assert_contains_all(
         &contributing_contents,
         "contributing v1 package proof",
@@ -893,6 +912,53 @@ fn verify_v1_release_configs(release_plz_config: &str, deny_config: &str) -> Res
             "unknown-registry = \"deny\"",
             "unknown-git = \"deny\"",
         ],
+    )?;
+
+    Ok(())
+}
+
+fn verify_windows_conpty_vendor_patch(
+    workspace_manifest: &str,
+    vendored_psuedocon: &str,
+) -> Result<(), String> {
+    assert_contains_all(
+        workspace_manifest,
+        "workspace manifest Windows ConPTY patch",
+        &["[patch.crates-io]", "portable-pty = { path = \"vendor/portable-pty\" }"],
+    )?;
+    assert_contains_all(
+        vendored_psuedocon,
+        "vendored portable-pty Windows ConPTY patch",
+        &[
+            "(CONPTY.CreatePseudoConsole)(",
+            "Terminal Platform v1 intentionally",
+            "flag 0 here",
+            "plain UTF-8/VT I/O without",
+        ],
+    )?;
+
+    let create_call =
+        section_between(vendored_psuedocon, "(CONPTY.CreatePseudoConsole)(", "&mut con,")
+            .ok_or_else(|| {
+                "vendored portable-pty Windows ConPTY patch is missing CreatePseudoConsole call"
+                    .to_string()
+            })?;
+
+    assert_value(
+        create_call.contains("0,"),
+        "vendored portable-pty Windows ConPTY patch must call CreatePseudoConsole with dwFlags = 0",
+    )?;
+    assert_value(
+        !create_call.contains("PSUEDOCONSOLE_INHERIT_CURSOR"),
+        "vendored portable-pty Windows ConPTY patch must not enable PSEUDOCONSOLE_INHERIT_CURSOR in CreatePseudoConsole",
+    )?;
+    assert_value(
+        !create_call.contains("PSEUDOCONSOLE_RESIZE_QUIRK"),
+        "vendored portable-pty Windows ConPTY patch must not enable PSEUDOCONSOLE_RESIZE_QUIRK in CreatePseudoConsole",
+    )?;
+    assert_value(
+        !create_call.contains("PSEUDOCONSOLE_WIN32_INPUT_MODE"),
+        "vendored portable-pty Windows ConPTY patch must not enable PSEUDOCONSOLE_WIN32_INPUT_MODE in CreatePseudoConsole",
     )?;
 
     Ok(())
@@ -1792,7 +1858,8 @@ fn assert_value(value: bool, message: &str) -> Result<(), String> {
 mod tests {
     use super::{
         verify_manual_qa_scope, verify_node_package_scripts, verify_recorded_passes,
-        verify_v1_release_configs, verify_v1_workflows, verify_windows_zellij_package_smoke,
+        verify_v1_release_configs, verify_v1_workflows, verify_windows_conpty_vendor_patch,
+        verify_windows_zellij_package_smoke,
     };
     use std::{
         fs,
@@ -2402,6 +2469,48 @@ none
     }
 
     #[test]
+    fn verify_windows_conpty_vendor_patch_accepts_expected_contract() {
+        if let Err(error) = verify_windows_conpty_vendor_patch(
+            VALID_WORKSPACE_MANIFEST,
+            VALID_VENDORED_PORTABLE_PTY_PSEUDOCON,
+        ) {
+            panic!("expected Windows ConPTY vendor patch to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_windows_conpty_vendor_patch_rejects_missing_workspace_patch() {
+        let invalid_manifest = VALID_WORKSPACE_MANIFEST
+            .replace("[patch.crates-io]\nportable-pty = { path = \"vendor/portable-pty\" }\n", "");
+        let error = match verify_windows_conpty_vendor_patch(
+            &invalid_manifest,
+            VALID_VENDORED_PORTABLE_PTY_PSEUDOCON,
+        ) {
+            Ok(()) => panic!("expected missing workspace patch to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("[patch.crates-io]"), "got: {error}");
+    }
+
+    #[test]
+    fn verify_windows_conpty_vendor_patch_rejects_undocumented_flags() {
+        let invalid_psuedocon = VALID_VENDORED_PORTABLE_PTY_PSEUDOCON.replace(
+            "    0,\n",
+            "    PSUEDOCONSOLE_INHERIT_CURSOR | PSEUDOCONSOLE_RESIZE_QUIRK,\n",
+        );
+        let error = match verify_windows_conpty_vendor_patch(
+            VALID_WORKSPACE_MANIFEST,
+            &invalid_psuedocon,
+        ) {
+            Ok(()) => panic!("expected undocumented Windows ConPTY flags to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("dwFlags = 0"), "got: {error}");
+    }
+
+    #[test]
     fn verify_node_package_scripts_accepts_expected_guardrails() {
         if let Err(error) = verify_node_package_scripts(
             VALID_NODE_PACKAGE_STAGE_SCRIPT,
@@ -2494,6 +2603,27 @@ throw new Error(`Refusing to stage package into unsafe output directory: ${outDi
 options.out = readFlagValue(argv, index, arg);
 options.addon = readFlagValue(argv, index, arg);
 throw new Error(`Missing value for ${flag}`);
+"#;
+
+    const VALID_WORKSPACE_MANIFEST: &str = r#"
+[workspace]
+members = []
+
+[patch.crates-io]
+portable-pty = { path = "vendor/portable-pty" }
+"#;
+
+    const VALID_VENDORED_PORTABLE_PTY_PSEUDOCON: &str = r#"
+(CONPTY.CreatePseudoConsole)(
+    size,
+    input.as_raw_handle() as _,
+    output.as_raw_handle() as _,
+    0,
+    &mut con,
+)
+// Terminal Platform v1 intentionally
+// flag 0 here
+// plain UTF-8/VT I/O without
 "#;
 
     const VALID_NODE_PACKAGE_BUILD_SCRIPT: &str = r#"

@@ -163,6 +163,7 @@ Quality gates currently include:
 - `cargo fmt`
 - `cargo clippy`
 - `cargo nextest`
+- a vendored Windows `portable-pty` guardrail that pins `CreatePseudoConsole(..., 0, ...)` until broader flag behavior is proven in hosted CI
 - fuzz baseline runs under `fuzz/`
 - staged and installed package smoke for Node
 - staged and installed package smoke for the C ABI

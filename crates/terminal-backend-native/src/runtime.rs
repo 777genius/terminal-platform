@@ -1099,8 +1099,9 @@ fn respond_to_cursor_inherit_query(
     #[cfg(windows)]
     {
         // CreatePseudoConsole warns that inheriting the cursor can deadlock unless the host
-        // answers the cursor-position query received on the output pipe. portable-pty's Windows
-        // ConPTY path enables cursor inherit internally, so keep the pipe responsive here.
+        // answers the cursor-position query received on the output pipe. v1 now pins the
+        // vendored portable-pty path to dwFlags = 0, but keep this safeguard so unexpected
+        // ConPTY hosts or future vendor drift do not wedge the pipe.
         if chunk.windows(4).any(|window| window == b"\x1b[6n")
             && let Ok(mut writer) = writer.lock()
         {
@@ -1116,14 +1117,7 @@ fn respond_to_cursor_inherit_query(
 fn normalize_pty_input(text: &str) -> Cow<'_, str> {
     #[cfg(windows)]
     {
-        // ConPTY consumes UTF-8 text / VT sequences, and Microsoft's examples submit Enter as
-        // `\n`. Normalize CRLF / CR here so higher-level host surfaces do not have to leak that
-        // Windows-specific transport detail into their contracts.
-        if text.as_bytes().contains(&b'\r') {
-            Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
-        } else {
-            Cow::Borrowed(text)
-        }
+        normalize_windows_pty_input(text)
     }
 
     #[cfg(not(windows))]
@@ -1132,7 +1126,48 @@ fn normalize_pty_input(text: &str) -> Cow<'_, str> {
     }
 }
 
+#[cfg(any(test, windows))]
+fn normalize_windows_pty_input(text: &str) -> Cow<'_, str> {
+    if !text.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
+        return Cow::Borrowed(text);
+    }
+
+    let mut normalized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\r' => {
+                if matches!(chars.peek(), Some('\n')) {
+                    chars.next();
+                }
+                normalized.push('\r');
+            }
+            '\n' => normalized.push('\r'),
+            _ => normalized.push(ch),
+        }
+    }
+
+    Cow::Owned(normalized)
+}
+
 fn bump_watch(sender: &watch::Sender<u64>) {
     let next = sender.borrow().wrapping_add(1);
     let _ = sender.send(next);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_windows_pty_input;
+
+    #[test]
+    fn normalize_windows_pty_input_preserves_plain_text() {
+        assert_eq!(normalize_windows_pty_input("plain text").as_ref(), "plain text");
+    }
+
+    #[test]
+    fn normalize_windows_pty_input_collapses_newline_variants_to_carriage_return() {
+        assert_eq!(normalize_windows_pty_input("alpha\r\nbeta").as_ref(), "alpha\rbeta");
+        assert_eq!(normalize_windows_pty_input("alpha\nbeta").as_ref(), "alpha\rbeta");
+        assert_eq!(normalize_windows_pty_input("alpha\rbeta").as_ref(), "alpha\rbeta");
+    }
 }
