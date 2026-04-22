@@ -1,7 +1,4 @@
-use std::{
-    thread,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 #[cfg(any(unix, windows))]
 use std::{
@@ -10,14 +7,15 @@ use std::{
 };
 
 #[cfg(unix)]
-use std::{process::Command, sync::Arc};
+use std::{process::Command, sync::Arc, thread};
 
 #[cfg(unix)]
 use terminal_application::BackendCatalog;
 use terminal_backend_api::{
-    CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, OverrideLayoutSpec, ResizePaneSpec,
-    SendInputSpec, ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
+    CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SubscriptionSpec,
 };
+#[cfg(unix)]
+use terminal_backend_api::{MuxBackendPort, OverrideLayoutSpec, ResizePaneSpec, SplitPaneSpec};
 #[cfg(unix)]
 use terminal_backend_native::NativeBackend;
 #[cfg(unix)]
@@ -26,9 +24,9 @@ use terminal_backend_tmux::TmuxBackend;
 use terminal_backend_zellij::ZellijBackend;
 #[cfg(unix)]
 use terminal_daemon::TerminalDaemonState;
-use terminal_domain::{
-    BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
-};
+use terminal_domain::BackendKind;
+#[cfg(unix)]
+use terminal_domain::{CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR};
 #[cfg(unix)]
 use terminal_domain::{
     CURRENT_SAVED_SESSION_FORMAT_VERSION, SavedSessionCompatibilityStatus, SavedSessionManifest,
@@ -46,9 +44,11 @@ use terminal_persistence::SqliteSessionStore;
 use terminal_projection::{ProjectionSource, ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{DaemonPhase, SubscriptionEvent};
 use terminal_testing::{
-    ZellijSessionGuard, ZellijTestLock, daemon_fixture, daemon_fixture_with_state, daemon_state,
-    echo_shell_launch_spec, isolated_daemon_state, unique_sqlite_path, unique_zellij_session_name,
+    ZellijSessionGuard, ZellijTestLock, daemon_fixture, daemon_state, echo_shell_launch_spec,
+    unique_zellij_session_name,
 };
+#[cfg(unix)]
+use terminal_testing::{daemon_fixture_with_state, isolated_daemon_state, unique_sqlite_path};
 use tokio::time::{sleep, timeout};
 
 #[test]
