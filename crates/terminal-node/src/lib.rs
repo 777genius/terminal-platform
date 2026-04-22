@@ -435,16 +435,16 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+    use terminal_daemon::spawn_local_socket_server;
     use terminal_daemon_client::LocalSocketDaemonClient;
     use terminal_domain::DegradedModeReason;
     #[cfg(unix)]
     use terminal_testing::{
-        TmuxServerGuard, daemon_fixture_with_state, tmux_daemon_state, unique_tmux_session_name,
+        TmuxServerGuard, daemon_fixture_with_daemon, tmux_daemon, unique_tmux_session_name,
         unique_tmux_socket_name,
     };
     use terminal_testing::{
-        ZellijSessionGuard, ZellijTestLock, daemon_fixture, daemon_state, echo_shell_launch_spec,
+        ZellijSessionGuard, ZellijTestLock, daemon, daemon_fixture, echo_shell_launch_spec,
         unique_socket_address, unique_zellij_session_name, wait_for_daemon_ready,
     };
     use tokio::time::{sleep, timeout};
@@ -453,7 +453,7 @@ mod tests {
         NodeBackendKind, NodeCreateSessionRequest, NodeHostClient, NodeMuxCommand,
         NodeNewTabCommand, NodePaneTreeNode, NodeProjectionSource, NodeRenameTabCommand,
         NodeSendInputCommand, NodeSubscriptionEvent, NodeSubscriptionSpec,
-        export_typescript_bindings,
+        export_typescript_bindings_to,
     };
 
     #[test]
@@ -621,9 +621,8 @@ mod tests {
         let session_name = unique_tmux_session_name("workspace");
         let _tmux =
             TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux server should start");
-        let fixture =
-            daemon_fixture_with_state("terminal-node-tmux", tmux_daemon_state(&socket_name))
-                .expect("fixture should start");
+        let fixture = daemon_fixture_with_daemon("terminal-node-tmux", tmux_daemon(&socket_name))
+            .expect("fixture should start");
         let node = NodeHostClient::new(fixture.client.address().clone());
 
         let discovered = node
@@ -1560,7 +1559,7 @@ mod tests {
         let mut last_error = None;
 
         for attempt in 0..attempts {
-            match spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone()) {
+            match spawn_local_socket_server(daemon(), address.clone()) {
                 Ok(server) => return Ok(server),
                 Err(error) if retryable_kinds.contains(&error.kind()) && attempt + 1 < attempts => {
                     last_error = Some(error);

@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use uuid::Uuid;
-
 use crate::{BackendKind, SessionId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,21 +25,6 @@ pub struct SessionRoute {
 const NATIVE_SESSION_NAMESPACE: &str = "native_session";
 
 #[must_use]
-pub fn imported_session_id(route: &SessionRoute) -> Option<SessionId> {
-    if route.authority != RouteAuthority::ImportedForeign {
-        return None;
-    }
-
-    let external = route.external.as_ref()?;
-    let fingerprint = format!(
-        "terminal-platform/imported/{:?}/{}/{}",
-        route.backend, external.namespace, external.value
-    );
-
-    Some(SessionId::from(Uuid::new_v5(&Uuid::NAMESPACE_URL, fingerprint.as_bytes())))
-}
-
-#[must_use]
 pub fn local_native_route(session_id: SessionId) -> SessionRoute {
     SessionRoute {
         backend: BackendKind::Native,
@@ -64,7 +47,7 @@ pub fn local_native_session_id(route: &SessionRoute) -> Option<SessionId> {
         return None;
     }
 
-    Uuid::parse_str(&external.value).ok().map(SessionId::from)
+    uuid::Uuid::parse_str(&external.value).ok().map(SessionId::from)
 }
 
 #[cfg(test)]

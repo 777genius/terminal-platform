@@ -24,8 +24,6 @@ use std::{
 #[cfg(windows)]
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 #[cfg(unix)]
-use terminal_application::BackendCatalog;
-#[cfg(unix)]
 use terminal_backend_api::MuxBackendPort;
 use terminal_backend_api::ShellLaunchSpec;
 #[cfg(unix)]
@@ -34,23 +32,23 @@ use terminal_backend_native::NativeBackend;
 use terminal_backend_tmux::TmuxBackend;
 #[cfg(unix)]
 use terminal_backend_zellij::ZellijBackend;
-use terminal_daemon::{
-    LocalSocketServerHandle, TerminalDaemon, TerminalDaemonState, spawn_local_socket_server,
-};
+use terminal_daemon::{LocalSocketServerHandle, TerminalDaemon, spawn_local_socket_server};
 use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_persistence::SqliteSessionStore;
 use terminal_protocol::LocalSocketAddress;
+#[cfg(unix)]
+use terminal_runtime::{BackendCatalog, TerminalRuntime};
 
 #[must_use]
-pub fn daemon_state() -> TerminalDaemonState {
-    TerminalDaemonState::default()
+pub fn daemon() -> TerminalDaemon {
+    TerminalDaemon::default()
 }
 
 #[must_use]
-pub fn isolated_daemon_state(label: &str) -> TerminalDaemonState {
+pub fn isolated_daemon(label: &str) -> TerminalDaemon {
     let store = SqliteSessionStore::open(unique_sqlite_path(label))
         .expect("isolated sqlite session store should open");
-    TerminalDaemonState::with_default_persistence(store)
+    TerminalDaemon::with_persistence(store)
 }
 
 pub struct DaemonFixture {
@@ -86,15 +84,15 @@ pub fn unique_sqlite_path(label: &str) -> PathBuf {
 }
 
 pub fn daemon_fixture(label: &str) -> std::io::Result<DaemonFixture> {
-    daemon_fixture_with_state(label, TerminalDaemonState::default())
+    daemon_fixture_with_daemon(label, TerminalDaemon::default())
 }
 
-pub fn daemon_fixture_with_state(
+pub fn daemon_fixture_with_daemon(
     label: &str,
-    state: TerminalDaemonState,
+    daemon: TerminalDaemon,
 ) -> std::io::Result<DaemonFixture> {
     let address = unique_socket_address(label);
-    let server = spawn_local_socket_server(TerminalDaemon::new(state), address.clone())?;
+    let server = spawn_local_socket_server(daemon, address.clone())?;
     let client = LocalSocketDaemonClient::new(address);
 
     Ok(DaemonFixture { client, server })
@@ -131,12 +129,12 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
 #[cfg(unix)]
 #[must_use]
-pub fn tmux_daemon_state(socket_name: &str) -> TerminalDaemonState {
-    TerminalDaemonState::new(BackendCatalog::new([
+pub fn tmux_daemon(socket_name: &str) -> TerminalDaemon {
+    TerminalDaemon::new(TerminalRuntime::new(BackendCatalog::new([
         Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
         Arc::new(TmuxBackend::with_socket_name(socket_name)) as Arc<dyn MuxBackendPort>,
         Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>,
-    ]))
+    ])))
 }
 
 #[cfg(unix)]

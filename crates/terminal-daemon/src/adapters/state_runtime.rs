@@ -4,36 +4,34 @@ use terminal_backend_api::{
 };
 use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
-use terminal_protocol::Handshake;
+use terminal_protocol::{DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion};
+use terminal_runtime::{RuntimeHandshake, RuntimePhase, TerminalRuntime};
 
-use crate::{
-    TerminalDaemonState,
-    application::{
-        RuntimePrunedSavedSessions, RuntimeSavedSessionRecord, RuntimeSavedSessionSummary,
-        TerminalDaemonActiveSessionPort, TerminalDaemonCatalogPort,
-        TerminalDaemonSavedSessionsPort, TerminalDaemonSubscriptionPort,
-    },
+use crate::application::{
+    RuntimePrunedSavedSessions, RuntimeSavedSessionRecord, RuntimeSavedSessionSummary,
+    TerminalDaemonActiveSessionPort, TerminalDaemonCatalogPort, TerminalDaemonSavedSessionsPort,
+    TerminalDaemonSubscriptionPort,
 };
 
 #[derive(Clone, Copy)]
-pub struct TerminalDaemonStateRuntimeAdapter<'a> {
-    state: &'a TerminalDaemonState,
+pub struct TerminalRuntimeAdapter<'a> {
+    runtime: &'a TerminalRuntime,
 }
 
-impl<'a> TerminalDaemonStateRuntimeAdapter<'a> {
+impl<'a> TerminalRuntimeAdapter<'a> {
     #[must_use]
-    pub fn new(state: &'a TerminalDaemonState) -> Self {
-        Self { state }
+    pub fn new(runtime: &'a TerminalRuntime) -> Self {
+        Self { runtime }
     }
 }
 
-impl TerminalDaemonCatalogPort for TerminalDaemonStateRuntimeAdapter<'_> {
+impl TerminalDaemonCatalogPort for TerminalRuntimeAdapter<'_> {
     fn handshake(&self) -> Handshake {
-        self.state.handshake()
+        map_runtime_handshake(self.runtime.handshake())
     }
 
     fn list_sessions(&self) -> Vec<BackendSessionSummary> {
-        self.state.list_sessions()
+        self.runtime.list_sessions()
     }
 
     async fn create_session(
@@ -41,21 +39,21 @@ impl TerminalDaemonCatalogPort for TerminalDaemonStateRuntimeAdapter<'_> {
         backend: BackendKind,
         spec: CreateSessionSpec,
     ) -> Result<BackendSessionSummary, BackendError> {
-        self.state.create_session(backend, spec).await
+        self.runtime.create_session(backend, spec).await
     }
 
     async fn discover_sessions(
         &self,
         backend: BackendKind,
     ) -> Result<Vec<DiscoveredSession>, BackendError> {
-        self.state.discover_sessions(backend).await
+        self.runtime.discover_sessions(backend).await
     }
 
     async fn backend_capabilities(
         &self,
         backend: BackendKind,
     ) -> Result<BackendCapabilities, BackendError> {
-        self.state.backend_capabilities(backend).await
+        self.runtime.backend_capabilities(backend).await
     }
 
     async fn import_session(
@@ -63,13 +61,13 @@ impl TerminalDaemonCatalogPort for TerminalDaemonStateRuntimeAdapter<'_> {
         route: SessionRoute,
         title: Option<String>,
     ) -> Result<BackendSessionSummary, BackendError> {
-        self.state.import_session(route, title).await
+        self.runtime.import_session(route, title).await
     }
 }
 
-impl TerminalDaemonSavedSessionsPort for TerminalDaemonStateRuntimeAdapter<'_> {
+impl TerminalDaemonSavedSessionsPort for TerminalRuntimeAdapter<'_> {
     fn list_saved_sessions(&self) -> Result<Vec<RuntimeSavedSessionSummary>, BackendError> {
-        self.state
+        self.runtime
             .list_saved_sessions()
             .map(|sessions| sessions.into_iter().map(map_saved_session_summary).collect())
     }
@@ -78,18 +76,18 @@ impl TerminalDaemonSavedSessionsPort for TerminalDaemonStateRuntimeAdapter<'_> {
         &self,
         session_id: SessionId,
     ) -> Result<RuntimeSavedSessionRecord, BackendError> {
-        self.state.saved_session(session_id).map(map_saved_session_record)
+        self.runtime.saved_session(session_id).map(map_saved_session_record)
     }
 
     fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {
-        self.state.delete_saved_session(session_id)
+        self.runtime.delete_saved_session(session_id)
     }
 
     fn prune_saved_sessions(
         &self,
         keep_latest: usize,
     ) -> Result<RuntimePrunedSavedSessions, BackendError> {
-        self.state.prune_saved_sessions(keep_latest).map(|pruned| RuntimePrunedSavedSessions {
+        self.runtime.prune_saved_sessions(keep_latest).map(|pruned| RuntimePrunedSavedSessions {
             deleted_count: pruned.deleted_count,
             kept_count: pruned.kept_count,
         })
@@ -99,16 +97,16 @@ impl TerminalDaemonSavedSessionsPort for TerminalDaemonStateRuntimeAdapter<'_> {
         &self,
         session_id: SessionId,
     ) -> Result<BackendSessionSummary, BackendError> {
-        self.state.restore_saved_session(session_id).await
+        self.runtime.restore_saved_session(session_id).await
     }
 }
 
-impl TerminalDaemonActiveSessionPort for TerminalDaemonStateRuntimeAdapter<'_> {
+impl TerminalDaemonActiveSessionPort for TerminalRuntimeAdapter<'_> {
     async fn topology_snapshot(
         &self,
         session_id: SessionId,
     ) -> Result<TopologySnapshot, BackendError> {
-        self.state.topology_snapshot(session_id).await
+        self.runtime.topology_snapshot(session_id).await
     }
 
     async fn screen_snapshot(
@@ -116,7 +114,7 @@ impl TerminalDaemonActiveSessionPort for TerminalDaemonStateRuntimeAdapter<'_> {
         session_id: SessionId,
         pane_id: PaneId,
     ) -> Result<ScreenSnapshot, BackendError> {
-        self.state.screen_snapshot(session_id, pane_id).await
+        self.runtime.screen_snapshot(session_id, pane_id).await
     }
 
     async fn screen_delta(
@@ -125,7 +123,7 @@ impl TerminalDaemonActiveSessionPort for TerminalDaemonStateRuntimeAdapter<'_> {
         pane_id: PaneId,
         from_sequence: u64,
     ) -> Result<ScreenDelta, BackendError> {
-        self.state.screen_delta(session_id, pane_id, from_sequence).await
+        self.runtime.screen_delta(session_id, pane_id, from_sequence).await
     }
 
     async fn dispatch(
@@ -133,17 +131,44 @@ impl TerminalDaemonActiveSessionPort for TerminalDaemonStateRuntimeAdapter<'_> {
         session_id: SessionId,
         command: MuxCommand,
     ) -> Result<MuxCommandResult, BackendError> {
-        self.state.dispatch(session_id, command).await
+        self.runtime.dispatch(session_id, command).await
     }
 }
 
-impl TerminalDaemonSubscriptionPort for TerminalDaemonStateRuntimeAdapter<'_> {
+impl TerminalDaemonSubscriptionPort for TerminalRuntimeAdapter<'_> {
     async fn open_subscription(
         &self,
         session_id: SessionId,
         spec: SubscriptionSpec,
     ) -> Result<BackendSubscription, BackendError> {
-        self.state.open_subscription(session_id, spec).await
+        self.runtime.open_subscription(session_id, spec).await
+    }
+}
+
+fn map_runtime_handshake(handshake: RuntimeHandshake) -> Handshake {
+    Handshake {
+        protocol_version: ProtocolVersion {
+            major: handshake.protocol_version.major,
+            minor: handshake.protocol_version.minor,
+        },
+        binary_version: handshake.binary_version,
+        daemon_phase: match handshake.daemon_phase {
+            RuntimePhase::Starting => DaemonPhase::Starting,
+            RuntimePhase::Ready => DaemonPhase::Ready,
+            RuntimePhase::Degraded => DaemonPhase::Degraded,
+        },
+        capabilities: DaemonCapabilities {
+            request_reply: handshake.capabilities.request_reply,
+            topology_subscriptions: handshake.capabilities.topology_subscriptions,
+            pane_subscriptions: handshake.capabilities.pane_subscriptions,
+            backend_discovery: handshake.capabilities.backend_discovery,
+            backend_capability_queries: handshake.capabilities.backend_capability_queries,
+            saved_sessions: handshake.capabilities.saved_sessions,
+            session_restore: handshake.capabilities.session_restore,
+            degraded_error_reasons: handshake.capabilities.degraded_error_reasons,
+        },
+        available_backends: handshake.available_backends,
+        session_scope: handshake.session_scope,
     }
 }
 

@@ -34,6 +34,15 @@ fn migrations() -> Migrations<'static> {
         // Keep migration cardinality stable for existing local stores that already advanced
         // to migration index 2 in earlier development builds.
         M::up("SELECT 1;"),
+        M::up(
+            "
+            CREATE TABLE IF NOT EXISTS session_routes (
+                session_id TEXT PRIMARY KEY,
+                route_json TEXT NOT NULL,
+                route_fingerprint TEXT NOT NULL UNIQUE
+            );
+            ",
+        ),
     ])
 }
 
@@ -65,6 +74,13 @@ pub struct SavedSessionSummary {
 pub struct PrunedSavedSessions {
     pub deleted_count: usize,
     pub kept_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRouteRecord {
+    pub session_id: SessionId,
+    pub route: SessionRoute,
+    pub route_fingerprint: String,
 }
 
 #[derive(Debug, Clone)]
@@ -223,6 +239,89 @@ impl SqliteSessionStore {
         Ok(deleted > 0)
     }
 
+    pub fn upsert_session_route(
+        &self,
+        record: &SessionRouteRecord,
+    ) -> Result<(), PersistenceError> {
+        let mut connection = self.open_connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "
+            INSERT INTO session_routes (
+                session_id,
+                route_json,
+                route_fingerprint
+            ) VALUES (?1, ?2, ?3)
+            ON CONFLICT(session_id) DO UPDATE SET
+                route_json = excluded.route_json,
+                route_fingerprint = excluded.route_fingerprint
+            ",
+            params![
+                record.session_id.0.to_string(),
+                serde_json::to_string(&record.route)?,
+                record.route_fingerprint,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn load_session_route(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Option<SessionRouteRecord>, PersistenceError> {
+        let connection = self.open_connection()?;
+        let row = connection
+            .query_row(
+                "
+                SELECT route_json, route_fingerprint
+                FROM session_routes
+                WHERE session_id = ?1
+                ",
+                params![session_id.0.to_string()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+
+        row.map_or(Ok(None), |(route_json, route_fingerprint)| {
+            Ok(Some(SessionRouteRecord {
+                session_id,
+                route: serde_json::from_str(&route_json)?,
+                route_fingerprint,
+            }))
+        })
+    }
+
+    pub fn load_session_route_by_fingerprint(
+        &self,
+        route_fingerprint: &str,
+    ) -> Result<Option<SessionRouteRecord>, PersistenceError> {
+        let connection = self.open_connection()?;
+        let row = connection
+            .query_row(
+                "
+                SELECT session_id, route_json
+                FROM session_routes
+                WHERE route_fingerprint = ?1
+                ",
+                params![route_fingerprint],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+
+        row.map_or(Ok(None), |(session_id, route_json)| {
+            Ok(Some(SessionRouteRecord {
+                session_id: SessionId::from(Uuid::parse_str(&session_id).map_err(|error| {
+                    PersistenceError::InvalidData(format!(
+                        "invalid session route id `{session_id}` - {error}"
+                    ))
+                })?),
+                route: serde_json::from_str(&route_json)?,
+                route_fingerprint: route_fingerprint.to_string(),
+            }))
+        })
+    }
+
     pub fn prune_native_sessions(
         &self,
         keep_latest: usize,
@@ -376,7 +475,7 @@ mod tests {
         ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
     };
 
-    use super::{PersistenceError, SavedNativeSession, SqliteSessionStore};
+    use super::{PersistenceError, SavedNativeSession, SessionRouteRecord, SqliteSessionStore};
 
     fn sample_snapshot(session_id: SessionId, title: &str, line: &str) -> SavedNativeSession {
         SavedNativeSession {
@@ -671,6 +770,89 @@ mod tests {
 
         assert_eq!(loaded.manifest.format_version, 1);
         assert_eq!(loaded.manifest.binary_version, CURRENT_BINARY_VERSION);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn saves_and_loads_session_route_registry_records() {
+        let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+        let path =
+            std::env::temp_dir().join(format!("terminal-platform-route-registry-{nonce}.sqlite3"));
+        let store = SqliteSessionStore::open(&path).expect("store should open");
+        let record = SessionRouteRecord {
+            session_id: SessionId::new(),
+            route: SessionRoute {
+                backend: BackendKind::Tmux,
+                authority: RouteAuthority::ImportedForeign,
+                external: Some(terminal_domain::ExternalSessionRef {
+                    namespace: "tmux_session".to_string(),
+                    value: "demo".to_string(),
+                }),
+            },
+            route_fingerprint: "tmux/import/demo".to_string(),
+        };
+
+        store.upsert_session_route(&record).expect("route record should save");
+
+        assert_eq!(
+            store.load_session_route(record.session_id).expect("lookup by id should succeed"),
+            Some(record.clone())
+        );
+        assert_eq!(
+            store
+                .load_session_route_by_fingerprint(&record.route_fingerprint)
+                .expect("lookup by fingerprint should succeed"),
+            Some(record)
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn upgrades_legacy_saved_session_schema_without_session_routes_table() {
+        let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+        let path =
+            std::env::temp_dir().join(format!("terminal-platform-legacy-routes-{nonce}.sqlite3"));
+        let connection = Connection::open(&path).expect("legacy db should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE native_saved_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    route_json TEXT NOT NULL,
+                    title TEXT,
+                    launch_json TEXT,
+                    topology_json TEXT NOT NULL,
+                    screens_json TEXT NOT NULL,
+                    saved_at_ms INTEGER NOT NULL
+                );
+                ",
+            )
+            .expect("legacy schema should be created");
+        drop(connection);
+
+        let store = SqliteSessionStore::open(&path).expect("store should upgrade legacy schema");
+        let record = SessionRouteRecord {
+            session_id: SessionId::new(),
+            route: SessionRoute {
+                backend: BackendKind::Tmux,
+                authority: RouteAuthority::ImportedForeign,
+                external: Some(terminal_domain::ExternalSessionRef {
+                    namespace: "tmux_session".to_string(),
+                    value: "after-upgrade".to_string(),
+                }),
+            },
+            route_fingerprint: "tmux/import/after-upgrade".to_string(),
+        };
+
+        store.upsert_session_route(&record).expect("route record should save after upgrade");
+        assert_eq!(
+            store
+                .load_session_route_by_fingerprint(&record.route_fingerprint)
+                .expect("lookup by fingerprint should succeed"),
+            Some(record)
+        );
 
         let _ = std::fs::remove_file(path);
     }

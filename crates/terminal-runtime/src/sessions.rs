@@ -34,13 +34,6 @@ pub struct SessionService {
 
 impl SessionService {
     #[must_use]
-    pub fn new(backends: BackendCatalog) -> Self {
-        let persistence =
-            SqliteSessionStore::open_default().expect("default sqlite session store should open");
-        Self::with_persistence(backends, persistence)
-    }
-
-    #[must_use]
     pub fn with_persistence(backends: BackendCatalog, persistence: SqliteSessionStore) -> Self {
         Self { backends, registry: InMemorySessionRegistry::default(), persistence }
     }

@@ -601,12 +601,10 @@ mod tests {
     use std::{sync::mpsc, thread};
 
     use serde_json::Value;
-    use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+    use terminal_daemon::spawn_local_socket_server;
     use terminal_daemon_client::LocalSocketDaemonClient;
     use terminal_protocol::LocalSocketAddress;
-    use terminal_testing::{
-        daemon_fixture, daemon_state, unique_socket_address, wait_for_daemon_ready,
-    };
+    use terminal_testing::{daemon, daemon_fixture, unique_socket_address, wait_for_daemon_ready};
 
     use super::*;
 
@@ -973,9 +971,8 @@ mod tests {
             let started_cycle = event_rx.recv().expect("test should receive cycle-start signal");
             assert_eq!(started_cycle, cycle);
             let readiness_client = LocalSocketDaemonClient::new(address.clone());
-            let server =
-                spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
-                    .expect("daemon should bind for restart cycle");
+            let server = spawn_local_socket_server(daemon(), address.clone())
+                .expect("daemon should bind for restart cycle");
             wait_for_daemon_ready(&readiness_client).await;
             ack_tx.send(cycle).expect("test should send daemon-ready ack");
 

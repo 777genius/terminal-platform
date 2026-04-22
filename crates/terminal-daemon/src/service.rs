@@ -1,23 +1,38 @@
 use terminal_backend_api::BackendSubscription;
+use terminal_persistence::SqliteSessionStore;
 use terminal_protocol::{
     OpenSubscriptionRequest, ProtocolError, RequestEnvelope, ResponseEnvelope,
 };
+use terminal_runtime::TerminalRuntime;
 
 use crate::{
-    TerminalDaemonState,
-    adapters::TerminalDaemonStateRuntimeAdapter,
-    application::{TerminalDaemonRequestDispatcher, TerminalDaemonSubscriptionService},
+    adapters::TerminalRuntimeAdapter,
+    application::{
+        TerminalDaemonCatalogPort, TerminalDaemonRequestDispatcher,
+        TerminalDaemonSubscriptionService,
+    },
+    composition,
 };
 
-#[derive(Default)]
 pub struct TerminalDaemon {
-    state: TerminalDaemonState,
+    runtime: TerminalRuntime,
+}
+
+impl Default for TerminalDaemon {
+    fn default() -> Self {
+        Self::new(composition::default_runtime())
+    }
 }
 
 impl TerminalDaemon {
     #[must_use]
-    pub fn new(state: TerminalDaemonState) -> Self {
-        Self { state }
+    pub fn new(runtime: TerminalRuntime) -> Self {
+        Self { runtime }
+    }
+
+    #[must_use]
+    pub fn with_persistence(persistence: SqliteSessionStore) -> Self {
+        Self::new(composition::runtime_with_persistence(persistence))
     }
 
     pub async fn handle_request(
@@ -34,17 +49,27 @@ impl TerminalDaemon {
         self.subscription_service().open_backend_subscription(request).await
     }
 
-    fn runtime_adapter(&self) -> TerminalDaemonStateRuntimeAdapter<'_> {
-        TerminalDaemonStateRuntimeAdapter::new(&self.state)
+    #[must_use]
+    pub fn handshake(&self) -> terminal_protocol::Handshake {
+        self.runtime_adapter().handshake()
+    }
+
+    #[must_use]
+    pub fn session_count(&self) -> usize {
+        self.runtime.session_count()
+    }
+
+    fn runtime_adapter(&self) -> TerminalRuntimeAdapter<'_> {
+        TerminalRuntimeAdapter::new(&self.runtime)
     }
 
     fn dispatcher(
         &self,
     ) -> TerminalDaemonRequestDispatcher<
-        TerminalDaemonStateRuntimeAdapter<'_>,
-        TerminalDaemonStateRuntimeAdapter<'_>,
-        TerminalDaemonStateRuntimeAdapter<'_>,
-        TerminalDaemonStateRuntimeAdapter<'_>,
+        TerminalRuntimeAdapter<'_>,
+        TerminalRuntimeAdapter<'_>,
+        TerminalRuntimeAdapter<'_>,
+        TerminalRuntimeAdapter<'_>,
     > {
         let runtime = self.runtime_adapter();
         TerminalDaemonRequestDispatcher::new(
@@ -57,7 +82,7 @@ impl TerminalDaemon {
 
     fn subscription_service(
         &self,
-    ) -> TerminalDaemonSubscriptionService<TerminalDaemonStateRuntimeAdapter<'_>> {
+    ) -> TerminalDaemonSubscriptionService<TerminalRuntimeAdapter<'_>> {
         TerminalDaemonSubscriptionService::new(self.runtime_adapter())
     }
 }
@@ -109,7 +134,7 @@ mod tests {
         let store = SqliteSessionStore::open(isolated_store_path("test"))
             .expect("isolated sqlite session store should open");
 
-        TerminalDaemon::new(crate::TerminalDaemonState::with_default_persistence(store))
+        TerminalDaemon::with_persistence(store)
     }
 
     fn save_incompatible_snapshot(
@@ -146,10 +171,7 @@ mod tests {
             })
             .expect("future snapshot should save");
 
-        (
-            TerminalDaemon::new(crate::TerminalDaemonState::with_default_persistence(store)),
-            session_id,
-        )
+        (TerminalDaemon::with_persistence(store), session_id)
     }
 
     #[tokio::test(flavor = "multi_thread")]

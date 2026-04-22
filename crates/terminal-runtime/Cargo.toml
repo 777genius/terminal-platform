@@ -1,5 +1,5 @@
 [package]
-name = "terminal-application"
+name = "terminal-runtime"
 version = "0.1.0"
 edition = "2024"
 license.workspace = true
@@ -10,6 +10,12 @@ terminal-domain = { path = "../terminal-domain" }
 terminal-mux-domain = { path = "../terminal-mux-domain" }
 terminal-persistence = { path = "../terminal-persistence" }
 terminal-projection = { path = "../terminal-projection" }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+rusqlite = { workspace = true }
+terminal-backend-native = { path = "../terminal-backend-native" }
+tokio = { workspace = true }

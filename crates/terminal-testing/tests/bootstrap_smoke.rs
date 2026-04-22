@@ -11,8 +11,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(unix)]
-use terminal_application::BackendCatalog;
 use terminal_backend_api::{
     CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, OverrideLayoutSpec, ResizePaneSpec,
     SendInputSpec, ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
@@ -24,7 +22,7 @@ use terminal_backend_tmux::TmuxBackend;
 #[cfg(unix)]
 use terminal_backend_zellij::ZellijBackend;
 #[cfg(unix)]
-use terminal_daemon::TerminalDaemonState;
+use terminal_daemon::TerminalDaemon;
 use terminal_domain::{
     BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
 };
@@ -44,15 +42,17 @@ use terminal_persistence::SqliteSessionStore;
 #[cfg(any(unix, windows))]
 use terminal_projection::{ProjectionSource, ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{DaemonPhase, SubscriptionEvent};
+#[cfg(unix)]
+use terminal_runtime::{BackendCatalog, TerminalRuntime};
 use terminal_testing::{
-    ZellijSessionGuard, ZellijTestLock, daemon_fixture, daemon_fixture_with_state, daemon_state,
-    echo_shell_launch_spec, isolated_daemon_state, unique_sqlite_path, unique_zellij_session_name,
+    ZellijSessionGuard, ZellijTestLock, daemon, daemon_fixture, daemon_fixture_with_daemon,
+    echo_shell_launch_spec, isolated_daemon, unique_sqlite_path, unique_zellij_session_name,
 };
 use tokio::time::{sleep, timeout};
 
 #[test]
-fn bootstrap_smoke_exposes_empty_daemon_state() {
-    let daemon = daemon_state();
+fn bootstrap_smoke_exposes_empty_daemon() {
+    let daemon = daemon();
     let handshake = daemon.handshake();
 
     assert_eq!(handshake.protocol_version.major, 0);
@@ -827,7 +827,7 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_reports_incompatible_saved_session_manifest_via_daemon_api() {
-    let (state, session_id) = daemon_state_with_incompatible_saved_session(
+    let (state, session_id) = daemon_with_incompatible_saved_session(
         "smoke-saved-incompat",
         SavedSessionManifest {
             format_version: CURRENT_SAVED_SESSION_FORMAT_VERSION,
@@ -837,7 +837,7 @@ async fn bootstrap_smoke_reports_incompatible_saved_session_manifest_via_daemon_
         },
     );
     let fixture =
-        daemon_fixture_with_state("smoke-saved-incompat", state).expect("fixture should start");
+        daemon_fixture_with_daemon("smoke-saved-incompat", state).expect("fixture should start");
 
     let listed =
         fixture.client.list_saved_sessions().await.expect("list_saved_sessions should succeed");
@@ -873,9 +873,9 @@ async fn bootstrap_smoke_reports_incompatible_saved_session_manifest_via_daemon_
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_prunes_saved_native_sessions_via_daemon_api() {
-    let fixture = daemon_fixture_with_state(
+    let fixture = daemon_fixture_with_daemon(
         "bootstrap-native-prune-saved",
-        isolated_daemon_state("bootstrap-native-prune-saved"),
+        isolated_daemon("bootstrap-native-prune-saved"),
     )
     .expect("fixture should start");
     let mut last_saved_session = None;
@@ -1396,9 +1396,8 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
     let session_name = unique_tmux_session_name("workspace");
     let _tmux =
         TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
-    let fixture =
-        daemon_fixture_with_state("bootstrap-tmux-import", tmux_daemon_state(&socket_name))
-            .expect("fixture should start");
+    let fixture = daemon_fixture_with_daemon("bootstrap-tmux-import", tmux_daemon(&socket_name))
+        .expect("fixture should start");
 
     let discovered = fixture
         .client
@@ -1549,7 +1548,7 @@ async fn bootstrap_smoke_reads_inactive_tmux_tab_pane_snapshot() {
     let _tmux =
         TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
     let fixture =
-        daemon_fixture_with_state("bootstrap-tmux-inactive-pane", tmux_daemon_state(&socket_name))
+        daemon_fixture_with_daemon("bootstrap-tmux-inactive-pane", tmux_daemon(&socket_name))
             .expect("fixture should start");
 
     let discovered = fixture
@@ -1592,7 +1591,7 @@ async fn bootstrap_smoke_controls_tmux_tab_lifecycle_via_dispatch() {
     let _tmux =
         TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
     let fixture =
-        daemon_fixture_with_state("bootstrap-tmux-tab-control", tmux_daemon_state(&socket_name))
+        daemon_fixture_with_daemon("bootstrap-tmux-tab-control", tmux_daemon(&socket_name))
             .expect("fixture should start");
 
     let discovered = fixture
@@ -1673,7 +1672,7 @@ async fn bootstrap_smoke_controls_tmux_pane_lifecycle_via_dispatch() {
     let _tmux =
         TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
     let fixture =
-        daemon_fixture_with_state("bootstrap-tmux-pane-control", tmux_daemon_state(&socket_name))
+        daemon_fixture_with_daemon("bootstrap-tmux-pane-control", tmux_daemon(&socket_name))
             .expect("fixture should start");
 
     let discovered = fixture
@@ -1818,7 +1817,7 @@ async fn bootstrap_smoke_streams_tmux_topology_updates() {
     let _tmux =
         TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
     let fixture =
-        daemon_fixture_with_state("bootstrap-tmux-topology-sub", tmux_daemon_state(&socket_name))
+        daemon_fixture_with_daemon("bootstrap-tmux-topology-sub", tmux_daemon(&socket_name))
             .expect("fixture should start");
 
     let discovered = fixture
@@ -1885,9 +1884,8 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
     let session_name = unique_tmux_session_name("workspace");
     let _tmux =
         TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux test server should start");
-    let fixture =
-        daemon_fixture_with_state("bootstrap-tmux-pane-sub", tmux_daemon_state(&socket_name))
-            .expect("fixture should start");
+    let fixture = daemon_fixture_with_daemon("bootstrap-tmux-pane-sub", tmux_daemon(&socket_name))
+        .expect("fixture should start");
 
     let discovered = fixture
         .client
@@ -1970,7 +1968,7 @@ async fn bootstrap_smoke_preserves_tmux_fullscreen_viewports_for_vim_less_and_fz
     let _tmux = TmuxServerGuard::spawn_with_shell(&socket_name, &session_name)
         .expect("tmux interactive test server should start");
     let fixture =
-        daemon_fixture_with_state("bootstrap-tmux-fullscreen", tmux_daemon_state(&socket_name))
+        daemon_fixture_with_daemon("bootstrap-tmux-fullscreen", tmux_daemon(&socket_name))
             .expect("fixture should start");
 
     let discovered = fixture
@@ -2521,10 +2519,10 @@ fn cat_launch_spec() -> ShellLaunchSpec {
 }
 
 #[cfg(unix)]
-fn daemon_state_with_incompatible_saved_session(
+fn daemon_with_incompatible_saved_session(
     label: &str,
     manifest: SavedSessionManifest,
-) -> (TerminalDaemonState, SessionId) {
+) -> (TerminalDaemon, SessionId) {
     let store = SqliteSessionStore::open(unique_sqlite_path(label))
         .expect("isolated sqlite session store should open");
     let session_id = SessionId::new();
@@ -2554,7 +2552,7 @@ fn daemon_state_with_incompatible_saved_session(
         })
         .expect("future snapshot should save");
 
-    (TerminalDaemonState::with_default_persistence(store), session_id)
+    (TerminalDaemon::with_persistence(store), session_id)
 }
 
 #[cfg(any(unix, windows))]
@@ -2732,12 +2730,12 @@ fn collect_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
 }
 
 #[cfg(unix)]
-fn tmux_daemon_state(socket_name: &str) -> TerminalDaemonState {
-    TerminalDaemonState::new(BackendCatalog::new([
+fn tmux_daemon(socket_name: &str) -> TerminalDaemon {
+    TerminalDaemon::new(TerminalRuntime::new(BackendCatalog::new([
         Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
         Arc::new(TmuxBackend::with_socket_name(socket_name)) as Arc<dyn MuxBackendPort>,
         Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>,
-    ]))
+    ])))
 }
 
 #[cfg(unix)]

@@ -2,9 +2,7 @@ use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionSummary, CreateSessionSpec,
     DiscoveredSession,
 };
-use terminal_domain::{
-    BackendKind, DegradedModeReason, RouteAuthority, SessionRoute, imported_session_id,
-};
+use terminal_domain::{BackendKind, DegradedModeReason, RouteAuthority, SessionRoute};
 
 use super::runtime::SessionRuntime;
 
@@ -63,16 +61,13 @@ impl<'a> SessionCatalogService<'a> {
             return Ok(SessionRuntime::to_summary(existing));
         }
 
-        self.runtime.backend(route.backend)?.attach_session(route.clone()).await?;
+        let session_id = self.runtime.resolve_session_id_for_route(&route)?;
+        self.runtime.backend(route.backend)?.attach_session(session_id, route.clone()).await?;
 
-        let descriptor = crate::registry::SessionDescriptor {
-            session_id: imported_session_id(&route)
-                .ok_or_else(|| BackendError::invalid_input("route is not importable"))?,
-            route,
-            title,
-            launch: None,
-        };
+        let descriptor =
+            crate::registry::SessionDescriptor { session_id, route, title, launch: None };
         let summary = SessionRuntime::to_summary(descriptor.clone());
+        self.runtime.upsert_session_route(descriptor.session_id, &descriptor.route)?;
         self.runtime.registry().insert(descriptor);
 
         Ok(summary)

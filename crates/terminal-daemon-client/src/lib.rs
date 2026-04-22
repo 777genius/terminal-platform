@@ -584,7 +584,7 @@ mod tests {
         )))
         .expect("isolated sqlite session store should open");
 
-        TerminalDaemon::new(terminal_daemon::TerminalDaemonState::with_default_persistence(store))
+        TerminalDaemon::with_persistence(store)
     }
 
     fn isolated_daemon_with_saved_snapshot(
@@ -628,12 +628,7 @@ mod tests {
             })
             .expect("future snapshot should save");
 
-        (
-            TerminalDaemon::new(terminal_daemon::TerminalDaemonState::with_default_persistence(
-                store,
-            )),
-            session_id,
-        )
+        (TerminalDaemon::with_persistence(store), session_id)
     }
 
     fn isolated_daemon_with_valid_and_corrupted_saved_rows(
@@ -710,13 +705,7 @@ mod tests {
             )
             .expect("corrupted row should insert");
 
-        (
-            TerminalDaemon::new(terminal_daemon::TerminalDaemonState::with_default_persistence(
-                store,
-            )),
-            valid_session_id,
-            corrupt_session_id,
-        )
+        (TerminalDaemon::with_persistence(store), valid_session_id, corrupt_session_id)
     }
 
     fn cat_launch_spec() -> ShellLaunchSpec {

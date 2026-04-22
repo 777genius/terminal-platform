@@ -17,7 +17,7 @@ use terminal_backend_api::{
 };
 use terminal_domain::{
     BackendKind, DegradedModeReason, ExternalSessionRef, PaneId, RouteAuthority, SessionId,
-    SessionRoute, TabId, imported_session_id,
+    SessionRoute, TabId,
 };
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 use terminal_projection::{
@@ -234,6 +234,7 @@ impl MuxBackendPort for ZellijBackend {
 
     fn attach_session(
         &self,
+        session_id: SessionId,
         route: SessionRoute,
     ) -> BoxFuture<'_, Result<Box<dyn BackendSessionPort>, BackendError>> {
         let backend = self.clone();
@@ -250,9 +251,6 @@ impl MuxBackendPort for ZellijBackend {
 
             match probe.surface {
                 ZellijSurface::RichCli044Plus => {
-                    let session_id = imported_session_id(&route).ok_or_else(|| {
-                        BackendError::invalid_input("zellij route is not importable")
-                    })?;
                     let attached = ZellijAttachedSession {
                         backend: Arc::new(backend),
                         session_id,

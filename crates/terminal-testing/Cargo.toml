@@ -6,7 +6,6 @@ license.workspace = true
 
 [dependencies]
 portable-pty = { workspace = true }
-terminal-application = { path = "../terminal-application" }
 terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-backend-native = { path = "../terminal-backend-native" }
 terminal-backend-tmux = { path = "../terminal-backend-tmux" }
@@ -18,6 +17,7 @@ terminal-mux-domain = { path = "../terminal-mux-domain" }
 terminal-persistence = { path = "../terminal-persistence" }
 terminal-projection = { path = "../terminal-projection" }
 terminal-protocol = { path = "../terminal-protocol" }
+terminal-runtime = { path = "../terminal-runtime" }
 tokio = { workspace = true }
 
 [lints]

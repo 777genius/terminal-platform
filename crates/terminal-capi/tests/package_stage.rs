@@ -8,15 +8,13 @@ use std::{
 };
 
 #[cfg(unix)]
-use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+use terminal_daemon::spawn_local_socket_server;
 #[cfg(unix)]
 use terminal_daemon_client::LocalSocketDaemonClient;
 #[cfg(unix)]
 use terminal_protocol::LocalSocketAddress;
 #[cfg(unix)]
-use terminal_testing::{
-    daemon_fixture, daemon_state, unique_socket_address, wait_for_daemon_ready,
-};
+use terminal_testing::{daemon, daemon_fixture, unique_socket_address, wait_for_daemon_ready};
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
@@ -106,9 +104,8 @@ async fn staged_terminal_capi_package_handles_shutdown_and_restart_flows() {
     let initial_ready_file = support::unique_temp_path("terminal-capi-stage-restart", "ready");
     let stale_ready_file = support::unique_temp_path("terminal-capi-stage-restart", "stale");
     let restart_file = support::unique_temp_path("terminal-capi-stage-restart", "restart");
-    let initial_server =
-        spawn_local_socket_server(TerminalDaemon::new(daemon_state()), restart_address.clone())
-            .expect("initial daemon should start for staged restart consumer");
+    let initial_server = spawn_local_socket_server(daemon(), restart_address.clone())
+        .expect("initial daemon should start for staged restart consumer");
     wait_for_daemon_ready(&restart_client).await;
     let restart_child = spawn_staged_reference_consumer(
         &binary_path,
@@ -139,9 +136,8 @@ async fn staged_terminal_capi_package_handles_shutdown_and_restart_flows() {
     .await;
 
     let replacement_client = LocalSocketDaemonClient::new(restart_address.clone());
-    let replacement_server =
-        spawn_local_socket_server(TerminalDaemon::new(daemon_state()), restart_address)
-            .expect("replacement daemon should start for staged restart consumer");
+    let replacement_server = spawn_local_socket_server(daemon(), restart_address)
+        .expect("replacement daemon should start for staged restart consumer");
     wait_for_daemon_ready(&replacement_client).await;
     std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");
     let restart_output =

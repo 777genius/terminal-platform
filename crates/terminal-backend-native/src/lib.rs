@@ -98,6 +98,7 @@ impl MuxBackendPort for NativeBackend {
 
     fn attach_session(
         &self,
+        session_id: SessionId,
         route: SessionRoute,
     ) -> BoxFuture<'_, Result<Box<dyn BackendSessionPort>, BackendError>> {
         Box::pin(async move {
@@ -107,14 +108,19 @@ impl MuxBackendPort for NativeBackend {
                 ));
             }
 
-            let runtime = if let Some(session_id) = local_native_session_id(&route) {
+            let runtime = if let Some(route_session_id) = local_native_session_id(&route) {
+                if route_session_id != session_id {
+                    return Err(BackendError::invalid_input(
+                        "native attach session id does not match route identity",
+                    ));
+                }
                 let sessions = self
                     .sessions
                     .read()
                     .map_err(|_| BackendError::internal("native backend read lock poisoned"))?;
                 Arc::clone(
                     sessions
-                        .get(&session_id)
+                        .get(&route_session_id)
                         .ok_or_else(|| BackendError::not_found("native route is not registered"))?,
                 )
             } else {
@@ -343,7 +349,7 @@ mod tests {
             .await
             .expect("native session should be created");
         let session = backend
-            .attach_session(binding.route.clone())
+            .attach_session(binding.session_id, binding.route.clone())
             .await
             .expect("attach_session should succeed");
         let topology = session.topology_snapshot().await.expect("topology should succeed");
@@ -380,8 +386,10 @@ mod tests {
             })
             .await
             .expect("native session should be created");
-        let session =
-            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let session = backend
+            .attach_session(binding.session_id, binding.route)
+            .await
+            .expect("attach_session should succeed");
         let before = session.topology_snapshot().await.expect("topology should succeed");
         let focused_pane = before.tabs[0].focused_pane.expect("focused pane should exist");
 
@@ -412,8 +420,10 @@ mod tests {
             })
             .await
             .expect("native session should be created");
-        let session =
-            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let session = backend
+            .attach_session(binding.session_id, binding.route)
+            .await
+            .expect("attach_session should succeed");
         let initial = session.topology_snapshot().await.expect("topology should succeed");
         let tab = &initial.tabs[0];
         let pane_id = tab.focused_pane.expect("focused pane should exist");
@@ -479,8 +489,10 @@ mod tests {
             })
             .await
             .expect("native session should be created");
-        let session =
-            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let session = backend
+            .attach_session(binding.session_id, binding.route)
+            .await
+            .expect("attach_session should succeed");
         let initial = session.topology_snapshot().await.expect("topology should succeed");
         let pane_id = initial.tabs[0].focused_pane.expect("focused pane should exist");
 
@@ -552,8 +564,10 @@ mod tests {
             })
             .await
             .expect("native session should be created");
-        let session =
-            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let session = backend
+            .attach_session(binding.session_id, binding.route)
+            .await
+            .expect("attach_session should succeed");
         let initial = session.topology_snapshot().await.expect("topology should succeed");
         let tab_id = initial.tabs[0].tab_id;
         let original_pane = initial.tabs[0].focused_pane.expect("focused pane should exist");
@@ -628,8 +642,10 @@ mod tests {
             })
             .await
             .expect("native session should be created");
-        let session =
-            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let session = backend
+            .attach_session(binding.session_id, binding.route)
+            .await
+            .expect("attach_session should succeed");
         let topology = session.topology_snapshot().await.expect("topology should succeed");
         let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
 
@@ -674,8 +690,10 @@ mod tests {
             })
             .await
             .expect("native session should be created");
-        let session =
-            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let session = backend
+            .attach_session(binding.session_id, binding.route)
+            .await
+            .expect("attach_session should succeed");
         let topology = session.topology_snapshot().await.expect("topology should succeed");
         let tab_id = topology.tabs[0].tab_id;
         let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
@@ -709,8 +727,10 @@ mod tests {
             })
             .await
             .expect("native session should be created");
-        let session =
-            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let session = backend
+            .attach_session(binding.session_id, binding.route)
+            .await
+            .expect("attach_session should succeed");
         let mut subscription = session
             .subscribe(SubscriptionSpec::SessionTopology)
             .await
@@ -746,8 +766,10 @@ mod tests {
             })
             .await
             .expect("native session should be created");
-        let session =
-            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let session = backend
+            .attach_session(binding.session_id, binding.route)
+            .await
+            .expect("attach_session should succeed");
         let topology = session.topology_snapshot().await.expect("topology should succeed");
         let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
         let tab_id = topology.tabs[0].tab_id;
@@ -790,8 +812,10 @@ mod tests {
             })
             .await
             .expect("native session should be created");
-        let session =
-            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let session = backend
+            .attach_session(binding.session_id, binding.route)
+            .await
+            .expect("attach_session should succeed");
         let topology = session.topology_snapshot().await.expect("topology should succeed");
         let original_pane = topology.tabs[0].focused_pane.expect("focused pane should exist");
 

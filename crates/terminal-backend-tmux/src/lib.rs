@@ -13,7 +13,7 @@ use terminal_backend_api::{
 };
 use terminal_domain::{
     BackendKind, DegradedModeReason, ExternalSessionRef, PaneId, RouteAuthority, SessionId,
-    SessionRoute, TabId, imported_session_id,
+    SessionRoute, TabId,
 };
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 use terminal_projection::{
@@ -167,6 +167,7 @@ impl MuxBackendPort for TmuxBackend {
 
     fn attach_session(
         &self,
+        session_id: SessionId,
         route: SessionRoute,
     ) -> BoxFuture<'_, Result<Box<dyn BackendSessionPort>, BackendError>> {
         let backend = self.clone();
@@ -178,8 +179,6 @@ impl MuxBackendPort for TmuxBackend {
             }
             let target = TmuxTarget::from_route(&route)?;
             backend.run(Some(&target), &["has-session", "-t", &target.session_name])?;
-            let session_id = imported_session_id(&route)
-                .ok_or_else(|| BackendError::invalid_input("tmux route is not importable"))?;
 
             Ok(Box::new(TmuxAttachedSession { backend: Arc::new(backend), session_id, target })
                 as Box<dyn BackendSessionPort>)

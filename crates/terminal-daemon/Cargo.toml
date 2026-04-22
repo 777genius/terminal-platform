@@ -7,7 +7,6 @@ license.workspace = true
 [dependencies]
 futures-util = { workspace = true }
 interprocess = { workspace = true }
-terminal-application = { path = "../terminal-application" }
 terminal-backend-api = { path = "../terminal-backend-api" }
 terminal-backend-native = { path = "../terminal-backend-native" }
 terminal-backend-tmux = { path = "../terminal-backend-tmux" }
@@ -16,6 +15,7 @@ terminal-domain = { path = "../terminal-domain" }
 terminal-persistence = { path = "../terminal-persistence" }
 terminal-protocol = { path = "../terminal-protocol" }
 terminal-projection = { path = "../terminal-projection" }
+terminal-runtime = { path = "../terminal-runtime" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 

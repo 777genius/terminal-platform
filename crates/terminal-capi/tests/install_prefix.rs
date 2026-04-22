@@ -8,15 +8,13 @@ use std::{
 };
 
 #[cfg(unix)]
-use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+use terminal_daemon::spawn_local_socket_server;
 #[cfg(unix)]
 use terminal_daemon_client::LocalSocketDaemonClient;
 #[cfg(unix)]
 use terminal_protocol::LocalSocketAddress;
 #[cfg(unix)]
-use terminal_testing::{
-    daemon_fixture, daemon_state, unique_socket_address, wait_for_daemon_ready,
-};
+use terminal_testing::{daemon, daemon_fixture, unique_socket_address, wait_for_daemon_ready};
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
@@ -108,8 +106,7 @@ async fn installed_prefix_handles_shutdown_and_restart_flows() {
     let stale_ready_file = support::unique_temp_path("terminal-capi-install-restart", "stale");
     let restart_file = support::unique_temp_path("terminal-capi-install-restart", "restart");
     let mut server =
-        spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
-            .expect("initial daemon should bind");
+        spawn_local_socket_server(daemon(), address.clone()).expect("initial daemon should bind");
     wait_for_daemon_ready(&initial_client).await;
     let restart_child = spawn_installed_reference_consumer(
         &prefix_dir,
@@ -136,7 +133,7 @@ async fn installed_prefix_handles_shutdown_and_restart_flows() {
     .await;
 
     let restarted_client = LocalSocketDaemonClient::new(address.clone());
-    server = spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
+    server = spawn_local_socket_server(daemon(), address.clone())
         .expect("replacement daemon should bind");
     wait_for_daemon_ready(&restarted_client).await;
     std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");

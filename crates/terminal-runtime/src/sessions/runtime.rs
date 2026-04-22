@@ -2,9 +2,9 @@ use terminal_backend_api::{
     BackendError, BackendSessionPort, BackendSessionSummary, CreateSessionSpec, MuxBackendPort,
     MuxCommand,
 };
-use terminal_domain::{BackendKind, PaneId, SessionId, TabId};
+use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
-use terminal_persistence::SqliteSessionStore;
+use terminal_persistence::{SessionRouteRecord, SqliteSessionStore};
 use terminal_projection::TopologySnapshot;
 
 use crate::{
@@ -67,6 +67,7 @@ impl<'a> SessionRuntime<'a> {
             launch: spec.launch,
         };
         let summary = Self::to_summary(descriptor.clone());
+        self.upsert_session_route(descriptor.session_id, &descriptor.route)?;
         self.registry.insert(descriptor);
 
         Ok(summary)
@@ -81,7 +82,9 @@ impl<'a> SessionRuntime<'a> {
             .get(session_id)
             .ok_or_else(|| BackendError::not_found(format!("unknown session {session_id:?}")))?;
 
-        self.backend(descriptor.route.backend)?.attach_session(descriptor.route).await
+        self.backend(descriptor.route.backend)?
+            .attach_session(descriptor.session_id, descriptor.route)
+            .await
     }
 
     pub(super) async fn refresh_session_summary_title(
@@ -105,6 +108,54 @@ impl<'a> SessionRuntime<'a> {
             title: session.title,
         }
     }
+
+    pub(super) fn resolve_session_id_for_route(
+        &self,
+        route: &SessionRoute,
+    ) -> Result<SessionId, BackendError> {
+        let route_fingerprint = session_route_fingerprint(route);
+        if let Some(record) = self
+            .persistence
+            .load_session_route_by_fingerprint(&route_fingerprint)
+            .map_err(|error| {
+                BackendError::internal(format!(
+                    "failed to load session route by fingerprint - {error}"
+                ))
+            })?
+        {
+            return Ok(record.session_id);
+        }
+
+        let session_id = SessionId::new();
+        self.upsert_session_route(session_id, route)?;
+        Ok(session_id)
+    }
+
+    pub(super) fn upsert_session_route(
+        &self,
+        session_id: SessionId,
+        route: &SessionRoute,
+    ) -> Result<(), BackendError> {
+        self.persistence
+            .upsert_session_route(&SessionRouteRecord {
+                session_id,
+                route: route.clone(),
+                route_fingerprint: session_route_fingerprint(route),
+            })
+            .map_err(|error| {
+                BackendError::internal(format!("failed to persist session route - {error}"))
+            })
+    }
+}
+
+pub(super) fn session_route_fingerprint(route: &SessionRoute) -> String {
+    let external = route
+        .external
+        .as_ref()
+        .map(|external| format!("{}/{}", external.namespace, external.value))
+        .unwrap_or_else(|| "-".to_string());
+
+    format!("v1/{:?}/{:?}/{external}", route.backend, route.authority)
 }
 
 pub(super) fn collect_pane_ids_from_topology(topology: &TopologySnapshot) -> Vec<PaneId> {
@@ -173,11 +224,11 @@ fn collect_pane_ids_from_node_inner(root: &PaneTreeNode, pane_ids: &mut Vec<Pane
 #[cfg(test)]
 mod tests {
     use terminal_backend_api::{MuxCommand, NewTabSpec};
-    use terminal_domain::{BackendKind, SessionId, TabId};
+    use terminal_domain::{BackendKind, RouteAuthority, SessionId, SessionRoute, TabId};
     use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
     use terminal_projection::TopologySnapshot;
 
-    use super::{command_updates_summary_title, saved_session_title};
+    use super::{command_updates_summary_title, saved_session_title, session_route_fingerprint};
 
     #[test]
     fn saved_session_title_prefers_focused_tab_title() {
@@ -204,5 +255,27 @@ mod tests {
     fn command_title_refresh_tracks_only_tab_mutations() {
         assert!(command_updates_summary_title(&MuxCommand::NewTab(NewTabSpec::default())));
         assert!(!command_updates_summary_title(&MuxCommand::SaveSession));
+    }
+
+    #[test]
+    fn session_route_fingerprint_distinguishes_foreign_routes() {
+        let route_a = SessionRoute {
+            backend: BackendKind::Tmux,
+            authority: RouteAuthority::ImportedForeign,
+            external: Some(terminal_domain::ExternalSessionRef {
+                namespace: "tmux_session".to_string(),
+                value: "alpha".to_string(),
+            }),
+        };
+        let route_b = SessionRoute {
+            backend: BackendKind::Tmux,
+            authority: RouteAuthority::ImportedForeign,
+            external: Some(terminal_domain::ExternalSessionRef {
+                namespace: "tmux_session".to_string(),
+                value: "beta".to_string(),
+            }),
+        };
+
+        assert_ne!(session_route_fingerprint(&route_a), session_route_fingerprint(&route_b));
     }
 }

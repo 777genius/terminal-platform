@@ -8,14 +8,14 @@ use std::{
 };
 
 #[cfg(unix)]
-use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+use terminal_daemon::spawn_local_socket_server;
 #[cfg(unix)]
 use terminal_daemon_client::LocalSocketDaemonClient;
 #[cfg(unix)]
 use terminal_protocol::LocalSocketAddress;
 #[cfg(unix)]
 use terminal_testing::{
-    TmuxServerGuard, daemon_fixture, daemon_fixture_with_state, daemon_state, tmux_daemon_state,
+    TmuxServerGuard, daemon, daemon_fixture, daemon_fixture_with_daemon, tmux_daemon,
     unique_socket_address, unique_tmux_session_name, unique_tmux_socket_name,
     wait_for_daemon_ready,
 };
@@ -38,7 +38,7 @@ async fn external_c_consumer_discovers_and_imports_tmux_sessions() {
     let session_name = unique_tmux_session_name("workspace");
     let _tmux =
         TmuxServerGuard::spawn(&socket_name, &session_name).expect("tmux server should start");
-    let fixture = daemon_fixture_with_state("capi-ext-tmux", tmux_daemon_state(&socket_name))
+    let fixture = daemon_fixture_with_daemon("capi-ext-tmux", tmux_daemon(&socket_name))
         .expect("daemon fixture should start for external tmux c consumer");
     wait_for_daemon_ready(&fixture.client).await;
     run_reference_consumer(fixture.client.address(), "tmux");
@@ -89,7 +89,7 @@ async fn external_c_consumer_recovers_after_daemon_restart() {
     let stale_ready_file = support::unique_temp_path("terminal-capi-restart", "stale");
     let restart_file = support::unique_temp_path("terminal-capi-restart", "restart");
 
-    let server = spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address.clone())
+    let server = spawn_local_socket_server(daemon(), address.clone())
         .expect("initial daemon should start for restart consumer");
     wait_for_daemon_ready(&initial_client).await;
     let child = spawn_reference_consumer(
@@ -116,7 +116,7 @@ async fn external_c_consumer_recovers_after_daemon_restart() {
     .await;
 
     let restarted_client = LocalSocketDaemonClient::new(address.clone());
-    let replacement = spawn_local_socket_server(TerminalDaemon::new(daemon_state()), address)
+    let replacement = spawn_local_socket_server(daemon(), address)
         .expect("replacement daemon should start for restart consumer");
     wait_for_daemon_ready(&restarted_client).await;
     std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");

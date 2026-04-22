@@ -90,6 +90,7 @@ pub trait MuxBackendPort: Send + Sync {
 
     fn attach_session(
         &self,
+        session_id: SessionId,
         route: SessionRoute,
     ) -> BoxFuture<'_, Result<Box<dyn BackendSessionPort>, BackendError>>;
 

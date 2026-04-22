@@ -1344,17 +1344,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "terminal-application"
-version = "0.1.0"
-dependencies = [
- "terminal-backend-api",
- "terminal-domain",
- "terminal-mux-domain",
- "terminal-persistence",
- "terminal-projection",
-]
-
-[[package]]
 name = "terminal-backend-api"
 version = "0.1.0"
 dependencies = [
@@ -1427,7 +1416,6 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "interprocess",
- "terminal-application",
  "terminal-backend-api",
  "terminal-backend-native",
  "terminal-backend-tmux",
@@ -1437,6 +1425,7 @@ dependencies = [
  "terminal-persistence",
  "terminal-projection",
  "terminal-protocol",
+ "terminal-runtime",
  "tokio",
  "tokio-util",
 ]
@@ -1554,11 +1543,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "terminal-runtime"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "terminal-backend-api",
+ "terminal-backend-native",
+ "terminal-domain",
+ "terminal-mux-domain",
+ "terminal-persistence",
+ "terminal-projection",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "terminal-testing"
 version = "0.1.0"
 dependencies = [
  "portable-pty",
- "terminal-application",
  "terminal-backend-api",
  "terminal-backend-native",
  "terminal-backend-tmux",
@@ -1570,6 +1573,7 @@ dependencies = [
  "terminal-persistence",
  "terminal-projection",
  "terminal-protocol",
+ "terminal-runtime",
  "tokio",
 ]
 

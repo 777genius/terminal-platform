@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use terminal_daemon::{TerminalDaemon, TerminalDaemonState, spawn_local_socket_server};
+use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
 use terminal_persistence::SqliteSessionStore;
 use terminal_protocol::LocalSocketAddress;
 
@@ -32,7 +32,7 @@ fn daemon_with_persistence(path: Option<&Path>) -> TerminalDaemon {
     };
 
     match store {
-        Ok(store) => TerminalDaemon::new(TerminalDaemonState::with_default_persistence(store)),
+        Ok(store) => TerminalDaemon::with_persistence(store),
         Err(error) => {
             eprintln!(
                 "terminal-daemon persistence disabled - {error}. falling back to in-memory state"
