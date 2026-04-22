@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{HashSet, VecDeque},
     io::{Read as _, Write as _},
     sync::{Arc, Mutex},
@@ -1023,7 +1024,7 @@ fn dispatch_send_input(
         .iter()
         .find_map(|tab| tab.pane(spec.pane_id))
         .ok_or_else(|| BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)))?;
-    pane.write_all(spec.data.as_bytes())?;
+    pane.write_text(&spec.data)?;
     Ok(false)
 }
 
@@ -1036,11 +1037,16 @@ fn dispatch_send_paste(
         .iter()
         .find_map(|tab| tab.pane(spec.pane_id))
         .ok_or_else(|| BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)))?;
-    pane.write_all(spec.data.as_bytes())?;
+    pane.write_text(&spec.data)?;
     Ok(false)
 }
 
 impl NativePaneRuntime {
+    fn write_text(&self, text: &str) -> Result<(), BackendError> {
+        let normalized = normalize_pty_input(text);
+        self.write_all(normalized.as_bytes())
+    }
+
     fn write_all(&self, bytes: &[u8]) -> Result<(), BackendError> {
         let mut process = self
             .process
@@ -1075,6 +1081,25 @@ impl NativePaneRuntime {
         self.emulator.resize(rows, cols);
         self.mark_surface_dirty();
         Ok(())
+    }
+}
+
+fn normalize_pty_input(text: &str) -> Cow<'_, str> {
+    #[cfg(windows)]
+    {
+        // ConPTY consumes UTF-8 text / VT sequences, and Microsoft's examples submit Enter as
+        // `\n`. Normalize CRLF / CR here so higher-level host surfaces do not have to leak that
+        // Windows-specific transport detail into their contracts.
+        if text.as_bytes().contains(&b'\r') {
+            Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
+        } else {
+            Cow::Borrowed(text)
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        Cow::Borrowed(text)
     }
 }
 

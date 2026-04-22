@@ -299,16 +299,21 @@ mod tests {
 
     use terminal_backend_api::BackendSubscriptionEvent;
     use terminal_backend_api::{
-        BackendScope, CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec,
-        OverrideLayoutSpec, ResizePaneSpec, SendInputSpec, ShellLaunchSpec, SplitPaneSpec,
+        BackendScope, CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, SendInputSpec,
         SubscriptionSpec,
     };
     use terminal_domain::BackendKind;
-    use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection};
     use terminal_projection::ProjectionSource;
     use tokio::time::sleep;
 
     use super::NativeBackend;
+
+    #[cfg(unix)]
+    use terminal_backend_api::{
+        OverrideLayoutSpec, ResizePaneSpec, ShellLaunchSpec, SplitPaneSpec,
+    };
+    #[cfg(unix)]
+    use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection};
 
     #[tokio::test]
     async fn creates_and_lists_empty_sessions() {
@@ -664,6 +669,50 @@ mod tests {
         assert!(delta.full_replace.is_none());
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn writes_crlf_input_into_default_windows_session() {
+        let backend = NativeBackend::default();
+        let binding = backend
+            .create_session(CreateSessionSpec {
+                title: Some("shell".to_string()),
+                ..CreateSessionSpec::default()
+            })
+            .await
+            .expect("native session should be created");
+        let session =
+            backend.attach_session(binding.route).await.expect("attach_session should succeed");
+        let topology = session.topology_snapshot().await.expect("topology should succeed");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+        let before =
+            session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
+        let command = "echo hello from windows backend\r\n";
+        let result = session
+            .dispatch(MuxCommand::SendInput(SendInputSpec { pane_id, data: command.to_string() }))
+            .await
+            .expect("send input should succeed");
+
+        assert!(!result.changed);
+        wait_for_interactive_screen_line(&*session, pane_id, command, "hello from windows backend")
+            .await;
+        let delta = session
+            .screen_delta(pane_id, before.sequence)
+            .await
+            .expect("screen delta should succeed");
+        let patch = delta.patch.expect("delta patch should exist");
+
+        assert_eq!(delta.pane_id, pane_id);
+        assert_eq!(delta.from_sequence, before.sequence);
+        assert!(delta.to_sequence > before.sequence);
+        assert!(
+            patch
+                .line_updates
+                .iter()
+                .any(|line| line.line.text.contains("hello from windows backend"))
+        );
+        assert!(delta.full_replace.is_none());
+    }
+
     #[tokio::test]
     async fn emits_screen_delta_for_tab_title_changes() {
         let backend = NativeBackend::default();
@@ -870,23 +919,15 @@ mod tests {
         assert!(resized_updated.full_replace.is_some());
     }
 
+    #[cfg(unix)]
     fn cat_launch_spec() -> ShellLaunchSpec {
         #[cfg(unix)]
         {
             ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
         }
-
-        #[cfg(windows)]
-        {
-            let program = std::env::var("COMSPEC")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "cmd.exe".to_string());
-
-            ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
-        }
     }
 
+    #[cfg(unix)]
     async fn wait_for_screen_line(
         session: &dyn terminal_backend_api::BackendSessionPort,
         pane_id: terminal_domain::PaneId,
@@ -907,12 +948,46 @@ mod tests {
         panic!("screen never contained expected text: {needle}; last lines: {last_lines:?}");
     }
 
+    #[cfg(windows)]
+    async fn wait_for_interactive_screen_line(
+        session: &dyn terminal_backend_api::BackendSessionPort,
+        pane_id: terminal_domain::PaneId,
+        command: &str,
+        needle: &str,
+    ) {
+        let mut last_lines = Vec::new();
+        for attempt in 0..120 {
+            if attempt % 6 == 0 {
+                session
+                    .dispatch(MuxCommand::SendInput(SendInputSpec {
+                        pane_id,
+                        data: command.to_string(),
+                    }))
+                    .await
+                    .expect("interactive send input should succeed");
+            }
+
+            let screen =
+                session.screen_snapshot(pane_id).await.expect("screen snapshot should succeed");
+            if screen.surface.lines.iter().any(|line| line.text.contains(needle)) {
+                return;
+            }
+            last_lines =
+                screen.surface.lines.iter().map(|line| line.text.clone()).take(12).collect();
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        panic!("screen never reached interactive text: {needle}; last lines: {last_lines:?}");
+    }
+
+    #[cfg(unix)]
     fn collect_pane_ids(root: &terminal_mux_domain::PaneTreeNode) -> Vec<terminal_domain::PaneId> {
         let mut pane_ids = Vec::new();
         collect_pane_ids_inner(root, &mut pane_ids);
         pane_ids
     }
 
+    #[cfg(unix)]
     fn collect_pane_ids_inner(
         root: &terminal_mux_domain::PaneTreeNode,
         pane_ids: &mut Vec<terminal_domain::PaneId>,
