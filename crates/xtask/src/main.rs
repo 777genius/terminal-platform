@@ -110,11 +110,33 @@ fn run() -> Result<(), String> {
             println!("v1 readiness audit passed");
             Ok(())
         }
-        Command::ScaffoldManualRun { kind, date, output, os, rust, node, tmux, zellij, force } => {
+        Command::ScaffoldManualRun {
+            kind,
+            date,
+            output,
+            os,
+            rust,
+            node,
+            tmux,
+            zellij,
+            workflow,
+            job,
+            force,
+        } => {
             let output_path = scaffold_manual_run(
                 kind,
                 &date,
-                ManualRunScaffoldOptions { output, os, rust, node, tmux, zellij, force },
+                ManualRunScaffoldOptions {
+                    output,
+                    os,
+                    rust,
+                    node,
+                    tmux,
+                    zellij,
+                    workflow,
+                    job,
+                    force,
+                },
             )?;
             println!("{}", output_path.display());
             Ok(())
@@ -148,6 +170,8 @@ enum Command {
         node: Option<String>,
         tmux: Option<String>,
         zellij: Option<String>,
+        workflow: Option<String>,
+        job: Option<String>,
         force: bool,
     },
 }
@@ -166,6 +190,8 @@ struct ManualRunScaffoldOptions {
     node: Option<String>,
     tmux: Option<String>,
     zellij: Option<String>,
+    workflow: Option<String>,
+    job: Option<String>,
     force: bool,
 }
 
@@ -280,6 +306,8 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
             let mut node = None;
             let mut tmux = None;
             let mut zellij = None;
+            let mut workflow = None;
+            let mut job = None;
             let mut force = false;
 
             while let Some(arg) = args.next() {
@@ -322,6 +350,16 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
                             args.next().ok_or_else(|| "missing value for --zellij".to_string())?,
                         );
                     }
+                    "--workflow" => {
+                        workflow = Some(
+                            args.next()
+                                .ok_or_else(|| "missing value for --workflow".to_string())?,
+                        );
+                    }
+                    "--job" => {
+                        job =
+                            Some(args.next().ok_or_else(|| "missing value for --job".to_string())?);
+                    }
                     "--force" => {
                         force = true;
                     }
@@ -343,6 +381,8 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
                 node,
                 tmux,
                 zellij,
+                workflow,
+                job,
                 force,
             })
         }
@@ -1141,7 +1181,8 @@ fn scaffold_manual_run(
     date: &str,
     options: ManualRunScaffoldOptions,
 ) -> Result<PathBuf, String> {
-    let ManualRunScaffoldOptions { output, os, rust, node, tmux, zellij, force } = options;
+    let ManualRunScaffoldOptions { output, os, rust, node, tmux, zellij, workflow, job, force } =
+        options;
     let workspace_root = workspace_root();
     let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
     let template_path = workspace_root.join(MANUAL_RUNS_DIR).join("_template.md");
@@ -1202,11 +1243,21 @@ fn scaffold_manual_run(
         .replace("Zellij: 0.44.x or n/a", &format!("Zellij: {resolved_zellij}"))
         .replace("Result: pass", "Result: pending");
     let payload = if matches!(kind, ManualRunKind::WindowsNativeZellij) {
-        payload.replacen(
+        let payload = payload.replacen(
             "\n## Scope",
             "\nWorkflow: fill from workflow log\nJob: fill from workflow log\n\n## Scope",
             1,
-        )
+        );
+        let payload = if let Some(workflow) = workflow {
+            payload.replace("Workflow: fill from workflow log", &format!("Workflow: {workflow}"))
+        } else {
+            payload
+        };
+        if let Some(job) = job {
+            payload.replace("Job: fill from workflow log", &format!("Job: {job}"))
+        } else {
+            payload
+        }
     } else {
         payload
     };
@@ -1863,8 +1914,9 @@ fn assert_value(value: bool, message: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        verify_manual_qa_scope, verify_node_package_scripts, verify_recorded_passes,
-        verify_v1_release_configs, verify_v1_workflows, verify_windows_conpty_vendor_patch,
+        ManualRunKind, ManualRunScaffoldOptions, scaffold_manual_run, verify_manual_qa_scope,
+        verify_node_package_scripts, verify_recorded_passes, verify_v1_release_configs,
+        verify_v1_workflows, verify_windows_conpty_vendor_patch,
         verify_windows_zellij_package_smoke,
     };
     use std::{
@@ -2180,6 +2232,53 @@ none
         assert!(
             error.contains("Workflow: "),
             "expected hosted workflow marker error, got: {error}"
+        );
+    }
+
+    #[test]
+    fn scaffold_manual_run_injects_windows_workflow_metadata() {
+        let dir = TestDir::new();
+        let output = dir.path().join("windows-native-zellij-2026-04-22.md");
+
+        let output_path = scaffold_manual_run(
+            ManualRunKind::WindowsNativeZellij,
+            "2026-04-22",
+            ManualRunScaffoldOptions {
+                output: Some(output.clone()),
+                os: Some("Windows GitHub-hosted runner image".to_string()),
+                rust: Some("rustc 1.90.0".to_string()),
+                node: Some("v20.19.0".to_string()),
+                tmux: Some("n/a".to_string()),
+                zellij: Some("0.44.2".to_string()),
+                workflow: Some(
+                    "https://github.com/example/terminal-platform/actions/runs/123456789"
+                        .to_string(),
+                ),
+                job: Some(
+                    "windows-v1 (https://github.com/example/terminal-platform/actions/runs/123456789/job/987654321)"
+                        .to_string(),
+                ),
+                force: false,
+            },
+        )
+        .expect("windows scaffold should write");
+
+        let contents =
+            fs::read_to_string(&output_path).expect("scaffolded manual run should read back");
+
+        assert_eq!(output_path, output);
+        assert!(contents.contains("Result: pending"), "contents: {contents}");
+        assert!(
+            contents.contains(
+                "Workflow: https://github.com/example/terminal-platform/actions/runs/123456789"
+            ),
+            "contents: {contents}"
+        );
+        assert!(
+            contents.contains(
+                "Job: windows-v1 (https://github.com/example/terminal-platform/actions/runs/123456789/job/987654321)"
+            ),
+            "contents: {contents}"
         );
     }
 

@@ -28,6 +28,7 @@ For the required Windows `Native + Zellij` pass, keep those as explicit top-leve
 cargo run -p xtask -- scaffold-manual-run --kind electron --date YYYY-MM-DD
 cargo run -p xtask -- scaffold-manual-run --kind unix-tmux --date YYYY-MM-DD
 cargo run -p xtask -- scaffold-manual-run --kind windows-native-zellij --date YYYY-MM-DD --zellij "zellij 0.44.x"
+cargo run -p xtask -- scaffold-manual-run --kind windows-native-zellij --date YYYY-MM-DD --zellij "zellij 0.44.x" --workflow https://github.com/<owner>/<repo>/actions/runs/<run-id> --job "windows-v1 (https://github.com/<owner>/<repo>/actions/runs/<run-id>/job/<job-id>)"
 ```
 
 By default these commands create draft files under:
@@ -48,7 +49,7 @@ Minimum expectations:
 
 - actually run the listed flows
 - record the real OS and tool versions
-- for hosted Windows evidence, replace the scaffolded `Workflow:` and `Job:` placeholders with the real run URL and exact `windows-v1` job
+- for hosted Windows evidence, either replace the scaffolded `Workflow:` and `Job:` placeholders manually or prefill them with `--workflow` and `--job`
 - write real findings, even if the value is `no issues found`
 - keep the checklist path accurate
 - remove unresolved draft text such as `fill from workflow log`, `fill after hosted run completes`,
