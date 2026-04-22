@@ -142,7 +142,22 @@ let state = TerminalDaemonState::with_backend_config(
 ) ?;
 ```
 
-The daemon handshake will report only the backends that are actually compiled and enabled. Unsupported combinations fail explicitly instead of silently degrading into fake parity.
+Or use the canonical bootstrap config contract for embedders:
+
+```rust
+use terminal_daemon::TerminalDaemonBootstrapConfig;
+
+let daemon = TerminalDaemonBootstrapConfig::from_backend_csv("native,zellij")?
+    .build_daemon()?;
+```
+
+Environment-driven bootstrap is also supported:
+
+```bash
+export TERMINAL_DAEMON_BACKENDS=native,zellij
+```
+
+The daemon handshake will report only the backends that are actually compiled and enabled. Unsupported combinations fail explicitly instead of silently degrading into fake parity, and backend wiring now lives behind a provider registry instead of being hard-coded inside daemon state.
 
 ## Main Surfaces
 

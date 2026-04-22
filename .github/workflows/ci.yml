@@ -18,6 +18,48 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  backend-bundles:
+    name: backend-bundles-${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: native-only
+            features: native-backend
+          - label: tmux-only
+            features: tmux-backend
+          - label: zellij-only
+            features: zellij-backend
+          - label: native-zellij
+            features: native-backend,zellij-backend
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Daemon bundle test
+        shell: bash
+        run: cargo test -p terminal-daemon --no-default-features --features "${{ matrix.features }}" -- --nocapture
+
+      - name: Embed surface bundle compile
+        shell: bash
+        run: |
+          cargo check -p terminal-testing --no-default-features --features "${{ matrix.features }}" --lib
+          cargo check -p terminal-daemon-client --no-default-features --features "${{ matrix.features }}" --lib
+          cargo check -p terminal-node --no-default-features --features "${{ matrix.features }}" --lib
+          cargo check -p terminal-node-napi --no-default-features --features "${{ matrix.features }}" --lib
+          cargo check -p terminal-capi --no-default-features --features "${{ matrix.features }}" --lib
+
   unix-matrix:
     name: unix-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -170,6 +212,18 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features
+
+      - name: Windows backend bundle compile
+        shell: pwsh
+        run: |
+          cargo check -p terminal-daemon --no-default-features --features native-backend --tests
+          cargo check -p terminal-daemon --no-default-features --features zellij-backend --tests
+          cargo check -p terminal-daemon --no-default-features --features native-backend,zellij-backend --tests
+          cargo check -p terminal-testing --no-default-features --features native-backend,zellij-backend --lib
+          cargo check -p terminal-daemon-client --no-default-features --features native-backend,zellij-backend --lib
+          cargo check -p terminal-node --no-default-features --features native-backend,zellij-backend --lib
+          cargo check -p terminal-node-napi --no-default-features --features native-backend,zellij-backend --lib
+          cargo check -p terminal-capi --no-default-features --features native-backend,zellij-backend --lib
 
       - name: Nextest
         run: >

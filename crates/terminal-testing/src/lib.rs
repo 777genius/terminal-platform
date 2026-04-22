@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend"))]
 use std::sync::Arc;
 #[cfg(windows)]
 use std::{
@@ -23,19 +23,20 @@ use std::{
 
 #[cfg(windows)]
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend"))]
 use terminal_application::BackendCatalog;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend"))]
 use terminal_backend_api::MuxBackendPort;
 use terminal_backend_api::ShellLaunchSpec;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend", feature = "native-backend"))]
 use terminal_backend_native::NativeBackend;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend"))]
 use terminal_backend_tmux::TmuxBackend;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend", feature = "zellij-backend"))]
 use terminal_backend_zellij::ZellijBackend;
 use terminal_daemon::{
-    LocalSocketServerHandle, TerminalDaemon, TerminalDaemonState, spawn_local_socket_server,
+    LocalSocketServerHandle, TerminalDaemon, TerminalDaemonBootstrapConfig, TerminalDaemonState,
+    spawn_local_socket_server,
 };
 use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_persistence::SqliteSessionStore;
@@ -43,14 +44,19 @@ use terminal_protocol::LocalSocketAddress;
 
 #[must_use]
 pub fn daemon_state() -> TerminalDaemonState {
-    TerminalDaemonState::default()
+    TerminalDaemonBootstrapConfig::default()
+        .build_state()
+        .expect("compiled default bootstrap config should build a daemon state")
 }
 
 #[must_use]
 pub fn isolated_daemon_state(label: &str) -> TerminalDaemonState {
     let store = SqliteSessionStore::open(unique_sqlite_path(label))
         .expect("isolated sqlite session store should open");
-    TerminalDaemonState::with_default_persistence(store)
+    TerminalDaemonState::builder()
+        .persistence(store)
+        .build()
+        .expect("compiled default bootstrap config should build a daemon state with persistence")
 }
 
 pub struct DaemonFixture {
@@ -158,14 +164,20 @@ fn resolve_windows_executable(program: &str) -> String {
     program.to_string()
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend"))]
 #[must_use]
 pub fn tmux_daemon_state(socket_name: &str) -> TerminalDaemonState {
-    TerminalDaemonState::new(BackendCatalog::new([
-        Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
-        Arc::new(TmuxBackend::with_socket_name(socket_name)) as Arc<dyn MuxBackendPort>,
-        Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>,
-    ]))
+    let mut backends = Vec::<Arc<dyn MuxBackendPort>>::new();
+
+    #[cfg(feature = "native-backend")]
+    backends.push(Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>);
+
+    backends.push(Arc::new(TmuxBackend::with_socket_name(socket_name)) as Arc<dyn MuxBackendPort>);
+
+    #[cfg(feature = "zellij-backend")]
+    backends.push(Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>);
+
+    TerminalDaemonState::new(BackendCatalog::new(backends))
 }
 
 #[cfg(unix)]

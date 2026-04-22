@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2024"
 license.workspace = true
 
+[features]
+default = ["native-backend", "tmux-backend", "zellij-backend"]
+native-backend = ["terminal-daemon/native-backend", "terminal-testing/native-backend"]
+tmux-backend = ["terminal-daemon/tmux-backend", "terminal-testing/tmux-backend"]
+zellij-backend = ["terminal-daemon/zellij-backend", "terminal-testing/zellij-backend"]
+
 [dependencies]
 serde = { workspace = true }
 terminal-backend-api = { path = "../terminal-backend-api" }
@@ -17,8 +23,8 @@ ts-rs = "12.0.1"
 uuid = { workspace = true }
 
 [dev-dependencies]
-terminal-daemon = { path = "../terminal-daemon" }
-terminal-testing = { path = "../terminal-testing" }
+terminal-daemon = { path = "../terminal-daemon", default-features = false }
+terminal-testing = { path = "../terminal-testing", default-features = false }
 
 [lints]
 workspace = true

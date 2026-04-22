@@ -546,7 +546,7 @@ mod tests {
             node.list_saved_sessions().await.expect("list_saved_sessions should succeed");
 
         assert!(handshake.assessment.can_use);
-        assert_eq!(handshake.handshake.available_backends.len(), 3);
+        assert!(handshake.handshake.available_backends.contains(&NodeBackendKind::Native));
         assert_eq!(native_capabilities.backend, NodeBackendKind::Native);
         assert!(native_capabilities.capabilities.explicit_session_save);
         assert_eq!(tmux_capabilities.backend, NodeBackendKind::Tmux);

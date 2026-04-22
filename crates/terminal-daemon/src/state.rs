@@ -1,10 +1,7 @@
-use std::sync::Arc;
-
 use terminal_application::{BackendCatalog, SessionService};
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendSessionSummary, BackendSubscription,
-    CreateSessionSpec, DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult,
-    SubscriptionSpec,
+    CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult, SubscriptionSpec,
 };
 use terminal_domain::{
     BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR, PaneId,
@@ -18,12 +15,7 @@ use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion};
 use thiserror::Error;
 
-#[cfg(feature = "native-backend")]
-use terminal_backend_native::NativeBackend;
-#[cfg(feature = "tmux-backend")]
-use terminal_backend_tmux::TmuxBackend;
-#[cfg(feature = "zellij-backend")]
-use terminal_backend_zellij::ZellijBackend;
+use crate::backend_registry::TerminalDaemonBackendRegistry;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalDaemonBackendConfig {
@@ -56,6 +48,23 @@ impl TerminalDaemonBackendConfig {
         }
         self
     }
+
+    #[must_use]
+    pub const fn is_enabled(&self, backend: BackendKind) -> bool {
+        match backend {
+            BackendKind::Native => self.native,
+            BackendKind::Tmux => self.tmux,
+            BackendKind::Zellij => self.zellij,
+        }
+    }
+
+    #[must_use]
+    pub fn enabled_backends(&self) -> Vec<BackendKind> {
+        [BackendKind::Native, BackendKind::Tmux, BackendKind::Zellij]
+            .into_iter()
+            .filter(|backend| self.is_enabled(*backend))
+            .collect()
+    }
 }
 
 impl Default for TerminalDaemonBackendConfig {
@@ -74,10 +83,21 @@ pub enum TerminalDaemonStateBuildError {
     BackendNotCompiled { backend: BackendKind, compiled_backends: Vec<BackendKind> },
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TerminalDaemonStateBuilder {
     backend_config: TerminalDaemonBackendConfig,
     persistence: Option<SqliteSessionStore>,
+    backend_registry: TerminalDaemonBackendRegistry,
+}
+
+impl Default for TerminalDaemonStateBuilder {
+    fn default() -> Self {
+        Self {
+            backend_config: TerminalDaemonBackendConfig::default(),
+            persistence: None,
+            backend_registry: TerminalDaemonBackendRegistry::compiled_default(),
+        }
+    }
 }
 
 pub struct TerminalDaemonState {
@@ -100,7 +120,7 @@ impl TerminalDaemonState {
 
     #[must_use]
     pub fn compiled_backends() -> Vec<BackendKind> {
-        compiled_backend_kinds()
+        TerminalDaemonBackendRegistry::compiled_default().compiled_backends()
     }
 
     #[must_use]
@@ -271,123 +291,20 @@ impl TerminalDaemonStateBuilder {
         self
     }
 
+    #[must_use]
+    pub fn backend_registry(mut self, backend_registry: TerminalDaemonBackendRegistry) -> Self {
+        self.backend_registry = backend_registry;
+        self
+    }
+
     pub fn build(self) -> Result<TerminalDaemonState, TerminalDaemonStateBuildError> {
-        let backends = backend_catalog_from_config(self.backend_config)?;
+        let backends = self.backend_registry.build_catalog(self.backend_config)?;
         let sessions = match self.persistence {
             Some(persistence) => SessionService::with_persistence(backends, persistence),
             None => SessionService::new(backends),
         };
         Ok(TerminalDaemonState { sessions })
     }
-}
-
-fn backend_catalog_from_config(
-    backend_config: TerminalDaemonBackendConfig,
-) -> Result<BackendCatalog, TerminalDaemonStateBuildError> {
-    let compiled_backends = compiled_backend_kinds();
-    let mut backends = Vec::<Arc<dyn MuxBackendPort>>::new();
-
-    maybe_push_native_backend(backend_config.native, &compiled_backends, &mut backends)?;
-    maybe_push_tmux_backend(backend_config.tmux, &compiled_backends, &mut backends)?;
-    maybe_push_zellij_backend(backend_config.zellij, &compiled_backends, &mut backends)?;
-
-    if backends.is_empty() {
-        return Err(TerminalDaemonStateBuildError::NoBackendsEnabled);
-    }
-
-    Ok(BackendCatalog::new(backends))
-}
-
-fn compiled_backend_kinds() -> Vec<BackendKind> {
-    [
-        cfg!(feature = "native-backend").then_some(BackendKind::Native),
-        cfg!(feature = "tmux-backend").then_some(BackendKind::Tmux),
-        cfg!(feature = "zellij-backend").then_some(BackendKind::Zellij),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
-}
-
-#[cfg(feature = "native-backend")]
-fn maybe_push_native_backend(
-    enabled: bool,
-    _compiled_backends: &[BackendKind],
-    backends: &mut Vec<Arc<dyn MuxBackendPort>>,
-) -> Result<(), TerminalDaemonStateBuildError> {
-    if enabled {
-        backends.push(Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>);
-    }
-    Ok(())
-}
-
-#[cfg(not(feature = "native-backend"))]
-fn maybe_push_native_backend(
-    enabled: bool,
-    compiled_backends: &[BackendKind],
-    _backends: &mut Vec<Arc<dyn MuxBackendPort>>,
-) -> Result<(), TerminalDaemonStateBuildError> {
-    if enabled {
-        return Err(TerminalDaemonStateBuildError::BackendNotCompiled {
-            backend: BackendKind::Native,
-            compiled_backends: compiled_backends.to_vec(),
-        });
-    }
-    Ok(())
-}
-
-#[cfg(feature = "tmux-backend")]
-fn maybe_push_tmux_backend(
-    enabled: bool,
-    _compiled_backends: &[BackendKind],
-    backends: &mut Vec<Arc<dyn MuxBackendPort>>,
-) -> Result<(), TerminalDaemonStateBuildError> {
-    if enabled {
-        backends.push(Arc::new(TmuxBackend::default()) as Arc<dyn MuxBackendPort>);
-    }
-    Ok(())
-}
-
-#[cfg(not(feature = "tmux-backend"))]
-fn maybe_push_tmux_backend(
-    enabled: bool,
-    compiled_backends: &[BackendKind],
-    _backends: &mut Vec<Arc<dyn MuxBackendPort>>,
-) -> Result<(), TerminalDaemonStateBuildError> {
-    if enabled {
-        return Err(TerminalDaemonStateBuildError::BackendNotCompiled {
-            backend: BackendKind::Tmux,
-            compiled_backends: compiled_backends.to_vec(),
-        });
-    }
-    Ok(())
-}
-
-#[cfg(feature = "zellij-backend")]
-fn maybe_push_zellij_backend(
-    enabled: bool,
-    _compiled_backends: &[BackendKind],
-    backends: &mut Vec<Arc<dyn MuxBackendPort>>,
-) -> Result<(), TerminalDaemonStateBuildError> {
-    if enabled {
-        backends.push(Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>);
-    }
-    Ok(())
-}
-
-#[cfg(not(feature = "zellij-backend"))]
-fn maybe_push_zellij_backend(
-    enabled: bool,
-    compiled_backends: &[BackendKind],
-    _backends: &mut Vec<Arc<dyn MuxBackendPort>>,
-) -> Result<(), TerminalDaemonStateBuildError> {
-    if enabled {
-        return Err(TerminalDaemonStateBuildError::BackendNotCompiled {
-            backend: BackendKind::Zellij,
-            compiled_backends: compiled_backends.to_vec(),
-        });
-    }
-    Ok(())
 }
 
 fn daemon_capabilities() -> DaemonCapabilities {
@@ -411,7 +328,7 @@ mod tests {
     #[cfg(feature = "native-backend")]
     use terminal_application::BackendCatalog;
     #[cfg(feature = "native-backend")]
-    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec};
+    use terminal_backend_api::{CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec};
     #[cfg(feature = "native-backend")]
     use terminal_backend_native::NativeBackend;
     use terminal_domain::BackendKind;
@@ -424,7 +341,7 @@ mod tests {
     #[test]
     fn exposes_ready_handshake_with_configured_backends() {
         let state = TerminalDaemonState::new(BackendCatalog::new([
-            Arc::new(NativeBackend::default()) as Arc<dyn terminal_backend_api::MuxBackendPort>,
+            Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
         ]));
         let handshake = state.handshake();
 

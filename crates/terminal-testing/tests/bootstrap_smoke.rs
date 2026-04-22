@@ -61,7 +61,7 @@ fn bootstrap_smoke_exposes_empty_daemon_state() {
     assert_eq!(handshake.daemon_phase, DaemonPhase::Ready);
     assert_eq!(
         handshake.available_backends,
-        vec![BackendKind::Native, BackendKind::Tmux, BackendKind::Zellij]
+        terminal_daemon::TerminalDaemonState::compiled_backends()
     );
     assert!(handshake.capabilities.request_reply);
     assert!(handshake.capabilities.topology_subscriptions);
