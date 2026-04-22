@@ -73,6 +73,49 @@ export interface NativeBindingLoadOptions {
   addonPath?: string | undefined;
 }
 
+export interface TerminalNodeDiagnosticsClient {
+  readonly address?: string | undefined;
+  bindingVersion(): Promise<NodeBindingVersion> | NodeBindingVersion;
+  handshakeInfo(): Promise<NodeHandshakeInfo> | NodeHandshakeInfo;
+  backendCapabilities(
+    backend: NodeBackendKind,
+  ): Promise<NodeBackendCapabilitiesInfo> | NodeBackendCapabilitiesInfo;
+}
+
+export interface TerminalNodeEnvironmentReportOptions {
+  backends?: NodeBackendKind[] | undefined;
+  includeBindingPath?: boolean | undefined;
+}
+
+export interface TerminalNodeEnvironmentReportBackend {
+  backend: NodeBackendKind;
+  promisedInV1: boolean;
+  capabilities: NodeBackendCapabilitiesInfo["capabilities"];
+}
+
+export interface TerminalNodeEnvironmentReport {
+  runtime: {
+    platform: string;
+    arch: string;
+    nodeVersion: string;
+  };
+  binding: {
+    path: string | null;
+    version: NodeBindingVersion;
+  };
+  daemon: {
+    address: string | null;
+    handshake: NodeHandshakeInfo;
+  };
+  supportMatrix: {
+    currentPlatform: string;
+    inV1SupportMatrix: boolean;
+    promisedBackends: NodeBackendKind[];
+    unpromisedBackends: NodeBackendKind[];
+  };
+  backends: TerminalNodeEnvironmentReportBackend[];
+}
+
 export interface TerminalNodeSubscriptionPumpOptions {
   signal?: AbortSignal | null | undefined;
   onEvent(event: NodeSubscriptionEvent): void | Promise<void>;
@@ -344,6 +387,10 @@ export declare function resolveNativeBindingPath(
 export declare function loadNativeBinding(
   options?: NativeBindingLoadOptions,
 ): NativeBindingModule;
+export declare function collectEnvironmentReport(
+  client: TerminalNodeDiagnosticsClient,
+  options?: TerminalNodeEnvironmentReportOptions,
+): Promise<TerminalNodeEnvironmentReport>;
 
 export declare function createSessionState(
   attached: NodeAttachedSession,
@@ -509,6 +556,7 @@ export declare class ElectronTerminalNodeClient {
 
 declare const _default: {
   applyScreenDelta: typeof applyScreenDelta;
+  collectEnvironmentReport: typeof collectEnvironmentReport;
   createElectronMainBridge: typeof createElectronMainBridge;
   createElectronPreloadApi: typeof createElectronPreloadApi;
   createSessionState: typeof createSessionState;

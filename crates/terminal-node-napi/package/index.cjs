@@ -6,6 +6,59 @@ const path = require("node:path");
 
 const defaultAddonPath = path.join(__dirname, "native", "terminal_node_napi.node");
 const nativeManifestPath = path.join(__dirname, "native", "manifest.json");
+const reportBackendOrder = Object.freeze(["native", "tmux", "zellij"]);
+
+function promisedV1BackendsForPlatform(platform = process.platform) {
+  if (platform === "win32") {
+    return ["native", "zellij"];
+  }
+
+  if (platform === "darwin" || platform === "linux") {
+    return [...reportBackendOrder];
+  }
+
+  return [];
+}
+
+function normalizeReportBackends(backends) {
+  if (backends == null) {
+    return [...reportBackendOrder];
+  }
+
+  if (!Array.isArray(backends) || backends.length === 0) {
+    throw new TypeError(
+      "terminal-node collectEnvironmentReport requires backends to be a non-empty array when provided",
+    );
+  }
+
+  const unique = [];
+  for (const backend of backends) {
+    if (!reportBackendOrder.includes(backend)) {
+      throw new TypeError(
+        `terminal-node collectEnvironmentReport received an unsupported backend: ${backend}`,
+      );
+    }
+    if (!unique.includes(backend)) {
+      unique.push(backend);
+    }
+  }
+
+  return unique;
+}
+
+function assertDiagnosticsClient(client) {
+  if (!client || typeof client !== "object") {
+    throw new TypeError("terminal-node collectEnvironmentReport requires a client object");
+  }
+
+  for (const method of ["bindingVersion", "handshakeInfo", "backendCapabilities"]) {
+    if (typeof client[method] !== "function") {
+      throw new TypeError(
+        `terminal-node collectEnvironmentReport requires client.${method}()`,
+      );
+    }
+  }
+}
 
 function resolveNativeBindingPath(options = {}) {
   const manifestAddonPath = resolveManifestAddonPath();
@@ -109,6 +162,58 @@ function loadNativeBinding(options = {}) {
   }
 
   return binding;
+}
+
+async function collectEnvironmentReport(client, options = {}) {
+  assertDiagnosticsClient(client);
+
+  const backends = normalizeReportBackends(options.backends);
+  const promisedBackends = promisedV1BackendsForPlatform(process.platform);
+  const includeBindingPath = options.includeBindingPath !== false;
+  let bindingPath = null;
+
+  if (includeBindingPath) {
+    try {
+      bindingPath = resolveNativeBindingPath();
+    } catch (_error) {
+      bindingPath = null;
+    }
+  }
+
+  const [bindingVersion, handshake, ...capabilities] = await Promise.all([
+    client.bindingVersion(),
+    client.handshakeInfo(),
+    ...backends.map((backend) => client.backendCapabilities(backend)),
+  ]);
+
+  return {
+    runtime: {
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+    },
+    binding: {
+      path: bindingPath,
+      version: bindingVersion,
+    },
+    daemon: {
+      address: typeof client.address === "string" ? client.address : null,
+      handshake,
+    },
+    supportMatrix: {
+      currentPlatform: process.platform,
+      inV1SupportMatrix: promisedBackends.length > 0,
+      promisedBackends,
+      unpromisedBackends: reportBackendOrder.filter(
+        (backend) => !promisedBackends.includes(backend),
+      ),
+    },
+    backends: capabilities.map((capability) => ({
+      backend: capability.backend,
+      promisedInV1: promisedBackends.includes(capability.backend),
+      capabilities: capability.capabilities,
+    })),
+  };
 }
 
 function firstPaneId(node) {
@@ -1284,6 +1389,7 @@ function createElectronMainBridge(options = {}) {
 
 module.exports = {
   applyScreenDelta,
+  collectEnvironmentReport,
   createElectronMainBridge,
   createElectronPreloadApi,
   createSessionState,

@@ -116,6 +116,31 @@ The package-level watch helpers are explicitly tested for:
 - restart recovery on the same client instance
 - main and preload disposal during live session-state watchers
 
+## Environment Report
+
+For host diagnostics and support tickets, the package can collect a structured environment report without guessing backend truth:
+
+```js
+const {
+  TerminalNodeClient,
+  collectEnvironmentReport,
+} = require("terminal-platform-node");
+
+const client = TerminalNodeClient.fromRuntimeSlug("default");
+const report = await collectEnvironmentReport(client);
+
+console.log(report.supportMatrix);
+console.log(report.backends);
+```
+
+The report includes:
+
+- current Node platform and arch
+- resolved addon path when available
+- binding and daemon handshake versions
+- backend capability snapshots for `native`, `tmux`, and `zellij`
+- the published v1 support matrix for the current host platform
+
 ## Packaging And Local Staging
 
 Stage a publishable package directory from a compiled addon:

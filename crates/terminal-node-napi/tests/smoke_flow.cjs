@@ -11,6 +11,7 @@ const ZELLIJ_CREATE_TIMEOUT_MS = process.platform === "win32" ? 20000 : 10000;
 const ZELLIJ_DISCOVERY_TIMEOUT_MS = process.platform === "win32" ? 30000 : 20000;
 const ZELLIJ_SESSION_WAIT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 20000;
 const ZELLIJ_TOPOLOGY_POLL_ATTEMPTS = process.platform === "win32" ? 80 : 120;
+
 function readyEchoLaunch() {
   if (process.platform === "win32") {
     return null;
@@ -22,7 +23,38 @@ function readyEchoLaunch() {
   };
 }
 
-async function runSmoke(createClient) {
+async function assertEnvironmentReport(client, sdk) {
+  if (!sdk || typeof sdk.collectEnvironmentReport !== "function") {
+    return;
+  }
+
+  const report = await sdk.collectEnvironmentReport(client);
+  const native = report.backends.find((backend) => backend.backend === "native");
+  const tmux = report.backends.find((backend) => backend.backend === "tmux");
+  const zellij = report.backends.find((backend) => backend.backend === "zellij");
+
+  assert.equal(report.runtime.platform, process.platform);
+  assert.equal(report.runtime.arch, process.arch);
+  assert.equal(report.runtime.nodeVersion, process.version);
+  assert.equal(typeof report.binding.version.protocol.major, "number");
+  assert.equal(report.daemon.address, typeof client.address === "string" ? client.address : null);
+  assert.equal(report.daemon.handshake.assessment.can_use, true);
+  assert.equal(Array.isArray(report.supportMatrix.promisedBackends), true);
+  assert.equal(Array.isArray(report.supportMatrix.unpromisedBackends), true);
+  assert.equal(report.backends.length, 3);
+  assert.equal(typeof native?.promisedInV1, "boolean");
+  assert.equal(tmux?.promisedInV1, process.platform !== "win32");
+  assert.equal(typeof zellij?.promisedInV1, "boolean");
+  if (process.platform === "win32") {
+    assert.deepEqual(report.supportMatrix.promisedBackends, ["native", "zellij"]);
+    assert.deepEqual(report.supportMatrix.unpromisedBackends, ["tmux"]);
+  } else if (process.platform === "darwin" || process.platform === "linux") {
+    assert.deepEqual(report.supportMatrix.promisedBackends, ["native", "tmux", "zellij"]);
+    assert.deepEqual(report.supportMatrix.unpromisedBackends, []);
+  }
+}
+
+async function runSmoke(createClient, sdk = null) {
   const client = createClient();
 
   const version = client.bindingVersion();
@@ -90,6 +122,8 @@ async function runSmoke(createClient) {
   const restored = await client.restoreSavedSession(created.session_id);
   const deleted = await client.deleteSavedSession(created.session_id);
   const savedAfterDelete = await client.listSavedSessions();
+
+  await assertEnvironmentReport(client, sdk);
 
   assert.equal(typeof client.address, "string");
   assert.equal(version.protocol.major, 0);

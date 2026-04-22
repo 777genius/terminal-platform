@@ -34,7 +34,7 @@ function createClient(sdk) {
 
 async function main() {
   const sdk = require("terminal-platform-node");
-  await runSmoke(() => createClient(sdk));
+  await runSmoke(() => createClient(sdk), sdk);
   await runPackageWatchSmoke(() => createClient(sdk), sdk);
 }
 
@@ -66,7 +66,7 @@ function createClient(binding) {
 }
 
 async function main() {
-  await runSmoke(() => createClient(sdk));
+  await runSmoke(() => createClient(sdk), sdk);
   await runPackageWatchSmoke(() => createClient(sdk), sdk);
 }
 
