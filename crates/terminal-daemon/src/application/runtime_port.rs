@@ -8,19 +8,9 @@ use terminal_protocol::Handshake;
 
 use super::{RuntimePrunedSavedSessions, RuntimeSavedSessionRecord, RuntimeSavedSessionSummary};
 
-pub trait TerminalDaemonRuntimePort {
+pub trait TerminalDaemonCatalogPort {
     fn handshake(&self) -> Handshake;
     fn list_sessions(&self) -> Vec<BackendSessionSummary>;
-    fn list_saved_sessions(&self) -> Result<Vec<RuntimeSavedSessionSummary>, BackendError>;
-    fn saved_session(
-        &self,
-        session_id: SessionId,
-    ) -> Result<RuntimeSavedSessionRecord, BackendError>;
-    fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError>;
-    fn prune_saved_sessions(
-        &self,
-        keep_latest: usize,
-    ) -> Result<RuntimePrunedSavedSessions, BackendError>;
 
     async fn create_session(
         &self,
@@ -40,10 +30,27 @@ pub trait TerminalDaemonRuntimePort {
         route: SessionRoute,
         title: Option<String>,
     ) -> Result<BackendSessionSummary, BackendError>;
+}
+
+pub trait TerminalDaemonSavedSessionsPort {
+    fn list_saved_sessions(&self) -> Result<Vec<RuntimeSavedSessionSummary>, BackendError>;
+    fn saved_session(
+        &self,
+        session_id: SessionId,
+    ) -> Result<RuntimeSavedSessionRecord, BackendError>;
+    fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError>;
+    fn prune_saved_sessions(
+        &self,
+        keep_latest: usize,
+    ) -> Result<RuntimePrunedSavedSessions, BackendError>;
+
     async fn restore_saved_session(
         &self,
         session_id: SessionId,
     ) -> Result<BackendSessionSummary, BackendError>;
+}
+
+pub trait TerminalDaemonActiveSessionPort {
     async fn topology_snapshot(
         &self,
         session_id: SessionId,
@@ -64,6 +71,9 @@ pub trait TerminalDaemonRuntimePort {
         session_id: SessionId,
         command: MuxCommand,
     ) -> Result<MuxCommandResult, BackendError>;
+}
+
+pub trait TerminalDaemonSubscriptionPort {
     async fn open_subscription(
         &self,
         session_id: SessionId,

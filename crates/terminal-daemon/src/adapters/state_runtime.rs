@@ -10,10 +10,12 @@ use crate::{
     TerminalDaemonState,
     application::{
         RuntimePrunedSavedSessions, RuntimeSavedSessionRecord, RuntimeSavedSessionSummary,
-        TerminalDaemonRuntimePort,
+        TerminalDaemonActiveSessionPort, TerminalDaemonCatalogPort,
+        TerminalDaemonSavedSessionsPort, TerminalDaemonSubscriptionPort,
     },
 };
 
+#[derive(Clone, Copy)]
 pub struct TerminalDaemonStateRuntimeAdapter<'a> {
     state: &'a TerminalDaemonState,
 }
@@ -25,40 +27,13 @@ impl<'a> TerminalDaemonStateRuntimeAdapter<'a> {
     }
 }
 
-impl TerminalDaemonRuntimePort for TerminalDaemonStateRuntimeAdapter<'_> {
+impl TerminalDaemonCatalogPort for TerminalDaemonStateRuntimeAdapter<'_> {
     fn handshake(&self) -> Handshake {
         self.state.handshake()
     }
 
     fn list_sessions(&self) -> Vec<BackendSessionSummary> {
         self.state.list_sessions()
-    }
-
-    fn list_saved_sessions(&self) -> Result<Vec<RuntimeSavedSessionSummary>, BackendError> {
-        self.state
-            .list_saved_sessions()
-            .map(|sessions| sessions.into_iter().map(map_saved_session_summary).collect())
-    }
-
-    fn saved_session(
-        &self,
-        session_id: SessionId,
-    ) -> Result<RuntimeSavedSessionRecord, BackendError> {
-        self.state.saved_session(session_id).map(map_saved_session_record)
-    }
-
-    fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {
-        self.state.delete_saved_session(session_id)
-    }
-
-    fn prune_saved_sessions(
-        &self,
-        keep_latest: usize,
-    ) -> Result<RuntimePrunedSavedSessions, BackendError> {
-        self.state.prune_saved_sessions(keep_latest).map(|pruned| RuntimePrunedSavedSessions {
-            deleted_count: pruned.deleted_count,
-            kept_count: pruned.kept_count,
-        })
     }
 
     async fn create_session(
@@ -90,6 +65,35 @@ impl TerminalDaemonRuntimePort for TerminalDaemonStateRuntimeAdapter<'_> {
     ) -> Result<BackendSessionSummary, BackendError> {
         self.state.import_session(route, title).await
     }
+}
+
+impl TerminalDaemonSavedSessionsPort for TerminalDaemonStateRuntimeAdapter<'_> {
+    fn list_saved_sessions(&self) -> Result<Vec<RuntimeSavedSessionSummary>, BackendError> {
+        self.state
+            .list_saved_sessions()
+            .map(|sessions| sessions.into_iter().map(map_saved_session_summary).collect())
+    }
+
+    fn saved_session(
+        &self,
+        session_id: SessionId,
+    ) -> Result<RuntimeSavedSessionRecord, BackendError> {
+        self.state.saved_session(session_id).map(map_saved_session_record)
+    }
+
+    fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {
+        self.state.delete_saved_session(session_id)
+    }
+
+    fn prune_saved_sessions(
+        &self,
+        keep_latest: usize,
+    ) -> Result<RuntimePrunedSavedSessions, BackendError> {
+        self.state.prune_saved_sessions(keep_latest).map(|pruned| RuntimePrunedSavedSessions {
+            deleted_count: pruned.deleted_count,
+            kept_count: pruned.kept_count,
+        })
+    }
 
     async fn restore_saved_session(
         &self,
@@ -97,7 +101,9 @@ impl TerminalDaemonRuntimePort for TerminalDaemonStateRuntimeAdapter<'_> {
     ) -> Result<BackendSessionSummary, BackendError> {
         self.state.restore_saved_session(session_id).await
     }
+}
 
+impl TerminalDaemonActiveSessionPort for TerminalDaemonStateRuntimeAdapter<'_> {
     async fn topology_snapshot(
         &self,
         session_id: SessionId,
@@ -129,7 +135,9 @@ impl TerminalDaemonRuntimePort for TerminalDaemonStateRuntimeAdapter<'_> {
     ) -> Result<MuxCommandResult, BackendError> {
         self.state.dispatch(session_id, command).await
     }
+}
 
+impl TerminalDaemonSubscriptionPort for TerminalDaemonStateRuntimeAdapter<'_> {
     async fn open_subscription(
         &self,
         session_id: SessionId,

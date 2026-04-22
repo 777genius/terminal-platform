@@ -4,8 +4,9 @@ use terminal_protocol::{
 };
 
 use crate::{
-    TerminalDaemonState, adapters::TerminalDaemonStateRuntimeAdapter,
-    application::TerminalDaemonRequestDispatcher,
+    TerminalDaemonState,
+    adapters::TerminalDaemonStateRuntimeAdapter,
+    application::{TerminalDaemonRequestDispatcher, TerminalDaemonSubscriptionService},
 };
 
 #[derive(Default)]
@@ -30,11 +31,34 @@ impl TerminalDaemon {
         &self,
         request: OpenSubscriptionRequest,
     ) -> Result<BackendSubscription, ProtocolError> {
-        self.dispatcher().open_subscription(request).await
+        self.subscription_service().open_backend_subscription(request).await
     }
 
-    fn dispatcher(&self) -> TerminalDaemonRequestDispatcher<TerminalDaemonStateRuntimeAdapter<'_>> {
-        TerminalDaemonRequestDispatcher::new(TerminalDaemonStateRuntimeAdapter::new(&self.state))
+    fn runtime_adapter(&self) -> TerminalDaemonStateRuntimeAdapter<'_> {
+        TerminalDaemonStateRuntimeAdapter::new(&self.state)
+    }
+
+    fn dispatcher(
+        &self,
+    ) -> TerminalDaemonRequestDispatcher<
+        TerminalDaemonStateRuntimeAdapter<'_>,
+        TerminalDaemonStateRuntimeAdapter<'_>,
+        TerminalDaemonStateRuntimeAdapter<'_>,
+        TerminalDaemonStateRuntimeAdapter<'_>,
+    > {
+        let runtime = self.runtime_adapter();
+        TerminalDaemonRequestDispatcher::new(
+            runtime,
+            runtime,
+            runtime,
+            TerminalDaemonSubscriptionService::new(runtime),
+        )
+    }
+
+    fn subscription_service(
+        &self,
+    ) -> TerminalDaemonSubscriptionService<TerminalDaemonStateRuntimeAdapter<'_>> {
+        TerminalDaemonSubscriptionService::new(self.runtime_adapter())
     }
 }
 
