@@ -90,7 +90,7 @@ struct LayoutResizeOutcome {
 
 struct NativePtyProcess {
     master: Box<dyn portable_pty::MasterPty + Send>,
-    writer: Box<dyn std::io::Write + Send>,
+    writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
@@ -326,6 +326,7 @@ fn spawn_pane(
         .master
         .take_writer()
         .map_err(|error| BackendError::transport(format!("failed to take pty writer - {error}")))?;
+    let writer = Arc::new(Mutex::new(writer));
     let emulator = Arc::new(EmulatorBuffer::new(rows, cols));
     let transcript = Arc::new(TranscriptBuffer::default());
     let pane_id = PaneId::new();
@@ -333,6 +334,7 @@ fn spawn_pane(
 
     spawn_reader_thread(
         reader,
+        Arc::clone(&writer),
         Arc::clone(&transcript),
         Arc::clone(&emulator),
         surface_tick.clone(),
@@ -362,6 +364,7 @@ fn build_command(launch: &ShellLaunchSpec) -> CommandBuilder {
 
 fn spawn_reader_thread(
     mut reader: Box<dyn std::io::Read + Send>,
+    writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
     transcript: Arc<TranscriptBuffer>,
     emulator: Arc<EmulatorBuffer>,
     surface_tick: watch::Sender<u64>,
@@ -372,6 +375,7 @@ fn spawn_reader_thread(
             match reader.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(read) => {
+                    respond_to_cursor_inherit_query(&chunk[..read], &writer);
                     transcript.append(&chunk[..read]);
                     emulator.advance(&chunk[..read]);
                     bump_watch(&surface_tick);
@@ -1048,14 +1052,18 @@ impl NativePaneRuntime {
     }
 
     fn write_all(&self, bytes: &[u8]) -> Result<(), BackendError> {
-        let mut process = self
+        let process = self
             .process
             .lock()
             .map_err(|_| BackendError::internal("native pane process lock poisoned"))?;
-        process.writer.write_all(bytes).map_err(|error| {
+        let mut writer = process
+            .writer
+            .lock()
+            .map_err(|_| BackendError::internal("native pane writer lock poisoned"))?;
+        writer.write_all(bytes).map_err(|error| {
             BackendError::transport(format!("failed to write to pty - {error}"))
         })?;
-        process.writer.flush().map_err(|error| {
+        writer.flush().map_err(|error| {
             BackendError::transport(format!("failed to flush pty writer - {error}"))
         })?;
         Ok(())
@@ -1082,6 +1090,27 @@ impl NativePaneRuntime {
         self.mark_surface_dirty();
         Ok(())
     }
+}
+
+fn respond_to_cursor_inherit_query(
+    chunk: &[u8],
+    writer: &Arc<Mutex<Box<dyn std::io::Write + Send>>>,
+) {
+    #[cfg(windows)]
+    {
+        // CreatePseudoConsole warns that inheriting the cursor can deadlock unless the host
+        // answers the cursor-position query received on the output pipe. portable-pty's Windows
+        // ConPTY path enables cursor inherit internally, so keep the pipe responsive here.
+        if chunk.windows(4).any(|window| window == b"\x1b[6n")
+            && let Ok(mut writer) = writer.lock()
+        {
+            let _ = writer.write_all(b"\x1b[1;1R");
+            let _ = writer.flush();
+        }
+    }
+
+    #[cfg(not(windows))]
+    let _ = (chunk, writer);
 }
 
 fn normalize_pty_input(text: &str) -> Cow<'_, str> {
