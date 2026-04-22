@@ -993,6 +993,10 @@ fn verify_node_package_scripts(
             "options.out = path.resolve(readFlagValue(argv, index, arg))",
             "Missing value for ${flag}",
             "npm_config_cache",
+            "nodePackageManager()",
+            "process.platform === \"win32\" ? \"npm.cmd\" : \"npm\"",
+            "npm pack failed to launch -",
+            "signal ${packResult.signal ?? \"<none>\"}",
         ],
     )?;
     assert_contains_all(
@@ -2635,6 +2639,10 @@ throw new Error(`Missing value for ${flag}`);
 options.out = path.resolve(readFlagValue(argv, index, arg));
 throw new Error(`Missing value for ${flag}`);
 npm_config_cache: process.env.npm_config_cache ?? path.join(options.out, ".npm-cache"),
+nodePackageManager()
+process.platform === "win32" ? "npm.cmd" : "npm"
+npm pack failed to launch -
+signal ${packResult.signal ?? "<none>"}
 "#;
 
     const VALID_NODE_PACKAGE_VERIFY_SCRIPT: &str = r#"
