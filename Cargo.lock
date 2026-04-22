@@ -1414,8 +1414,6 @@ dependencies = [
 name = "terminal-daemon"
 version = "0.1.0"
 dependencies = [
- "futures-util",
- "interprocess",
  "terminal-backend-api",
  "terminal-backend-native",
  "terminal-backend-tmux",
@@ -1426,16 +1424,14 @@ dependencies = [
  "terminal-projection",
  "terminal-protocol",
  "terminal-runtime",
+ "terminal-transport",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
 name = "terminal-daemon-client"
 version = "0.1.0"
 dependencies = [
- "futures-util",
- "interprocess",
  "rusqlite",
  "serde_json",
  "terminal-backend-api",
@@ -1445,8 +1441,8 @@ dependencies = [
  "terminal-persistence",
  "terminal-projection",
  "terminal-protocol",
+ "terminal-transport",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -1575,6 +1571,21 @@ dependencies = [
  "terminal-protocol",
  "terminal-runtime",
  "tokio",
+]
+
+[[package]]
+name = "terminal-transport"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "interprocess",
+ "terminal-backend-api",
+ "terminal-domain",
+ "terminal-mux-domain",
+ "terminal-projection",
+ "terminal-protocol",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

@@ -81,9 +81,10 @@
     terminal-mux-domain/
     terminal-backend-api/
     terminal-protocol/
-    terminal-application/
+    terminal-runtime/
     terminal-projection/
     terminal-persistence/
+    terminal-transport/
     terminal-backend-native/
     terminal-backend-tmux/
     terminal-backend-zellij/
@@ -181,8 +182,9 @@ Root workspace file должен:
 - `terminal-backend-api`
 - `terminal-protocol`
 - `terminal-projection`
-- `terminal-application`
+- `terminal-runtime`
 - `terminal-persistence`
+- `terminal-transport`
 
 Они:
 
@@ -201,7 +203,7 @@ Root workspace file должен:
 Они:
 
 - зависят inward
-- могут зависеть на `terminal-backend-api`, `terminal-application`, `terminal-protocol`
+- могут зависеть на `terminal-backend-api`, `terminal-runtime`, `terminal-protocol`, `terminal-transport`
 - не должны образовывать циклы
 
 ### Host leaves
@@ -270,13 +272,21 @@ Root workspace file должен:
 - `projection_source.rs`
 - `lib.rs`
 
-### `terminal-application`
+### `terminal-runtime`
 
 Стартовые модули:
 
 - `services/`
 - `use_cases/`
 - `registry/`
+- `lib.rs`
+
+### `terminal-transport`
+
+Стартовые модули:
+
+- `server.rs`
+- `client.rs`
 - `lib.rs`
 
 ### `terminal-persistence`

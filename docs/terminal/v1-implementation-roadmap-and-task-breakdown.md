@@ -130,7 +130,7 @@ Bootstrap details for the very first phase live in:
 
 ### Deliverables
 
-- `terminal-application`
+- `terminal-runtime`
 - initial `terminal-persistence`
 - session lifecycle service
 

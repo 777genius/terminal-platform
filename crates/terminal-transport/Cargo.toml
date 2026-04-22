@@ -1,0 +1,21 @@
+[package]
+name = "terminal-transport"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+futures-util = { workspace = true }
+interprocess = { workspace = true }
+terminal-domain = { path = "../terminal-domain" }
+terminal-protocol = { path = "../terminal-protocol" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+terminal-backend-api = { path = "../terminal-backend-api" }
+terminal-mux-domain = { path = "../terminal-mux-domain" }
+terminal-projection = { path = "../terminal-projection" }

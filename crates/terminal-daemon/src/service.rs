@@ -4,6 +4,7 @@ use terminal_protocol::{
     OpenSubscriptionRequest, ProtocolError, RequestEnvelope, ResponseEnvelope,
 };
 use terminal_runtime::TerminalRuntime;
+use terminal_transport::TransportSubscription;
 
 use crate::{
     adapters::TerminalRuntimeAdapter,
@@ -11,7 +12,7 @@ use crate::{
         TerminalDaemonCatalogPort, TerminalDaemonRequestDispatcher,
         TerminalDaemonSubscriptionService,
     },
-    composition,
+    composition, transport,
 };
 
 pub struct TerminalDaemon {
@@ -57,6 +58,14 @@ impl TerminalDaemon {
     #[must_use]
     pub fn session_count(&self) -> usize {
         self.runtime.session_count()
+    }
+
+    pub(crate) async fn open_transport_subscription(
+        &self,
+        request: OpenSubscriptionRequest,
+    ) -> Result<TransportSubscription, ProtocolError> {
+        Ok(transport::backend_subscription_to_transport(self.open_subscription(request).await?)
+            .await)
     }
 
     fn runtime_adapter(&self) -> TerminalRuntimeAdapter<'_> {

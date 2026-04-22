@@ -1,0 +1,209 @@
+use std::{io, sync::Arc};
+
+use futures_util::{SinkExt as _, StreamExt as _};
+use interprocess::local_socket::{ListenerOptions, tokio::Stream, traits::tokio::Listener as _};
+use tokio::{
+    sync::{oneshot, watch},
+    task::{JoinError, JoinHandle, JoinSet},
+};
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
+
+use terminal_protocol::{
+    LocalSocketAddress, RequestEnvelope, ResponseEnvelope, ResponsePayload, SubscriptionEnvelope,
+    SubscriptionRequest, SubscriptionRequestEnvelope, TransportResponse, decode_json_frame,
+    encode_json_frame,
+};
+
+use crate::{TransportRequestHandler, TransportSubscriptionHandler};
+
+pub struct LocalSocketServerHandle {
+    address: LocalSocketAddress,
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    task: JoinHandle<io::Result<()>>,
+}
+
+impl LocalSocketServerHandle {
+    #[must_use]
+    pub fn address(&self) -> &LocalSocketAddress {
+        &self.address
+    }
+
+    pub async fn shutdown(mut self) -> io::Result<()> {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+
+        self.task.await.map_err(join_error_to_io)?
+    }
+}
+
+pub fn spawn_local_socket_server<Handler>(
+    handler: Handler,
+    address: LocalSocketAddress,
+) -> io::Result<LocalSocketServerHandle>
+where
+    Handler: TransportRequestHandler + TransportSubscriptionHandler + Send + Sync + 'static,
+{
+    let listener =
+        ListenerOptions::new().name(address.to_name()?).try_overwrite(true).create_tokio()?;
+    let handler = Arc::new(handler);
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    let (connection_shutdown_tx, connection_shutdown_rx) = watch::channel(false);
+
+    let task = tokio::spawn(async move {
+        let mut connection_tasks = JoinSet::new();
+
+        let result = loop {
+            tokio::select! {
+                _ = &mut shutdown_rx => break Ok(()),
+                accept_result = listener.accept() => {
+                    let stream = accept_result?;
+                    let handler = Arc::clone(&handler);
+                    let connection_shutdown_rx = connection_shutdown_rx.clone();
+
+                    connection_tasks.spawn(async move {
+                        let _ = handle_connection(handler, stream, connection_shutdown_rx).await;
+                    });
+                }
+                Some(join_result) = connection_tasks.join_next(), if !connection_tasks.is_empty() => {
+                    if let Err(error) = join_result
+                        && !error.is_cancelled()
+                    {
+                        break Err(join_error_to_io(error));
+                    }
+                }
+            }
+        };
+
+        let _ = connection_shutdown_tx.send(true);
+        drain_connection_tasks(&mut connection_tasks).await?;
+
+        result
+    });
+
+    Ok(LocalSocketServerHandle { address, shutdown_tx: Some(shutdown_tx), task })
+}
+
+async fn handle_connection<Handler>(
+    handler: Arc<Handler>,
+    stream: Stream,
+    mut shutdown_rx: watch::Receiver<bool>,
+) -> io::Result<()>
+where
+    Handler: TransportRequestHandler + TransportSubscriptionHandler + Send + Sync + 'static,
+{
+    let mut framed = Framed::new(stream, LengthDelimitedCodec::new());
+
+    loop {
+        tokio::select! {
+            _ = shutdown_rx.changed() => break Ok(()),
+            frame_result = framed.next() => {
+                let Some(frame_result) = frame_result else {
+                    break Ok(());
+                };
+                let frame = frame_result?;
+                let reply = match decode_json_frame::<RequestEnvelope>(&frame) {
+                    Ok(request) => {
+                        if matches!(&request.payload, terminal_protocol::RequestPayload::OpenSubscription(_)) {
+                            return handle_subscription_connection(handler, request, framed, shutdown_rx).await;
+                        }
+                        TransportResponse::from_result(handler.handle_request(request).await)
+                    }
+                    Err(error) => TransportResponse::Error(error),
+                };
+                let encoded_reply =
+                    encode_json_frame(&reply).map_err(|error| io::Error::other(error.to_string()))?;
+
+                framed.send(encoded_reply).await?;
+            }
+        }
+    }
+}
+
+async fn handle_subscription_connection<Handler>(
+    handler: Arc<Handler>,
+    request: RequestEnvelope,
+    mut framed: Framed<Stream, LengthDelimitedCodec>,
+    mut shutdown_rx: watch::Receiver<bool>,
+) -> io::Result<()>
+where
+    Handler: TransportRequestHandler + TransportSubscriptionHandler + Send + Sync + 'static,
+{
+    let terminal_protocol::RequestPayload::OpenSubscription(open_request) = request.payload else {
+        return Err(io::Error::other("subscription connection requires open_subscription request"));
+    };
+    let mut subscription = handler
+        .open_subscription(open_request)
+        .await
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    let subscription_id = subscription.subscription_id;
+    let opened = ResponseEnvelope {
+        operation_id: request.operation_id,
+        payload: ResponsePayload::SubscriptionOpened(terminal_protocol::OpenSubscriptionResponse {
+            subscription_id,
+        }),
+    };
+    let encoded_opened = encode_json_frame(&TransportResponse::Response(Box::new(opened)))
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    framed.send(encoded_opened).await?;
+
+    let result = loop {
+        tokio::select! {
+            biased;
+            _ = shutdown_rx.changed() => break Ok(()),
+            inbound = framed.next() => {
+                match inbound {
+                    Some(Ok(frame)) => {
+                        let envelope = decode_json_frame::<SubscriptionRequestEnvelope>(&frame)
+                            .map_err(|error| io::Error::other(error.to_string()));
+                        let envelope = match envelope {
+                            Ok(envelope) => envelope,
+                            Err(error) => break Err(error),
+                        };
+                        if envelope.subscription_id != subscription_id {
+                            break Err(io::Error::other("subscription control targeted wrong subscription"));
+                        }
+                        match envelope.request {
+                            SubscriptionRequest::Close => break Ok(()),
+                        }
+                    }
+                    Some(Err(error)) => break Err(error),
+                    None => break Ok(()),
+                }
+            }
+            event = subscription.events.recv() => {
+                let Some(event) = event else {
+                    break Ok(());
+                };
+                let envelope = SubscriptionEnvelope { subscription_id, event };
+                let encoded_event = match encode_json_frame(&envelope) {
+                    Ok(encoded_event) => encoded_event,
+                    Err(error) => break Err(io::Error::other(error.to_string())),
+                };
+                if let Err(error) = framed.send(encoded_event).await {
+                    break Err(error);
+                }
+            }
+        }
+    };
+
+    subscription.cancel();
+
+    result
+}
+
+async fn drain_connection_tasks(connection_tasks: &mut JoinSet<()>) -> io::Result<()> {
+    while let Some(join_result) = connection_tasks.join_next().await {
+        if let Err(error) = join_result
+            && !error.is_cancelled()
+        {
+            return Err(join_error_to_io(error));
+        }
+    }
+
+    Ok(())
+}
+
+fn join_error_to_io(error: JoinError) -> io::Error {
+    io::Error::other(error.to_string())
+}

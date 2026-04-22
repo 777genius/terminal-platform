@@ -136,13 +136,14 @@ terminal-capi
 ```text
 terminal-domain
 terminal-mux-domain
-terminal-application
+terminal-runtime
 terminal-backend-api
 terminal-backend-native
 terminal-backend-tmux
 terminal-backend-zellij
 terminal-projection
 terminal-persistence
+terminal-transport
 terminal-daemon
 terminal-testing
 ```
@@ -184,9 +185,9 @@ Ports and backend DTOs:
 - `BackendError`
 - `SubscriptionSpec`
 
-### `terminal-application`
+### `terminal-runtime`
 
-Use cases:
+Runtime application services:
 
 - `CreateSession`
 - `AttachSession`
@@ -195,6 +196,16 @@ Use cases:
 - `GetTopologySnapshot`
 - `GetScreenSnapshot`
 - `SubscribeSession`
+
+### `terminal-transport`
+
+Transport plumbing:
+
+- local socket listener/client loops
+- framed request/reply lane
+- framed subscription lane
+- connection shutdown and drain semantics
+- transport-scoped close tolerance
 
 ### `terminal-projection`
 
@@ -250,10 +261,10 @@ Foreign adapter:
 
 Composition root:
 
-- local socket server
+- runtime wiring
+- transport wiring
 - handshake
 - auth/peer verification
-- subscription fanout
 - operation routing
 
 ## Canonical traits
