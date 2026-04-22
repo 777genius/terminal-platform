@@ -1,0 +1,20 @@
+{
+  "name": "@terminal-platform/runtime-types",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "generate": "node ./scripts/generate.mjs",
+    "check:generated": "node ./scripts/check-generated.mjs",
+    "prebuild": "npm run generate",
+    "build": "tsc -p tsconfig.json",
+    "pretypecheck": "npm run generate",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

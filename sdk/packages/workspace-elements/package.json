@@ -1,0 +1,25 @@
+{
+  "name": "@terminal-platform/workspace-elements",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./define": {
+      "types": "./dist/define.d.ts",
+      "import": "./dist/define.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@terminal-platform/design-tokens": "0.1.0",
+    "@terminal-platform/workspace-core": "0.1.0",
+    "lit": "3.3.2"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json"
+  }
+}

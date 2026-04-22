@@ -1,0 +1,42 @@
+{
+  "name": "terminal-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Electron demo shell for Terminal Platform",
+  "main": "./dist/host/main/index.js",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "postinstall": "npm run stage:sdk",
+    "stage:sdk": "node ./scripts/stage-terminal-sdk.mjs",
+    "check:architecture": "node ./scripts/check-architecture.mjs",
+    "dev": "node ./scripts/dev.mjs",
+    "dev:browser": "node ./scripts/dev-browser.mjs",
+    "typecheck": "npm run check:architecture && npm run stage:sdk && tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.json --noEmit",
+    "build:host": "node --input-type=module -e \"import fs from 'node:fs'; fs.rmSync('dist/host', { recursive: true, force: true }); fs.rmSync('dist/features', { recursive: true, force: true }); fs.rmSync('dist/shared', { recursive: true, force: true });\" && tsc -p tsconfig.host.json && tsc-alias -p tsconfig.host.json --resolve-full-paths --resolve-full-extension .js",
+    "build:renderer": "vite build",
+    "build": "npm run stage:sdk && npm run check:architecture && npm run build:host && npm run build:renderer",
+    "test": "npm run check:architecture && npm run stage:sdk && npm run build:host && node --test ./tests/**/*.test.mjs",
+    "preview": "electron ./dist/host/main/index.js",
+    "start": "npm run build && electron ./dist/host/main/index.js"
+  },
+  "dependencies": {
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "ws": "8.20.0",
+    "zustand": "5.0.12"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/ws": "8.18.1",
+    "@vitejs/plugin-react": "6.0.1",
+    "electron": "41.2.2",
+    "tsc-alias": "1.8.16",
+    "typescript": "6.0.3",
+    "vite": "8.0.9"
+  }
+}

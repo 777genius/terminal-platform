@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2023", "DOM"],
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "references": [
+    {
+      "path": "../runtime-types"
+    },
+    {
+      "path": "../workspace-contracts"
+    }
+  ],
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ]
+}

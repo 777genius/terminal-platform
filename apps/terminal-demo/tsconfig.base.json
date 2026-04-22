@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "@features/terminal-workspace/contracts": ["src/features/terminal-workspace/contracts/index.ts"],
+      "@features/terminal-workspace/main": ["src/features/terminal-workspace/main/index.ts"],
+      "@features/terminal-workspace/preload": ["src/features/terminal-workspace/preload/index.ts"],
+      "@features/terminal-workspace/renderer": ["src/features/terminal-workspace/renderer/index.ts"],
+      "@features/*": ["src/features/*"]
+    },
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useDefineForClassFields": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "moduleDetection": "force"
+  }
+}

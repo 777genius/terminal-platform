@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ]
+  },
+  "references": [
+    {
+      "path": "../design-tokens"
+    },
+    {
+      "path": "../workspace-core"
+    }
+  ],
+  "include": [
+    "src/**/*.ts"
+  ]
+}

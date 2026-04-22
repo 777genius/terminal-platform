@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "references": [
+    {
+      "path": "../runtime-types"
+    },
+    {
+      "path": "../workspace-contracts"
+    }
+  ],
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ]
+}

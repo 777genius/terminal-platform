@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "references": [
+    {
+      "path": "../workspace-adapter-memory"
+    },
+    {
+      "path": "../workspace-core"
+    }
+  ],
+  "include": [
+    "src/**/*.ts"
+  ]
+}

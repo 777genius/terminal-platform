@@ -1,0 +1,25 @@
+{
+  "name": "@terminal-platform/workspace-react",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@lit/react": "1.0.8",
+    "@terminal-platform/workspace-core": "0.1.0",
+    "@terminal-platform/workspace-elements": "0.1.0",
+    "react": "19.2.5"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json"
+  }
+}

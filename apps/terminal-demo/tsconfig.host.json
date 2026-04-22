@@ -1,0 +1,28 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "sourceMap": true
+  },
+  "include": [
+    "src/features/**/*.d.ts",
+    "src/features/*/contracts/**/*.ts",
+    "src/features/*/core/**/*.ts",
+    "src/features/*/main/**/*.ts",
+    "src/features/*/main/**/*.cts",
+    "src/features/*/preload/**/*.ts",
+    "src/features/*/preload/**/*.cts",
+    "src/features/*/renderer/adapters/WebSocket*.ts",
+    "src/features/*/renderer/commands/**/*.ts",
+    "src/features/*/renderer/presenters/**/*.ts",
+    "src/features/*/renderer/view-models/**/*.ts",
+    "src/features/*/renderer/utils/**/*.ts",
+    "src/host/**/*.ts",
+    "src/host/**/*.cts"
+  ]
+}

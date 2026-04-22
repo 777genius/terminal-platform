@@ -1,6 +1,6 @@
 mod dto;
 
-use std::{fs, sync::Arc};
+use std::{fs, path::Path, sync::Arc};
 
 use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_domain::{PaneId, SessionId};
@@ -359,9 +359,10 @@ impl NodeHostClient {
     }
 }
 
-pub fn export_typescript_bindings() -> std::io::Result<()> {
-    fs::create_dir_all("./bindings")?;
-    let cfg = Config::default();
+pub fn export_typescript_bindings_to(out_dir: impl AsRef<Path>) -> std::io::Result<()> {
+    let out_dir = out_dir.as_ref();
+    fs::create_dir_all(out_dir)?;
+    let cfg = Config::default().with_out_dir(out_dir).with_import_extension(Some("js"));
 
     NodeBindingVersion::export_all(&cfg).map_err(export_error)?;
     NodeCreateSessionRequest::export_all(&cfg).map_err(export_error)?;
@@ -372,6 +373,8 @@ pub fn export_typescript_bindings() -> std::io::Result<()> {
     NodeSavedSessionSummary::export_all(&cfg).map_err(export_error)?;
     NodeSavedSessionRecord::export_all(&cfg).map_err(export_error)?;
     NodeRestoredSession::export_all(&cfg).map_err(export_error)?;
+    NodeDeleteSavedSessionResult::export_all(&cfg).map_err(export_error)?;
+    NodePruneSavedSessionsResult::export_all(&cfg).map_err(export_error)?;
     NodeTopologySnapshot::export_all(&cfg).map_err(export_error)?;
     NodeScreenSnapshot::export_all(&cfg).map_err(export_error)?;
     NodeScreenDelta::export_all(&cfg).map_err(export_error)?;
@@ -383,6 +386,10 @@ pub fn export_typescript_bindings() -> std::io::Result<()> {
     NodeAttachedSession::export_all(&cfg).map_err(export_error)?;
 
     Ok(())
+}
+
+pub fn export_typescript_bindings() -> std::io::Result<()> {
+    export_typescript_bindings_to("./bindings")
 }
 
 fn export_error(error: ts_rs::ExportError) -> std::io::Error {
@@ -1333,7 +1340,7 @@ mod tests {
     #[test]
     fn exports_typescript_bindings_for_node_surface() {
         let export_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("bindings");
-        export_typescript_bindings().expect("bindings export should succeed");
+        export_typescript_bindings_to(&export_dir).expect("bindings export should succeed");
 
         assert!(export_dir.join("NodeBindingVersion.ts").exists());
         assert!(export_dir.join("NodeHandshakeInfo.ts").exists());

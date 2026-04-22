@@ -1,0 +1,38 @@
+{
+  "name": "terminal-platform-sdk-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "npm@11.12.1",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "workspaces": [
+    "packages/foundation",
+    "packages/runtime-types",
+    "packages/design-tokens",
+    "packages/workspace-contracts",
+    "packages/workspace-core",
+    "packages/workspace-adapter-websocket",
+    "packages/workspace-adapter-preload",
+    "packages/workspace-adapter-memory",
+    "packages/workspace-elements",
+    "packages/workspace-react",
+    "packages/testing"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run --passWithNoTests",
+    "check": "npm run typecheck && npm run build && npm run test",
+    "changeset": "changeset"
+  },
+  "devDependencies": {
+    "@changesets/cli": "2.31.0",
+    "@types/node": "25.6.0",
+    "@types/ws": "8.18.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.5",
+    "ws": "8.20.0"
+  }
+}

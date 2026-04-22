@@ -1,0 +1,61 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node"
+    ],
+    "strict": true,
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "@terminal-platform/foundation": [
+        "packages/foundation/src/index.ts"
+      ],
+      "@terminal-platform/runtime-types": [
+        "packages/runtime-types/src/index.ts"
+      ],
+      "@terminal-platform/design-tokens": [
+        "packages/design-tokens/src/index.ts"
+      ],
+      "@terminal-platform/workspace-contracts": [
+        "packages/workspace-contracts/src/index.ts"
+      ],
+      "@terminal-platform/workspace-core": [
+        "packages/workspace-core/src/index.ts"
+      ],
+      "@terminal-platform/workspace-adapter-websocket": [
+        "packages/workspace-adapter-websocket/src/index.ts"
+      ],
+      "@terminal-platform/workspace-adapter-preload": [
+        "packages/workspace-adapter-preload/src/index.ts"
+      ],
+      "@terminal-platform/workspace-adapter-memory": [
+        "packages/workspace-adapter-memory/src/index.ts"
+      ],
+      "@terminal-platform/workspace-elements": [
+        "packages/workspace-elements/src/index.ts"
+      ],
+      "@terminal-platform/workspace-react": [
+        "packages/workspace-react/src/index.ts"
+      ],
+      "@terminal-platform/testing": [
+        "packages/testing/src/index.ts"
+      ]
+    },
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useDefineForClassFields": true,
+    "noEmitOnError": true,
+    "skipLibCheck": true
+  }
+}

@@ -63,6 +63,11 @@ fn main() {
 
 fn run() -> Result<(), String> {
     match parse_command(env::args().skip(1))? {
+        Command::ExportSdkRuntimeTypes { out_dir } => {
+            let exported_dir = export_sdk_runtime_types(&out_dir)?;
+            println!("{}", exported_dir.display());
+            Ok(())
+        }
         Command::StageCapiPackage { out_dir } => {
             let staged_dir = stage_capi_package(&out_dir)?;
             println!("{}", staged_dir.display());
@@ -101,6 +106,9 @@ fn run() -> Result<(), String> {
 }
 
 enum Command {
+    ExportSdkRuntimeTypes {
+        out_dir: PathBuf,
+    },
     StageCapiPackage {
         out_dir: PathBuf,
     },
@@ -153,6 +161,31 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
     };
 
     match command.as_str() {
+        "export-sdk-runtime-types" => {
+            let mut out_dir = workspace_root().join("sdk/packages/runtime-types/src/generated/raw");
+
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--out" => {
+                        let value =
+                            args.next().ok_or_else(|| "missing value for --out".to_string())?;
+                        let candidate = PathBuf::from(value);
+                        out_dir = if candidate.is_absolute() {
+                            candidate
+                        } else {
+                            workspace_root().join(candidate)
+                        };
+                    }
+                    other => {
+                        return Err(format!(
+                            "unsupported export-sdk-runtime-types argument: {other}"
+                        ));
+                    }
+                }
+            }
+
+            Ok(Command::ExportSdkRuntimeTypes { out_dir })
+        }
         "stage-capi-package" => {
             let mut out_dir = workspace_root().join("crates/terminal-capi/artifacts/local");
 
@@ -995,6 +1028,22 @@ fn workspace_root() -> PathBuf {
         .and_then(Path::parent)
         .expect("xtask workspace root should resolve")
         .to_path_buf()
+}
+
+fn export_sdk_runtime_types(out_dir: &Path) -> Result<PathBuf, String> {
+    if out_dir.exists() {
+        fs::remove_dir_all(out_dir)
+            .map_err(|error| format!("failed to clean {} - {error}", out_dir.display()))?;
+    }
+
+    fs::create_dir_all(out_dir)
+        .map_err(|error| format!("failed to create {} - {error}", out_dir.display()))?;
+
+    terminal_node::export_typescript_bindings_to(out_dir).map_err(|error| {
+        format!("failed to export runtime types to {} - {error}", out_dir.display())
+    })?;
+
+    Ok(out_dir.to_path_buf())
 }
 
 fn read_crate_version(manifest_path: &Path) -> Result<String, String> {
