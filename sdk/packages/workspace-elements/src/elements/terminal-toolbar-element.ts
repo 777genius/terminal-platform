@@ -8,14 +8,31 @@ export class TerminalToolbarElement extends WorkspaceKernelConsumerElement {
     terminalElementStyles,
     css`
       .toolbar {
-        display: flex;
-        align-items: center;
-        gap: var(--tp-space-2);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: var(--tp-space-3);
         padding: var(--tp-space-3);
       }
 
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--tp-space-2);
+        justify-content: flex-end;
+      }
+
       .status {
-        margin-left: auto;
+        align-self: start;
+      }
+
+      @media (max-width: 900px) {
+        .toolbar {
+          grid-template-columns: 1fr;
+        }
+
+        .actions {
+          justify-content: flex-start;
+        }
       }
     `,
   ];
@@ -23,19 +40,26 @@ export class TerminalToolbarElement extends WorkspaceKernelConsumerElement {
   override render() {
     return html`
       <div class="panel toolbar" part="toolbar">
-        <button part="bootstrap" @click=${() => this.runCommand(() => this.kernel?.commands.bootstrap())}>
-          Bootstrap
-        </button>
-        <button part="refresh" @click=${() => this.runCommand(() => this.kernel?.commands.refreshSessions())}>
-          Refresh Sessions
-        </button>
-        <button part="saved" @click=${() => this.runCommand(() => this.kernel?.commands.refreshSavedSessions())}>
-          Refresh Saved
-        </button>
-        <button part="diagnostics" @click=${() => this.kernel?.commands.clearDiagnostics()}>
-          Clear Diagnostics
-        </button>
-        <span class="status muted" part="status">${this.snapshot.connection.state}</span>
+        <div>
+          <div class="panel-eyebrow">Advanced tools</div>
+          <div class="panel-title">Refresh shells, reconnect the workspace, and clear notices</div>
+        </div>
+
+        <div class="actions">
+          <button part="bootstrap" @click=${() => this.runCommand(() => this.kernel?.commands.bootstrap())}>
+            Reconnect
+          </button>
+          <button part="refresh" @click=${() => this.runCommand(() => this.kernel?.commands.refreshSessions())}>
+            Reload sessions
+          </button>
+          <button part="saved" @click=${() => this.runCommand(() => this.kernel?.commands.refreshSavedSessions())}>
+            Reload saved
+          </button>
+          <button part="diagnostics" @click=${() => this.kernel?.commands.clearDiagnostics()}>
+            Clear alerts
+          </button>
+          <span class="status muted" part="status">${this.snapshot.connection.state}</span>
+        </div>
       </div>
     `;
   }

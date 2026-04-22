@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::RwLock};
 
 use terminal_backend_api::ShellLaunchSpec;
 use terminal_domain::{SessionId, SessionRoute};
+use terminal_projection::SessionHealthSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionDescriptor {
@@ -9,6 +10,7 @@ pub struct SessionDescriptor {
     pub route: SessionRoute,
     pub title: Option<String>,
     pub launch: Option<ShellLaunchSpec>,
+    pub health: SessionHealthSnapshot,
 }
 
 pub trait SessionRegistry: Send + Sync {
@@ -17,6 +19,7 @@ pub trait SessionRegistry: Send + Sync {
     fn get_by_route(&self, route: &SessionRoute) -> Option<SessionDescriptor>;
     fn list(&self) -> Vec<SessionDescriptor>;
     fn update_title(&self, session_id: SessionId, title: Option<String>);
+    fn update_health(&self, session_id: SessionId, health: SessionHealthSnapshot);
 }
 
 #[derive(Debug, Default)]
@@ -56,20 +59,30 @@ impl SessionRegistry for InMemorySessionRegistry {
             session.title = title;
         }
     }
+
+    fn update_health(&self, session_id: SessionId, health: SessionHealthSnapshot) {
+        let mut sessions =
+            self.sessions.write().expect("session registry write lock should not be poisoned");
+        if let Some(session) = sessions.get_mut(&session_id) {
+            session.health = health;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use terminal_backend_api::ShellLaunchSpec;
     use terminal_domain::{BackendKind, RouteAuthority, SessionRoute};
+    use terminal_projection::{SessionHealthPhase, SessionHealthSnapshot};
 
     use super::{InMemorySessionRegistry, SessionDescriptor, SessionRegistry};
 
     #[test]
     fn inserts_and_lists_sessions() {
         let registry = InMemorySessionRegistry::default();
+        let session_id = terminal_domain::SessionId::new();
         let descriptor = SessionDescriptor {
-            session_id: terminal_domain::SessionId::new(),
+            session_id,
             route: SessionRoute {
                 backend: BackendKind::Native,
                 authority: RouteAuthority::LocalDaemon,
@@ -77,6 +90,7 @@ mod tests {
             },
             title: Some("shell".to_string()),
             launch: Some(ShellLaunchSpec::new("/bin/sh")),
+            health: SessionHealthSnapshot::ready(session_id),
         };
 
         registry.insert(descriptor.clone());
@@ -91,8 +105,9 @@ mod tests {
     #[test]
     fn updates_existing_session_title() {
         let registry = InMemorySessionRegistry::default();
+        let session_id = terminal_domain::SessionId::new();
         let descriptor = SessionDescriptor {
-            session_id: terminal_domain::SessionId::new(),
+            session_id,
             route: SessionRoute {
                 backend: BackendKind::Native,
                 authority: RouteAuthority::LocalDaemon,
@@ -100,6 +115,7 @@ mod tests {
             },
             title: Some("shell".to_string()),
             launch: Some(ShellLaunchSpec::new("/bin/sh")),
+            health: SessionHealthSnapshot::ready(session_id),
         };
 
         registry.insert(descriptor.clone());
@@ -108,6 +124,38 @@ mod tests {
         assert_eq!(
             registry.get(descriptor.session_id).and_then(|session| session.title),
             Some("logs".to_string())
+        );
+    }
+
+    #[test]
+    fn updates_existing_session_health() {
+        let registry = InMemorySessionRegistry::default();
+        let session_id = terminal_domain::SessionId::new();
+        let descriptor = SessionDescriptor {
+            session_id,
+            route: SessionRoute {
+                backend: BackendKind::Native,
+                authority: RouteAuthority::LocalDaemon,
+                external: None,
+            },
+            title: Some("shell".to_string()),
+            launch: Some(ShellLaunchSpec::new("/bin/sh")),
+            health: SessionHealthSnapshot::ready(session_id),
+        };
+
+        registry.insert(descriptor);
+        registry.update_health(
+            session_id,
+            SessionHealthSnapshot::stale(
+                session_id,
+                terminal_projection::SessionHealthReason::SubscriptionSourceClosed,
+                "stream ended",
+            ),
+        );
+
+        assert_eq!(
+            registry.get(session_id).map(|session| session.health.phase),
+            Some(SessionHealthPhase::Stale)
         );
     }
 }

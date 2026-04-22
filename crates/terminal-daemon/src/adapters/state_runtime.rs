@@ -3,7 +3,9 @@ use terminal_backend_api::{
     CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult, SubscriptionSpec,
 };
 use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
-use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{
+    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
+};
 use terminal_protocol::{DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion};
 use terminal_runtime::{RuntimeHandshake, RuntimePhase, TerminalRuntime};
 
@@ -102,6 +104,13 @@ impl TerminalDaemonSavedSessionsPort for TerminalRuntimeAdapter<'_> {
 }
 
 impl TerminalDaemonActiveSessionPort for TerminalRuntimeAdapter<'_> {
+    fn session_health_snapshot(
+        &self,
+        session_id: SessionId,
+    ) -> Result<SessionHealthSnapshot, BackendError> {
+        self.runtime.session_health_snapshot(session_id)
+    }
+
     async fn topology_snapshot(
         &self,
         session_id: SessionId,
@@ -166,6 +175,7 @@ fn map_runtime_handshake(handshake: RuntimeHandshake) -> Handshake {
             saved_sessions: handshake.capabilities.saved_sessions,
             session_restore: handshake.capabilities.session_restore,
             degraded_error_reasons: handshake.capabilities.degraded_error_reasons,
+            session_health: handshake.capabilities.session_health,
         },
         available_backends: handshake.available_backends,
         session_scope: handshake.session_scope,

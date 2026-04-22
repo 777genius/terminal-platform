@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
 use terminal_domain::{PaneId, SubscriptionId};
-use terminal_projection::{ScreenDelta, TopologySnapshot};
+use terminal_projection::{ScreenDelta, SessionHealthSnapshot, TopologySnapshot};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -15,6 +15,7 @@ pub enum SubscriptionSpec {
 pub enum BackendSubscriptionEvent {
     TopologySnapshot(TopologySnapshot),
     ScreenDelta(ScreenDelta),
+    SessionHealthSnapshot(SessionHealthSnapshot),
 }
 
 #[derive(Debug)]

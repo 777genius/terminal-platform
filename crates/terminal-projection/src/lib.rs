@@ -1,9 +1,13 @@
 pub mod projection_source;
+pub mod session_health_snapshot;
 pub mod screen_delta;
 pub mod screen_snapshot;
 pub mod topology_snapshot;
 
 pub use projection_source::ProjectionSource;
+pub use session_health_snapshot::{
+    SessionHealthPhase, SessionHealthReason, SessionHealthSnapshot,
+};
 pub use screen_delta::{ScreenDelta, ScreenLinePatch, ScreenPatch};
 pub use screen_snapshot::{ScreenCursor, ScreenLine, ScreenSnapshot, ScreenSurface};
 pub use topology_snapshot::TopologySnapshot;

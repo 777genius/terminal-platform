@@ -4,6 +4,8 @@ mod runtime;
 mod saved_sessions_service;
 mod subscription_service;
 
+use std::sync::Arc;
+
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendSessionSummary, BackendSubscription,
     CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult, SubscriptionSpec,
@@ -13,7 +15,9 @@ use terminal_persistence::{
     PrunedSavedSessions, SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary,
     SqliteSessionStore,
 };
-use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{
+    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
+};
 
 use crate::{
     backend_catalog::BackendCatalog,
@@ -28,14 +32,14 @@ use self::{
 
 pub struct SessionService {
     backends: BackendCatalog,
-    registry: InMemorySessionRegistry,
+    registry: Arc<InMemorySessionRegistry>,
     persistence: SqliteSessionStore,
 }
 
 impl SessionService {
     #[must_use]
     pub fn with_persistence(backends: BackendCatalog, persistence: SqliteSessionStore) -> Self {
-        Self { backends, registry: InMemorySessionRegistry::default(), persistence }
+        Self { backends, registry: Arc::new(InMemorySessionRegistry::default()), persistence }
     }
 
     pub async fn discover_sessions(
@@ -141,6 +145,13 @@ impl SessionService {
         self.active_session_service().dispatch(session_id, command).await
     }
 
+    pub fn session_health_snapshot(
+        &self,
+        session_id: SessionId,
+    ) -> Result<SessionHealthSnapshot, BackendError> {
+        self.active_session_service().session_health_snapshot(session_id)
+    }
+
     pub async fn open_subscription(
         &self,
         session_id: SessionId,
@@ -152,7 +163,7 @@ impl SessionService {
     fn runtime(&self) -> SessionRuntime<'_> {
         SessionRuntime::new(
             &self.backends,
-            &self.registry as &dyn SessionRegistry,
+            self.registry.clone() as Arc<dyn SessionRegistry>,
             &self.persistence,
         )
     }

@@ -21,7 +21,7 @@ use super::{
     },
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct SavedSessionsService<'a> {
     runtime: SessionRuntime<'a>,
 }
@@ -160,7 +160,7 @@ impl<'a> SavedSessionsService<'a> {
         restored_session_id: SessionId,
         saved: &SavedNativeSession,
     ) -> Result<(), BackendError> {
-        let active = ActiveSessionService::new(self.runtime);
+        let active = ActiveSessionService::new(self.runtime.clone());
 
         for saved_tab in saved.topology.tabs.iter().skip(1) {
             active
@@ -233,7 +233,7 @@ impl<'a> SavedSessionsService<'a> {
         live_tab_id: TabId,
         saved_tab: &TabSnapshot,
     ) -> Result<HashMap<PaneId, PaneId>, BackendError> {
-        let active = ActiveSessionService::new(self.runtime);
+        let active = ActiveSessionService::new(self.runtime.clone());
         let topology = active.topology_snapshot(restored_session_id).await?;
         let live_tab = tab_snapshot_by_id(&topology, live_tab_id)?;
         let initial_live_pane_id = collect_pane_ids_from_node(&live_tab.root)

@@ -3,7 +3,9 @@ use terminal_backend_api::{
     CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult, SubscriptionSpec,
 };
 use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
-use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{
+    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
+};
 use terminal_protocol::Handshake;
 
 use super::{RuntimePrunedSavedSessions, RuntimeSavedSessionRecord, RuntimeSavedSessionSummary};
@@ -51,6 +53,10 @@ pub trait TerminalDaemonSavedSessionsPort {
 }
 
 pub trait TerminalDaemonActiveSessionPort {
+    fn session_health_snapshot(
+        &self,
+        session_id: SessionId,
+    ) -> Result<SessionHealthSnapshot, BackendError>;
     async fn topology_snapshot(
         &self,
         session_id: SessionId,

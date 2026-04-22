@@ -76,6 +76,7 @@ fn handshake_strategy() -> impl Strategy<Value = Handshake> {
                     saved_sessions: capability_flags[5],
                     session_restore: capability_flags[6],
                     degraded_error_reasons: true,
+                    session_health: true,
                 },
                 available_backends,
                 session_scope,

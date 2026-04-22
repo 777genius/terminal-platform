@@ -67,13 +67,22 @@ export function TerminalDemoWorkspaceScreen(props: {
     [activeSessionId, snapshot.catalog.sessions],
   );
   const activePaneId = snapshot.selection.activePaneId ?? snapshot.attachedSession?.focused_screen?.pane_id ?? null;
-  const focusedSequence = snapshot.attachedSession?.focused_screen?.sequence != null
-    ? String(snapshot.attachedSession.focused_screen.sequence)
-    : null;
   const hasDiagnostics = snapshot.diagnostics.length > 0;
   const canSendInput = Boolean(activeSessionId && activePaneId && inputDraft.trim()) && !commandPending;
   const canIssueSessionCommand = Boolean(activeSessionId) && !commandPending;
   const activeTitle = activeSession?.title ?? snapshot.attachedSession?.session.title ?? "Pick a session to inspect";
+  const connectionSummary = describeConnectionState(snapshot.connection.state);
+  const diagnosticsPreview = snapshot.diagnostics.slice(0, 3);
+  const advancedNoticeCount = diagnosticsPreview.length + (actionError ? 1 : 0);
+  const quickCommands = useMemo(
+    () => [
+      { label: "pwd", value: "pwd" },
+      { label: "ls -la", value: "ls -la" },
+      { label: "git status", value: "git status" },
+      { label: "hello demo", value: 'printf "hello from sdk demo\\n"' },
+    ],
+    [],
+  );
 
   useEffect(() => {
     autoAttachAttemptRef.current = null;
@@ -220,69 +229,60 @@ export function TerminalDemoWorkspaceScreen(props: {
     }
   }
 
+  async function handleRestoreSavedSession(sessionId: SessionId) {
+    setActionError(null);
+    setCommandPending(true);
+    try {
+      await props.kernel.commands.restoreSavedSession(sessionId);
+      await props.kernel.commands.refreshSessions();
+      await props.kernel.commands.refreshSavedSessions();
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      setCommandPending(false);
+    }
+  }
+
+  async function handleDeleteSavedSession(sessionId: SessionId) {
+    setActionError(null);
+    setCommandPending(true);
+    try {
+      await props.kernel.commands.deleteSavedSession(sessionId);
+      await props.kernel.commands.refreshSavedSessions();
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      setCommandPending(false);
+    }
+  }
+
   return (
     <div className="shell">
       <aside className="shell__sidebar panel panel--sidebar">
-        <section className="panel hero">
-          <div>
-            <div className="section__eyebrow">SDK Consumer Path</div>
-            <h1 className="hero__title">Terminal Platform Demo</h1>
+        <section className="panel hero hero--demo">
+          <div className="hero__content">
+            <div className="section__eyebrow">Terminal Demo</div>
+            <h1 className="hero__title">Start a shell and run commands</h1>
             <p className="hero__copy">
-              This shell now mounts <code>@terminal-platform/workspace-react</code> over the headless
-              workspace kernel.
+              Start a shell, pick the session in the workspace, then type commands in the dock below the
+              terminal output.
             </p>
+
+            <div className="hero__flow" aria-label="Demo flow">
+              <span className="hero__flow-item">1. Start shell</span>
+              <span className="hero__flow-item">2. Pick session</span>
+              <span className="hero__flow-item">3. Send command</span>
+            </div>
           </div>
 
-          <div className="meta-stack meta-stack--inline">
+          <div className="meta-stack">
             <span className={`badge ${badgeToneForConnection(snapshot.connection.state)}`}>
-              {snapshot.connection.state}
+              {connectionSummary.label}
             </span>
-            <span className="badge badge--neutral">{props.config.runtimeSlug}</span>
-            <span className="badge badge--neutral">{snapshot.catalog.sessions.length} sessions</span>
-            <span className="badge badge--neutral">{snapshot.catalog.savedSessions.length} saved</span>
-            {focusedSequence ? <span className="badge badge--brand">seq {focusedSequence}</span> : null}
-            {hasDiagnostics ? (
-              <span className="badge badge--danger">{snapshot.diagnostics.length} diagnostics</span>
-            ) : null}
-          </div>
-        </section>
-
-        <section className="panel panel--surface section">
-          <div className="section__header">
-            <div>
-              <div className="section__eyebrow">Runtime</div>
-              <h2 className="section__title">Connection Surface</h2>
-            </div>
-            <span className="section__meta">
-              {snapshot.connection.handshake?.daemon_phase ?? "pending handshake"}
+            <span className="badge badge--neutral">{snapshot.catalog.sessions.length} running shells</span>
+            <span className="badge badge--neutral">
+              {activeSessionId ? "Shell selected" : "Pick a shell"}
             </span>
-          </div>
-
-          <dl className="definition-list">
-            <div>
-              <dt>Control plane</dt>
-              <dd>{props.config.controlPlaneUrl}</dd>
-            </div>
-            <div>
-              <dt>Session stream</dt>
-              <dd>{props.config.sessionStreamUrl}</dd>
-            </div>
-            <div>
-              <dt>Active session</dt>
-              <dd>{activeTitle}</dd>
-            </div>
-          </dl>
-
-          <div className="button-row">
-            <button className="button" onClick={() => void handleRebootstrap()}>
-              Re-bootstrap
-            </button>
-            <button className="button" onClick={() => void handleRefreshCatalog()}>
-              Refresh Catalog
-            </button>
-            <button className="button" onClick={() => props.kernel.commands.clearDiagnostics()}>
-              Clear Diagnostics
-            </button>
           </div>
         </section>
 
@@ -290,60 +290,15 @@ export function TerminalDemoWorkspaceScreen(props: {
           <div className="section__header">
             <div>
               <div className="section__eyebrow">Launch</div>
-              <h2 className="section__title">Create Native Session</h2>
+              <h2 className="section__title">Start a shell</h2>
             </div>
+            <span className="section__meta">{createPending ? "starting" : "ready"}</span>
           </div>
 
-          <div className="form-grid">
-            <label>
-              <span>Title</span>
-              <input
-                value={createForm.title}
-                onChange={(event) => {
-                  setCreateForm((current) => ({
-                    ...current,
-                    title: event.target.value,
-                  }));
-                }}
-              />
-            </label>
-            <label>
-              <span>Program</span>
-              <input
-                value={createForm.program}
-                onChange={(event) => {
-                  setCreateForm((current) => ({
-                    ...current,
-                    program: event.target.value,
-                  }));
-                }}
-              />
-            </label>
-            <label>
-              <span>Args</span>
-              <input
-                value={createForm.args}
-                onChange={(event) => {
-                  setCreateForm((current) => ({
-                    ...current,
-                    args: event.target.value,
-                  }));
-                }}
-              />
-            </label>
-            <label>
-              <span>Working directory</span>
-              <input
-                value={createForm.cwd}
-                onChange={(event) => {
-                  setCreateForm((current) => ({
-                    ...current,
-                    cwd: event.target.value,
-                  }));
-                }}
-              />
-            </label>
-          </div>
+          <p className="section__copy">
+            Use the default shell for the fastest path, or open advanced options if you want another
+            program or working directory.
+          </p>
 
           <div className="button-row">
             <button
@@ -351,57 +306,210 @@ export function TerminalDemoWorkspaceScreen(props: {
               disabled={createPending}
               onClick={() => void handleCreateNativeSession()}
             >
-              Create Native Session
+              {createPending ? "Starting shell..." : "Start default shell"}
             </button>
           </div>
-        </section>
 
-        {hasDiagnostics ? (
-          <section className="panel panel--surface section">
-            <div className="section__header">
+          {activeSessionId ? (
+            <div className="banner banner--subtle section-callout">
+              <strong>Current focus</strong>
               <div>
-                <div className="section__eyebrow">Diagnostics</div>
-                <h2 className="section__title">Workspace Issues</h2>
+                {activeTitle}
+                {activePaneId ? ` - pane ${activePaneId}` : ""}
               </div>
             </div>
-            <div className="degraded-list">
-              {snapshot.diagnostics.map((diagnostic, index) => (
-                <div
-                  className="degraded-list__item"
-                  key={`${diagnostic.code}-${diagnostic.timestampMs}-${index}`}
-                >
-                  <strong>{diagnostic.code}</strong>
-                  <small>{diagnostic.message}</small>
-                </div>
-              ))}
+          ) : (
+            <div className="banner banner--subtle section-callout">
+              <strong>No shell selected yet</strong>
+              <div>Start a shell, then pick it from the workspace rail to route terminal output and input.</div>
             </div>
-          </section>
-        ) : null}
+          )}
 
-        {actionError ? (
-          <section className="banner banner--warning">
-            <strong>Last action failed</strong>
-            <div>{actionError}</div>
-          </section>
-        ) : null}
+          <details className="details-panel">
+            <summary>
+              Advanced tools
+              {advancedNoticeCount > 0
+                ? ` - ${advancedNoticeCount} notice${advancedNoticeCount === 1 ? "" : "s"}`
+                : ""}
+            </summary>
+
+            <div className="advanced-stack">
+              <div className="advanced-block">
+                <div className="section__eyebrow">Maintenance</div>
+                <div className="advanced-actions">
+                  <button className="button" disabled={createPending} onClick={() => void handleRefreshCatalog()}>
+                    Refresh shells
+                  </button>
+                  <button className="button" onClick={() => void handleRebootstrap()}>
+                    Reconnect workspace
+                  </button>
+                </div>
+              </div>
+
+              {actionError || hasDiagnostics ? (
+                <div className="advanced-block">
+                  <div className="section__eyebrow">Notices</div>
+
+                  {actionError ? (
+                    <div className="banner banner--warning">
+                      <strong>Last action failed</strong>
+                      <div>{actionError}</div>
+                    </div>
+                  ) : null}
+
+                  {hasDiagnostics ? (
+                    <div className="degraded-list">
+                      {diagnosticsPreview.map((diagnostic, index) => (
+                        <div
+                          className="degraded-list__item"
+                          key={`${diagnostic.code}-${diagnostic.timestampMs}-${index}`}
+                        >
+                          <strong>{diagnostic.code}</strong>
+                          <small>{diagnostic.message}</small>
+                        </div>
+                      ))}
+                      {snapshot.diagnostics.length > diagnosticsPreview.length ? (
+                        <small className="section__copy">
+                          {snapshot.diagnostics.length - diagnosticsPreview.length} more notices are listed
+                          inside the workspace tools panel.
+                        </small>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="advanced-block">
+                <div className="section__eyebrow">Advanced launch</div>
+
+                <div className="form-grid">
+                  <label>
+                    <span>Title</span>
+                    <input
+                      value={createForm.title}
+                      onChange={(event) => {
+                        setCreateForm((current) => ({
+                          ...current,
+                          title: event.target.value,
+                        }));
+                      }}
+                    />
+                  </label>
+                  <label>
+                    <span>Program</span>
+                    <input
+                      value={createForm.program}
+                      onChange={(event) => {
+                        setCreateForm((current) => ({
+                          ...current,
+                          program: event.target.value,
+                        }));
+                      }}
+                    />
+                  </label>
+                  <label>
+                    <span>Args</span>
+                    <input
+                      value={createForm.args}
+                      onChange={(event) => {
+                        setCreateForm((current) => ({
+                          ...current,
+                          args: event.target.value,
+                        }));
+                      }}
+                    />
+                  </label>
+                  <label>
+                    <span>Working directory</span>
+                    <input
+                      value={createForm.cwd}
+                      onChange={(event) => {
+                        setCreateForm((current) => ({
+                          ...current,
+                          cwd: event.target.value,
+                        }));
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="advanced-block">
+                <div className="section__eyebrow">Runtime details</div>
+
+                <dl className="definition-list">
+                  <div>
+                    <dt>Control plane</dt>
+                    <dd>{props.config.controlPlaneUrl}</dd>
+                  </div>
+                  <div>
+                    <dt>Session stream</dt>
+                    <dd>{props.config.sessionStreamUrl}</dd>
+                  </div>
+                  <div>
+                    <dt>Attached session</dt>
+                    <dd>{attachedSessionId ?? "Not attached yet"}</dd>
+                  </div>
+                </dl>
+              </div>
+
+              {snapshot.catalog.savedSessions.length > 0 ? (
+                <div className="advanced-block">
+                  <div className="section__eyebrow">Saved layouts</div>
+                  <div className="list-stack list-stack--scroll">
+                    {snapshot.catalog.savedSessions.slice(0, 6).map((session) => (
+                      <div className="list-card list-card--saved" key={session.session_id}>
+                        <div>
+                          <strong>{session.title ?? session.session_id}</strong>
+                          <small>{session.compatibility.status}</small>
+                        </div>
+                        <div className="button-row">
+                          <button
+                            className="button"
+                            disabled={commandPending}
+                            onClick={() => void handleRestoreSavedSession(session.session_id)}
+                          >
+                            Restore
+                          </button>
+                          <button
+                            className="button"
+                            disabled={commandPending}
+                            onClick={() => void handleDeleteSavedSession(session.session_id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {snapshot.catalog.savedSessions.length > 6 ? (
+                    <small className="section__copy">
+                      Showing 6 of {snapshot.catalog.savedSessions.length} saved layouts.
+                    </small>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </details>
+        </section>
       </aside>
 
       <main className="shell__main">
         <section className="panel panel--surface panel--workspace">
           <div className="panel__header">
             <div>
-              <div className="section__eyebrow">Workspace Surface</div>
+              <div className="section__eyebrow">Workspace</div>
               <h2 className="section__title workspace-summary__title">{activeTitle}</h2>
               <p className="section__copy">
-                React mounts the portable SDK component tree here. The UI below is rendered by
-                <code> @terminal-platform/workspace-react </code>
-                and the underlying Web Components layer.
+                Pick a running shell in the rail, watch output here, then send commands from the dock below.
               </p>
             </div>
 
             <div className="meta-stack meta-stack--inline">
-              {attachedSessionId ? <span className="badge badge--brand">attached {attachedSessionId}</span> : null}
-              {activePaneId ? <span className="badge badge--neutral">pane {activePaneId}</span> : null}
+              <span className={`badge ${badgeToneForConnection(snapshot.connection.state)}`}>
+                {connectionSummary.label}
+              </span>
+              {activePaneId ? <span className="badge badge--neutral">Focused pane {activePaneId}</span> : null}
             </div>
           </div>
 
@@ -411,18 +519,34 @@ export function TerminalDemoWorkspaceScreen(props: {
             <section className="terminal-dock" aria-label="Focused pane command lane">
               <div className="terminal-dock__header">
                 <div>
-                  <div className="section__eyebrow">Command Lane</div>
-                  <h3 className="terminal-dock__title">Focused Pane Input</h3>
+                  <div className="section__eyebrow">Command Input</div>
+                  <h3 className="terminal-dock__title">Send text to the focused pane</h3>
                 </div>
 
                 <div className="meta-stack meta-stack--inline">
                   <span className="badge badge--neutral">
-                    {activePaneId ? `pane ${activePaneId}` : "no focused pane"}
+                    {activePaneId ? `Pane ${activePaneId}` : "Pick a pane first"}
                   </span>
                   <span className="badge badge--neutral">
-                    {commandPending ? "dispatching" : "ready to send"}
+                    {commandPending ? "Sending..." : "Ready"}
                   </span>
                 </div>
+              </div>
+
+              <div className="terminal-dock__presets">
+                {quickCommands.map((command) => (
+                  <button
+                    key={command.label}
+                    className="terminal-chip"
+                    type="button"
+                    onClick={() => {
+                      setInputDraft(command.value);
+                      setActionError(null);
+                    }}
+                  >
+                    {command.label}
+                  </button>
+                ))}
               </div>
 
               <label className="terminal-dock__composer">
@@ -442,7 +566,9 @@ export function TerminalDemoWorkspaceScreen(props: {
 
               <div className="terminal-dock__footer">
                 <div className="terminal-dock__hint">
-                  Input is injected into the focused pane and sent with a trailing newline.
+                  {activePaneId
+                    ? "Type a command and press send. The dock automatically appends a newline."
+                    : "Start or select a session in the workspace, then focus a pane to type here."}
                 </div>
 
                 <div className="button-row button-row--dock">
@@ -451,24 +577,30 @@ export function TerminalDemoWorkspaceScreen(props: {
                     disabled={!canSendInput}
                     onClick={() => void handleSendInput()}
                   >
-                    Send + Enter
+                    Send command
                   </button>
+                </div>
+              </div>
+
+              <details className="terminal-dock__more">
+                <summary>Session tools</summary>
+                <div className="button-row">
                   <button
                     className="button"
                     disabled={!canIssueSessionCommand}
                     onClick={() => void handleSaveSession()}
                   >
-                    Save Session
+                    Save layout
                   </button>
                   <button
                     className="button"
                     disabled={!canIssueSessionCommand}
                     onClick={() => void handleResyncScreen()}
                   >
-                    Re-sync Screen
+                    Refresh terminal
                   </button>
                 </div>
-              </div>
+              </details>
             </section>
           </div>
         </section>
@@ -535,6 +667,37 @@ function badgeToneForConnection(state: WorkspaceSnapshot["connection"]["state"])
   }
 
   return "badge--neutral";
+}
+
+function describeConnectionState(state: WorkspaceSnapshot["connection"]["state"]): {
+  label: string;
+  copy: string;
+} {
+  if (state === "ready") {
+    return {
+      label: "Connected",
+      copy: "The workspace is connected. You can start a shell, switch sessions, and send commands below.",
+    };
+  }
+
+  if (state === "error") {
+    return {
+      label: "Connection issue",
+      copy: "The runtime is reachable but the workspace hit an error. Use reconnect or check the alerts panel.",
+    };
+  }
+
+  if (state === "disposed") {
+    return {
+      label: "Closed",
+      copy: "The workspace controller was disposed. Reconnect the workspace to continue.",
+    };
+  }
+
+  return {
+    label: "Connecting",
+    copy: "The demo is still attaching to the local runtime. Once ready, the workspace and command dock will wake up.",
+  };
 }
 
 function getErrorMessage(error: unknown): string {

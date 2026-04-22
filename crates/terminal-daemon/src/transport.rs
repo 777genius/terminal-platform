@@ -88,5 +88,8 @@ fn map_subscription_event(
         terminal_backend_api::BackendSubscriptionEvent::ScreenDelta(delta) => {
             SubscriptionEvent::ScreenDelta(delta)
         }
+        terminal_backend_api::BackendSubscriptionEvent::SessionHealthSnapshot(health) => {
+            SubscriptionEvent::SessionHealthSnapshot(health)
+        }
     }
 }

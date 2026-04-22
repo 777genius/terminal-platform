@@ -5,17 +5,19 @@ use terminal_domain::{
 };
 use terminal_transport::{LocalSocketTransportClient, LocalSocketTransportSubscription};
 
-use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{
+    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
+};
 use terminal_protocol::{
     BackendCapabilitiesResponse, CreateSessionRequest, CreateSessionResponse,
     DeleteSavedSessionRequest, DeleteSavedSessionResponse, DiscoverSessionsRequest,
     DiscoverSessionsResponse, DispatchMuxCommandRequest, GetBackendCapabilitiesRequest,
     GetSavedSessionRequest, GetScreenDeltaRequest, GetScreenSnapshotRequest,
-    GetTopologySnapshotRequest, Handshake, ImportSessionRequest, ImportSessionResponse,
-    ListSavedSessionsResponse, ListSessionsResponse, LocalSocketAddress, OpenSubscriptionRequest,
-    ProtocolError, ProtocolVersion, PruneSavedSessionsRequest, PruneSavedSessionsResponse,
-    RequestPayload, ResponsePayload, RestoreSavedSessionRequest, RestoreSavedSessionResponse,
-    SavedSessionResponse, SubscriptionEvent,
+    GetSessionHealthSnapshotRequest, GetTopologySnapshotRequest, Handshake, ImportSessionRequest,
+    ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse, LocalSocketAddress,
+    OpenSubscriptionRequest, ProtocolError, ProtocolVersion, PruneSavedSessionsRequest,
+    PruneSavedSessionsResponse, RequestPayload, ResponsePayload, RestoreSavedSessionRequest,
+    RestoreSavedSessionResponse, SavedSessionResponse, SubscriptionEvent,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,7 +43,7 @@ pub struct HandshakeAssessment {
 
 impl Default for DaemonClientInfo {
     fn default() -> Self {
-        Self { expected_protocol: ProtocolVersion { major: 0, minor: 1 } }
+        Self { expected_protocol: ProtocolVersion { major: 0, minor: 2 } }
     }
 }
 
@@ -224,6 +226,22 @@ impl LocalSocketDaemonClient {
         match response.payload {
             ResponsePayload::SavedSession(saved) => Ok(saved),
             other => Err(ProtocolError::unexpected_payload("saved_session", &other)),
+        }
+    }
+
+    pub async fn session_health_snapshot(
+        &self,
+        session_id: terminal_domain::SessionId,
+    ) -> Result<SessionHealthSnapshot, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::GetSessionHealthSnapshot(
+                GetSessionHealthSnapshotRequest { session_id },
+            ))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::SessionHealthSnapshot(health) => Ok(health),
+            other => Err(ProtocolError::unexpected_payload("session_health_snapshot", &other)),
         }
     }
 
@@ -636,7 +654,7 @@ mod tests {
         let sessions = client.list_sessions().await.expect("list_sessions should succeed");
 
         assert_eq!(handshake.protocol_version.major, 0);
-        assert_eq!(handshake.protocol_version.minor, 1);
+        assert_eq!(handshake.protocol_version.minor, 2);
         assert_eq!(handshake.daemon_phase, DaemonPhase::Ready);
         assert!(handshake.capabilities.request_reply);
         assert!(handshake.capabilities.topology_subscriptions);
@@ -646,6 +664,7 @@ mod tests {
         assert!(handshake.capabilities.saved_sessions);
         assert!(handshake.capabilities.session_restore);
         assert!(handshake.capabilities.degraded_error_reasons);
+        assert!(handshake.capabilities.session_health);
         assert_eq!(client.info().expected_protocol, handshake.protocol_version);
         assert!(assessment.can_use);
         assert_eq!(assessment.status, HandshakeAssessmentStatus::Ready);
@@ -658,7 +677,7 @@ mod tests {
     fn assesses_handshake_protocol_and_phase() {
         let info = super::DaemonClientInfo::default();
         let starting = info.assess_handshake(&Handshake {
-            protocol_version: ProtocolVersion { major: 0, minor: 1 },
+            protocol_version: ProtocolVersion { major: 0, minor: 2 },
             binary_version: CURRENT_BINARY_VERSION.to_string(),
             daemon_phase: DaemonPhase::Starting,
             capabilities: DaemonCapabilities {
@@ -670,12 +689,13 @@ mod tests {
                 saved_sessions: true,
                 session_restore: true,
                 degraded_error_reasons: true,
+                session_health: true,
             },
             available_backends: vec![BackendKind::Native],
             session_scope: "current_user".to_string(),
         });
         let incompatible = info.assess_handshake(&Handshake {
-            protocol_version: ProtocolVersion { major: 0, minor: 2 },
+            protocol_version: ProtocolVersion { major: 0, minor: 3 },
             binary_version: CURRENT_BINARY_VERSION.to_string(),
             daemon_phase: DaemonPhase::Ready,
             capabilities: DaemonCapabilities {
@@ -687,6 +707,7 @@ mod tests {
                 saved_sessions: true,
                 session_restore: true,
                 degraded_error_reasons: true,
+                session_health: true,
             },
             available_backends: vec![BackendKind::Native],
             session_scope: "current_user".to_string(),
@@ -698,6 +719,32 @@ mod tests {
         assert!(!incompatible.can_use);
         assert_eq!(incompatible.status, HandshakeAssessmentStatus::ProtocolMinorAhead);
         assert!(!incompatible.protocol.can_connect);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetches_session_health_snapshot_for_native_session() {
+        let address = unique_address("daemon-client-session-health");
+        let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+            .expect("server should bind");
+        let client = LocalSocketDaemonClient::new(address);
+
+        let created = client
+            .create_session(BackendKind::Native, CreateSessionSpec::default())
+            .await
+            .expect("native session should be created");
+
+        let health = client
+            .session_health_snapshot(created.session.session_id)
+            .await
+            .expect("session health should succeed");
+
+        assert_eq!(health.session_id, created.session.session_id);
+        assert_eq!(health.phase, terminal_projection::SessionHealthPhase::Ready);
+        assert!(health.can_attach);
+        assert!(!health.invalidated);
+        assert_eq!(health.reason, None);
+
+        server.shutdown().await.expect("server shutdown should succeed");
     }
 
     #[tokio::test(flavor = "multi_thread")]

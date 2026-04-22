@@ -25,12 +25,16 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
     return html`
       <div class="panel screen" part="screen">
+        <div class="panel-header">
+          <div class="panel-eyebrow">Terminal</div>
+          <div class="panel-title">${screen?.surface.title ?? "Live output"}</div>
+          <div class="panel-copy">This is the focused pane. Commands from the dock are sent here.</div>
+        </div>
         ${screen
           ? html`
-              <div class="muted" part="screen-title">${screen.surface.title ?? "Terminal"}</div>
               <pre part="screen-lines">${screen.surface.lines.map((line) => line.text).join("\n")}</pre>
             `
-          : html`<div class="muted" part="empty">No active screen</div>`}
+          : html`<div class="empty-state" part="empty">No active screen yet. Start or attach a session to see output here.</div>`}
       </div>
     `;
   }

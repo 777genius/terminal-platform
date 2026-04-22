@@ -26,6 +26,8 @@ pub struct DaemonCapabilities {
     pub saved_sessions: bool,
     pub session_restore: bool,
     pub degraded_error_reasons: bool,
+    #[serde(default)]
+    pub session_health: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

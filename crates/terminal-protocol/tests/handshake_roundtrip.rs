@@ -16,6 +16,7 @@ fn handshake_roundtrips_through_json() {
             saved_sessions: true,
             session_restore: true,
             degraded_error_reasons: true,
+            session_health: true,
         },
         available_backends: vec![BackendKind::Native, BackendKind::Tmux],
         session_scope: "current_user".to_string(),

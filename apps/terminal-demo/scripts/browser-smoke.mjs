@@ -142,7 +142,7 @@ async function runSmokeScenario(browserUrl) {
     }))()`);
 
     const createButtonResult = await evaluate(send, `(() => {
-      const button = [...document.querySelectorAll('button')].find((entry) => /Create Native Session/i.test(entry.textContent || ''));
+      const button = [...document.querySelectorAll('button')].find((entry) => /Start default shell/i.test(entry.textContent || ''));
       if (!button) {
         return { clicked: false };
       }
@@ -150,7 +150,7 @@ async function runSmokeScenario(browserUrl) {
       return { clicked: true };
     })()`);
     if (!createButtonResult.clicked) {
-      throw new Error("Create Native Session button was not found");
+      throw new Error("Start default shell button was not found");
     }
 
     await sleep(2500);
@@ -188,7 +188,7 @@ async function runSmokeScenario(browserUrl) {
       const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
       descriptor?.set?.call(textarea, 'printf \"browser-smoke-ok\\\\n\"');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      const button = [...document.querySelectorAll('button')].find((entry) => /Send \\+ Enter/i.test(entry.textContent || ''));
+      const button = [...document.querySelectorAll('button')].find((entry) => /Send command/i.test(entry.textContent || ''));
       if (!button) {
         return { ok: false, reason: 'send button missing' };
       }
@@ -250,6 +250,7 @@ async function startBrowserHost(rendererUrlValue) {
       env: {
         ...process.env,
         TERMINAL_DEMO_RENDERER_URL: rendererUrlValue,
+        TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE: "dist-only",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

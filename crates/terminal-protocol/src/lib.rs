@@ -12,9 +12,9 @@ pub use handshake::{DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion}
 pub use requests::{
     CreateSessionRequest, DeleteSavedSessionRequest, DiscoverSessionsRequest,
     DispatchMuxCommandRequest, GetBackendCapabilitiesRequest, GetSavedSessionRequest,
-    GetScreenDeltaRequest, GetScreenSnapshotRequest, GetTopologySnapshotRequest,
-    ImportSessionRequest, OpenSubscriptionRequest, PruneSavedSessionsRequest, RequestPayload,
-    RestoreSavedSessionRequest,
+    GetScreenDeltaRequest, GetScreenSnapshotRequest, GetSessionHealthSnapshotRequest,
+    GetTopologySnapshotRequest, ImportSessionRequest, OpenSubscriptionRequest,
+    PruneSavedSessionsRequest, RequestPayload, RestoreSavedSessionRequest,
 };
 pub use responses::{
     BackendCapabilitiesResponse, CreateSessionResponse, DeleteSavedSessionResponse,

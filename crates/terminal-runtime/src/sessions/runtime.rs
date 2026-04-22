@@ -1,28 +1,30 @@
 use terminal_backend_api::{
-    BackendError, BackendSessionPort, BackendSessionSummary, CreateSessionSpec, MuxBackendPort,
-    MuxCommand,
+    BackendError, BackendErrorKind, BackendSessionPort, BackendSessionSummary, CreateSessionSpec,
+    MuxBackendPort, MuxCommand,
 };
 use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
 use terminal_persistence::{SessionRouteRecord, SqliteSessionStore};
-use terminal_projection::TopologySnapshot;
+use terminal_projection::{
+    SessionHealthReason, SessionHealthSnapshot, TopologySnapshot,
+};
 
 use crate::{
     backend_catalog::BackendCatalog,
     registry::{SessionDescriptor, SessionRegistry},
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct SessionRuntime<'a> {
     backends: &'a BackendCatalog,
-    registry: &'a dyn SessionRegistry,
+    registry: std::sync::Arc<dyn SessionRegistry>,
     persistence: &'a SqliteSessionStore,
 }
 
 impl<'a> SessionRuntime<'a> {
     pub(super) fn new(
         backends: &'a BackendCatalog,
-        registry: &'a dyn SessionRegistry,
+        registry: std::sync::Arc<dyn SessionRegistry>,
         persistence: &'a SqliteSessionStore,
     ) -> Self {
         Self { backends, registry, persistence }
@@ -40,8 +42,12 @@ impl<'a> SessionRuntime<'a> {
         self.registry.list().into_iter().map(Self::to_summary).collect()
     }
 
-    pub(super) fn registry(&self) -> &'a dyn SessionRegistry {
-        self.registry
+    pub(super) fn registry(&self) -> &dyn SessionRegistry {
+        self.registry.as_ref()
+    }
+
+    pub(super) fn registry_handle(&self) -> std::sync::Arc<dyn SessionRegistry> {
+        self.registry.clone()
     }
 
     pub(super) fn persistence(&self) -> &'a SqliteSessionStore {
@@ -65,6 +71,7 @@ impl<'a> SessionRuntime<'a> {
             route: binding.route,
             title: spec.title,
             launch: spec.launch,
+            health: SessionHealthSnapshot::ready(binding.session_id),
         };
         let summary = Self::to_summary(descriptor.clone());
         self.upsert_session_route(descriptor.session_id, &descriptor.route)?;
@@ -82,9 +89,22 @@ impl<'a> SessionRuntime<'a> {
             .get(session_id)
             .ok_or_else(|| BackendError::not_found(format!("unknown session {session_id:?}")))?;
 
-        self.backend(descriptor.route.backend)?
+        match self
+            .backend(descriptor.route.backend)?
             .attach_session(descriptor.session_id, descriptor.route)
             .await
+        {
+            Ok(session) => {
+                self.mark_session_ready(session_id);
+                Ok(session)
+            }
+            Err(error) => {
+                if let Some(health) = session_health_from_attach_error(session_id, &error) {
+                    self.record_session_health(session_id, health);
+                }
+                Err(error)
+            }
+        }
     }
 
     pub(super) async fn refresh_session_summary_title(
@@ -107,6 +127,29 @@ impl<'a> SessionRuntime<'a> {
             route: session.route,
             title: session.title,
         }
+    }
+
+    pub(super) fn session_health_snapshot(
+        &self,
+        session_id: SessionId,
+    ) -> Result<SessionHealthSnapshot, BackendError> {
+        self.registry
+            .get(session_id)
+            .map(|session| session.health)
+            .ok_or_else(|| BackendError::not_found(format!("unknown session {session_id:?}")))
+    }
+
+    pub(super) fn record_session_health(
+        &self,
+        session_id: SessionId,
+        health: SessionHealthSnapshot,
+    ) {
+        self.registry.update_health(session_id, health);
+    }
+
+    pub(super) fn mark_session_ready(&self, session_id: SessionId) {
+        self.registry
+            .update_health(session_id, SessionHealthSnapshot::ready(session_id));
     }
 
     pub(super) fn resolve_session_id_for_route(
@@ -145,6 +188,37 @@ impl<'a> SessionRuntime<'a> {
             .map_err(|error| {
                 BackendError::internal(format!("failed to persist session route - {error}"))
             })
+    }
+}
+
+pub(super) fn session_health_from_attach_error(
+    session_id: SessionId,
+    error: &BackendError,
+) -> Option<SessionHealthSnapshot> {
+    match error.kind {
+        BackendErrorKind::Unsupported => error.degraded_reason.as_ref().map(|_| {
+            SessionHealthSnapshot::degraded(
+                session_id,
+                SessionHealthReason::BackendDegraded,
+                error.message.clone(),
+            )
+        }),
+        BackendErrorKind::NotFound => Some(SessionHealthSnapshot::terminated(
+            session_id,
+            SessionHealthReason::SessionNotFound,
+            error.message.clone(),
+        )),
+        BackendErrorKind::Transport => Some(SessionHealthSnapshot::stale(
+            session_id,
+            SessionHealthReason::BackendTransportLost,
+            error.message.clone(),
+        )),
+        BackendErrorKind::Internal => Some(SessionHealthSnapshot::stale(
+            session_id,
+            SessionHealthReason::BackendInternalFault,
+            error.message.clone(),
+        )),
+        BackendErrorKind::InvalidInput => None,
     }
 }
 
@@ -223,12 +297,13 @@ fn collect_pane_ids_from_node_inner(root: &PaneTreeNode, pane_ids: &mut Vec<Pane
 
 #[cfg(test)]
 mod tests {
-    use terminal_backend_api::{MuxCommand, NewTabSpec};
+    use terminal_backend_api::{BackendError, MuxCommand, NewTabSpec};
     use terminal_domain::{BackendKind, RouteAuthority, SessionId, SessionRoute, TabId};
     use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
-    use terminal_projection::TopologySnapshot;
+    use terminal_projection::{SessionHealthPhase, TopologySnapshot};
 
     use super::{command_updates_summary_title, saved_session_title, session_route_fingerprint};
+    use super::session_health_from_attach_error;
 
     #[test]
     fn saved_session_title_prefers_focused_tab_title() {
@@ -255,6 +330,19 @@ mod tests {
     fn command_title_refresh_tracks_only_tab_mutations() {
         assert!(command_updates_summary_title(&MuxCommand::NewTab(NewTabSpec::default())));
         assert!(!command_updates_summary_title(&MuxCommand::SaveSession));
+    }
+
+    #[test]
+    fn attach_error_maps_transport_failures_to_stale_health() {
+        let session_id = SessionId::new();
+        let health = session_health_from_attach_error(
+            session_id,
+            &BackendError::transport("connection dropped"),
+        )
+        .expect("transport error should map to health");
+
+        assert_eq!(health.phase, SessionHealthPhase::Stale);
+        assert!(health.invalidated);
     }
 
     #[test]

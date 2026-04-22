@@ -91,18 +91,23 @@ button {
 }
 
 .hero {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
   gap: 18px;
   padding: 22px;
   background: var(--bg-hero);
   border-color: var(--border-strong);
 }
 
+.hero__content {
+  display: grid;
+  gap: 14px;
+}
+
 .hero__title {
   margin: 4px 0 8px;
-  font-size: clamp(1.9rem, 4vw, 3rem);
-  line-height: 0.95;
+  font-size: clamp(1.75rem, 3.4vw, 2.65rem);
+  line-height: 0.98;
+  max-width: 13ch;
 }
 
 .hero__copy,
@@ -143,6 +148,23 @@ button {
 .section__title,
 .panel__header h3 {
   margin: 0;
+}
+
+.hero__flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hero__flow-item {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 0.84rem;
+  border: 1px solid rgba(130, 162, 196, 0.16);
+  background: rgba(9, 14, 22, 0.4);
+  color: #dce7f5;
 }
 
 .panel__header {
@@ -241,6 +263,56 @@ button {
 .form-grid {
   display: grid;
   gap: 10px;
+}
+
+.details-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.details-panel summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(130, 162, 196, 0.16);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.details-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.details-panel[open] summary {
+  border-color: rgba(248, 184, 76, 0.26);
+  background: rgba(248, 184, 76, 0.06);
+}
+
+.details-panel > :not(summary) {
+  padding-inline: 4px;
+}
+
+.advanced-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.advanced-block {
+  display: grid;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.advanced-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.details-panel--secondary summary {
+  background: rgba(9, 14, 22, 0.72);
 }
 
 .form-grid label,
@@ -518,6 +590,11 @@ textarea:focus-visible {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.section-callout {
+  display: grid;
+  gap: 6px;
+}
+
 .workspace-summary__title code,
 .hero__copy code {
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
@@ -548,6 +625,25 @@ textarea:focus-visible {
 .terminal-dock__title {
   margin: 4px 0 0;
   font-size: clamp(1.1rem, 1.6vw, 1.35rem);
+}
+
+.terminal-dock__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.terminal-chip {
+  border-radius: 999px;
+  border: 1px solid rgba(130, 162, 196, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  padding: 8px 12px;
+}
+
+.terminal-chip:hover {
+  border-color: rgba(248, 184, 76, 0.34);
+  background: rgba(248, 184, 76, 0.1);
 }
 
 .terminal-dock__composer {
@@ -596,6 +692,33 @@ textarea:focus-visible {
   color: var(--text-soft);
   font-size: 0.9rem;
   line-height: 1.45;
+}
+
+.terminal-dock__more {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.terminal-dock__more summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 162, 196, 0.18);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.terminal-dock__more summary::-webkit-details-marker {
+  display: none;
+}
+
+.terminal-dock__more[open] summary {
+  color: var(--text);
+  border-color: rgba(248, 184, 76, 0.26);
+  background: rgba(248, 184, 76, 0.08);
 }
 
 .empty-state {

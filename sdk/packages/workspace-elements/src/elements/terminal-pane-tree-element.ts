@@ -27,7 +27,12 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
 
     return html`
       <div class="panel tree" part="tree">
-        ${root ? renderNode(root) : html`<div class="muted" part="empty">No pane tree</div>`}
+        <div class="panel-header">
+          <div class="panel-eyebrow">Layout</div>
+          <div class="panel-title">Pane structure</div>
+          <div class="panel-copy">See how the current session is split before sending input to a pane.</div>
+        </div>
+        ${root ? renderNode(root) : html`<div class="muted" part="empty">No pane tree yet</div>`}
       </div>
     `;
   }

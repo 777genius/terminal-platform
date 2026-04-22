@@ -1,13 +1,15 @@
 use terminal_backend_api::{BackendError, MuxCommand, MuxCommandResult};
 use terminal_domain::{PaneId, SessionId};
-use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{
+    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
+};
 
 use super::{
     runtime::{SessionRuntime, command_updates_summary_title},
     saved_sessions_service::SavedSessionsService,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct ActiveSessionService<'a> {
     runtime: SessionRuntime<'a>,
 }
@@ -50,7 +52,9 @@ impl<'a> ActiveSessionService<'a> {
         command: MuxCommand,
     ) -> Result<MuxCommandResult, BackendError> {
         if matches!(command, MuxCommand::SaveSession) {
-            return SavedSessionsService::new(self.runtime).save_session(session_id).await;
+            return SavedSessionsService::new(self.runtime.clone())
+                .save_session(session_id)
+                .await;
         }
         let session = self.runtime.attach_session(session_id).await?;
         let refresh_summary_title = command_updates_summary_title(&command);
@@ -59,5 +63,12 @@ impl<'a> ActiveSessionService<'a> {
             self.runtime.refresh_session_summary_title(session_id, &*session).await;
         }
         Ok(result)
+    }
+
+    pub(super) fn session_health_snapshot(
+        &self,
+        session_id: SessionId,
+    ) -> Result<SessionHealthSnapshot, BackendError> {
+        self.runtime.session_health_snapshot(session_id)
     }
 }

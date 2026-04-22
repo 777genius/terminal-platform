@@ -14,18 +14,48 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
 
       .body {
         display: grid;
-        grid-template-columns: minmax(16rem, 20rem) 1fr;
+        grid-template-columns: minmax(15rem, 18rem) 1fr;
         gap: var(--tp-space-4);
+        min-height: 0;
       }
 
       .sidebar,
       .content {
         display: grid;
         gap: var(--tp-space-3);
+        min-height: 0;
+        align-content: start;
       }
 
       .diagnostics {
         padding: var(--tp-space-3);
+      }
+
+      .advanced-stack {
+        display: grid;
+        gap: var(--tp-space-3);
+      }
+
+      .secondary-toggle {
+        border: 1px solid var(--tp-color-border);
+        border-radius: var(--tp-radius-md);
+        background: var(--tp-color-panel);
+        overflow: hidden;
+      }
+
+      .secondary-toggle summary {
+        cursor: pointer;
+        list-style: none;
+        padding: var(--tp-space-3);
+        font-weight: 600;
+      }
+
+      .secondary-toggle summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .secondary-toggle[open] summary {
+        border-bottom: 1px solid var(--tp-color-border);
       }
 
       @media (max-width: 900px) {
@@ -39,31 +69,38 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
   override render() {
     return html`
       <div class="workspace" part="workspace">
-        <tp-terminal-toolbar .kernel=${this.kernel}></tp-terminal-toolbar>
         <div class="body" part="body">
           <div class="sidebar" part="sidebar">
             <tp-terminal-session-list .kernel=${this.kernel}></tp-terminal-session-list>
-            <tp-terminal-saved-sessions .kernel=${this.kernel}></tp-terminal-saved-sessions>
           </div>
           <div class="content" part="content">
-            <tp-terminal-pane-tree .kernel=${this.kernel}></tp-terminal-pane-tree>
-            ${this.snapshot.diagnostics.length > 0
-              ? html`
-                  <div class="panel diagnostics" part="diagnostics">
-                    <ul>
-                      ${this.snapshot.diagnostics.map(
-                        (item) => html`
-                          <li>
-                            <strong>${item.code}</strong>
-                            <span class="muted"> ${item.message}</span>
-                          </li>
-                        `,
-                      )}
-                    </ul>
-                  </div>
-                `
-              : null}
             <tp-terminal-screen .kernel=${this.kernel}></tp-terminal-screen>
+            <div class="advanced-stack">
+              ${this.snapshot.diagnostics.length > 0
+                ? html`
+                    <details class="secondary-toggle" open>
+                      <summary>Workspace notices - ${this.snapshot.diagnostics.length}</summary>
+                      <div class="panel diagnostics" part="diagnostics">
+                        <div class="panel-header">
+                          <div class="panel-eyebrow">Alerts</div>
+                          <div class="panel-title">Workspace diagnostics</div>
+                          <div class="panel-copy">These notices come from the transport or runtime layer.</div>
+                        </div>
+                        <ul>
+                          ${this.snapshot.diagnostics.map(
+                            (item) => html`
+                              <li>
+                                <strong>${item.code}</strong>
+                                <span class="muted"> ${item.message}</span>
+                              </li>
+                            `,
+                          )}
+                        </ul>
+                      </div>
+                    </details>
+                  `
+                : null}
+            </div>
           </div>
         </div>
       </div>

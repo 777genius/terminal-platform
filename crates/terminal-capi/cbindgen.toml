@@ -37,6 +37,7 @@ include = [
   "terminal_capi_client_saved_session_json",
   "terminal_capi_client_screen_delta_json",
   "terminal_capi_client_screen_snapshot_json",
+  "terminal_capi_client_session_health_snapshot_json",
   "terminal_capi_client_topology_snapshot_json",
   "terminal_capi_subscription_close",
   "terminal_capi_subscription_free",

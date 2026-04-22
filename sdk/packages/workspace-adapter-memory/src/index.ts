@@ -209,6 +209,7 @@ export function createDefaultMemoryWorkspaceFixture(): MemoryWorkspaceFixture {
   const screen = createScreenSnapshot(paneId, "shell", "ready");
   const attachedSession: AttachedSession = {
     session,
+    health: createSessionHealthSnapshot(session.session_id),
     topology,
     focused_screen: screen,
   };
@@ -324,6 +325,7 @@ function createDefaultHandshake(): Handshake {
       saved_sessions: true,
       session_restore: true,
       degraded_error_reasons: true,
+      session_health: true,
     },
     available_backends: ["native", "tmux", "zellij"],
     session_scope: "memory-fixture",
@@ -511,6 +513,7 @@ function seedSessionArtifacts(
   };
   state.attachedSessions[session.session_id] = {
     session,
+    health: createSessionHealthSnapshot(session.session_id),
     topology,
     focused_screen: screen,
   };
@@ -524,8 +527,20 @@ function seedSavedSessionArtifacts(state: MemoryWorkspaceFixture, record: SavedS
   );
   state.attachedSessions[record.session_id] = {
     session,
+    health: createSessionHealthSnapshot(record.session_id),
     topology: record.topology,
     focused_screen: record.screens[0] ?? null,
+  };
+}
+
+function createSessionHealthSnapshot(sessionId: SessionId): AttachedSession["health"] {
+  return {
+    session_id: sessionId,
+    phase: "ready",
+    can_attach: true,
+    invalidated: false,
+    reason: null,
+    detail: null,
   };
 }
 

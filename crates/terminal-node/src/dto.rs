@@ -13,7 +13,8 @@ use terminal_domain::{
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 use terminal_projection::{
     ProjectionSource, ScreenCursor, ScreenDelta, ScreenLine, ScreenLinePatch, ScreenPatch,
-    ScreenSnapshot, ScreenSurface, TopologySnapshot,
+    ScreenSnapshot, ScreenSurface, SessionHealthPhase, SessionHealthReason,
+    SessionHealthSnapshot, TopologySnapshot,
 };
 use terminal_protocol::{
     BackendCapabilitiesResponse, DaemonCapabilities, DaemonPhase, DeleteSavedSessionResponse,
@@ -100,6 +101,7 @@ pub struct NodeDaemonCapabilities {
     pub saved_sessions: bool,
     pub session_restore: bool,
     pub degraded_error_reasons: bool,
+    pub session_health: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -313,11 +315,44 @@ pub enum NodeSubscriptionSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodeSessionHealthPhase {
+    Ready,
+    Degraded,
+    Stale,
+    Terminated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodeSessionHealthReason {
+    BackendDegraded,
+    SubscriptionSourceClosed,
+    SessionNotFound,
+    BackendTransportLost,
+    BackendInternalFault,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSessionHealthSnapshot {
+    pub session_id: String,
+    pub phase: NodeSessionHealthPhase,
+    pub can_attach: bool,
+    pub invalidated: bool,
+    pub reason: Option<NodeSessionHealthReason>,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export)]
 pub enum NodeSubscriptionEvent {
     TopologySnapshot(NodeTopologySnapshot),
     ScreenDelta(NodeScreenDelta),
+    SessionHealthSnapshot(NodeSessionHealthSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -520,6 +555,7 @@ pub struct NodeTopologySnapshot {
 #[ts(export)]
 pub struct NodeAttachedSession {
     pub session: NodeSessionSummary,
+    pub health: NodeSessionHealthSnapshot,
     pub topology: NodeTopologySnapshot,
     pub focused_screen: Option<NodeScreenSnapshot>,
 }
@@ -609,6 +645,43 @@ impl From<&DaemonCapabilities> for NodeDaemonCapabilities {
             saved_sessions: value.saved_sessions,
             session_restore: value.session_restore,
             degraded_error_reasons: value.degraded_error_reasons,
+            session_health: value.session_health,
+        }
+    }
+}
+
+impl From<&SessionHealthPhase> for NodeSessionHealthPhase {
+    fn from(value: &SessionHealthPhase) -> Self {
+        match value {
+            SessionHealthPhase::Ready => Self::Ready,
+            SessionHealthPhase::Degraded => Self::Degraded,
+            SessionHealthPhase::Stale => Self::Stale,
+            SessionHealthPhase::Terminated => Self::Terminated,
+        }
+    }
+}
+
+impl From<&SessionHealthReason> for NodeSessionHealthReason {
+    fn from(value: &SessionHealthReason) -> Self {
+        match value {
+            SessionHealthReason::BackendDegraded => Self::BackendDegraded,
+            SessionHealthReason::SubscriptionSourceClosed => Self::SubscriptionSourceClosed,
+            SessionHealthReason::SessionNotFound => Self::SessionNotFound,
+            SessionHealthReason::BackendTransportLost => Self::BackendTransportLost,
+            SessionHealthReason::BackendInternalFault => Self::BackendInternalFault,
+        }
+    }
+}
+
+impl From<&SessionHealthSnapshot> for NodeSessionHealthSnapshot {
+    fn from(value: &SessionHealthSnapshot) -> Self {
+        Self {
+            session_id: value.session_id.0.to_string(),
+            phase: (&value.phase).into(),
+            can_attach: value.can_attach,
+            invalidated: value.invalidated,
+            reason: value.reason.as_ref().map(Into::into),
+            detail: value.detail.clone(),
         }
     }
 }
@@ -846,6 +919,9 @@ impl From<&SubscriptionEvent> for NodeSubscriptionEvent {
                 Self::TopologySnapshot(snapshot.into())
             }
             SubscriptionEvent::ScreenDelta(delta) => Self::ScreenDelta(delta.into()),
+            SubscriptionEvent::SessionHealthSnapshot(snapshot) => {
+                Self::SessionHealthSnapshot(snapshot.into())
+            }
         }
     }
 }

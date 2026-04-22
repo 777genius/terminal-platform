@@ -37,6 +37,11 @@ pub struct GetTopologySnapshotRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetSessionHealthSnapshotRequest {
+    pub session_id: SessionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GetScreenSnapshotRequest {
     pub session_id: SessionId,
     pub pane_id: PaneId,
@@ -90,6 +95,7 @@ pub enum RequestPayload {
     PruneSavedSessions(PruneSavedSessionsRequest),
     RestoreSavedSession(RestoreSavedSessionRequest),
     GetTopologySnapshot(GetTopologySnapshotRequest),
+    GetSessionHealthSnapshot(GetSessionHealthSnapshotRequest),
     GetScreenSnapshot(GetScreenSnapshotRequest),
     GetScreenDelta(GetScreenDeltaRequest),
     DispatchMuxCommand(DispatchMuxCommandRequest),

@@ -147,6 +147,13 @@ where
                     )
                 })
             }
+            RequestPayload::GetSessionHealthSnapshot(request) => {
+                ResponsePayload::SessionHealthSnapshot(
+                    self.active_sessions
+                        .session_health_snapshot(request.session_id)
+                        .map_err(map_backend_error)?,
+                )
+            }
             RequestPayload::GetTopologySnapshot(request) => ResponsePayload::TopologySnapshot(
                 self.active_sessions
                     .topology_snapshot(request.session_id)
@@ -191,11 +198,13 @@ mod tests {
         DegradedModeReason, OperationId, PaneId, RouteAuthority, SessionId, SessionRoute,
     };
     use terminal_projection::{
-        ProjectionSource, ScreenDelta, ScreenSnapshot, ScreenSurface, TopologySnapshot,
+        ProjectionSource, ScreenDelta, ScreenSnapshot, ScreenSurface, SessionHealthSnapshot,
+        TopologySnapshot,
     };
     use terminal_protocol::{
-        CreateSessionRequest, DaemonCapabilities, DaemonPhase, Handshake, OpenSubscriptionRequest,
-        ProtocolVersion, RequestEnvelope, RequestPayload, ResponsePayload,
+        CreateSessionRequest, DaemonCapabilities, DaemonPhase, GetSessionHealthSnapshotRequest,
+        Handshake, OpenSubscriptionRequest, ProtocolVersion, RequestEnvelope, RequestPayload,
+        ResponsePayload,
     };
 
     use crate::application::{
@@ -227,6 +236,7 @@ mod tests {
                     saved_sessions: true,
                     session_restore: true,
                     degraded_error_reasons: true,
+                    session_health: true,
                 },
                 available_backends: vec![BackendKind::Native],
                 session_scope: "current_user".to_string(),
@@ -319,6 +329,13 @@ mod tests {
     }
 
     impl TerminalDaemonActiveSessionPort for StubRuntime {
+        fn session_health_snapshot(
+            &self,
+            session_id: SessionId,
+        ) -> Result<SessionHealthSnapshot, BackendError> {
+            Ok(SessionHealthSnapshot::ready(session_id))
+        }
+
         async fn topology_snapshot(
             &self,
             _session_id: SessionId,
@@ -443,5 +460,32 @@ mod tests {
 
         let error = result.expect_err("stub subscription path should surface backend error");
         assert_eq!(error.code, "backend_not_found");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_session_health_snapshot_through_runtime_port() {
+        let dispatcher = TerminalDaemonRequestDispatcher::new(
+            StubRuntime,
+            StubRuntime,
+            StubRuntime,
+            TerminalDaemonSubscriptionService::new(StubRuntime),
+        );
+        let session_id = SessionId::new();
+        let response = dispatcher
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::GetSessionHealthSnapshot(
+                    GetSessionHealthSnapshotRequest { session_id },
+                ),
+            })
+            .await
+            .expect("session health should dispatch through runtime port");
+
+        match response.payload {
+            ResponsePayload::SessionHealthSnapshot(health) => {
+                assert_eq!(health.session_id, session_id);
+            }
+            other => panic!("unexpected response payload: {other:?}"),
+        }
     }
 }

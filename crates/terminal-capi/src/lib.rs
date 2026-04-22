@@ -472,6 +472,25 @@ pub extern "C" fn terminal_capi_client_topology_snapshot_json(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn terminal_capi_client_session_health_snapshot_json(
+    client: *mut TerminalCapiClientHandle,
+    session_id: *const c_char,
+) -> TerminalCapiStringResult {
+    let session_id = match read_required_string(session_id, "session_id") {
+        Ok(session_id) => session_id,
+        Err(error) => return error,
+    };
+
+    match with_client_handle(client, |client| {
+        client.runtime.block_on(client.client.session_health_snapshot(&session_id))
+    }) {
+        Ok(Ok(snapshot)) => TerminalCapiStringResult::ok_json(&snapshot),
+        Ok(Err(error)) => TerminalCapiStringResult::protocol_error(error),
+        Err(error) => error,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn terminal_capi_client_screen_snapshot_json(
     client: *mut TerminalCapiClientHandle,
     session_id: *const c_char,

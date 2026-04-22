@@ -15,7 +15,9 @@ use terminal_domain::{
 use terminal_persistence::{
     PrunedSavedSessions, SavedNativeSession, SavedSessionSummary, SqliteSessionStore,
 };
-use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{
+    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
+};
 
 pub use backend_catalog::BackendCatalog;
 pub use registry::{InMemorySessionRegistry, SessionDescriptor, SessionRegistry};
@@ -45,6 +47,7 @@ pub struct RuntimeCapabilities {
     pub saved_sessions: bool,
     pub session_restore: bool,
     pub degraded_error_reasons: bool,
+    pub session_health: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +103,7 @@ impl TerminalRuntime {
                 saved_sessions: true,
                 session_restore: true,
                 degraded_error_reasons: true,
+                session_health: true,
             },
             available_backends: self.sessions.available_backends(),
             session_scope: "current_user".to_string(),
@@ -202,6 +206,13 @@ impl TerminalRuntime {
         command: MuxCommand,
     ) -> Result<MuxCommandResult, BackendError> {
         self.sessions.dispatch(session_id, command).await
+    }
+
+    pub fn session_health_snapshot(
+        &self,
+        session_id: SessionId,
+    ) -> Result<SessionHealthSnapshot, BackendError> {
+        self.sessions.session_health_snapshot(session_id)
     }
 
     pub async fn open_subscription(

@@ -10,6 +10,7 @@ terminal-domain = { path = "../terminal-domain" }
 terminal-mux-domain = { path = "../terminal-mux-domain" }
 terminal-persistence = { path = "../terminal-persistence" }
 terminal-projection = { path = "../terminal-projection" }
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 thiserror = { workspace = true }
 
 [lints]

@@ -23,6 +23,7 @@ pub use dto::{
     NodeSavedSessionRecord, NodeSavedSessionRestoreSemantics, NodeSavedSessionSummary,
     NodeScreenCursor, NodeScreenDelta, NodeScreenLine, NodeScreenLinePatch, NodeScreenPatch,
     NodeScreenSnapshot, NodeScreenSurface, NodeSendInputCommand, NodeSendPasteCommand,
+    NodeSessionHealthPhase, NodeSessionHealthReason, NodeSessionHealthSnapshot,
     NodeSessionRoute, NodeSessionSummary, NodeShellLaunchSpec, NodeSplitDirection,
     NodeSplitPaneCommand, NodeSubscriptionEvent, NodeSubscriptionMeta, NodeSubscriptionSpec,
     NodeTabSnapshot, NodeTopologySnapshot,
@@ -294,6 +295,7 @@ impl NodeHostClient {
             .ok_or_else(|| {
                 ProtocolError::new("session_not_found", format!("unknown session {session_id:?}"))
             })?;
+        let health = self.client.session_health_snapshot(session_id).await?;
         let topology = self.client.topology_snapshot(session_id).await?;
         let focused_screen = match focused_pane_id(&topology) {
             Some(pane_id) => Some(self.client.screen_snapshot(session_id, pane_id).await?),
@@ -302,9 +304,18 @@ impl NodeHostClient {
 
         Ok(NodeAttachedSession {
             session: (&session).into(),
+            health: (&health).into(),
             topology: (&topology).into(),
             focused_screen: focused_screen.as_ref().map(Into::into),
         })
+    }
+
+    pub async fn session_health_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<NodeSessionHealthSnapshot, ProtocolError> {
+        let health = self.client.session_health_snapshot(parse_session_id(session_id)?).await?;
+        Ok((&health).into())
     }
 
     pub async fn topology_snapshot(
@@ -378,6 +389,9 @@ pub fn export_typescript_bindings_to(out_dir: impl AsRef<Path>) -> std::io::Resu
     NodeTopologySnapshot::export_all(&cfg).map_err(export_error)?;
     NodeScreenSnapshot::export_all(&cfg).map_err(export_error)?;
     NodeScreenDelta::export_all(&cfg).map_err(export_error)?;
+    NodeSessionHealthPhase::export_all(&cfg).map_err(export_error)?;
+    NodeSessionHealthReason::export_all(&cfg).map_err(export_error)?;
+    NodeSessionHealthSnapshot::export_all(&cfg).map_err(export_error)?;
     NodeMuxCommand::export_all(&cfg).map_err(export_error)?;
     NodeMuxCommandResult::export_all(&cfg).map_err(export_error)?;
     NodeSubscriptionSpec::export_all(&cfg).map_err(export_error)?;
@@ -779,6 +793,9 @@ mod tests {
                                 assert_eq!(snapshot.session_id, imported.session_id);
                                 assert_eq!(snapshot.backend_kind, NodeBackendKind::Zellij);
                             }
+                            NodeSubscriptionEvent::SessionHealthSnapshot(health) => {
+                                panic!("unexpected initial zellij topology health event: {health:?}");
+                            }
                             other => panic!("unexpected initial zellij topology event: {other:?}"),
                         }
                         match initial_pane {
@@ -786,6 +803,9 @@ mod tests {
                                 assert_eq!(delta.pane_id, focused_pane);
                                 assert_eq!(delta.source, NodeProjectionSource::ZellijDumpSnapshot);
                                 assert!(delta.full_replace.is_some());
+                            }
+                            NodeSubscriptionEvent::SessionHealthSnapshot(health) => {
+                                panic!("unexpected initial zellij pane health event: {health:?}");
                             }
                             other => panic!("unexpected initial zellij pane event: {other:?}"),
                         }
@@ -1441,6 +1461,7 @@ mod tests {
             {
                 Some(NodeSubscriptionEvent::TopologySnapshot(snapshot)) => return Some(snapshot),
                 Some(NodeSubscriptionEvent::ScreenDelta(_)) => continue,
+                Some(NodeSubscriptionEvent::SessionHealthSnapshot(_)) => continue,
                 None => return None,
             }
         }
@@ -1485,6 +1506,7 @@ mod tests {
                 }
                 Some(NodeSubscriptionEvent::ScreenDelta(_)) => continue,
                 Some(NodeSubscriptionEvent::TopologySnapshot(_)) => continue,
+                Some(NodeSubscriptionEvent::SessionHealthSnapshot(_)) => continue,
                 None => return None,
             }
         }

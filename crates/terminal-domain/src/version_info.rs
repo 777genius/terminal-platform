@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub const CURRENT_BINARY_VERSION: &str = "0.1.0-dev";
 pub const CURRENT_PROTOCOL_MAJOR: u16 = 0;
-pub const CURRENT_PROTOCOL_MINOR: u16 = 1;
+pub const CURRENT_PROTOCOL_MINOR: u16 = 2;
 pub const CURRENT_SAVED_SESSION_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

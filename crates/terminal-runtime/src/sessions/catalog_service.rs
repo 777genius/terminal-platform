@@ -3,10 +3,11 @@ use terminal_backend_api::{
     DiscoveredSession,
 };
 use terminal_domain::{BackendKind, DegradedModeReason, RouteAuthority, SessionRoute};
+use terminal_projection::SessionHealthSnapshot;
 
 use super::runtime::SessionRuntime;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct SessionCatalogService<'a> {
     runtime: SessionRuntime<'a>,
 }
@@ -65,7 +66,13 @@ impl<'a> SessionCatalogService<'a> {
         self.runtime.backend(route.backend)?.attach_session(session_id, route.clone()).await?;
 
         let descriptor =
-            crate::registry::SessionDescriptor { session_id, route, title, launch: None };
+            crate::registry::SessionDescriptor {
+                session_id,
+                route,
+                title,
+                launch: None,
+                health: SessionHealthSnapshot::ready(session_id),
+            };
         let summary = SessionRuntime::to_summary(descriptor.clone());
         self.runtime.upsert_session_route(descriptor.session_id, &descriptor.route)?;
         self.runtime.registry().insert(descriptor);
