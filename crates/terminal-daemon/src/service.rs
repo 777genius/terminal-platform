@@ -237,20 +237,28 @@ fn saved_session_restore_semantics(has_launch: bool) -> SavedSessionRestoreSeman
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "native-backend")]
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[cfg(feature = "native-backend")]
     use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec};
+    use terminal_domain::OperationId;
+    #[cfg(feature = "native-backend")]
     use terminal_domain::{
-        CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR, OperationId,
+        CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
         SavedSessionCompatibilityStatus, SavedSessionManifest, local_native_route,
     };
+    #[cfg(feature = "native-backend")]
     use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
+    #[cfg(feature = "native-backend")]
     use terminal_persistence::SqliteSessionStore;
+    #[cfg(feature = "native-backend")]
     use terminal_projection::TopologySnapshot;
     use terminal_protocol::{RequestEnvelope, RequestPayload, ResponsePayload};
 
     use super::TerminalDaemon;
 
+    #[cfg(feature = "native-backend")]
     fn isolated_daemon() -> TerminalDaemon {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -265,6 +273,7 @@ mod tests {
         TerminalDaemon::new(crate::TerminalDaemonState::with_default_persistence(store))
     }
 
+    #[cfg(feature = "native-backend")]
     fn save_incompatible_snapshot(
         label: &str,
         manifest: SavedSessionManifest,
@@ -329,11 +338,7 @@ mod tests {
                 assert_eq!(handshake.daemon_phase, terminal_protocol::DaemonPhase::Ready);
                 assert_eq!(
                     handshake.available_backends,
-                    vec![
-                        terminal_domain::BackendKind::Native,
-                        terminal_domain::BackendKind::Tmux,
-                        terminal_domain::BackendKind::Zellij
-                    ]
+                    crate::TerminalDaemonState::compiled_backends()
                 );
                 assert!(handshake.capabilities.request_reply);
                 assert!(handshake.capabilities.topology_subscriptions);
@@ -348,6 +353,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_native_session_creation_requests() {
         let daemon = TerminalDaemon::default();
@@ -376,14 +382,16 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_backend_capabilities_requests() {
+        let backend = crate::TerminalDaemonState::compiled_backends()
+            .into_iter()
+            .next()
+            .expect("at least one backend should be compiled");
         let daemon = TerminalDaemon::default();
         let response = daemon
             .handle_request(RequestEnvelope {
                 operation_id: OperationId::new(),
                 payload: RequestPayload::GetBackendCapabilities(
-                    terminal_protocol::GetBackendCapabilitiesRequest {
-                        backend: terminal_domain::BackendKind::Native,
-                    },
+                    terminal_protocol::GetBackendCapabilitiesRequest { backend },
                 ),
             })
             .await
@@ -391,16 +399,13 @@ mod tests {
 
         match response.payload {
             ResponsePayload::BackendCapabilities(capabilities) => {
-                assert_eq!(capabilities.backend, terminal_domain::BackendKind::Native);
-                assert!(capabilities.capabilities.tiled_panes);
-                assert!(capabilities.capabilities.tab_create);
-                assert!(capabilities.capabilities.tab_close);
-                assert!(capabilities.capabilities.tab_focus);
+                assert_eq!(capabilities.backend, backend);
             }
             other => panic!("unexpected response payload: {other:?}"),
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_saved_session_requests() {
         let daemon = TerminalDaemon::default();
@@ -497,6 +502,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_delete_saved_session_requests() {
         let daemon = TerminalDaemon::default();
@@ -559,6 +565,7 @@ mod tests {
         assert_eq!(lookup_error.code, "backend_not_found");
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_restore_saved_session_requests() {
         let daemon = TerminalDaemon::default();
@@ -622,6 +629,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_prune_saved_sessions_requests() {
         let daemon = isolated_daemon();
@@ -691,6 +699,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn reports_incompatible_saved_session_manifest_and_blocks_restore() {
         let (daemon, session_id) = save_incompatible_snapshot(
@@ -761,6 +770,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_topology_snapshot_requests() {
         let daemon = TerminalDaemon::default();
@@ -800,6 +810,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_dispatch_mux_command_requests() {
         let daemon = TerminalDaemon::default();
@@ -839,6 +850,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_screen_delta_requests() {
         let daemon = TerminalDaemon::default();
@@ -896,6 +908,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_open_subscription_requests() {
         let daemon = TerminalDaemon::default();

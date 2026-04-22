@@ -4,18 +4,25 @@ version = "0.1.0"
 edition = "2024"
 license.workspace = true
 
+[features]
+default = ["native-backend", "tmux-backend", "zellij-backend"]
+native-backend = ["dep:terminal-backend-native"]
+tmux-backend = ["dep:terminal-backend-tmux"]
+zellij-backend = ["dep:terminal-backend-zellij"]
+
 [dependencies]
 futures-util = { workspace = true }
 interprocess = { workspace = true }
 terminal-application = { path = "../terminal-application" }
 terminal-backend-api = { path = "../terminal-backend-api" }
-terminal-backend-native = { path = "../terminal-backend-native" }
-terminal-backend-tmux = { path = "../terminal-backend-tmux" }
-terminal-backend-zellij = { path = "../terminal-backend-zellij" }
+terminal-backend-native = { path = "../terminal-backend-native", optional = true }
+terminal-backend-tmux = { path = "../terminal-backend-tmux", optional = true }
+terminal-backend-zellij = { path = "../terminal-backend-zellij", optional = true }
 terminal-domain = { path = "../terminal-domain" }
 terminal-persistence = { path = "../terminal-persistence" }
 terminal-protocol = { path = "../terminal-protocol" }
 terminal-projection = { path = "../terminal-projection" }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 
