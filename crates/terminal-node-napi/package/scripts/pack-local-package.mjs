@@ -18,15 +18,21 @@ function main() {
   run("node", buildArgs, packageDir);
   run("node", ["./scripts/verify-package.mjs", "--package-dir", options.out], packageDir);
 
-  const packResult = spawnSync("npm", ["pack", "--json"], {
+  const packResult = spawnSync(nodePackageManager(), ["pack", "--json"], {
     cwd: options.out,
     env: packageManagerEnv(options),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
   });
 
+  if (packResult.error) {
+    throw new Error(`npm pack failed to launch - ${packResult.error.message}`);
+  }
+
   if (packResult.status !== 0) {
-    throw new Error(`npm pack failed with exit code ${packResult.status}`);
+    throw new Error(
+      `npm pack failed with exit code ${packResult.status} signal ${packResult.signal ?? "<none>"}`,
+    );
   }
 
   const payload = JSON.parse(packResult.stdout);
@@ -89,6 +95,10 @@ function packageManagerEnv(options) {
     ...process.env,
     npm_config_cache: process.env.npm_config_cache ?? path.join(options.out, ".npm-cache"),
   };
+}
+
+function nodePackageManager() {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
 main();
