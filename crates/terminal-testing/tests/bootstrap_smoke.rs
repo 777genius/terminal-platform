@@ -2275,10 +2275,10 @@ async fn bootstrap_smoke_preserves_zellij_fullscreen_viewports_for_imported_tuis
 
     wait_for_shell_marker(&fixture, imported.session.session_id, focused_pane, "zellij-initial")
         .await;
-    // Hosted Linux `dump-screen` is not a truthful proof source for plain `less` in imported
-    // Zellij sessions, so keep automated parity honest there and leave pager validation to the
-    // documented manual `less -X` acceptance path.
-    let exercise_less = !cfg!(target_os = "linux");
+    // Imported Unix Zellij sessions do not expose a truthful automated proof source for plain
+    // `less` through `dump-screen`, so keep automated parity honest there and leave pager
+    // validation to the documented manual `less -X` acceptance path.
+    let exercise_less = cfg!(windows);
     run_fullscreen_viewport_flow(
         &fixture,
         imported.session.session_id,
