@@ -2126,7 +2126,10 @@ fn fullscreen_fzf_command(path: &std::path::Path) -> String {
     let quoted = quoted_command_path(path);
     if cfg!(windows) {
         let fzf = resolve_command_on_path("fzf").unwrap_or_else(|| "fzf".to_string());
-        format!("type {quoted} | \"{fzf}\"")
+        // `cmd.exe` handles a bare executable path more reliably inside a pipe when the resolved
+        // path has no spaces, while still keeping the quoted fallback for local paths that do.
+        let fzf = if fzf.contains(' ') { format!("\"{fzf}\"") } else { fzf };
+        format!("type {quoted} | {fzf}")
     } else {
         format!("fzf < {quoted}")
     }
@@ -2215,12 +2218,7 @@ fn native_fullscreen_shell_launch_spec() -> ShellLaunchSpec {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "cmd.exe".to_string());
-    ShellLaunchSpec::new(program).with_args([
-        "/D",
-        "/Q",
-        "/K",
-        "prompt terminal-platform$G & echo ready",
-    ])
+    ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
 }
 
 #[cfg(unix)]

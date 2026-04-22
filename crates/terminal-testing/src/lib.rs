@@ -125,15 +125,9 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "cmd.exe".to_string());
 
-        // Keep the Windows host smoke inside a real interactive shell contract instead of a
-        // one-shot process. The prompt marker plus explicit ready line has been more reliable
-        // through the hosted PTY screen path than the Node echo loop.
-        ShellLaunchSpec::new(program).with_args([
-            "/D",
-            "/Q",
-            "/K",
-            "prompt terminal-platform$G & echo ready",
-        ])
+        // Hosted Windows has been more reliable with a plain `cmd` bootstrap than with a
+        // prompt mutation or a separate Node echo loop.
+        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
     }
 }
 

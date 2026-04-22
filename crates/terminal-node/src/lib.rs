@@ -1396,7 +1396,7 @@ mod tests {
                     "/D".to_string(),
                     "/Q".to_string(),
                     "/K".to_string(),
-                    "prompt terminal-platform$G & echo ready".to_string(),
+                    "echo ready".to_string(),
                 ]
             );
         }
