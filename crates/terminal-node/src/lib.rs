@@ -1389,12 +1389,14 @@ mod tests {
 
         #[cfg(windows)]
         {
-            assert!(launch.program.to_ascii_lowercase().ends_with("node.exe"));
+            assert!(launch.program.to_ascii_lowercase().ends_with("cmd.exe"));
             assert_eq!(
                 launch.args,
                 vec![
-                    "-e".to_string(),
-                    "process.stdout.write('ready\\n'); process.stdin.resume(); process.stdin.on('data', chunk => process.stdout.write(chunk));".to_string(),
+                    "/D".to_string(),
+                    "/Q".to_string(),
+                    "/K".to_string(),
+                    "prompt terminal-platform$G & echo ready".to_string(),
                 ]
             );
         }

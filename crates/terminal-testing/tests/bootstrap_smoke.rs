@@ -2016,6 +2016,38 @@ fn command_on_path(command: &str) -> bool {
 }
 
 #[cfg(any(unix, windows))]
+fn resolve_command_on_path(command: &str) -> Option<String> {
+    let has_separator = command.contains(std::path::MAIN_SEPARATOR) || command.contains('/');
+    if has_separator {
+        return std::path::Path::new(command).is_file().then(|| command.to_string());
+    }
+
+    let candidates = if cfg!(windows) {
+        if command.contains('.') {
+            vec![command.to_string()]
+        } else {
+            vec![
+                format!("{command}.exe"),
+                format!("{command}.cmd"),
+                format!("{command}.bat"),
+                command.to_string(),
+            ]
+        }
+    } else {
+        vec![command.to_string()]
+    };
+
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|dir| {
+            candidates.iter().find_map(|candidate| {
+                let path = dir.join(candidate);
+                path.is_file().then(|| path.display().to_string())
+            })
+        })
+    })
+}
+
+#[cfg(any(unix, windows))]
 fn quoted_command_path(path: &std::path::Path) -> String {
     format!("\"{}\"", path.display())
 }
@@ -2092,7 +2124,12 @@ async fn wait_for_shell_marker(
 #[cfg(any(unix, windows))]
 fn fullscreen_fzf_command(path: &std::path::Path) -> String {
     let quoted = quoted_command_path(path);
-    if cfg!(windows) { format!("type {quoted} | fzf") } else { format!("fzf < {quoted}") }
+    if cfg!(windows) {
+        let fzf = resolve_command_on_path("fzf").unwrap_or_else(|| "fzf".to_string());
+        format!("type {quoted} | \"{fzf}\"")
+    } else {
+        format!("fzf < {quoted}")
+    }
 }
 
 #[cfg(any(unix, windows))]
@@ -2178,7 +2215,12 @@ fn native_fullscreen_shell_launch_spec() -> ShellLaunchSpec {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "cmd.exe".to_string());
-    ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "prompt terminal-platform$G"])
+    ShellLaunchSpec::new(program).with_args([
+        "/D",
+        "/Q",
+        "/K",
+        "prompt terminal-platform$G & echo ready",
+    ])
 }
 
 #[cfg(unix)]
@@ -2317,6 +2359,7 @@ async fn bootstrap_smoke_preserves_native_fullscreen_viewports_for_vim_less_and_
         .expect("topology_snapshot should succeed");
     let focused_pane = topology.tabs[0].focused_pane.expect("focused pane should exist");
 
+    wait_for_screen_line(&fixture, created.session.session_id, focused_pane, "ready").await;
     wait_for_shell_marker(&fixture, created.session.session_id, focused_pane, "native-initial")
         .await;
     run_fullscreen_viewport_flow(

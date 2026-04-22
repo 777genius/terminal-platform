@@ -120,11 +120,19 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        // `cmd /K "echo ready"` is flaky through the daemon screen path on hosted Windows.
-        // Reuse the Node-based echo loop that already passes in daemon-client smoke coverage.
-        ShellLaunchSpec::new(resolve_windows_executable("node")).with_args([
-            "-e",
-            "process.stdout.write('ready\\n'); process.stdin.resume(); process.stdin.on('data', chunk => process.stdout.write(chunk));",
+        let program = std::env::var("COMSPEC")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "cmd.exe".to_string());
+
+        // Keep the Windows host smoke inside a real interactive shell contract instead of a
+        // one-shot process. The prompt marker plus explicit ready line has been more reliable
+        // through the hosted PTY screen path than the Node echo loop.
+        ShellLaunchSpec::new(program).with_args([
+            "/D",
+            "/Q",
+            "/K",
+            "prompt terminal-platform$G & echo ready",
         ])
     }
 }
