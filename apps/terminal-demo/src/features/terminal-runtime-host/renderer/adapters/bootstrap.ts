@@ -1,4 +1,5 @@
 import {
+  buildTerminalRuntimeBrowserUrl,
   deriveTerminalRuntimeSessionStreamUrl,
   TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH,
   type TerminalRuntimeBootstrapConfig,
@@ -52,6 +53,38 @@ export async function resolveTerminalRuntimeBootstrapConfig(): Promise<Bootstrap
     config: null,
     error: "Bootstrap config is missing. Run Electron mode or open the browser URL emitted by the browser host runner.",
   };
+}
+
+export async function loadLatestTerminalRuntimeBootstrapConfig(): Promise<TerminalRuntimeBootstrapConfig | null> {
+  const electronConfig = normalizeBootstrapConfig(window.terminalDemo?.config);
+  if (electronConfig) {
+    return electronConfig;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const queryConfig = normalizeBootstrapConfig({
+    controlPlaneUrl: params.get("controlPlaneUrl")?.trim(),
+    sessionStreamUrl: params.get("sessionStreamUrl")?.trim(),
+    gatewayUrl: params.get("gatewayUrl")?.trim(),
+    runtimeSlug: params.get("runtimeSlug")?.trim(),
+  });
+
+  const browserConfig = await loadBrowserBootstrapConfig();
+  return selectPreferredBootstrapConfig({
+    browserConfig,
+    queryConfig,
+  });
+}
+
+export function syncTerminalRuntimeBrowserLocation(config: TerminalRuntimeBootstrapConfig): void {
+  if (window.terminalDemo?.config) {
+    return;
+  }
+
+  const nextUrl = buildTerminalRuntimeBrowserUrl(window.location.href, config);
+  if (nextUrl !== window.location.href) {
+    window.history.replaceState(null, "", nextUrl);
+  }
 }
 
 async function loadBrowserBootstrapConfig(): Promise<TerminalRuntimeBootstrapConfig | null> {
