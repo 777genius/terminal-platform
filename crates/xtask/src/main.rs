@@ -995,6 +995,8 @@ fn verify_node_package_scripts(
             "npm_config_cache",
             "nodePackageManager()",
             "process.platform === \"win32\" ? \"npm.cmd\" : \"npm\"",
+            "shell: packageManagerShell()",
+            "process.platform === \"win32\" ? process.env.ComSpec ?? true : false",
             "npm pack failed to launch -",
             "signal ${packResult.signal ?? \"<none>\"}",
         ],
@@ -2641,6 +2643,8 @@ throw new Error(`Missing value for ${flag}`);
 npm_config_cache: process.env.npm_config_cache ?? path.join(options.out, ".npm-cache"),
 nodePackageManager()
 process.platform === "win32" ? "npm.cmd" : "npm"
+shell: packageManagerShell()
+process.platform === "win32" ? process.env.ComSpec ?? true : false
 npm pack failed to launch -
 signal ${packResult.signal ?? "<none>"}
 "#;

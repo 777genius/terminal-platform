@@ -22,6 +22,7 @@ function main() {
     cwd: options.out,
     env: packageManagerEnv(options),
     encoding: "utf8",
+    shell: packageManagerShell(),
     stdio: ["ignore", "pipe", "inherit"],
   });
 
@@ -99,6 +100,10 @@ function packageManagerEnv(options) {
 
 function nodePackageManager() {
   return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function packageManagerShell() {
+  return process.platform === "win32" ? process.env.ComSpec ?? true : false;
 }
 
 main();
