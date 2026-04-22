@@ -198,9 +198,10 @@ src/features/terminal/
     terminal-mux-domain/
     terminal-backend-api/
     terminal-protocol/
-    terminal-application/
+    terminal-runtime/
     terminal-projection/
     terminal-persistence/
+    terminal-transport/
     terminal-backend-native/
     terminal-backend-tmux/
     terminal-backend-zellij/
