@@ -516,25 +516,31 @@ mod tests {
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+    #[cfg(unix)]
     use rusqlite::{Connection, params};
     use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec};
     #[cfg(unix)]
     use terminal_backend_api::{SendInputSpec, ShellLaunchSpec};
     use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
-    use terminal_domain::{BackendKind, PaneId};
+    use terminal_domain::{BackendKind, CURRENT_BINARY_VERSION};
     #[cfg(unix)]
     use terminal_domain::{
-        CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
-        CURRENT_SAVED_SESSION_FORMAT_VERSION, DegradedModeReason, SavedSessionCompatibilityStatus,
-        SavedSessionManifest, SessionId, TabId, local_native_route,
+        CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR, CURRENT_SAVED_SESSION_FORMAT_VERSION,
+        DegradedModeReason, PaneId, SavedSessionCompatibilityStatus, SavedSessionManifest,
+        SessionId, TabId, local_native_route,
     };
+    #[cfg(unix)]
     use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
+    #[cfg(unix)]
     use terminal_persistence::SqliteSessionStore;
+    #[cfg(unix)]
     use terminal_projection::TopologySnapshot;
     use terminal_protocol::{
         DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion, SubscriptionEvent,
     };
-    use tokio::time::{sleep, timeout};
+    #[cfg(unix)]
+    use tokio::time::sleep;
+    use tokio::time::timeout;
 
     use super::{HandshakeAssessmentStatus, LocalSocketDaemonClient};
 
