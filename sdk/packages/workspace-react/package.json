@@ -12,11 +12,14 @@
   "dependencies": {
     "@lit/react": "1.0.8",
     "@terminal-platform/workspace-core": "0.1.0",
-    "@terminal-platform/workspace-elements": "0.1.0",
+    "@terminal-platform/workspace-elements": "0.1.0"
+  },
+  "peerDependencies": {
     "react": "19.2.5"
   },
   "devDependencies": {
-    "@types/react": "19.2.14"
+    "@types/react": "19.2.14",
+    "react": "19.2.5"
   },
   "scripts": {
     "build": "tsc -b tsconfig.json",

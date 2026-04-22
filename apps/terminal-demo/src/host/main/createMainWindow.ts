@@ -1,15 +1,15 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow } from "electron";
-import type { TerminalDemoBootstrapConfig } from "@features/terminal-workspace/contracts";
-import { resolveTerminalWorkspacePreloadPath } from "@features/terminal-workspace/preload";
+import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
+import { resolveTerminalRuntimePreloadPath } from "@features/terminal-runtime-host/preload";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(moduleDir, "../../../");
 const rendererDistPath = path.resolve(appRoot, "dist/renderer/index.html");
 
 export async function createMainWindow(
-  config: TerminalDemoBootstrapConfig,
+  config: TerminalRuntimeBootstrapConfig,
 ): Promise<BrowserWindow> {
   const window = new BrowserWindow({
     width: 1580,
@@ -20,7 +20,7 @@ export async function createMainWindow(
     show: false,
     title: "Terminal Platform Demo",
     webPreferences: {
-      preload: resolveTerminalWorkspacePreloadPath(),
+      preload: resolveTerminalRuntimePreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
       additionalArguments: [

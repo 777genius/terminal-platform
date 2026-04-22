@@ -24,3 +24,11 @@ updates:
     labels:
       - dependencies
       - host:node-electron
+  - package-ecosystem: npm
+    directory: /apps/terminal-demo
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - host:node-electron

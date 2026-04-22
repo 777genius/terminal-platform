@@ -23,13 +23,13 @@ export class TerminalToolbarElement extends WorkspaceKernelConsumerElement {
   override render() {
     return html`
       <div class="panel toolbar" part="toolbar">
-        <button part="bootstrap" @click=${() => void this.kernel?.commands.bootstrap()}>
+        <button part="bootstrap" @click=${() => this.runCommand(() => this.kernel?.commands.bootstrap())}>
           Bootstrap
         </button>
-        <button part="refresh" @click=${() => void this.kernel?.commands.refreshSessions()}>
+        <button part="refresh" @click=${() => this.runCommand(() => this.kernel?.commands.refreshSessions())}>
           Refresh Sessions
         </button>
-        <button part="saved" @click=${() => void this.kernel?.commands.refreshSavedSessions()}>
+        <button part="saved" @click=${() => this.runCommand(() => this.kernel?.commands.refreshSavedSessions())}>
           Refresh Saved
         </button>
         <button part="diagnostics" @click=${() => this.kernel?.commands.clearDiagnostics()}>
@@ -38,5 +38,11 @@ export class TerminalToolbarElement extends WorkspaceKernelConsumerElement {
         <span class="status muted" part="status">${this.snapshot.connection.state}</span>
       </div>
     `;
+  }
+
+  private runCommand(command: () => Promise<unknown> | undefined): void {
+    void command()?.catch(() => {
+      // Command failures are already recorded in kernel diagnostics.
+    });
   }
 }

@@ -3,7 +3,7 @@ import { generateRuntimeTypes, resolveRuntimeTypesPaths, snapshotDirectory } fro
 const { rawDir } = resolveRuntimeTypesPaths(import.meta.url);
 const before = snapshotDirectory(rawDir);
 
-generateRuntimeTypes(import.meta.url);
+await generateRuntimeTypes(import.meta.url);
 
 const after = snapshotDirectory(rawDir);
 

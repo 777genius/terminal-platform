@@ -14,6 +14,7 @@
     "check:architecture": "node ./scripts/check-architecture.mjs",
     "dev": "node ./scripts/dev.mjs",
     "dev:browser": "node ./scripts/dev-browser.mjs",
+    "smoke:browser": "node ./scripts/browser-smoke.mjs",
     "typecheck": "npm run check:architecture && npm run stage:sdk && tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.json --noEmit",
     "build:host": "node --input-type=module -e \"import fs from 'node:fs'; fs.rmSync('dist/host', { recursive: true, force: true }); fs.rmSync('dist/features', { recursive: true, force: true }); fs.rmSync('dist/shared', { recursive: true, force: true });\" && tsc -p tsconfig.host.json && tsc-alias -p tsconfig.host.json --resolve-full-paths --resolve-full-extension .js",
     "build:renderer": "vite build",
@@ -23,6 +24,8 @@
     "start": "npm run build && electron ./dist/host/main/index.js"
   },
   "dependencies": {
+    "@lit/react": "1.0.8",
+    "lit": "3.3.2",
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "ws": "8.20.0",

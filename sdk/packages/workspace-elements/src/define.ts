@@ -5,13 +5,18 @@ import { TerminalSessionListElement } from "./elements/terminal-session-list-ele
 import { TerminalToolbarElement } from "./elements/terminal-toolbar-element.js";
 import { TerminalWorkspaceElement } from "./elements/terminal-workspace-element.js";
 
-export function defineTerminalPlatformElements(registry: CustomElementRegistry = customElements): void {
-  defineIfNeeded(registry, "tp-terminal-workspace", TerminalWorkspaceElement);
-  defineIfNeeded(registry, "tp-terminal-session-list", TerminalSessionListElement);
-  defineIfNeeded(registry, "tp-terminal-toolbar", TerminalToolbarElement);
-  defineIfNeeded(registry, "tp-terminal-screen", TerminalScreenElement);
-  defineIfNeeded(registry, "tp-terminal-pane-tree", TerminalPaneTreeElement);
-  defineIfNeeded(registry, "tp-terminal-saved-sessions", TerminalSavedSessionsElement);
+export function defineTerminalPlatformElements(registry?: CustomElementRegistry): void {
+  const resolvedRegistry = registry ?? globalThis.customElements;
+  if (!resolvedRegistry) {
+    return;
+  }
+
+  defineIfNeeded(resolvedRegistry, "tp-terminal-workspace", TerminalWorkspaceElement);
+  defineIfNeeded(resolvedRegistry, "tp-terminal-session-list", TerminalSessionListElement);
+  defineIfNeeded(resolvedRegistry, "tp-terminal-toolbar", TerminalToolbarElement);
+  defineIfNeeded(resolvedRegistry, "tp-terminal-screen", TerminalScreenElement);
+  defineIfNeeded(resolvedRegistry, "tp-terminal-pane-tree", TerminalPaneTreeElement);
+  defineIfNeeded(resolvedRegistry, "tp-terminal-saved-sessions", TerminalSavedSessionsElement);
 }
 
 function defineIfNeeded(

@@ -207,6 +207,20 @@ The Node and Electron package README lives here:
 
 - [`crates/terminal-node-napi/package/README.md`](./crates/terminal-node-napi/package/README.md)
 
+## Demo Shell
+
+There is now a demo host app under:
+
+- [`apps/terminal-demo/README.md`](./apps/terminal-demo/README.md)
+
+It is intentionally structured as:
+
+- Electron as the desktop shell only
+- browser mode can consume the same local gateway without Electron
+- a local host-managed `terminal-daemon` sidecar
+- a local WebSocket gateway for the renderer
+- React + Zustand UI that is not coupled to Electron IPC
+
 ## Current Repo URL
 
 - [github.com/777genius/terminal-platform](https://github.com/777genius/terminal-platform)

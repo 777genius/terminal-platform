@@ -2,8 +2,11 @@
 
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createSiblingStagingDirectory, replaceDirectoryAtomically } from "../../../../scripts/node/replace-directory-atomically.mjs";
+import { withFileLock } from "../../../../scripts/node/with-file-lock.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.resolve(scriptDir, "..");
@@ -12,18 +15,31 @@ const workspaceRoot = path.resolve(crateDir, "..", "..");
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
-  const cargoArgs = ["build", "-p", "terminal-node-napi"];
+  return withFileLock(`${path.resolve(options.out)}.lock`, async () => {
+    const cargoArgs = ["build", "-p", "terminal-node-napi"];
 
-  if (options.release) {
-    cargoArgs.push("--release");
-  }
+    if (options.release) {
+      cargoArgs.push("--release");
+    }
 
-  run("cargo", cargoArgs, workspaceRoot);
+    run("cargo", cargoArgs, workspaceRoot);
 
-  const addonPath = locateAddon(options.release ? "release" : "debug");
-  run("node", ["./scripts/stage-package.mjs", "--out", options.out, "--addon", addonPath], packageDir);
+    const addonPath = locateAddon(options.release ? "release" : "debug");
+    const stagedOutDir = await createSiblingStagingDirectory(options.out, "stage");
+    run("node", ["./scripts/stage-package.mjs", "--out", stagedOutDir, "--addon", addonPath], packageDir);
+    await fs.copyFile(
+      path.join(stagedOutDir, "index.d.ts"),
+      path.join(stagedOutDir, "index.d.mts"),
+    );
+    await replaceDirectoryAtomically(options.out, stagedOutDir);
 
-  process.stdout.write(`${path.resolve(options.out)}\n`);
+    process.stdout.write(`${path.resolve(options.out)}\n`);
+  }, {
+    metadata: {
+      script: "build-local-package",
+      outDir: path.resolve(options.out),
+    },
+  });
 }
 
 function parseArgs(argv) {
@@ -96,4 +112,4 @@ function run(command, args, cwd) {
   }
 }
 
-main();
+await main();

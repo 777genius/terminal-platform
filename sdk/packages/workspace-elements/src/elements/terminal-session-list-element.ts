@@ -35,7 +35,9 @@ export class TerminalSessionListElement extends WorkspaceKernelConsumerElement {
                   part="button"
                   @click=${() => {
                     this.kernel?.commands.setActiveSession(session.session_id);
-                    void this.kernel?.commands.attachSession(session.session_id);
+                    void this.kernel?.commands.attachSession(session.session_id).catch(() => {
+                      // Command failures are already recorded in kernel diagnostics.
+                    });
                   }}
                 >
                   <strong>${session.title ?? session.session_id}</strong>

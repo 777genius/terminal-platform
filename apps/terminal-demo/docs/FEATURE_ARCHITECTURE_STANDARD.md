@@ -1,7 +1,7 @@
 # Feature Architecture Standard
 
 **Status**: app standard  
-**Reference implementation**: `src/features/terminal-workspace`
+**Reference implementation**: `src/features/terminal-runtime-host`
 
 This document defines the default architecture for medium and large features in `apps/terminal-demo`.
 
@@ -36,6 +36,8 @@ Use this template by default when a feature:
 - introduces its own use case or business policy
 - needs its own transport bridge or integration surface
 - is expected to grow with new providers, sources, or presentation flows
+
+For shared app-owned DTOs and pure policies used by multiple direct features, prefer a shared kernel feature such as `src/features/terminal-workspace-kernel`.
 
 ## Layer Responsibilities
 
@@ -117,133 +119,3 @@ Responsibilities:
 ### `main/adapters/output/`
 
 Driven adapters that implement application ports.
-
-Examples:
-
-- presenters
-- runtime adapters
-- source adapters
-
-Responsibilities:
-
-- translate between external data and core models
-- stay thin around infrastructure helpers
-
-### `main/infrastructure/`
-
-Concrete technical implementation details.
-
-Examples:
-
-- file system adapters
-- JSON-RPC transport clients
-- binary discovery
-- cache implementation
-
-Responsibilities:
-
-- know about runtime, process, OS, or protocol details
-
-### `preload/`
-
-Thin transport bridge between renderer and main.
-
-Responsibilities:
-
-- expose a feature API fragment
-- depend on `contracts/`
-
-Not allowed:
-
-- main composition code
-- renderer logic
-
-### `renderer/`
-
-Feature presentation and interaction.
-
-Recommended structure:
-
-```text
-renderer/
-  index.ts
-  adapters/
-  hooks/
-  ui/
-  utils/
-```
-
-Responsibilities:
-
-- `ui/` renders
-- `hooks/` orchestrate interaction and state usage
-- `adapters/` transform transport/bootstrap into renderer-facing APIs
-- `utils/` contain small pure renderer helpers
-
-## Import Rules
-
-### Public entrypoints only
-
-Outside the feature, import only:
-
-- `@features/<feature>/contracts`
-- `@features/<feature>/main`
-- `@features/<feature>/preload`
-- `@features/<feature>/renderer`
-
-Do not deep-import feature internals from app shell or from other features.
-
-### Core isolation
-
-`core/domain` must not import:
-
-- `main/*`
-- `renderer/*`
-- `preload/*`
-- adapters
-- infrastructure
-- Electron APIs
-- child process modules
-- `ws`
-
-`core/application` must not import:
-
-- `main/*`
-- `renderer/*`
-- Electron APIs
-- child process modules
-- `ws`
-
-### UI isolation
-
-`renderer/ui` must not import:
-
-- app shell modules
-- `main/*`
-- Electron APIs
-- runtime transport implementations
-
-Push transport and store access into feature hooks or adapters.
-
-## Browser-Friendly Guidance
-
-The default transport direction should be:
-
-`renderer -> feature contracts -> renderer adapter -> preload/http/ws adapter`
-
-To keep that path clean:
-
-- never call `window.terminalDemo` directly inside feature UI
-- keep Electron-specific concerns in `main/` and `preload/`
-- keep business rules in `core/`
-
-## Definition Of Done For A Reference Feature
-
-A feature is reference-quality when:
-
-- structure matches the canonical template
-- core is side-effect free
-- app shell imports only public entrypoints
-- renderer UI is dumb and presentational
-- main domain and application rules are isolated from framework/runtime code
-- feature has a concise local README if it introduces a reusable pattern

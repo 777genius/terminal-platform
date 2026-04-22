@@ -1,3 +1,3 @@
 import { generateRuntimeTypes } from "./generate-runtime-types.mjs";
 
-generateRuntimeTypes(import.meta.url);
+await generateRuntimeTypes(import.meta.url);

@@ -1,24 +1,26 @@
+import "./styles.css";
+
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  resolveTerminalWorkspaceBootstrapConfig,
-  TerminalWorkspaceApp,
-  TerminalWorkspaceBootstrapErrorView,
-} from "@features/terminal-workspace/renderer";
+  resolveTerminalRuntimeBootstrapConfig,
+  TerminalRuntimeBootstrapErrorView,
+} from "@features/terminal-runtime-host/renderer";
+import { TerminalDemoWorkspaceApp } from "./TerminalDemoWorkspaceApp.js";
 
 const root = createRoot(document.getElementById("root")!);
-const bootstrap = resolveTerminalWorkspaceBootstrapConfig();
+const bootstrap = resolveTerminalRuntimeBootstrapConfig();
 
 if (!bootstrap.config) {
   root.render(
     <StrictMode>
-      <TerminalWorkspaceBootstrapErrorView error={bootstrap.error ?? "Unknown bootstrap error"} />
+      <TerminalRuntimeBootstrapErrorView error={bootstrap.error ?? "Unknown bootstrap error"} />
     </StrictMode>,
   );
 } else {
   root.render(
     <StrictMode>
-      <TerminalWorkspaceApp config={bootstrap.config} />
+      <TerminalDemoWorkspaceApp config={bootstrap.config} />
     </StrictMode>,
   );
 }

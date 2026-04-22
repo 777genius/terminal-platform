@@ -1,27 +1,27 @@
 import process from "node:process";
-import type { TerminalDemoBootstrapConfig } from "@features/terminal-workspace/contracts";
-import { buildTerminalDemoBrowserUrl } from "@features/terminal-workspace/contracts";
+import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
+import { buildTerminalRuntimeBrowserUrl } from "@features/terminal-runtime-host/contracts";
 import {
-  DEFAULT_TERMINAL_WORKSPACE_RUNTIME_SLUG,
-  startTerminalWorkspaceHost,
-  type TerminalWorkspaceHostHandle,
-} from "@features/terminal-workspace/main";
+  DEFAULT_TERMINAL_RUNTIME_SLUG,
+  startTerminalRuntimeHost,
+  type TerminalRuntimeHostHandle,
+} from "@features/terminal-runtime-host/main";
 
-const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_WORKSPACE_RUNTIME_SLUG;
+const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
 const rendererUrl = process.env.TERMINAL_DEMO_RENDERER_URL ?? "http://127.0.0.1:5173";
 
-let hostHandle: TerminalWorkspaceHostHandle | null = null;
+let hostHandle: TerminalRuntimeHostHandle | null = null;
 let shuttingDown = false;
 
 async function bootstrap(): Promise<void> {
-  hostHandle = await startTerminalWorkspaceHost({ runtimeSlug });
+  hostHandle = await startTerminalRuntimeHost({ runtimeSlug });
 
-  const config: TerminalDemoBootstrapConfig = {
+  const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,
   };
-  const browserUrl = buildTerminalDemoBrowserUrl(rendererUrl, config);
+  const browserUrl = buildTerminalRuntimeBrowserUrl(rendererUrl, config);
 
   console.log(`[terminal-demo-browser] runtime ${config.runtimeSlug}`);
   console.log(`[terminal-demo-browser] control ${config.controlPlaneUrl}`);

@@ -73,6 +73,17 @@ impl TmuxBackend {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
         self.run(target, &refs)
     }
+
+    fn is_no_server_running_error(error: &BackendError) -> bool {
+        if error.kind != terminal_backend_api::BackendErrorKind::Transport {
+            return false;
+        }
+
+        let message = error.message.to_ascii_lowercase();
+        message.contains("no server running on")
+            || (message.contains("error connecting to")
+                && message.contains("no such file or directory"))
+    }
 }
 
 impl MuxBackendPort for TmuxBackend {
@@ -110,14 +121,18 @@ impl MuxBackendPort for TmuxBackend {
         _scope: BackendScope,
     ) -> BoxFuture<'_, Result<Vec<DiscoveredSession>, BackendError>> {
         Box::pin(async move {
-            let output = self.run(
+            let output = match self.run(
                 None,
                 &[
                     "list-sessions",
                     "-F",
                     "#{session_name}\t#{session_windows}\t#{session_attached}",
                 ],
-            )?;
+            ) {
+                Ok(output) => output,
+                Err(error) if Self::is_no_server_running_error(&error) => return Ok(Vec::new()),
+                Err(error) => return Err(error),
+            };
             let mut sessions = Vec::new();
             for line in output.lines().filter(|line| !line.trim().is_empty()) {
                 let mut fields = line.split('\t');
@@ -1035,11 +1050,13 @@ pub mod __fuzz {
 mod tests {
     use std::collections::BTreeMap;
 
+    use terminal_backend_api::{BackendScope, MuxBackendPort};
     use terminal_domain::{RouteAuthority, SessionRoute};
     use terminal_mux_domain::{PaneTreeNode, SplitDirection};
 
     use super::{
-        TMUX_ROUTE_NAMESPACE, TmuxTarget, fallback_tree, parse_tmux_layout, tmux_split_flag,
+        TMUX_ROUTE_NAMESPACE, TmuxBackend, TmuxTarget, fallback_tree, parse_tmux_layout,
+        tmux_split_flag,
     };
 
     #[test]
@@ -1114,5 +1131,21 @@ mod tests {
     fn maps_split_direction_to_tmux_flags_consistently() {
         assert_eq!(tmux_split_flag(SplitDirection::Horizontal), "-v");
         assert_eq!(tmux_split_flag(SplitDirection::Vertical), "-h");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn discover_sessions_returns_empty_when_tmux_server_is_absent() {
+        let backend = TmuxBackend::with_socket_name(format!(
+            "terminal-platform-no-server-{}",
+            uuid::Uuid::new_v4()
+        ));
+
+        let discovered = backend
+            .discover_sessions(BackendScope::CurrentUser)
+            .await
+            .expect("missing tmux server should look like an empty discovery set");
+
+        assert!(discovered.is_empty());
     }
 }

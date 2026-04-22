@@ -39,10 +39,22 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
                 <div><strong>${session.title ?? session.session_id}</strong></div>
                 <div class="muted">${session.compatibility.status}</div>
                 <div class="actions" part="actions">
-                  <button @click=${() => void this.kernel?.commands.restoreSavedSession(session.session_id)}>
+                  <button
+                    @click=${() => {
+                      void this.kernel?.commands.restoreSavedSession(session.session_id).catch(() => {
+                        // Command failures are already recorded in kernel diagnostics.
+                      });
+                    }}
+                  >
                     Restore
                   </button>
-                  <button @click=${() => void this.kernel?.commands.deleteSavedSession(session.session_id)}>
+                  <button
+                    @click=${() => {
+                      void this.kernel?.commands.deleteSavedSession(session.session_id).catch(() => {
+                        // Command failures are already recorded in kernel diagnostics.
+                      });
+                    }}
+                  >
                     Delete
                   </button>
                 </div>

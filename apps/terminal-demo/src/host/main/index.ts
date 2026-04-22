@@ -1,20 +1,20 @@
 import { app, BrowserWindow } from "electron";
-import type { TerminalDemoBootstrapConfig } from "@features/terminal-workspace/contracts";
+import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
 import {
-  DEFAULT_TERMINAL_WORKSPACE_RUNTIME_SLUG,
-  startTerminalWorkspaceHost,
-  type TerminalWorkspaceHostHandle,
-} from "@features/terminal-workspace/main";
+  DEFAULT_TERMINAL_RUNTIME_SLUG,
+  startTerminalRuntimeHost,
+  type TerminalRuntimeHostHandle,
+} from "@features/terminal-runtime-host/main";
 import { createMainWindow } from "./createMainWindow.js";
 
-const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_WORKSPACE_RUNTIME_SLUG;
-let hostHandle: TerminalWorkspaceHostHandle | null = null;
+const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
+let hostHandle: TerminalRuntimeHostHandle | null = null;
 
 async function bootstrap(): Promise<void> {
   await app.whenReady();
 
-  hostHandle = await startTerminalWorkspaceHost({ runtimeSlug });
-  const config: TerminalDemoBootstrapConfig = {
+  hostHandle = await startTerminalRuntimeHost({ runtimeSlug });
+  const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,

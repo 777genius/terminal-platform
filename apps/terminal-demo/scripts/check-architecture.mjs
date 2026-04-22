@@ -11,10 +11,19 @@ const srcRoot = path.join(appRoot, "src");
 const supportedExtensions = [".ts", ".tsx", ".cts"];
 const importPattern = /(?:import|export)\s+(?:[^\"'`]+?\s+from\s+)?[\"'`]([^\"'`]+)[\"'`]|import\(\s*[\"'`]([^\"'`]+)[\"'`]\s*\)|require\(\s*[\"'`]([^\"'`]+)[\"'`]\s*\)/g;
 const publicFeatureEntrypointPattern = /^@features\/[^/]+\/(contracts|main|preload|renderer)$/;
+const kernelContractsEntrypoint = "@features/terminal-workspace-kernel/contracts";
+const legacyTerminalWorkspaceRendererEntrypoint = "@features/terminal-workspace/renderer";
+const runtimeHostFeature = "terminal-runtime-host";
 const restrictedRendererPackages = new Set(["electron", "ws", "zustand"]);
 const restrictedCorePackages = new Set(["electron", "react", "react-dom", "ws", "zustand"]);
+const runtimeHostOnlyPackages = new Set(["electron", "ws", "@terminal-platform/runtime-types"]);
 
-const files = await collectSourceFiles(srcRoot);
+const allFiles = await collectSourceFiles(srcRoot);
+const entrypointFiles = allFiles.filter((filePath) => {
+  const relative = path.relative(appRoot, filePath).replace(/\\/g, "/");
+  return relative.startsWith("src/host/") || relative.startsWith("src/renderer/app/");
+});
+const files = await collectReachableFiles(entrypointFiles);
 const violations = [];
 
 for (const filePath of files) {
@@ -33,12 +42,26 @@ for (const filePath of files) {
       violations.push(`${importRef}: staged SDK is only allowed inside feature main adapters/infrastructure`);
     }
 
+    if (runtimeHostOnlyPackages.has(specifier) && fileInfo.isFeatureInternal && fileInfo.featureName !== runtimeHostFeature) {
+      violations.push(`${importRef}: only terminal-runtime-host may depend on ${specifier}`);
+    }
+
     if (fileInfo.isFeatureInternal && specifier.startsWith("@features/")) {
-      violations.push(`${importRef}: feature internals must use relative imports, not public alias entrypoints`);
+      if (specifier !== kernelContractsEntrypoint) {
+        violations.push(`${importRef}: feature internals may import only @features/terminal-workspace-kernel/contracts across feature boundaries`);
+      }
+    }
+
+    if (fileInfo.isFeatureInternal && targetInfo?.isFeatureInternal && fileInfo.featureName !== targetInfo.featureName && specifier !== kernelContractsEntrypoint) {
+      violations.push(`${importRef}: cross-feature deep imports are forbidden`);
     }
 
     if (fileInfo.isShell && specifier.startsWith("@features/") && !publicFeatureEntrypointPattern.test(specifier)) {
       violations.push(`${importRef}: shell may import only public feature entrypoints`);
+    }
+
+    if (fileInfo.isShell && specifier === legacyTerminalWorkspaceRendererEntrypoint) {
+      violations.push(`${importRef}: shell must compose the active runtime-host workspace path, not the legacy terminal-workspace renderer`);
     }
 
     if (fileInfo.isShell && targetInfo?.isFeatureInternal && !specifier.startsWith("@features/")) {
@@ -50,8 +73,17 @@ for (const filePath of files) {
         violations.push(`${importRef}: contracts layer must stay package-free and framework-free`);
       }
 
-      if (targetInfo && (!targetInfo.isFeatureInternal || !sameFeatureContracts(fileInfo.relative, targetInfo.relative))) {
-        violations.push(`${importRef}: contracts may import only sibling contracts files from the same feature`);
+      if (targetInfo) {
+        const isSiblingContracts = sameFeatureContracts(fileInfo.relative, targetInfo.relative);
+        const isKernelSelfExport = fileInfo.featureName === "terminal-workspace-kernel"
+          && targetInfo.featureName === "terminal-workspace-kernel"
+          && (targetInfo.isCoreDomain || targetInfo.isCoreApplication);
+        const isRuntimeHostKernelDependency = fileInfo.featureName === runtimeHostFeature
+          && specifier === kernelContractsEntrypoint;
+
+        if (!isSiblingContracts && !isKernelSelfExport && !isRuntimeHostKernelDependency) {
+          violations.push(`${importRef}: contracts may import only same-feature contracts, kernel self-exports, or kernel public contracts`);
+        }
       }
     }
 
@@ -108,6 +140,34 @@ if (violations.length > 0) {
 }
 
 console.log(`Architecture boundaries verified for ${files.length} source files.`);
+
+async function collectReachableFiles(entrypointFiles) {
+  const visited = new Set();
+  const queued = [...entrypointFiles];
+
+  while (queued.length > 0) {
+    const filePath = queued.pop();
+    if (!filePath || visited.has(filePath)) {
+      continue;
+    }
+
+    visited.add(filePath);
+
+    const source = await fs.readFile(filePath, "utf8");
+    const specifiers = [...source.matchAll(importPattern)]
+      .map((match) => match[1] ?? match[2] ?? match[3])
+      .filter(Boolean);
+
+    for (const specifier of specifiers) {
+      const resolved = resolveProjectModule(filePath, specifier);
+      if (resolved && resolved.startsWith(srcRoot) && !visited.has(resolved)) {
+        queued.push(resolved);
+      }
+    }
+  }
+
+  return [...visited];
+}
 
 async function collectSourceFiles(directory) {
   const entries = await fs.readdir(directory, { withFileTypes: true });
