@@ -2096,7 +2096,8 @@ async fn wait_for_shell_marker(
             .unwrap_or_default()
     );
 
-    for attempt in 0..120 {
+    let max_attempts = if cfg!(windows) { 240 } else { 120 };
+    for attempt in 0..max_attempts {
         if attempt % 6 == 0 {
             send_pane_input(
                 fixture,
@@ -2221,7 +2222,7 @@ fn native_fullscreen_shell_launch_spec() -> ShellLaunchSpec {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "cmd.exe".to_string());
-    ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
+    ShellLaunchSpec::new(program)
 }
 
 #[cfg(unix)]

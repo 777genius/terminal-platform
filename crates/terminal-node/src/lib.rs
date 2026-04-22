@@ -1369,7 +1369,11 @@ mod tests {
 
         #[cfg(windows)]
         {
-            echo_shell_launch_spec()
+            let program = std::env::var("COMSPEC")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "cmd.exe".to_string());
+            terminal_backend_api::ShellLaunchSpec::new(program)
         }
     }
 
@@ -1390,15 +1394,7 @@ mod tests {
         #[cfg(windows)]
         {
             assert!(launch.program.to_ascii_lowercase().ends_with("cmd.exe"));
-            assert_eq!(
-                launch.args,
-                vec![
-                    "/D".to_string(),
-                    "/Q".to_string(),
-                    "/K".to_string(),
-                    "echo ready".to_string(),
-                ]
-            );
+            assert!(launch.args.is_empty());
         }
     }
 
