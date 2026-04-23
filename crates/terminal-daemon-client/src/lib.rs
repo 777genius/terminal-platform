@@ -5,9 +5,7 @@ use terminal_domain::{
 };
 use terminal_transport::{LocalSocketTransportClient, LocalSocketTransportSubscription};
 
-use terminal_projection::{
-    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
-};
+use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 use terminal_protocol::{
     BackendCapabilitiesResponse, CreateSessionRequest, CreateSessionResponse,
     DeleteSavedSessionRequest, DeleteSavedSessionResponse, DiscoverSessionsRequest,

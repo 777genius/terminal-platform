@@ -42,6 +42,7 @@ async function runSmoke(createClient) {
   });
   const listed = await client.listSessions();
   const attached = await client.attachSession(created.session_id);
+  const health = await client.sessionHealthSnapshot(created.session_id);
   const topology = await client.topologySnapshot(created.session_id);
   const readyScreen = await waitForInteractiveScreen(
     client,
@@ -99,8 +100,9 @@ async function runSmoke(createClient) {
 
   assert.equal(typeof client.address, "string");
   assert.equal(version.protocol.major, 0);
-  assert.equal(version.protocol.minor, 1);
+  assert.equal(version.protocol.minor, 2);
   assert.equal(handshake.assessment.can_use, true);
+  assert.equal(handshake.handshake.capabilities.session_health, true);
   assert.equal(Array.isArray(handshake.handshake.available_backends), true);
   assert.equal(nativeCapabilities.backend, "native");
   assert.equal(nativeCapabilities.capabilities.explicit_session_save, true);
@@ -135,6 +137,10 @@ async function runSmoke(createClient) {
   }
   assert.equal(listed.some((session) => session.session_id === created.session_id), true);
   assert.equal(attached.session.session_id, created.session_id);
+  assert.equal(attached.health.phase, "ready");
+  assert.equal(health.phase, "ready");
+  assert.equal(health.can_attach, true);
+  assert.equal(health.invalidated, false);
   assert.equal(attached.topology.session_id, created.session_id);
   assert.equal(topology.session_id, created.session_id);
   assert.equal(readyScreen.pane_id, attached.focused_screen.pane_id);

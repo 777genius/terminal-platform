@@ -15,9 +15,7 @@ use terminal_persistence::{
     PrunedSavedSessions, SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary,
     SqliteSessionStore,
 };
-use terminal_projection::{
-    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
-};
+use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 
 use crate::{
     backend_catalog::BackendCatalog,

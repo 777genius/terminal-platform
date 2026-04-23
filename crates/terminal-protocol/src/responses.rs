@@ -8,9 +8,7 @@ use terminal_domain::{
     BackendKind, SavedSessionCompatibility, SavedSessionManifest, SessionId, SessionRoute,
     SubscriptionId,
 };
-use terminal_projection::{
-    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
-};
+use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 
 use crate::Handshake;
 

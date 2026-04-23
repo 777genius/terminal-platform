@@ -13,8 +13,8 @@ use terminal_domain::{
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 use terminal_projection::{
     ProjectionSource, ScreenCursor, ScreenDelta, ScreenLine, ScreenLinePatch, ScreenPatch,
-    ScreenSnapshot, ScreenSurface, SessionHealthPhase, SessionHealthReason,
-    SessionHealthSnapshot, TopologySnapshot,
+    ScreenSnapshot, ScreenSurface, SessionHealthPhase, SessionHealthReason, SessionHealthSnapshot,
+    TopologySnapshot,
 };
 use terminal_protocol::{
     BackendCapabilitiesResponse, DaemonCapabilities, DaemonPhase, DeleteSavedSessionResponse,

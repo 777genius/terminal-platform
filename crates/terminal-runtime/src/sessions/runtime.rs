@@ -5,9 +5,7 @@ use terminal_backend_api::{
 use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
 use terminal_persistence::{SessionRouteRecord, SqliteSessionStore};
-use terminal_projection::{
-    SessionHealthReason, SessionHealthSnapshot, TopologySnapshot,
-};
+use terminal_projection::{SessionHealthReason, SessionHealthSnapshot, TopologySnapshot};
 
 use crate::{
     backend_catalog::BackendCatalog,
@@ -148,8 +146,7 @@ impl<'a> SessionRuntime<'a> {
     }
 
     pub(super) fn mark_session_ready(&self, session_id: SessionId) {
-        self.registry
-            .update_health(session_id, SessionHealthSnapshot::ready(session_id));
+        self.registry.update_health(session_id, SessionHealthSnapshot::ready(session_id));
     }
 
     pub(super) fn resolve_session_id_for_route(
@@ -302,8 +299,8 @@ mod tests {
     use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
     use terminal_projection::{SessionHealthPhase, TopologySnapshot};
 
-    use super::{command_updates_summary_title, saved_session_title, session_route_fingerprint};
     use super::session_health_from_attach_error;
+    use super::{command_updates_summary_title, saved_session_title, session_route_fingerprint};
 
     #[test]
     fn saved_session_title_prefers_focused_tab_title() {

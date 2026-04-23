@@ -15,9 +15,7 @@ use terminal_domain::{
 use terminal_persistence::{
     PrunedSavedSessions, SavedNativeSession, SavedSessionSummary, SqliteSessionStore,
 };
-use terminal_projection::{
-    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
-};
+use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 
 pub use backend_catalog::BackendCatalog;
 pub use registry::{InMemorySessionRegistry, SessionDescriptor, SessionRegistry};

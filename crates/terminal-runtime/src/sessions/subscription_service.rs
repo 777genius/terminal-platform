@@ -71,9 +71,8 @@ impl<'a> SessionSubscriptionService<'a> {
                     "session subscription source closed unexpectedly",
                 );
                 registry.update_health(session_id, health.clone());
-                let _ = events_tx
-                    .send(BackendSubscriptionEvent::SessionHealthSnapshot(health))
-                    .await;
+                let _ =
+                    events_tx.send(BackendSubscriptionEvent::SessionHealthSnapshot(health)).await;
             }
 
             subscription.cancel();

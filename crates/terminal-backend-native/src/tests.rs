@@ -1,4 +1,3 @@
-
 use std::time::Duration;
 
 use terminal_backend_api::BackendSubscriptionEvent;

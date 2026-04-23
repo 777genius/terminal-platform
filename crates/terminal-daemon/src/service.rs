@@ -217,6 +217,7 @@ mod tests {
                 assert!(handshake.capabilities.saved_sessions);
                 assert!(handshake.capabilities.session_restore);
                 assert!(handshake.capabilities.degraded_error_reasons);
+                assert!(handshake.capabilities.session_health);
             }
             other => panic!("unexpected payload: {other:?}"),
         }
@@ -275,7 +276,6 @@ mod tests {
                     spec: CreateSessionSpec {
                         title: Some("persisted-shell".to_string()),
                         launch: Some(cat_launch_spec()),
-                        ..CreateSessionSpec::default()
                     },
                 }),
             })
@@ -430,7 +430,6 @@ mod tests {
                     spec: CreateSessionSpec {
                         title: Some("restore-shell".to_string()),
                         launch: Some(cat_launch_spec()),
-                        ..CreateSessionSpec::default()
                     },
                 }),
             })

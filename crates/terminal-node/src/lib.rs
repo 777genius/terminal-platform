@@ -23,10 +23,10 @@ pub use dto::{
     NodeSavedSessionRecord, NodeSavedSessionRestoreSemantics, NodeSavedSessionSummary,
     NodeScreenCursor, NodeScreenDelta, NodeScreenLine, NodeScreenLinePatch, NodeScreenPatch,
     NodeScreenSnapshot, NodeScreenSurface, NodeSendInputCommand, NodeSendPasteCommand,
-    NodeSessionHealthPhase, NodeSessionHealthReason, NodeSessionHealthSnapshot,
-    NodeSessionRoute, NodeSessionSummary, NodeShellLaunchSpec, NodeSplitDirection,
-    NodeSplitPaneCommand, NodeSubscriptionEvent, NodeSubscriptionMeta, NodeSubscriptionSpec,
-    NodeTabSnapshot, NodeTopologySnapshot,
+    NodeSessionHealthPhase, NodeSessionHealthReason, NodeSessionHealthSnapshot, NodeSessionRoute,
+    NodeSessionSummary, NodeShellLaunchSpec, NodeSplitDirection, NodeSplitPaneCommand,
+    NodeSubscriptionEvent, NodeSubscriptionMeta, NodeSubscriptionSpec, NodeTabSnapshot,
+    NodeTopologySnapshot,
 };
 
 #[derive(Debug, Clone)]
@@ -477,7 +477,7 @@ mod tests {
 
         assert_eq!(version.binding_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(version.protocol.major, 0);
-        assert_eq!(version.protocol.minor, 1);
+        assert_eq!(version.protocol.minor, 2);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -794,7 +794,9 @@ mod tests {
                                 assert_eq!(snapshot.backend_kind, NodeBackendKind::Zellij);
                             }
                             NodeSubscriptionEvent::SessionHealthSnapshot(health) => {
-                                panic!("unexpected initial zellij topology health event: {health:?}");
+                                panic!(
+                                    "unexpected initial zellij topology health event: {health:?}"
+                                );
                             }
                             other => panic!("unexpected initial zellij topology event: {other:?}"),
                         }

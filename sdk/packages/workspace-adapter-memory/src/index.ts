@@ -312,7 +312,7 @@ function createDefaultHandshake(): Handshake {
   return {
     protocol_version: {
       major: 0,
-      minor: 1,
+      minor: 2,
     },
     binary_version: "0.1.0-dev",
     daemon_phase: "ready",
@@ -455,7 +455,7 @@ function createSavedSessionRecord(
       format_version: 1,
       binary_version: "0.1.0-dev",
       protocol_major: 0,
-      protocol_minor: 1,
+      protocol_minor: 2,
     },
     compatibility: {
       can_restore: true,

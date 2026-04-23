@@ -3,9 +3,7 @@ use terminal_backend_api::{
     CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult, SubscriptionSpec,
 };
 use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
-use terminal_projection::{
-    ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot,
-};
+use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 use terminal_protocol::Handshake;
 
 use super::{RuntimePrunedSavedSessions, RuntimeSavedSessionRecord, RuntimeSavedSessionSummary};

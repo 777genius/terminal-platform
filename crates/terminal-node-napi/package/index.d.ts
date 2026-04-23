@@ -37,6 +37,9 @@ export type { NodeSavedSessionManifest } from "./bindings/NodeSavedSessionManife
 export type { NodeSavedSessionRecord } from "./bindings/NodeSavedSessionRecord";
 export type { NodeSavedSessionRestoreSemantics } from "./bindings/NodeSavedSessionRestoreSemantics";
 export type { NodeSavedSessionSummary } from "./bindings/NodeSavedSessionSummary";
+export type { NodeSessionHealthPhase } from "./bindings/NodeSessionHealthPhase";
+export type { NodeSessionHealthReason } from "./bindings/NodeSessionHealthReason";
+export type { NodeSessionHealthSnapshot } from "./bindings/NodeSessionHealthSnapshot";
 export type { NodeSessionRoute } from "./bindings/NodeSessionRoute";
 export type { NodeSessionSummary } from "./bindings/NodeSessionSummary";
 export type { NodeShellLaunchSpec } from "./bindings/NodeShellLaunchSpec";
@@ -63,6 +66,7 @@ import type { NodeScreenDelta } from "./bindings/NodeScreenDelta";
 import type { NodeScreenSnapshot } from "./bindings/NodeScreenSnapshot";
 import type { NodeSavedSessionRecord } from "./bindings/NodeSavedSessionRecord";
 import type { NodeSavedSessionSummary } from "./bindings/NodeSavedSessionSummary";
+import type { NodeSessionHealthSnapshot } from "./bindings/NodeSessionHealthSnapshot";
 import type { NodeSessionRoute } from "./bindings/NodeSessionRoute";
 import type { NodeSessionSummary } from "./bindings/NodeSessionSummary";
 import type { NodeSubscriptionEvent } from "./bindings/NodeSubscriptionEvent";
@@ -81,6 +85,7 @@ export interface TerminalNodeSubscriptionPumpOptions {
 export type TerminalNodeSessionWatchEvent =
   | { kind: "attached"; attached: NodeAttachedSession }
   | { kind: "topology_snapshot"; topology: NodeTopologySnapshot }
+  | { kind: "session_health_snapshot"; health: NodeSessionHealthSnapshot }
   | { kind: "focused_screen"; screen: NodeScreenSnapshot }
   | { kind: "screen_delta"; delta: NodeScreenDelta };
 
@@ -91,6 +96,7 @@ export interface TerminalNodeSessionWatchOptions {
 
 export interface TerminalNodeSessionState {
   session: NodeSessionSummary;
+  health: NodeSessionHealthSnapshot;
   topology: NodeTopologySnapshot;
   focusedScreen: NodeScreenSnapshot | null;
 }
@@ -117,6 +123,7 @@ export type ElectronTerminalNodeInvokeMethod =
   | "savedSession"
   | "screenDelta"
   | "screenSnapshot"
+  | "sessionHealthSnapshot"
   | "topologySnapshot";
 
 export interface ElectronBridgeChannels {
@@ -228,6 +235,7 @@ export interface ElectronTerminalNodePreloadApi {
   ): Promise<NodePruneSavedSessionsResult>;
   restoreSavedSession(sessionId: string): Promise<NodeRestoredSession>;
   attachSession(sessionId: string): Promise<NodeAttachedSession>;
+  sessionHealthSnapshot(sessionId: string): Promise<NodeSessionHealthSnapshot>;
   topologySnapshot(sessionId: string): Promise<NodeTopologySnapshot>;
   screenSnapshot(sessionId: string, paneId: string): Promise<NodeScreenSnapshot>;
   screenDelta(
@@ -303,6 +311,7 @@ export interface NativeTerminalNodeClientHandle {
   ): Promise<NodePruneSavedSessionsResult>;
   restoreSavedSession(sessionId: string): Promise<NodeRestoredSession>;
   attachSession(sessionId: string): Promise<NodeAttachedSession>;
+  sessionHealthSnapshot(sessionId: string): Promise<NodeSessionHealthSnapshot>;
   topologySnapshot(sessionId: string): Promise<NodeTopologySnapshot>;
   screenSnapshot(sessionId: string, paneId: string): Promise<NodeScreenSnapshot>;
   screenDelta(
@@ -414,6 +423,7 @@ export declare class TerminalNodeClient
   ): Promise<NodePruneSavedSessionsResult>;
   restoreSavedSession(sessionId: string): Promise<NodeRestoredSession>;
   attachSession(sessionId: string): Promise<NodeAttachedSession>;
+  sessionHealthSnapshot(sessionId: string): Promise<NodeSessionHealthSnapshot>;
   topologySnapshot(sessionId: string): Promise<NodeTopologySnapshot>;
   screenSnapshot(sessionId: string, paneId: string): Promise<NodeScreenSnapshot>;
   screenDelta(
@@ -490,6 +500,7 @@ export declare class ElectronTerminalNodeClient {
   ): Promise<NodePruneSavedSessionsResult>;
   restoreSavedSession(sessionId: string): Promise<NodeRestoredSession>;
   attachSession(sessionId: string): Promise<NodeAttachedSession>;
+  sessionHealthSnapshot(sessionId: string): Promise<NodeSessionHealthSnapshot>;
   topologySnapshot(sessionId: string): Promise<NodeTopologySnapshot>;
   screenSnapshot(sessionId: string, paneId: string): Promise<NodeScreenSnapshot>;
   screenDelta(

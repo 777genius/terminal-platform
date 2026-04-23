@@ -159,6 +159,17 @@ function cloneSessionSummary(session) {
   };
 }
 
+function cloneSessionHealthSnapshot(health) {
+  return {
+    session_id: health.session_id,
+    phase: health.phase,
+    can_attach: Boolean(health.can_attach),
+    invalidated: Boolean(health.invalidated),
+    reason: health.reason ?? null,
+    detail: health.detail ?? null,
+  };
+}
+
 function cloneScreenLine(line) {
   return { text: line.text };
 }
@@ -218,6 +229,7 @@ function cloneTopologySnapshot(topology) {
 function cloneSessionState(state) {
   return {
     session: cloneSessionSummary(state.session),
+    health: cloneSessionHealthSnapshot(state.health),
     topology: cloneTopologySnapshot(state.topology),
     focusedScreen: state.focusedScreen ? cloneScreenSnapshot(state.focusedScreen) : null,
   };
@@ -226,6 +238,7 @@ function cloneSessionState(state) {
 function createSessionState(attached) {
   return {
     session: cloneSessionSummary(attached.session),
+    health: cloneSessionHealthSnapshot(attached.health),
     topology: cloneTopologySnapshot(attached.topology),
     focusedScreen: attached.focused_screen
       ? cloneScreenSnapshot(attached.focused_screen)
@@ -307,10 +320,16 @@ function reduceSessionWatchEvent(state, event) {
 
       return {
         session: cloneSessionSummary(state.session),
+        health: cloneSessionHealthSnapshot(state.health),
         topology: cloneTopologySnapshot(event.topology),
         focusedScreen: nextFocusedScreen,
       };
     }
+    case "session_health_snapshot":
+      return {
+        ...cloneSessionState(state),
+        health: cloneSessionHealthSnapshot(event.health),
+      };
     case "focused_screen":
       return {
         ...cloneSessionState(state),
@@ -349,6 +368,7 @@ const electronInvokeMethodNames = new Set([
   "savedSession",
   "screenDelta",
   "screenSnapshot",
+  "sessionHealthSnapshot",
   "topologySnapshot",
 ]);
 
@@ -599,6 +619,10 @@ class TerminalNodeClient {
     return this.#inner.attachSession(sessionId);
   }
 
+  sessionHealthSnapshot(sessionId) {
+    return this.#inner.sessionHealthSnapshot(sessionId);
+  }
+
   topologySnapshot(sessionId) {
     return this.#inner.topologySnapshot(sessionId);
   }
@@ -688,6 +712,13 @@ class TerminalNodeClient {
         .pump({
           signal: bridgeAbort.signal,
           onEvent: async (event) => {
+            if (event.kind === "session_health_snapshot") {
+              await onEvent({ kind: "session_health_snapshot", health: event });
+              return;
+            }
+            if (event.kind !== "screen_delta") {
+              return;
+            }
             if (emitFocusedScreen) {
               const screen = await this.screenSnapshot(sessionId, paneId);
               emitFocusedScreen = false;
@@ -729,6 +760,13 @@ class TerminalNodeClient {
         .pump({
           signal: bridgeAbort.signal,
           onEvent: async (event) => {
+            if (event.kind === "session_health_snapshot") {
+              await onEvent({ kind: "session_health_snapshot", health: event });
+              return;
+            }
+            if (event.kind !== "topology_snapshot") {
+              return;
+            }
             await onEvent({ kind: "topology_snapshot", topology: event });
 
             const nextPaneId = focusedPaneId(event);
@@ -858,6 +896,10 @@ class ElectronTerminalNodeClient {
 
   attachSession(sessionId) {
     return this.#invoke("attachSession", sessionId);
+  }
+
+  sessionHealthSnapshot(sessionId) {
+    return this.#invoke("sessionHealthSnapshot", sessionId);
   }
 
   topologySnapshot(sessionId) {
@@ -1036,6 +1078,10 @@ function createElectronPreloadApi(options = {}) {
 
     attachSession(sessionId) {
       return client.attachSession(sessionId);
+    },
+
+    sessionHealthSnapshot(sessionId) {
+      return client.sessionHealthSnapshot(sessionId);
     },
 
     topologySnapshot(sessionId) {

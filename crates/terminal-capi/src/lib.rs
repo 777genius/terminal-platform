@@ -654,7 +654,7 @@ mod tests {
             let binding_version =
                 read_json_result(terminal_capi_client_binding_version_json(handle));
             assert_eq!(binding_version["protocol"]["major"], 0);
-            assert_eq!(binding_version["protocol"]["minor"], 1);
+            assert_eq!(binding_version["protocol"]["minor"], 2);
 
             let handshake = read_json_result(terminal_capi_client_handshake_info_json(handle));
             assert_eq!(handshake["assessment"]["can_use"], true);

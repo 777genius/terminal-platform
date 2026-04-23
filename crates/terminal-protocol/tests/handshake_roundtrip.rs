@@ -4,7 +4,7 @@ use terminal_protocol::{DaemonCapabilities, DaemonPhase, Handshake, ProtocolVers
 #[test]
 fn handshake_roundtrips_through_json() {
     let handshake = Handshake {
-        protocol_version: ProtocolVersion { major: 0, minor: 1 },
+        protocol_version: ProtocolVersion { major: 0, minor: 2 },
         binary_version: "0.1.0-dev".to_string(),
         daemon_phase: DaemonPhase::Ready,
         capabilities: DaemonCapabilities {

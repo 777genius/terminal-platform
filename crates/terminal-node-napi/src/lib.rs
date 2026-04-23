@@ -148,6 +148,12 @@ impl TerminalNodeBinding {
         client.attach_session(&session_id).await.map_err(protocol_error).and_then(to_json)
     }
 
+    #[napi(js_name = "sessionHealthSnapshot")]
+    pub async fn session_health_snapshot(&self, session_id: String) -> Result<Value> {
+        let client = self.inner.clone();
+        client.session_health_snapshot(&session_id).await.map_err(protocol_error).and_then(to_json)
+    }
+
     #[napi(js_name = "topologySnapshot")]
     pub async fn topology_snapshot(&self, session_id: String) -> Result<Value> {
         let client = self.inner.clone();

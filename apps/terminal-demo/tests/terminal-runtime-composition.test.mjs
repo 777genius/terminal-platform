@@ -13,7 +13,7 @@ test("renderer app mounts the sdk react workspace shell", () => {
     connection: {
       state: "ready",
       handshake: {
-        protocol_version: { major: 1, minor: 0 },
+        protocol_version: { major: 0, minor: 2 },
         binary_version: "1.0.0",
         daemon_phase: "ready",
         capabilities: {
@@ -25,6 +25,7 @@ test("renderer app mounts the sdk react workspace shell", () => {
           saved_sessions: true,
           session_restore: true,
           degraded_error_reasons: true,
+          session_health: true,
         },
         available_backends: ["native"],
         session_scope: "terminal-demo",

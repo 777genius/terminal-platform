@@ -56,7 +56,7 @@ fn bootstrap_smoke_exposes_empty_daemon() {
     let handshake = daemon.handshake();
 
     assert_eq!(handshake.protocol_version.major, 0);
-    assert_eq!(handshake.protocol_version.minor, 1);
+    assert_eq!(handshake.protocol_version.minor, 2);
     assert_eq!(handshake.daemon_phase, DaemonPhase::Ready);
     assert_eq!(
         handshake.available_backends,
@@ -70,6 +70,7 @@ fn bootstrap_smoke_exposes_empty_daemon() {
     assert!(handshake.capabilities.saved_sessions);
     assert!(handshake.capabilities.session_restore);
     assert!(handshake.capabilities.degraded_error_reasons);
+    assert!(handshake.capabilities.session_health);
     assert_eq!(daemon.session_count(), 0);
 }
 
@@ -208,10 +209,11 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
         .expect("topology_snapshot should succeed");
 
     assert_eq!(handshake.protocol_version.major, 0);
-    assert_eq!(handshake.protocol_version.minor, 1);
+    assert_eq!(handshake.protocol_version.minor, 2);
     assert_eq!(handshake.daemon_phase, DaemonPhase::Ready);
     assert!(handshake.capabilities.request_reply);
     assert!(handshake.capabilities.saved_sessions);
+    assert!(handshake.capabilities.session_health);
     assert!(handshake_assessment.can_use);
     assert_eq!(created.session.route.backend, BackendKind::Native);
     assert_eq!(created.session.title.as_deref(), Some("shell"));
