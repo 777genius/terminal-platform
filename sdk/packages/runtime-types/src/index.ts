@@ -78,6 +78,15 @@ export type { NodeScreenSnapshot as ScreenSnapshot } from "./generated/raw/NodeS
 export type { NodeScreenSurface as ScreenSurface } from "./generated/raw/NodeScreenSurface.js";
 export type { NodeSendInputCommand as SendInputCommand } from "./generated/raw/NodeSendInputCommand.js";
 export type { NodeSendPasteCommand as SendPasteCommand } from "./generated/raw/NodeSendPasteCommand.js";
+export type {
+  NodeSessionHealthPhase as SessionHealthPhase,
+} from "./generated/raw/NodeSessionHealthPhase.js";
+export type {
+  NodeSessionHealthReason as SessionHealthReason,
+} from "./generated/raw/NodeSessionHealthReason.js";
+export type {
+  NodeSessionHealthSnapshot as SessionHealthSnapshot,
+} from "./generated/raw/NodeSessionHealthSnapshot.js";
 export type { NodeSessionRoute as SessionRoute } from "./generated/raw/NodeSessionRoute.js";
 export type { NodeSessionSummary as SessionSummary } from "./generated/raw/NodeSessionSummary.js";
 export type { NodeShellLaunchSpec as ShellLaunchSpec } from "./generated/raw/NodeShellLaunchSpec.js";

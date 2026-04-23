@@ -23,10 +23,31 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
         margin-top: var(--tp-space-2);
       }
 
+      li {
+        border: 1px solid var(--tp-color-border);
+        border-radius: var(--tp-radius-md);
+        padding: var(--tp-space-3);
+        background: color-mix(in srgb, var(--tp-color-panel-raised) 58%, transparent);
+      }
+
       .actions {
         display: flex;
+        flex-wrap: wrap;
         gap: var(--tp-space-2);
         margin-top: var(--tp-space-2);
+      }
+
+      .summary {
+        display: grid;
+        gap: 0.2rem;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--tp-space-2);
+        color: var(--tp-color-text-muted);
+        font-size: 0.8rem;
       }
     `,
   ];
@@ -47,10 +68,17 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
                 ${this.snapshot.catalog.savedSessions.map(
                   (session) => html`
                     <li part="item">
-                      <div><strong>${session.title ?? session.session_id}</strong></div>
-                      <div class="muted">${session.compatibility.status}</div>
+                      <div class="summary">
+                        <strong>${session.title ?? session.session_id}</strong>
+                        <div class="meta">
+                          <span>${session.compatibility.status}</span>
+                          <span>${session.tab_count} tabs</span>
+                          <span>${session.pane_count} panes</span>
+                        </div>
+                      </div>
                       <div class="actions" part="actions">
                         <button
+                          ?disabled=${!session.compatibility.can_restore}
                           @click=${() => {
                             void this.kernel?.commands.restoreSavedSession(session.session_id).catch(() => {
                               // Command failures are already recorded in kernel diagnostics.

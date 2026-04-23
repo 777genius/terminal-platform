@@ -27,12 +27,43 @@ export class TerminalSessionListElement extends WorkspaceKernelConsumerElement {
         width: 100%;
         text-align: left;
         display: grid;
-        gap: 0.18rem;
+        gap: 0.32rem;
+        padding: var(--tp-space-3);
       }
 
       button[data-active="true"] {
         border-color: color-mix(in srgb, var(--tp-color-accent) 42%, transparent);
         background: color-mix(in srgb, var(--tp-color-accent) 12%, transparent);
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--tp-space-2);
+        min-width: 0;
+      }
+
+      .title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .backend {
+        border: 1px solid var(--tp-color-border);
+        border-radius: 999px;
+        padding: 0.1rem 0.45rem;
+        font-size: 0.72rem;
+        color: var(--tp-color-text-muted);
+      }
+
+      code {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--tp-color-text-muted);
+        font-size: 0.78rem;
       }
     `,
   ];
@@ -63,8 +94,11 @@ export class TerminalSessionListElement extends WorkspaceKernelConsumerElement {
                           });
                         }}
                       >
-                        <strong>${session.title ?? session.session_id}</strong>
-                        <div class="muted">${session.route.backend}</div>
+                        <span class="row">
+                          <strong class="title">${session.title ?? session.session_id}</strong>
+                          <span class="backend">${session.route.backend}</span>
+                        </span>
+                        <code>${session.session_id}</code>
                       </button>
                     </li>
                   `,

@@ -14,7 +14,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
 
       .body {
         display: grid;
-        grid-template-columns: minmax(15rem, 18rem) 1fr;
+        grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr);
         gap: var(--tp-space-4);
         min-height: 0;
       }
@@ -25,6 +25,11 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         gap: var(--tp-space-3);
         min-height: 0;
         align-content: start;
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
       }
 
       .diagnostics {
@@ -58,9 +63,22 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         border-bottom: 1px solid var(--tp-color-border);
       }
 
+      .secondary-toggle .advanced-stack {
+        padding: var(--tp-space-3);
+      }
+
+      .workspace-tools {
+        display: grid;
+        gap: var(--tp-space-3);
+      }
+
       @media (max-width: 900px) {
         .body {
           grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          position: static;
         }
       }
     `,
@@ -69,13 +87,25 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
   override render() {
     return html`
       <div class="workspace" part="workspace">
+        <tp-terminal-status-bar .kernel=${this.kernel}></tp-terminal-status-bar>
+
         <div class="body" part="body">
           <div class="sidebar" part="sidebar">
             <tp-terminal-session-list .kernel=${this.kernel}></tp-terminal-session-list>
+            <tp-terminal-saved-sessions .kernel=${this.kernel}></tp-terminal-saved-sessions>
           </div>
           <div class="content" part="content">
             <tp-terminal-screen .kernel=${this.kernel}></tp-terminal-screen>
-            <div class="advanced-stack">
+
+            <details class="secondary-toggle workspace-tools">
+              <summary>Workspace tools</summary>
+              <div class="advanced-stack">
+                <tp-terminal-pane-tree .kernel=${this.kernel}></tp-terminal-pane-tree>
+                <tp-terminal-toolbar .kernel=${this.kernel}></tp-terminal-toolbar>
+              </div>
+            </details>
+
+            <div class="advanced-stack" part="diagnostics-stack">
               ${this.snapshot.diagnostics.length > 0
                 ? html`
                     <details class="secondary-toggle" open>

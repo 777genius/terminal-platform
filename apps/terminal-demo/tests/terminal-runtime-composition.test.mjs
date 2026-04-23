@@ -73,6 +73,14 @@ test("renderer app mounts the sdk react workspace shell", () => {
         title: "SDK Workspace",
         degraded_semantics: [],
       },
+      health: {
+        session_id: "session-1",
+        phase: "ready",
+        can_attach: true,
+        invalidated: false,
+        reason: null,
+        detail: null,
+      },
       topology: {
         session_id: "session-1",
         backend_kind: "native",
@@ -119,9 +127,11 @@ test("renderer app mounts the sdk react workspace shell", () => {
     kernel,
   }));
 
-  assert.match(markup, /SDK Consumer Path/);
-  assert.match(markup, /Create Native Session/);
-  assert.match(markup, /Command Lane/);
+  assert.match(markup, /Terminal Platform/);
+  assert.match(markup, /NativeMux workspace/);
+  assert.match(markup, /Session launcher/);
+  assert.match(markup, /Focused pane command lane/);
+  assert.match(markup, /data-testid="terminal-workspace-host"/);
   assert.match(markup, /tp-terminal-workspace/);
   assert.match(markup, /SDK Workspace/);
 });

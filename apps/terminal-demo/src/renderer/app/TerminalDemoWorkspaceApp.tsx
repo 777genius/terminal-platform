@@ -72,6 +72,9 @@ export function TerminalDemoWorkspaceScreen(props: {
   const canIssueSessionCommand = Boolean(activeSessionId) && !commandPending;
   const activeTitle = activeSession?.title ?? snapshot.attachedSession?.session.title ?? "Pick a session to inspect";
   const connectionSummary = describeConnectionState(snapshot.connection.state);
+  const activeHealth = snapshot.attachedSession?.health ?? null;
+  const healthSummary = describeSessionHealth(activeHealth?.phase ?? null);
+  const activeScreen = snapshot.attachedSession?.focused_screen ?? null;
   const diagnosticsPreview = snapshot.diagnostics.slice(0, 3);
   const advancedNoticeCount = diagnosticsPreview.length + (actionError ? 1 : 0);
   const quickCommands = useMemo(
@@ -257,21 +260,27 @@ export function TerminalDemoWorkspaceScreen(props: {
   }
 
   return (
-    <div className="shell">
-      <aside className="shell__sidebar panel panel--sidebar">
+    <div className="shell" data-testid="terminal-demo-shell">
+      <aside className="shell__sidebar">
         <section className="panel hero hero--demo">
           <div className="hero__content">
-            <div className="section__eyebrow">Terminal Demo</div>
-            <h1 className="hero__title">Start a shell and run commands</h1>
-            <p className="hero__copy">
-              Start a shell, pick the session in the workspace, then type commands in the dock below the
-              terminal output.
-            </p>
+            <div className="section__eyebrow">Terminal Platform</div>
+            <h1 className="hero__title">NativeMux workspace</h1>
+            <p className="hero__copy">{connectionSummary.copy}</p>
 
-            <div className="hero__flow" aria-label="Demo flow">
-              <span className="hero__flow-item">1. Start shell</span>
-              <span className="hero__flow-item">2. Pick session</span>
-              <span className="hero__flow-item">3. Send command</span>
+            <div className="hero__kpis" aria-label="Workspace summary">
+              <div className="hero__stat">
+                <span>Sessions</span>
+                <strong>{snapshot.catalog.sessions.length}</strong>
+              </div>
+              <div className="hero__stat">
+                <span>Saved</span>
+                <strong>{snapshot.catalog.savedSessions.length}</strong>
+              </div>
+              <div className="hero__stat">
+                <span>Health</span>
+                <strong>{healthSummary.label}</strong>
+              </div>
             </div>
           </div>
 
@@ -281,7 +290,7 @@ export function TerminalDemoWorkspaceScreen(props: {
             </span>
             <span className="badge badge--neutral">{snapshot.catalog.sessions.length} running shells</span>
             <span className="badge badge--neutral">
-              {activeSessionId ? "Shell selected" : "Pick a shell"}
+              {activeSessionId ? "Shell selected" : "No shell selected"}
             </span>
           </div>
         </section>
@@ -290,19 +299,15 @@ export function TerminalDemoWorkspaceScreen(props: {
           <div className="section__header">
             <div>
               <div className="section__eyebrow">Launch</div>
-              <h2 className="section__title">Start a shell</h2>
+              <h2 className="section__title">Session launcher</h2>
             </div>
             <span className="section__meta">{createPending ? "starting" : "ready"}</span>
           </div>
 
-          <p className="section__copy">
-            Use the default shell for the fastest path, or open advanced options if you want another
-            program or working directory.
-          </p>
-
           <div className="button-row">
             <button
               className="button button--primary"
+              data-testid="start-default-shell"
               disabled={createPending}
               onClick={() => void handleCreateNativeSession()}
             >
@@ -499,28 +504,36 @@ export function TerminalDemoWorkspaceScreen(props: {
           <div className="panel__header">
             <div>
               <div className="section__eyebrow">Workspace</div>
-              <h2 className="section__title workspace-summary__title">{activeTitle}</h2>
-              <p className="section__copy">
-                Pick a running shell in the rail, watch output here, then send commands from the dock below.
-              </p>
+              <h2 className="section__title workspace-summary__title" data-testid="workspace-active-title">
+                {activeTitle}
+              </h2>
+              <p className="section__copy">{healthSummary.copy}</p>
             </div>
 
             <div className="meta-stack meta-stack--inline">
               <span className={`badge ${badgeToneForConnection(snapshot.connection.state)}`}>
                 {connectionSummary.label}
               </span>
+              <span className={`badge ${healthSummary.badgeClass}`}>{healthSummary.label}</span>
               {activePaneId ? <span className="badge badge--neutral">Focused pane {activePaneId}</span> : null}
+              {activeScreen ? (
+                <span className="badge badge--neutral">
+                  {activeScreen.cols}x{activeScreen.rows}
+                </span>
+              ) : null}
             </div>
           </div>
 
           <div className="workspace-stack">
-            <TerminalWorkspace kernel={props.kernel} />
+            <div data-testid="terminal-workspace-host">
+              <TerminalWorkspace kernel={props.kernel} />
+            </div>
 
             <section className="terminal-dock" aria-label="Focused pane command lane">
               <div className="terminal-dock__header">
                 <div>
                   <div className="section__eyebrow">Command Input</div>
-                  <h3 className="terminal-dock__title">Send text to the focused pane</h3>
+                  <h3 className="terminal-dock__title">Focused pane command lane</h3>
                 </div>
 
                 <div className="meta-stack meta-stack--inline">
@@ -555,6 +568,7 @@ export function TerminalDemoWorkspaceScreen(props: {
                 </span>
                 <textarea
                   className="terminal-dock__textarea"
+                  data-testid="command-input"
                   value={inputDraft}
                   disabled={!activePaneId || commandPending}
                   onChange={(event) => {
@@ -574,6 +588,7 @@ export function TerminalDemoWorkspaceScreen(props: {
                 <div className="button-row button-row--dock">
                   <button
                     className="button button--primary"
+                    data-testid="send-command"
                     disabled={!canSendInput}
                     onClick={() => void handleSendInput()}
                   >
@@ -697,6 +712,50 @@ function describeConnectionState(state: WorkspaceSnapshot["connection"]["state"]
   return {
     label: "Connecting",
     copy: "The demo is still attaching to the local runtime. Once ready, the workspace and command dock will wake up.",
+  };
+}
+
+function describeSessionHealth(phase: string | null): {
+  label: string;
+  copy: string;
+  badgeClass: string;
+} {
+  if (phase === "ready") {
+    return {
+      label: "Healthy",
+      copy: "The focused session is attachable and serving fresh topology and screen snapshots.",
+      badgeClass: "badge--success",
+    };
+  }
+
+  if (phase === "degraded") {
+    return {
+      label: "Degraded",
+      copy: "The focused session is available with explicit degraded semantics from the runtime.",
+      badgeClass: "badge--warning",
+    };
+  }
+
+  if (phase === "stale") {
+    return {
+      label: "Stale",
+      copy: "The focused session needs a refresh before its output should be trusted.",
+      badgeClass: "badge--warning",
+    };
+  }
+
+  if (phase === "terminated") {
+    return {
+      label: "Terminated",
+      copy: "The selected session is no longer attachable.",
+      badgeClass: "badge--danger",
+    };
+  }
+
+  return {
+    label: "Pending",
+    copy: "No session health snapshot has been attached yet.",
+    badgeClass: "badge--neutral",
   };
 }
 

@@ -8,7 +8,8 @@ export const terminalElementStyles = css`
   :host {
     display: block;
     color: var(--tp-color-text);
-    font-family: var(--tp-font-family-mono);
+    font-family: var(--tp-font-family-ui);
+    line-height: 1.4;
   }
 
   :host([hidden]) {
@@ -19,6 +20,7 @@ export const terminalElementStyles = css`
     background: var(--tp-color-panel);
     border: 1px solid var(--tp-color-border);
     border-radius: var(--tp-radius-md);
+    box-shadow: var(--tp-shadow-panel);
   }
 
   .muted {
@@ -59,15 +61,30 @@ export const terminalElementStyles = css`
   button {
     appearance: none;
     border: 1px solid var(--tp-color-border);
-    background: transparent;
+    background: color-mix(in srgb, var(--tp-color-panel-raised) 82%, transparent);
     color: inherit;
     border-radius: var(--tp-radius-sm);
-    padding: 0.35rem 0.6rem;
+    padding: 0.45rem 0.7rem;
     cursor: pointer;
     font: inherit;
   }
 
   button:hover {
     border-color: var(--tp-color-accent);
+  }
+
+  button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--tp-color-accent) 62%, transparent);
+    outline-offset: 2px;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  code,
+  pre {
+    font-family: var(--tp-font-family-mono);
   }
 `;

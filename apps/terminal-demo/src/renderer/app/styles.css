@@ -1,17 +1,21 @@
 :root {
   color-scheme: dark;
-  --bg: #0b1117;
-  --bg-elevated: rgba(16, 23, 34, 0.86);
-  --bg-hero: linear-gradient(135deg, rgba(31, 62, 96, 0.88), rgba(16, 23, 34, 0.98));
-  --border: rgba(130, 162, 196, 0.22);
-  --border-strong: rgba(248, 184, 76, 0.42);
-  --text: #edf3fb;
-  --text-soft: #92a4bc;
-  --brand: #f8b84c;
-  --brand-soft: rgba(248, 184, 76, 0.16);
-  --danger: #ff6b5a;
-  --danger-soft: rgba(255, 107, 90, 0.16);
-  --shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+  --bg: #0c0d0f;
+  --bg-elevated: rgba(20, 22, 25, 0.92);
+  --bg-hero: linear-gradient(135deg, rgba(31, 34, 38, 0.96), rgba(14, 16, 18, 0.98));
+  --border: rgba(154, 165, 177, 0.2);
+  --border-strong: rgba(125, 211, 252, 0.4);
+  --text: #eef2f6;
+  --text-soft: #9ca7b3;
+  --brand: #7dd3fc;
+  --brand-soft: rgba(125, 211, 252, 0.14);
+  --success: #8ee6a8;
+  --success-soft: rgba(142, 230, 168, 0.14);
+  --warning: #f8d36b;
+  --warning-soft: rgba(248, 211, 107, 0.14);
+  --danger: #ff7a69;
+  --danger-soft: rgba(255, 122, 105, 0.15);
+  --shadow: 0 20px 62px rgba(0, 0, 0, 0.32);
   font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
 }
 
@@ -27,10 +31,7 @@ body,
 }
 
 body {
-  background:
-    radial-gradient(circle at top left, rgba(59, 104, 156, 0.34), transparent 30%),
-    radial-gradient(circle at right center, rgba(248, 184, 76, 0.18), transparent 22%),
-    linear-gradient(180deg, #0f1722 0%, #0b1117 46%, #070b10 100%);
+  background: linear-gradient(180deg, #121417 0%, #0c0d0f 52%, #08090a 100%);
   color: var(--text);
 }
 
@@ -73,9 +74,9 @@ button {
 .panel {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 24px;
+  border-radius: 10px;
   box-shadow: var(--shadow);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(14px);
 }
 
 .panel--sidebar {
@@ -105,9 +106,9 @@ button {
 
 .hero__title {
   margin: 4px 0 8px;
-  font-size: clamp(1.75rem, 3.4vw, 2.65rem);
-  line-height: 0.98;
-  max-width: 13ch;
+  font-size: clamp(1.55rem, 3vw, 2.35rem);
+  line-height: 1.03;
+  max-width: 14ch;
 }
 
 .hero__copy,
@@ -117,7 +118,8 @@ button {
 .list-card small,
 .empty-state,
 .screen-meta,
-.banner {
+.banner,
+.terminal-dock__hint {
   color: var(--text-soft);
 }
 
@@ -150,21 +152,32 @@ button {
   margin: 0;
 }
 
-.hero__flow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+.hero__kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
 }
 
-.hero__flow-item {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 8px 12px;
-  font-size: 0.84rem;
-  border: 1px solid rgba(130, 162, 196, 0.16);
-  background: rgba(9, 14, 22, 0.4);
-  color: #dce7f5;
+.hero__stat {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(154, 165, 177, 0.16);
+  background: rgba(6, 7, 9, 0.42);
+  padding: 10px;
+}
+
+.hero__stat span {
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+}
+
+.hero__stat strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel__header {
@@ -223,8 +236,8 @@ button {
 
 .badge--brand {
   background: var(--brand-soft);
-  border-color: rgba(248, 184, 76, 0.3);
-  color: #ffe7b7;
+  border-color: rgba(125, 211, 252, 0.34);
+  color: #c9f0ff;
 }
 
 .badge--neutral {
@@ -234,8 +247,20 @@ button {
 
 .badge--danger {
   background: var(--danger-soft);
-  border-color: rgba(255, 107, 90, 0.35);
-  color: #ffd2cc;
+  border-color: rgba(255, 122, 105, 0.35);
+  color: #ffd5cf;
+}
+
+.badge--success {
+  background: var(--success-soft);
+  border-color: rgba(142, 230, 168, 0.34);
+  color: #ceffd9;
+}
+
+.badge--warning {
+  background: var(--warning-soft);
+  border-color: rgba(248, 211, 107, 0.34);
+  color: #ffecad;
 }
 
 .definition-list {
@@ -274,7 +299,7 @@ button {
   cursor: pointer;
   list-style: none;
   padding: 14px 16px;
-  border-radius: 16px;
+  border-radius: 8px;
   border: 1px solid rgba(130, 162, 196, 0.16);
   background: rgba(255, 255, 255, 0.035);
   color: var(--text);
@@ -286,8 +311,8 @@ button {
 }
 
 .details-panel[open] summary {
-  border-color: rgba(248, 184, 76, 0.26);
-  background: rgba(248, 184, 76, 0.06);
+  border-color: rgba(125, 211, 252, 0.26);
+  background: rgba(125, 211, 252, 0.06);
 }
 
 .details-panel > :not(summary) {
@@ -324,7 +349,7 @@ button {
 input,
 textarea {
   width: 100%;
-  border-radius: 14px;
+  border-radius: 8px;
   border: 1px solid rgba(130, 162, 196, 0.18);
   background: rgba(10, 16, 24, 0.9);
   color: var(--text);
@@ -339,8 +364,8 @@ textarea {
 input:focus-visible,
 textarea:focus-visible {
   outline: none;
-  border-color: rgba(248, 184, 76, 0.48);
-  box-shadow: 0 0 0 3px rgba(248, 184, 76, 0.14);
+  border-color: rgba(125, 211, 252, 0.48);
+  box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.14);
 }
 
 .button-row {
@@ -361,14 +386,14 @@ textarea:focus-visible {
   border: 1px solid rgba(130, 162, 196, 0.22);
   background: rgba(255, 255, 255, 0.05);
   color: var(--text);
-  border-radius: 14px;
+  border-radius: 8px;
   padding: 11px 14px;
   transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
 }
 
 .button:hover {
   transform: translateY(-1px);
-  border-color: rgba(248, 184, 76, 0.38);
+  border-color: rgba(125, 211, 252, 0.38);
 }
 
 .button:disabled {
@@ -378,14 +403,14 @@ textarea:focus-visible {
 }
 
 .button--primary {
-  background: linear-gradient(135deg, rgba(248, 184, 76, 0.9), rgba(204, 126, 33, 0.92));
-  color: #1f1505;
-  border-color: rgba(248, 184, 76, 0.38);
+  background: linear-gradient(135deg, rgba(125, 211, 252, 0.92), rgba(142, 230, 168, 0.86));
+  color: #061016;
+  border-color: rgba(125, 211, 252, 0.38);
 }
 
 .button--danger {
   color: #ffd3ce;
-  border-color: rgba(255, 107, 90, 0.32);
+  border-color: rgba(255, 122, 105, 0.32);
 }
 
 .button--compact {
@@ -418,7 +443,7 @@ textarea:focus-visible {
 
 .list-item,
 .list-card {
-  border-radius: 16px;
+  border-radius: 8px;
   border: 1px solid rgba(130, 162, 196, 0.16);
   background: rgba(255, 255, 255, 0.035);
   padding: 12px 14px;
@@ -431,8 +456,8 @@ textarea:focus-visible {
 }
 
 .list-item--active {
-  border-color: rgba(248, 184, 76, 0.38);
-  background: rgba(248, 184, 76, 0.08);
+  border-color: rgba(125, 211, 252, 0.38);
+  background: rgba(125, 211, 252, 0.08);
 }
 
 .list-card {
@@ -466,8 +491,8 @@ textarea:focus-visible {
 }
 
 .tab-pill--active {
-  border-color: rgba(248, 184, 76, 0.4);
-  background: rgba(248, 184, 76, 0.12);
+  border-color: rgba(125, 211, 252, 0.4);
+  background: rgba(125, 211, 252, 0.12);
   color: var(--text);
 }
 
@@ -480,7 +505,7 @@ textarea:focus-visible {
   display: grid;
   gap: 12px;
   padding: 14px;
-  border-radius: 18px;
+  border-radius: 8px;
   background: rgba(6, 10, 16, 0.5);
   border: 1px solid rgba(130, 162, 196, 0.12);
 }
@@ -504,15 +529,15 @@ textarea:focus-visible {
 
 .pane-leaf {
   min-height: 88px;
-  border-radius: 16px;
+  border-radius: 8px;
   border: 1px solid rgba(130, 162, 196, 0.18);
   background: linear-gradient(180deg, rgba(20, 29, 42, 0.92), rgba(11, 16, 24, 0.98));
   color: var(--text);
 }
 
 .pane-leaf--focused {
-  border-color: rgba(248, 184, 76, 0.42);
-  box-shadow: inset 0 0 0 1px rgba(248, 184, 76, 0.24);
+  border-color: rgba(125, 211, 252, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.24);
 }
 
 .screen-meta {
@@ -527,7 +552,7 @@ textarea:focus-visible {
   min-height: 360px;
   max-height: 540px;
   overflow: auto;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(130, 162, 196, 0.14);
   background: linear-gradient(180deg, rgba(5, 8, 13, 0.98), rgba(7, 11, 16, 0.98));
   padding: 16px;
@@ -574,15 +599,15 @@ textarea:focus-visible {
 }
 
 .banner {
-  border-radius: 18px;
-  border: 1px solid rgba(255, 107, 90, 0.34);
-  background: rgba(255, 107, 90, 0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 122, 105, 0.34);
+  background: rgba(255, 122, 105, 0.1);
   padding: 12px 14px;
 }
 
 .banner--warning {
-  border-color: rgba(248, 184, 76, 0.3);
-  background: rgba(248, 184, 76, 0.12);
+  border-color: rgba(248, 211, 107, 0.3);
+  background: rgba(248, 211, 107, 0.12);
 }
 
 .banner--subtle {
@@ -599,18 +624,16 @@ textarea:focus-visible {
 .hero__copy code {
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 0.92em;
-  color: #ffe7b7;
+  color: #c9f0ff;
 }
 
 .terminal-dock {
   display: grid;
   gap: 16px;
   padding: 18px;
-  border-radius: 20px;
+  border-radius: 10px;
   border: 1px solid rgba(130, 162, 196, 0.16);
-  background:
-    linear-gradient(180deg, rgba(11, 17, 25, 0.96), rgba(8, 13, 20, 0.98)),
-    radial-gradient(circle at top right, rgba(248, 184, 76, 0.14), transparent 28%);
+  background: linear-gradient(180deg, rgba(16, 18, 22, 0.96), rgba(8, 9, 11, 0.98));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
@@ -642,8 +665,8 @@ textarea:focus-visible {
 }
 
 .terminal-chip:hover {
-  border-color: rgba(248, 184, 76, 0.34);
-  background: rgba(248, 184, 76, 0.1);
+  border-color: rgba(125, 211, 252, 0.34);
+  background: rgba(125, 211, 252, 0.1);
 }
 
 .terminal-dock__composer {
@@ -652,7 +675,7 @@ textarea:focus-visible {
   gap: 14px;
   align-items: stretch;
   padding: 14px;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(130, 162, 196, 0.16);
   background: linear-gradient(180deg, rgba(9, 14, 21, 0.92), rgba(5, 9, 14, 0.96));
 }
@@ -663,10 +686,10 @@ textarea:focus-visible {
   justify-content: center;
   min-width: 52px;
   padding-top: 14px;
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(248, 184, 76, 0.16), rgba(248, 184, 76, 0.06));
-  border: 1px solid rgba(248, 184, 76, 0.24);
-  color: #ffd890;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(125, 211, 252, 0.16), rgba(125, 211, 252, 0.06));
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  color: #c9f0ff;
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 0.92rem;
   letter-spacing: 0.12em;
@@ -675,7 +698,7 @@ textarea:focus-visible {
 .terminal-dock__textarea {
   min-height: 92px;
   border: 0;
-  border-radius: 14px;
+  border-radius: 8px;
   background: rgba(0, 0, 0, 0.16);
   padding: 14px 16px;
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
@@ -717,13 +740,13 @@ textarea:focus-visible {
 
 .terminal-dock__more[open] summary {
   color: var(--text);
-  border-color: rgba(248, 184, 76, 0.26);
-  background: rgba(248, 184, 76, 0.08);
+  border-color: rgba(125, 211, 252, 0.26);
+  background: rgba(125, 211, 252, 0.08);
 }
 
 .empty-state {
   border: 1px dashed rgba(130, 162, 196, 0.18);
-  border-radius: 16px;
+  border-radius: 8px;
   padding: 14px;
   text-align: center;
 }

@@ -57,6 +57,8 @@ async function main() {
     if (
       !result.afterCreate.hasReady
       || result.afterCreate.hasError
+      || result.afterCreate.healthPhase !== "ready"
+      || !result.afterCreate.hasStatusBar
       || !result.afterCreate.hasActiveTitle
       || !result.afterCreate.inputEnabled
     ) {
@@ -138,11 +140,12 @@ async function runSmokeScenario(browserUrl) {
 
     const before = await evaluate(send, `(() => ({
       bodyText: document.body.innerText,
+      hasWorkspaceShell: Boolean(document.querySelector('[data-testid="terminal-demo-shell"]')),
       buttons: [...document.querySelectorAll('button')].map((button) => button.textContent?.trim()).filter(Boolean),
     }))()`);
 
     const createButtonResult = await evaluate(send, `(() => {
-      const button = [...document.querySelectorAll('button')].find((entry) => /Start default shell/i.test(entry.textContent || ''));
+      const button = document.querySelector('[data-testid="start-default-shell"]');
       if (!button) {
         return { clicked: false };
       }
@@ -159,6 +162,7 @@ async function runSmokeScenario(browserUrl) {
       const debug = window.terminalDemoDebug?.getState?.();
       const workspaceHost = document.querySelector('tp-terminal-workspace');
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
+      const statusRoot = workspaceRoot?.querySelector('tp-terminal-status-bar')?.shadowRoot ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
@@ -170,10 +174,12 @@ async function runSmokeScenario(browserUrl) {
         hasReady: debug?.connection?.state === 'ready',
         hasError: debug?.connection?.state === 'error',
         activeSessionId: debug?.selection?.activeSessionId ?? null,
+        healthPhase: debug?.attachedSession?.health?.phase ?? null,
         focusedSequence: debug?.attachedSession?.focused_screen?.sequence != null
           ? String(debug.attachedSession.focused_screen.sequence)
           : null,
         hasScreen: Boolean(terminalScreenText),
+        hasStatusBar: Boolean(statusRoot?.querySelector('[part="status-bar"]')),
         hasActiveTitle: Boolean(activeTitle && activeTitle !== 'Pick a session to inspect'),
         inputEnabled: Boolean(input && !input.disabled),
       };
@@ -181,14 +187,14 @@ async function runSmokeScenario(browserUrl) {
 
     const initialSequence = afterCreate.focusedSequence;
     await evaluate(send, `(() => {
-      const textarea = document.querySelector('textarea');
+      const textarea = document.querySelector('[data-testid="command-input"]');
       if (!textarea) {
         return { ok: false, reason: 'textarea missing' };
       }
       const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
       descriptor?.set?.call(textarea, 'printf \"browser-smoke-ok\\\\n\"');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      const button = [...document.querySelectorAll('button')].find((entry) => /Send command/i.test(entry.textContent || ''));
+      const button = document.querySelector('[data-testid="send-command"]');
       if (!button) {
         return { ok: false, reason: 'send button missing' };
       }
