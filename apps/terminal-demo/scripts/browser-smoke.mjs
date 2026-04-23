@@ -60,6 +60,8 @@ async function main() {
       || result.afterCreate.healthPhase !== "ready"
       || !result.afterCreate.hasStatusBar
       || !result.afterCreate.hasCommandDock
+      || !result.afterCreate.hasScreenFollowControls
+      || !result.afterCreate.screenFollowPressed
       || result.afterCreate.savedItemsRendered > 8
       || (result.afterCreate.savedSessionCount > 8 && !result.afterCreate.hasSavedPagination)
       || !result.afterCreate.hasActiveTitle
@@ -87,9 +89,19 @@ async function main() {
 
     if (
       !result.afterCommand.connectionReady
+      || !result.afterCommand.screenFollowPressed
+      || !result.afterCommand.screenViewportAtBottom
       || (!result.afterCommand.sequenceAdvanced && !result.afterCommand.containsCommandOutput)
     ) {
       throw new Error(`Command lane did not advance the focused screen: ${JSON.stringify(result.afterCommand)}`);
+    }
+
+    if (
+      !result.afterScreenFollowToggle.paused
+      || !result.afterScreenFollowToggle.resumed
+      || !result.afterScreenFollowToggle.screenViewportAtBottom
+    ) {
+      throw new Error(`Screen follow controls did not toggle correctly: ${JSON.stringify(result.afterScreenFollowToggle)}`);
     }
 
     if (
@@ -196,6 +208,8 @@ async function runSmokeScenario(browserUrl) {
       const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
+      const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
+      const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : (screenRoot?.querySelector('[part=\"screen-lines\"]')?.textContent?.trim() ?? null);
@@ -212,6 +226,11 @@ async function runSmokeScenario(browserUrl) {
         focusedSequence: debug?.attachedSession?.focused_screen?.sequence != null
           ? String(debug.attachedSession.focused_screen.sequence)
           : null,
+        hasScreenFollowControls: Boolean(screenFollow && screenRoot?.querySelector('[data-testid="tp-screen-scroll-latest"]')),
+        screenFollowPressed: screenFollow?.getAttribute('aria-pressed') === 'true',
+        screenViewportAtBottom: screenViewport
+          ? screenViewport.scrollHeight - screenViewport.scrollTop - screenViewport.clientHeight <= 2
+          : false,
         hasScreen: Boolean(terminalScreenText),
         hasStatusBar: Boolean(statusRoot?.querySelector('[part="status-bar"]')),
         hasCommandDock: Boolean(commandRoot?.querySelector('[part="command-dock"]')),
@@ -277,6 +296,8 @@ async function runSmokeScenario(browserUrl) {
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
+      const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
+      const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : (screenRoot?.querySelector('[part=\"screen-lines\"]')?.textContent?.trim() ?? '');
@@ -285,11 +306,52 @@ async function runSmokeScenario(browserUrl) {
         focusedSequence: debug?.attachedSession?.focused_screen?.sequence != null
           ? String(debug.attachedSession.focused_screen.sequence)
           : null,
+        screenFollowPressed: screenFollow?.getAttribute('aria-pressed') === 'true',
+        screenViewportAtBottom: screenViewport
+          ? screenViewport.scrollHeight - screenViewport.scrollTop - screenViewport.clientHeight <= 2
+          : false,
+        screenViewportMetrics: screenViewport
+          ? {
+              scrollHeight: screenViewport.scrollHeight,
+              scrollTop: screenViewport.scrollTop,
+              clientHeight: screenViewport.clientHeight,
+            }
+          : null,
         terminalScreenText,
         containsCommandOutput: /browser-smoke-ok/i.test(terminalScreenText),
       };
     })()`);
     const replayInitialSequence = afterCommand.focusedSequence;
+
+    const afterScreenFollowToggle = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
+      const followButton = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
+      const scrollLatestButton = screenRoot?.querySelector('[data-testid="tp-screen-scroll-latest"]') ?? null;
+      const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      if (!followButton || !scrollLatestButton || !viewport) {
+        return {
+          paused: false,
+          resumed: false,
+          reason: 'screen controls missing',
+          screenViewportAtBottom: false,
+        };
+      }
+
+      followButton.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const paused = followButton.getAttribute('aria-pressed') === 'false' && followButton.textContent?.trim() === 'Paused';
+
+      scrollLatestButton.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const resumed = followButton.getAttribute('aria-pressed') === 'true' && followButton.textContent?.trim() === 'Following';
+
+      return {
+        paused,
+        resumed,
+        screenViewportAtBottom: viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2,
+      };
+    })()`);
 
     const historyReplayResult = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
@@ -355,6 +417,7 @@ async function runSmokeScenario(browserUrl) {
           ? afterCommand.focusedSequence !== initialSequence
           : false,
       },
+      afterScreenFollowToggle,
       afterHistoryReplay: {
         ...afterHistoryReplay,
         sequenceAdvanced: replayInitialSequence !== null
