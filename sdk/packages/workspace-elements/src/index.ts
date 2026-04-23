@@ -1,5 +1,6 @@
 export { defineTerminalPlatformElements } from "./define.js";
 
+export { TerminalCommandDockElement } from "./elements/terminal-command-dock-element.js";
 export { TerminalWorkspaceElement } from "./elements/terminal-workspace-element.js";
 export { TerminalSessionListElement } from "./elements/terminal-session-list-element.js";
 export { TerminalToolbarElement } from "./elements/terminal-toolbar-element.js";

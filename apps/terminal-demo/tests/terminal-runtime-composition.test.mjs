@@ -131,7 +131,6 @@ test("renderer app mounts the sdk react workspace shell", () => {
   assert.match(markup, /Terminal Platform/);
   assert.match(markup, /NativeMux workspace/);
   assert.match(markup, /Session launcher/);
-  assert.match(markup, /Focused pane command lane/);
   assert.match(markup, /data-testid="terminal-workspace-host"/);
   assert.match(markup, /tp-terminal-workspace/);
   assert.match(markup, /SDK Workspace/);

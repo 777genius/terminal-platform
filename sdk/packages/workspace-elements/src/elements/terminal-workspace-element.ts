@@ -88,6 +88,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     return html`
       <div class="workspace" part="workspace">
         <tp-terminal-status-bar .kernel=${this.kernel}></tp-terminal-status-bar>
+        <tp-terminal-command-dock .kernel=${this.kernel}></tp-terminal-command-dock>
 
         <div class="body" part="body">
           <div class="sidebar" part="sidebar">

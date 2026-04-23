@@ -54,7 +54,6 @@ export function TerminalDemoWorkspaceScreen(props: {
 }): ReactElement {
   const snapshot = useWorkspaceSnapshot(props.kernel);
   const [createForm, setCreateForm] = useState(initialNativeSessionFormState);
-  const [inputDraft, setInputDraft] = useState("");
   const [createPending, setCreatePending] = useState(false);
   const [commandPending, setCommandPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -68,8 +67,6 @@ export function TerminalDemoWorkspaceScreen(props: {
   );
   const activePaneId = snapshot.selection.activePaneId ?? snapshot.attachedSession?.focused_screen?.pane_id ?? null;
   const hasDiagnostics = snapshot.diagnostics.length > 0;
-  const canSendInput = Boolean(activeSessionId && activePaneId && inputDraft.trim()) && !commandPending;
-  const canIssueSessionCommand = Boolean(activeSessionId) && !commandPending;
   const activeTitle = activeSession?.title ?? snapshot.attachedSession?.session.title ?? "Pick a session to inspect";
   const connectionSummary = describeConnectionState(snapshot.connection.state);
   const activeHealth = snapshot.attachedSession?.health ?? null;
@@ -77,15 +74,6 @@ export function TerminalDemoWorkspaceScreen(props: {
   const activeScreen = snapshot.attachedSession?.focused_screen ?? null;
   const diagnosticsPreview = snapshot.diagnostics.slice(0, 3);
   const advancedNoticeCount = diagnosticsPreview.length + (actionError ? 1 : 0);
-  const quickCommands = useMemo(
-    () => [
-      { label: "pwd", value: "pwd" },
-      { label: "ls -la", value: "ls -la" },
-      { label: "git status", value: "git status" },
-      { label: "hello demo", value: 'printf "hello from sdk demo\\n"' },
-    ],
-    [],
-  );
 
   useEffect(() => {
     autoAttachAttemptRef.current = null;
@@ -133,7 +121,6 @@ export function TerminalDemoWorkspaceScreen(props: {
     const debug = {
       controller: props.kernel,
       getState: () => props.kernel.getSnapshot(),
-      setInputDraft,
     };
     window.terminalDemoDebug = debug;
 
@@ -172,63 +159,6 @@ export function TerminalDemoWorkspaceScreen(props: {
       await props.kernel.commands.bootstrap();
     } catch (error) {
       setActionError(getErrorMessage(error));
-    }
-  }
-
-  async function handleSendInput() {
-    if (!activeSessionId || !activePaneId) {
-      return;
-    }
-
-    setActionError(null);
-    setCommandPending(true);
-    try {
-      await props.kernel.commands.dispatchMuxCommand(activeSessionId, {
-        kind: "send_input",
-        pane_id: activePaneId,
-        data: `${inputDraft}\n`,
-      });
-      setInputDraft("");
-      autoAttachAttemptRef.current = null;
-      await props.kernel.commands.attachSession(activeSessionId);
-    } catch (error) {
-      setActionError(getErrorMessage(error));
-    } finally {
-      setCommandPending(false);
-    }
-  }
-
-  async function handleSaveSession() {
-    if (!activeSessionId) {
-      return;
-    }
-
-    setActionError(null);
-    setCommandPending(true);
-    try {
-      await props.kernel.commands.dispatchMuxCommand(activeSessionId, { kind: "save_session" });
-      await props.kernel.commands.refreshSavedSessions();
-    } catch (error) {
-      setActionError(getErrorMessage(error));
-    } finally {
-      setCommandPending(false);
-    }
-  }
-
-  async function handleResyncScreen() {
-    if (!activeSessionId) {
-      return;
-    }
-
-    setActionError(null);
-    setCommandPending(true);
-    try {
-      autoAttachAttemptRef.current = null;
-      await props.kernel.commands.attachSession(activeSessionId);
-    } catch (error) {
-      setActionError(getErrorMessage(error));
-    } finally {
-      setCommandPending(false);
     }
   }
 
@@ -528,95 +458,6 @@ export function TerminalDemoWorkspaceScreen(props: {
             <div data-testid="terminal-workspace-host">
               <TerminalWorkspace kernel={props.kernel} />
             </div>
-
-            <section className="terminal-dock" aria-label="Focused pane command lane">
-              <div className="terminal-dock__header">
-                <div>
-                  <div className="section__eyebrow">Command Input</div>
-                  <h3 className="terminal-dock__title">Focused pane command lane</h3>
-                </div>
-
-                <div className="meta-stack meta-stack--inline">
-                  <span className="badge badge--neutral">
-                    {activePaneId ? `Pane ${activePaneId}` : "Pick a pane first"}
-                  </span>
-                  <span className="badge badge--neutral">
-                    {commandPending ? "Sending..." : "Ready"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="terminal-dock__presets">
-                {quickCommands.map((command) => (
-                  <button
-                    key={command.label}
-                    className="terminal-chip"
-                    type="button"
-                    onClick={() => {
-                      setInputDraft(command.value);
-                      setActionError(null);
-                    }}
-                  >
-                    {command.label}
-                  </button>
-                ))}
-              </div>
-
-              <label className="terminal-dock__composer">
-                <span className="terminal-dock__prompt" aria-hidden="true">
-                  &gt;_
-                </span>
-                <textarea
-                  className="terminal-dock__textarea"
-                  data-testid="command-input"
-                  value={inputDraft}
-                  disabled={!activePaneId || commandPending}
-                  onChange={(event) => {
-                    setInputDraft(event.target.value);
-                  }}
-                  placeholder={"printf \"hello from sdk demo\\n\""}
-                />
-              </label>
-
-              <div className="terminal-dock__footer">
-                <div className="terminal-dock__hint">
-                  {activePaneId
-                    ? "Type a command and press send. The dock automatically appends a newline."
-                    : "Start or select a session in the workspace, then focus a pane to type here."}
-                </div>
-
-                <div className="button-row button-row--dock">
-                  <button
-                    className="button button--primary"
-                    data-testid="send-command"
-                    disabled={!canSendInput}
-                    onClick={() => void handleSendInput()}
-                  >
-                    Send command
-                  </button>
-                </div>
-              </div>
-
-              <details className="terminal-dock__more">
-                <summary>Session tools</summary>
-                <div className="button-row">
-                  <button
-                    className="button"
-                    disabled={!canIssueSessionCommand}
-                    onClick={() => void handleSaveSession()}
-                  >
-                    Save layout
-                  </button>
-                  <button
-                    className="button"
-                    disabled={!canIssueSessionCommand}
-                    onClick={() => void handleResyncScreen()}
-                  >
-                    Refresh terminal
-                  </button>
-                </div>
-              </details>
-            </section>
           </div>
         </section>
       </main>

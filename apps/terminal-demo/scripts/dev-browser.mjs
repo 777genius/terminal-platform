@@ -13,7 +13,7 @@ const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 runSync("npm", ["run", "stage:sdk"], appRoot);
 runSync("npm", ["run", "build:host"], appRoot);
 
-const vite = spawn("npx", ["vite", "--host", "127.0.0.1", "--port", rendererPort], {
+const vite = spawn("npx", ["vite", "--force", "--host", "127.0.0.1", "--port", rendererPort], {
   cwd: appRoot,
   env: process.env,
   stdio: "inherit",

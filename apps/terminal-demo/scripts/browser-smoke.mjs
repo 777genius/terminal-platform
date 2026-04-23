@@ -59,6 +59,7 @@ async function main() {
       || result.afterCreate.hasError
       || result.afterCreate.healthPhase !== "ready"
       || !result.afterCreate.hasStatusBar
+      || !result.afterCreate.hasCommandDock
       || !result.afterCreate.hasActiveTitle
       || !result.afterCreate.inputEnabled
     ) {
@@ -163,13 +164,14 @@ async function runSmokeScenario(browserUrl) {
       const workspaceHost = document.querySelector('tp-terminal-workspace');
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
       const statusRoot = workspaceRoot?.querySelector('tp-terminal-status-bar')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : (screenRoot?.querySelector('[part=\"screen-lines\"]')?.textContent?.trim() ?? null);
       const activeTitle = document.querySelector('.workspace-summary__title')?.textContent?.trim() ?? null;
-      const input = document.querySelector('textarea');
+      const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
       return {
         hasReady: debug?.connection?.state === 'ready',
         hasError: debug?.connection?.state === 'error',
@@ -180,27 +182,37 @@ async function runSmokeScenario(browserUrl) {
           : null,
         hasScreen: Boolean(terminalScreenText),
         hasStatusBar: Boolean(statusRoot?.querySelector('[part="status-bar"]')),
+        hasCommandDock: Boolean(commandRoot?.querySelector('[part="command-dock"]')),
         hasActiveTitle: Boolean(activeTitle && activeTitle !== 'Pick a session to inspect'),
         inputEnabled: Boolean(input && !input.disabled),
       };
     })()`);
 
     const initialSequence = afterCreate.focusedSequence;
-    await evaluate(send, `(() => {
-      const textarea = document.querySelector('[data-testid="command-input"]');
+    const sendCommandResult = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
       if (!textarea) {
         return { ok: false, reason: 'textarea missing' };
       }
       const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
       descriptor?.set?.call(textarea, 'printf \"browser-smoke-ok\\\\n\"');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      const button = document.querySelector('[data-testid="send-command"]');
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const button = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
       if (!button) {
         return { ok: false, reason: 'send button missing' };
+      }
+      if (button.disabled) {
+        return { ok: false, reason: 'send button disabled after input' };
       }
       button.click();
       return { ok: true };
     })()`);
+    if (!sendCommandResult.ok) {
+      throw new Error(`Unable to send command through command dock: ${JSON.stringify(sendCommandResult)}`);
+    }
 
     await sleep(2000);
 

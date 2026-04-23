@@ -15,13 +15,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         background:
           linear-gradient(180deg, color-mix(in srgb, var(--tp-color-bg-inset) 92%, transparent), var(--tp-color-bg)),
           var(--tp-color-bg);
-        min-height: 22rem;
+        min-height: 18rem;
       }
 
       .viewport {
         margin: 0;
-        min-height: 16rem;
-        max-height: min(56vh, 42rem);
+        min-height: 12rem;
+        max-height: min(28vh, 26rem);
         overflow: auto;
         border: 1px solid color-mix(in srgb, var(--tp-color-border) 70%, transparent);
         border-radius: var(--tp-radius-lg);
