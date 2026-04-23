@@ -9,6 +9,7 @@ const QUICK_COMMANDS: readonly { label: string; value: string }[] = [
   { label: "git status", value: "git status" },
   { label: "hello", value: 'printf "hello from Terminal Platform\\n"' },
 ];
+const COMMAND_HISTORY_LIMIT = 50;
 
 export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -160,6 +161,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   protected declare pending: boolean;
   protected declare actionError: string | null;
 
+  #commandHistory: string[] = [];
+  #historyCursor: number | null = null;
+  #historyDraftBeforeNavigation = "";
+
   constructor() {
     super();
     this.pending = false;
@@ -215,6 +220,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             .value=${draft}
             ?disabled=${!activePaneId || this.pending}
             placeholder=${activePaneId ? "Type shell input for the focused pane" : "Select a pane first"}
+            aria-label="Focused pane command input"
             @input=${(event: Event) => this.handleInput(event)}
             @keydown=${(event: KeyboardEvent) => this.handleKeydown(event)}
           ></textarea>
@@ -272,6 +278,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
 
     this.actionError = null;
+    this.resetHistoryNavigation();
     this.kernel?.commands.updateDraft(paneId, value);
   }
 
@@ -281,12 +288,22 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private handleKeydown(event: KeyboardEvent): void {
-    if (event.key !== "Enter" || event.shiftKey) {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
       return;
     }
 
-    event.preventDefault();
-    void this.sendDraft();
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      const target = event.currentTarget as HTMLTextAreaElement;
+      if (this.navigateCommandHistory(event.key === "ArrowUp" ? "previous" : "next", target)) {
+        event.preventDefault();
+      }
+      return;
+    }
+
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void this.sendDraft();
+    }
   }
 
   private async sendDraft(): Promise<void> {
@@ -299,7 +316,82 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
 
     await this.dispatchInput(sessionId, paneId, `${draft}\n`);
+    this.recordCommandHistory(draft);
+    this.resetHistoryNavigation();
     this.kernel?.commands.clearDraft(paneId);
+  }
+
+  private navigateCommandHistory(direction: "previous" | "next", target: HTMLTextAreaElement): boolean {
+    const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
+    if (!paneId || this.#commandHistory.length === 0 || !this.canNavigateHistory(direction, target)) {
+      return false;
+    }
+
+    if (direction === "previous") {
+      if (this.#historyCursor === null) {
+        this.#historyDraftBeforeNavigation = target.value;
+      }
+
+      this.#historyCursor = this.#historyCursor === null
+        ? this.#commandHistory.length - 1
+        : Math.max(0, this.#historyCursor - 1);
+    } else {
+      if (this.#historyCursor === null) {
+        return false;
+      }
+
+      if (this.#historyCursor === this.#commandHistory.length - 1) {
+        this.#historyCursor = null;
+        this.applyHistoryDraft(paneId, target, this.#historyDraftBeforeNavigation);
+        this.#historyDraftBeforeNavigation = "";
+        return true;
+      }
+
+      this.#historyCursor += 1;
+    }
+
+    const historyDraft = this.#commandHistory[this.#historyCursor];
+    if (!historyDraft) {
+      return false;
+    }
+
+    this.applyHistoryDraft(paneId, target, historyDraft);
+    return true;
+  }
+
+  private canNavigateHistory(direction: "previous" | "next", target: HTMLTextAreaElement): boolean {
+    const selectionStart = target.selectionStart ?? target.value.length;
+    const selectionEnd = target.selectionEnd ?? selectionStart;
+    if (selectionStart !== selectionEnd) {
+      return false;
+    }
+
+    if (direction === "previous") {
+      return !target.value.slice(0, selectionStart).includes("\n");
+    }
+
+    return !target.value.slice(selectionEnd).includes("\n");
+  }
+
+  private applyHistoryDraft(paneId: string, target: HTMLTextAreaElement, value: string): void {
+    target.value = value;
+    target.setSelectionRange(value.length, value.length);
+    this.kernel?.commands.updateDraft(paneId, value);
+  }
+
+  private recordCommandHistory(value: string): void {
+    if (value.trim().length === 0) {
+      return;
+    }
+
+    const historyEntry = value.replace(/\s+$/u, "");
+    const dedupedHistory = this.#commandHistory.filter((entry) => entry !== historyEntry);
+    this.#commandHistory = [...dedupedHistory, historyEntry].slice(-COMMAND_HISTORY_LIMIT);
+  }
+
+  private resetHistoryNavigation(): void {
+    this.#historyCursor = null;
+    this.#historyDraftBeforeNavigation = "";
   }
 
   private async sendShortcut(data: string): Promise<void> {

@@ -92,6 +92,15 @@ async function main() {
       throw new Error(`Command lane did not advance the focused screen: ${JSON.stringify(result.afterCommand)}`);
     }
 
+    if (
+      !result.afterHistoryReplay.recalledDraft?.includes("browser-smoke-ok")
+      || !result.afterHistoryReplay.replayClicked
+      || !result.afterHistoryReplay.connectionReady
+      || (!result.afterHistoryReplay.sequenceAdvanced && !result.afterHistoryReplay.containsCommandOutput)
+    ) {
+      throw new Error(`Command history replay did not settle correctly: ${JSON.stringify(result.afterHistoryReplay)}`);
+    }
+
     process.stdout.write(`Browser smoke passed - ${browserUrl}\n`);
     process.stdout.write(`Browser smoke screenshot - ${screenshotPath}\n`);
   } finally {
@@ -280,6 +289,55 @@ async function runSmokeScenario(browserUrl) {
         containsCommandOutput: /browser-smoke-ok/i.test(terminalScreenText),
       };
     })()`);
+    const replayInitialSequence = afterCommand.focusedSequence;
+
+    const historyReplayResult = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      if (!textarea) {
+        return { ok: false, reason: 'textarea missing', recalledDraft: null };
+      }
+      textarea.focus();
+      textarea.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowUp',
+        bubbles: true,
+        cancelable: true,
+      }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const recalledDraft = textarea.value;
+      const button = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
+      if (!button) {
+        return { ok: false, reason: 'send button missing', recalledDraft };
+      }
+      if (button.disabled) {
+        return { ok: false, reason: 'send button disabled after history recall', recalledDraft };
+      }
+      button.click();
+      return { ok: true, recalledDraft };
+    })()`);
+    if (!historyReplayResult.ok) {
+      throw new Error(`Unable to replay command through command history: ${JSON.stringify(historyReplayResult)}`);
+    }
+
+    await sleep(2000);
+
+    const afterHistoryReplay = await evaluate(send, `(() => {
+      const debug = window.terminalDemoDebug?.getState?.();
+      const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
+        ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+        : '';
+      return {
+        replayClicked: true,
+        recalledDraft: ${JSON.stringify(historyReplayResult.recalledDraft)},
+        connectionReady: debug?.connection?.state === 'ready',
+        focusedSequence: debug?.attachedSession?.focused_screen?.sequence != null
+          ? String(debug.attachedSession.focused_screen.sequence)
+          : null,
+        terminalScreenText,
+        containsCommandOutput: /browser-smoke-ok/i.test(terminalScreenText),
+      };
+    })()`);
 
     const screenshot = await send("Page.captureScreenshot", {
       format: "png",
@@ -295,6 +353,12 @@ async function runSmokeScenario(browserUrl) {
         ...afterCommand,
         sequenceAdvanced: initialSequence !== null
           ? afterCommand.focusedSequence !== initialSequence
+          : false,
+      },
+      afterHistoryReplay: {
+        ...afterHistoryReplay,
+        sequenceAdvanced: replayInitialSequence !== null
+          ? afterHistoryReplay.focusedSequence !== replayInitialSequence
           : false,
       },
       issues,
