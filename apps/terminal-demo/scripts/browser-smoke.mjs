@@ -60,10 +60,29 @@ async function main() {
       || result.afterCreate.healthPhase !== "ready"
       || !result.afterCreate.hasStatusBar
       || !result.afterCreate.hasCommandDock
+      || result.afterCreate.savedItemsRendered > 8
+      || (result.afterCreate.savedSessionCount > 8 && !result.afterCreate.hasSavedPagination)
       || !result.afterCreate.hasActiveTitle
       || !result.afterCreate.inputEnabled
     ) {
       throw new Error(`Session creation did not settle correctly: ${JSON.stringify(result.afterCreate)}`);
+    }
+
+    if (result.afterCreate.savedSessionCount > result.afterCreate.savedItemsRendered) {
+      const expectedPaginatedItems = Math.min(
+        result.afterCreate.savedSessionCount,
+        result.afterCreate.savedItemsRendered + 8,
+      );
+      if (
+        !result.afterSavedPagination.clicked
+        || result.afterSavedPagination.savedItemsRendered !== expectedPaginatedItems
+        || !result.afterSavedPagination.hasCollapse
+      ) {
+        throw new Error(`Saved-session pagination did not expand correctly: ${JSON.stringify({
+          expectedPaginatedItems,
+          afterSavedPagination: result.afterSavedPagination,
+        })}`);
+      }
     }
 
     if (
@@ -165,6 +184,7 @@ async function runSmokeScenario(browserUrl) {
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
       const statusRoot = workspaceRoot?.querySelector('tp-terminal-status-bar')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
@@ -176,6 +196,9 @@ async function runSmokeScenario(browserUrl) {
         hasReady: debug?.connection?.state === 'ready',
         hasError: debug?.connection?.state === 'error',
         activeSessionId: debug?.selection?.activeSessionId ?? null,
+        savedSessionCount: debug?.catalog?.savedSessions?.length ?? 0,
+        savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
+        hasSavedPagination: Boolean(savedRoot?.querySelector('[part="show-more"]')),
         healthPhase: debug?.attachedSession?.health?.phase ?? null,
         focusedSequence: debug?.attachedSession?.focused_screen?.sequence != null
           ? String(debug.attachedSession.focused_screen.sequence)
@@ -189,6 +212,29 @@ async function runSmokeScenario(browserUrl) {
     })()`);
 
     const initialSequence = afterCreate.focusedSequence;
+    const afterSavedPagination = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
+      const showMoreButton = savedRoot?.querySelector('[part="show-more"]') ?? null;
+      if (!showMoreButton) {
+        return {
+          clicked: false,
+          reason: 'show-more missing',
+          savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
+          hasCollapse: Boolean(savedRoot?.querySelector('[part="collapse"]')),
+          summaryText: savedRoot?.querySelector('[part="list-summary"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        };
+      }
+      showMoreButton.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return {
+        clicked: true,
+        savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
+        hasCollapse: Boolean(savedRoot?.querySelector('[part="collapse"]')),
+        summaryText: savedRoot?.querySelector('[part="list-summary"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+      };
+    })()`);
+
     const sendCommandResult = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
@@ -244,6 +290,7 @@ async function runSmokeScenario(browserUrl) {
     return {
       before,
       afterCreate,
+      afterSavedPagination,
       afterCommand: {
         ...afterCommand,
         sequenceAdvanced: initialSequence !== null
