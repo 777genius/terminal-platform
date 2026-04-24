@@ -658,4 +658,12 @@ textarea:focus-visible {
   .workspace-grid {
     grid-template-columns: 1fr;
   }
+
+  .shell[data-has-active-session="true"] .shell__main {
+    order: 1;
+  }
+
+  .shell[data-has-active-session="true"] .shell__sidebar {
+    order: 2;
+  }
 }

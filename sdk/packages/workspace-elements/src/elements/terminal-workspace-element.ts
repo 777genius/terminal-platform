@@ -77,7 +77,12 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           grid-template-columns: 1fr;
         }
 
+        .content {
+          order: 1;
+        }
+
         .sidebar {
+          order: 2;
           position: static;
         }
       }
@@ -88,7 +93,6 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     return html`
       <div class="workspace" part="workspace">
         <tp-terminal-status-bar .kernel=${this.kernel}></tp-terminal-status-bar>
-        <tp-terminal-command-dock .kernel=${this.kernel}></tp-terminal-command-dock>
 
         <div class="body" part="body">
           <div class="sidebar" part="sidebar">
@@ -97,6 +101,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           </div>
           <div class="content" part="content">
             <tp-terminal-screen .kernel=${this.kernel}></tp-terminal-screen>
+            <tp-terminal-command-dock .kernel=${this.kernel}></tp-terminal-command-dock>
 
             <details class="secondary-toggle workspace-tools">
               <summary>Workspace tools</summary>

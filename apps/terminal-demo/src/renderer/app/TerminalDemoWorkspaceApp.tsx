@@ -209,7 +209,11 @@ export function TerminalDemoWorkspaceScreen(props: {
   }
 
   return (
-    <div className="shell" data-testid="terminal-demo-shell">
+    <div
+      className="shell"
+      data-has-active-session={activeSessionId ? "true" : "false"}
+      data-testid="terminal-demo-shell"
+    >
       <aside className="shell__sidebar">
         <section className="panel hero hero--demo">
           <div className="hero__content">

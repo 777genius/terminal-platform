@@ -80,6 +80,7 @@ async function main() {
       || result.afterCreate.healthPhase !== "ready"
       || !result.afterCreate.hasStatusBar
       || !result.afterCreate.hasCommandDock
+      || !result.afterCreate.screenPrecedesCommandDock
       || !result.afterCreate.hasScreenFollowControls
       || !result.afterCreate.hasScreenSearchControls
       || !result.afterCreate.hasScreenCopyControl
@@ -279,7 +280,9 @@ async function runSmokeScenario(browserUrl) {
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
       const toolbarRoot = workspaceRoot?.querySelector('tp-terminal-toolbar')?.shadowRoot ?? null;
+      const contentRoot = workspaceRoot?.querySelector('[part="content"]') ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const commandDockHost = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
       const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
       const screenSearch = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
@@ -314,6 +317,13 @@ async function runSmokeScenario(browserUrl) {
         screenViewportAtBottom: screenViewport
           ? screenViewport.scrollHeight - screenViewport.scrollTop - screenViewport.clientHeight <= 2
           : false,
+        screenPrecedesCommandDock: Boolean(
+          contentRoot
+          && screenHost
+          && commandDockHost
+          && [...contentRoot.children].indexOf(screenHost) > -1
+          && [...contentRoot.children].indexOf(screenHost) < [...contentRoot.children].indexOf(commandDockHost)
+        ),
         hasScreen: Boolean(terminalScreenText),
         hasStatusBar: Boolean(statusRoot?.querySelector('[part="status-bar"]')),
         hasCommandDock: Boolean(commandRoot?.querySelector('[part="command-dock"]')),

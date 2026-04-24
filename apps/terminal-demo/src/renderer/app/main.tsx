@@ -2,6 +2,7 @@ import "./styles.css";
 
 import { StrictMode, startTransition, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import type { Root } from "react-dom/client";
 import {
   loadLatestTerminalRuntimeBootstrapConfig,
   resolveTerminalRuntimeBootstrapConfig,
@@ -11,7 +12,20 @@ import {
 import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
 import { TerminalDemoWorkspaceApp } from "./TerminalDemoWorkspaceApp.js";
 
-const root = createRoot(document.getElementById("root")!);
+declare global {
+  interface Window {
+    __terminalDemoReactRoot?: Root;
+  }
+}
+
+const rootElement = document.getElementById("root");
+
+if (!rootElement) {
+  throw new Error("Terminal demo root element was not found.");
+}
+
+const root = window.__terminalDemoReactRoot ?? createRoot(rootElement);
+window.__terminalDemoReactRoot = root;
 
 root.render(
   <StrictMode>
