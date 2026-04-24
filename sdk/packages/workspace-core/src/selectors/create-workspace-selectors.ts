@@ -34,5 +34,8 @@ export function createWorkspaceSelectors(
     themeId() {
       return getSnapshot().theme.themeId;
     },
+    terminalDisplay() {
+      return getSnapshot().terminalDisplay;
+    },
   };
 }

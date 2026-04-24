@@ -5,17 +5,38 @@ import { ConnectionService } from "../services/connection-service.js";
 import { DiagnosticsService } from "../services/diagnostics-service.js";
 import { DraftInputService } from "../services/draft-input-service.js";
 import { SessionCommandService } from "../services/session-command-service.js";
-import { ThemeResolutionService } from "../services/theme-resolution-service.js";
+import {
+  TerminalDisplayPreferenceService,
+  normalizeTerminalFontScale,
+} from "../services/terminal-display-preference-service.js";
+import {
+  ThemeResolutionService,
+  createAvailableThemeIdSet,
+  normalizeThemeId,
+} from "../services/theme-resolution-service.js";
 import { createWorkspaceSelectors } from "../selectors/create-workspace-selectors.js";
-import { createInitialWorkspaceSnapshot } from "../read-models/workspace-snapshot.js";
+import {
+  DEFAULT_TERMINAL_FONT_SCALE,
+  DEFAULT_WORKSPACE_THEME_ID,
+  createInitialWorkspaceSnapshot,
+  terminalPlatformWorkspaceThemeIds,
+} from "../read-models/workspace-snapshot.js";
 
 import type { WorkspaceTransportClient, WorkspaceTransportFactory } from "@terminal-platform/workspace-contracts";
 
 import type { CreateWorkspaceKernelOptions, WorkspaceDiagnostics, WorkspaceKernel } from "./types.js";
+import type { TerminalPlatformTerminalFontScale } from "../read-models/workspace-snapshot.js";
 import type { ServiceContext } from "../services/service-context.js";
 
 export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): WorkspaceKernel {
-  const store = createExternalStore(createInitialWorkspaceSnapshot());
+  const availableThemeIds = createAvailableThemeIdSet(options.availableThemeIds ?? terminalPlatformWorkspaceThemeIds);
+  const initialTheme = resolveInitialThemeId(options.initialThemeId, availableThemeIds);
+  const initialTerminalFontScale = resolveInitialTerminalFontScale(options.initialTerminalFontScale);
+  const store = createExternalStore(createInitialWorkspaceSnapshot({
+    themeId: initialTheme.themeId,
+    terminalFontScale: initialTerminalFontScale.fontScale,
+    terminalLineWrap: options.initialTerminalLineWrap ?? true,
+  }));
   const scope = new ResourceScope();
   const telemetry = options.telemetry ?? noopTelemetrySink;
   const now = options.now ?? (() => Date.now());
@@ -78,7 +99,8 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
   const catalogService = new CatalogService(context);
   const sessionCommandService = new SessionCommandService(context, catalogService);
   const draftInputService = new DraftInputService(context);
-  const themeResolutionService = new ThemeResolutionService(context);
+  const themeResolutionService = new ThemeResolutionService(context, availableThemeIds);
+  const terminalDisplayPreferenceService = new TerminalDisplayPreferenceService(context);
   const selectors = createWorkspaceSelectors(store.getSnapshot);
   const diagnostics: WorkspaceDiagnostics = new DiagnosticsService({
     clearDiagnostics,
@@ -87,6 +109,24 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
     telemetry,
     updateSnapshot: store.update,
   });
+
+  if (initialTheme.rejectedThemeId) {
+    context.recordDiagnostic({
+      code: "theme_unsupported",
+      message: `Initial theme "${initialTheme.rejectedThemeId}" is not registered for this workspace`,
+      severity: "warn",
+      recoverable: true,
+    });
+  }
+
+  if (initialTerminalFontScale.rejectedFontScale) {
+    context.recordDiagnostic({
+      code: "terminal_display_preference_unsupported",
+      message: `Initial terminal font scale "${initialTerminalFontScale.rejectedFontScale}" is not supported`,
+      severity: "warn",
+      recoverable: true,
+    });
+  }
 
   async function bootstrap(): Promise<void> {
     assertNotDisposed();
@@ -131,6 +171,8 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
       updateDraft: (paneId, value) => draftInputService.updateDraft(paneId, value),
       clearDraft: (paneId) => draftInputService.clearDraft(paneId),
       setTheme: (themeId) => themeResolutionService.setTheme(themeId),
+      setTerminalFontScale: (fontScale) => terminalDisplayPreferenceService.setFontScale(fontScale),
+      setTerminalLineWrap: (lineWrap) => terminalDisplayPreferenceService.setLineWrap(lineWrap),
       clearDiagnostics,
     },
     selectors,
@@ -152,4 +194,52 @@ function resolveTransport(
   }
 
   return transport;
+}
+
+function resolveInitialTerminalFontScale(
+  fontScale: string | null | undefined,
+): {
+  fontScale: TerminalPlatformTerminalFontScale;
+  rejectedFontScale: string | null;
+} {
+  const normalizedFontScale = normalizeTerminalFontScale(fontScale);
+  if (normalizedFontScale) {
+    return {
+      fontScale: normalizedFontScale,
+      rejectedFontScale: null,
+    };
+  }
+
+  return {
+    fontScale: DEFAULT_TERMINAL_FONT_SCALE,
+    rejectedFontScale: fontScale?.trim() || null,
+  };
+}
+
+function resolveInitialThemeId(
+  themeId: string | null | undefined,
+  availableThemeIds: ReadonlySet<string>,
+): {
+  themeId: string;
+  rejectedThemeId: string | null;
+} {
+  const normalizedThemeId = normalizeThemeId(themeId);
+  if (!normalizedThemeId) {
+    return {
+      themeId: DEFAULT_WORKSPACE_THEME_ID,
+      rejectedThemeId: null,
+    };
+  }
+
+  if (availableThemeIds.has(normalizedThemeId)) {
+    return {
+      themeId: normalizedThemeId,
+      rejectedThemeId: null,
+    };
+  }
+
+  return {
+    themeId: DEFAULT_WORKSPACE_THEME_ID,
+    rejectedThemeId: normalizedThemeId,
+  };
 }

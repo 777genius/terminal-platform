@@ -1,5 +1,6 @@
 import { LitElement, type PropertyValues } from "lit";
 
+import { TERMINAL_PLATFORM_THEME_ATTRIBUTE } from "@terminal-platform/design-tokens";
 import {
   createInitialWorkspaceSnapshot,
   type WorkspaceKernel,
@@ -26,6 +27,7 @@ export abstract class WorkspaceKernelConsumerElement extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.syncKernelSubscription();
+    this.syncThemeAttribute();
   }
 
   override disconnectedCallback(): void {
@@ -34,9 +36,13 @@ export abstract class WorkspaceKernelConsumerElement extends LitElement {
     super.disconnectedCallback();
   }
 
-  protected override willUpdate(changedProperties: PropertyValues<this>): void {
+  protected override willUpdate(changedProperties: PropertyValues): void {
     if (changedProperties.has("kernel")) {
       this.syncKernelSubscription();
+    }
+
+    if (changedProperties.has("snapshot")) {
+      this.syncThemeAttribute();
     }
   }
 
@@ -57,5 +63,9 @@ export abstract class WorkspaceKernelConsumerElement extends LitElement {
 
       this.snapshot = this.kernel.getSnapshot();
     });
+  }
+
+  protected syncThemeAttribute(): void {
+    this.setAttribute(TERMINAL_PLATFORM_THEME_ATTRIBUTE, this.snapshot.theme.themeId);
   }
 }

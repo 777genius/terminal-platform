@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:net";
 
 import { WebSocketServer, type WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,7 +16,9 @@ import {
   type WorkspaceGatewayStreamServerMessage,
 } from "./index.js";
 
-describe("workspace websocket adapter", () => {
+const canBindLoopback = await probeLoopbackTcp();
+
+describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
@@ -123,8 +126,22 @@ async function startWorkspaceGateway(transport: WorkspaceTransportClient): Promi
     });
   });
 
-  await new Promise<void>((resolve) => {
-    wss.once("listening", () => resolve());
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      wss.off("error", onError);
+      wss.off("listening", onListening);
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onListening = () => {
+      cleanup();
+      resolve();
+    };
+
+    wss.once("error", onError);
+    wss.once("listening", onListening);
   });
 
   const address = wss.address();
@@ -304,6 +321,28 @@ async function pumpSubscription(
       await subscription.close();
     }
   }
+}
+
+async function probeLoopbackTcp(): Promise<boolean> {
+  const server = createServer();
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      server.off("error", onError);
+      server.off("listening", onListening);
+    };
+    const onError = () => {
+      cleanup();
+      resolve(false);
+    };
+    const onListening = () => {
+      cleanup();
+      server.close(() => resolve(true));
+    };
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(0, "127.0.0.1");
+  });
 }
 
 function assertNever(value: never): never {

@@ -1,13 +1,27 @@
-import { css, html } from "lit";
+import { css, html, nothing } from "lit";
 import type { PropertyValues, TemplateResult } from "lit";
+
+import {
+  createTerminalOutputSearchResult,
+  formatTerminalOutputSearchCount,
+  resolveTerminalOutputSearchMatchIndex,
+  serializeTerminalOutputLines,
+  type TerminalOutputSearchResult,
+  type TerminalOutputSearchSegment,
+} from "@terminal-platform/workspace-core";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+
+type ScreenCopyState = "idle" | "copied" | "failed";
 
 export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
     followOutput: { state: true },
+    searchQuery: { state: true },
+    activeSearchMatchIndex: { state: true },
+    copyState: { state: true },
   };
 
   static styles = [
@@ -50,10 +64,62 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         color: var(--tp-color-success);
       }
 
+      .screen-tools {
+        display: grid;
+        grid-template-columns: minmax(12rem, 1fr) auto;
+        gap: var(--tp-space-2);
+        align-items: center;
+      }
+
+      .search {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: var(--tp-space-2);
+        align-items: center;
+        min-width: 0;
+      }
+
+      .search input {
+        min-width: 0;
+        border: 1px solid var(--tp-color-border);
+        border-radius: var(--tp-radius-sm);
+        background: color-mix(in srgb, var(--tp-color-bg) 72%, transparent);
+        color: var(--tp-color-text);
+        font: inherit;
+        padding: 0.48rem 0.65rem;
+      }
+
+      .search input:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--tp-color-accent) 62%, transparent);
+        outline-offset: 2px;
+      }
+
+      .search input:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+
+      .search-count {
+        color: var(--tp-color-text-muted);
+        font-size: 0.82rem;
+        white-space: nowrap;
+      }
+
+      .search-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--tp-space-2);
+        justify-content: flex-end;
+      }
+
+      .search-actions button {
+        white-space: nowrap;
+      }
+
       .viewport {
         margin: 0;
-        min-height: 12rem;
-        max-height: min(28vh, 26rem);
+        min-height: clamp(18rem, 42vh, 34rem);
+        max-height: min(58vh, 44rem);
         overflow: auto;
         border: 1px solid color-mix(in srgb, var(--tp-color-border) 70%, transparent);
         border-radius: var(--tp-radius-lg);
@@ -63,6 +129,21 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         font-size: 0.9rem;
         line-height: 1.48;
         scrollbar-gutter: stable;
+      }
+
+      .screen[data-font-scale="compact"] .viewport {
+        font-size: 0.82rem;
+        line-height: 1.42;
+      }
+
+      .screen[data-font-scale="large"] .viewport {
+        font-size: 1rem;
+        line-height: 1.56;
+      }
+
+      .screen[data-line-wrap="false"] .text {
+        white-space: pre;
+        overflow-wrap: normal;
       }
 
       .line {
@@ -81,6 +162,18 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       .text {
         white-space: pre-wrap;
         overflow-wrap: anywhere;
+      }
+
+      mark {
+        border-radius: 0.2rem;
+        background: color-mix(in srgb, var(--tp-color-warning) 36%, transparent);
+        color: var(--tp-color-text);
+        padding: 0 0.08rem;
+      }
+
+      mark[data-active="true"] {
+        outline: 1px solid color-mix(in srgb, var(--tp-color-warning) 80%, transparent);
+        background: color-mix(in srgb, var(--tp-color-warning) 58%, var(--tp-color-bg));
       }
 
       .screen-meta {
@@ -103,6 +196,18 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           display: grid;
         }
 
+        .screen-tools {
+          grid-template-columns: 1fr;
+        }
+
+        .search {
+          grid-template-columns: 1fr;
+        }
+
+        .search-actions {
+          justify-content: flex-start;
+        }
+
         .screen-actions {
           justify-content: flex-start;
         }
@@ -111,29 +216,65 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   ];
 
   protected declare followOutput: boolean;
+  protected declare searchQuery: string;
+  protected declare activeSearchMatchIndex: number | null;
+  protected declare copyState: ScreenCopyState;
 
   #autoScrolling = false;
+  #copyStateResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     super();
     this.followOutput = true;
+    this.searchQuery = "";
+    this.activeSearchMatchIndex = null;
+    this.copyState = "idle";
+  }
+
+  override disconnectedCallback(): void {
+    this.clearCopyStateResetTimer();
+    super.disconnectedCallback();
+  }
+
+  protected override willUpdate(changedProperties: PropertyValues): void {
+    super.willUpdate(changedProperties);
+    if (changedProperties.has("snapshot")) {
+      this.syncTerminalDisplayAttributes();
+    }
   }
 
   protected override updated(changedProperties: PropertyValues): void {
-    if (!changedProperties.has("snapshot") && !changedProperties.has("followOutput")) {
+    const shouldSyncSearch =
+      changedProperties.has("snapshot")
+      || changedProperties.has("searchQuery")
+      || changedProperties.has("activeSearchMatchIndex");
+    if (shouldSyncSearch && this.syncActiveSearchMatch()) {
       return;
     }
 
-    if (this.followOutput && this.snapshot.attachedSession?.focused_screen) {
-      this.scrollViewportToBottom();
+    if (
+      changedProperties.has("snapshot")
+      || changedProperties.has("followOutput")
+    ) {
+      if (this.followOutput && this.snapshot.attachedSession?.focused_screen) {
+        this.scrollViewportToBottom();
+      }
     }
   }
 
   override render() {
     const screen = this.snapshot.attachedSession?.focused_screen;
+    const searchResult = this.createSearchResult();
+    const terminalDisplay = this.snapshot.terminalDisplay;
 
     return html`
-      <div class="panel screen" part="screen" data-testid="tp-terminal-screen">
+      <div
+        class="panel screen"
+        part="screen"
+        data-testid="tp-terminal-screen"
+        data-font-scale=${terminalDisplay.fontScale}
+        data-line-wrap=${String(terminalDisplay.lineWrap)}
+      >
         <div class="screen-header">
           <div class="panel-header">
             <div class="panel-eyebrow">Terminal</div>
@@ -158,6 +299,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
             >
               Scroll latest
             </button>
+            <button
+              type="button"
+              data-testid="tp-screen-copy"
+              ?disabled=${!screen}
+              @click=${() => this.copyVisibleOutput()}
+            >
+              ${this.copyState === "copied" ? "Copied" : this.copyState === "failed" ? "Copy failed" : "Copy visible"}
+            </button>
           </div>
         </div>
         ${screen
@@ -167,6 +316,56 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 <span>${screen.rows} rows</span>
                 <span>seq ${String(screen.sequence)}</span>
                 <span>${screen.source}</span>
+                <span>${terminalDisplay.fontScale}</span>
+                <span>${terminalDisplay.lineWrap ? "wrapped" : "nowrap"}</span>
+                ${screen.surface.cursor
+                  ? html`<span>cursor ${screen.surface.cursor.row + 1}:${screen.surface.cursor.col + 1}</span>`
+                  : null}
+              </div>
+              <div class="screen-tools" part="screen-tools">
+                <label class="search" part="search">
+                  <input
+                    data-testid="tp-screen-search"
+                    .value=${this.searchQuery}
+                    placeholder="Find output"
+                    aria-label="Find terminal output"
+                    @input=${(event: Event) => this.handleSearchInput(event)}
+                    @keydown=${(event: KeyboardEvent) => this.handleSearchKeydown(event)}
+                  />
+                  <span class="search-count" part="search-count" aria-live="polite">
+                    ${formatTerminalOutputSearchCount(
+                      searchResult.query,
+                      searchResult.matchCount,
+                      searchResult.activeMatchIndex,
+                    )}
+                  </span>
+                </label>
+                <div class="search-actions" part="search-actions">
+                  <button
+                    type="button"
+                    data-testid="tp-screen-search-prev"
+                    ?disabled=${searchResult.matchCount === 0}
+                    @click=${() => this.selectSearchMatch("previous")}
+                  >
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="tp-screen-search-next"
+                    ?disabled=${searchResult.matchCount === 0}
+                    @click=${() => this.selectSearchMatch("next")}
+                  >
+                    Next
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="tp-screen-search-clear"
+                    ?disabled=${!searchResult.query}
+                    @click=${() => this.clearSearch()}
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
               <div
                 class="viewport"
@@ -174,7 +373,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 data-testid="tp-screen-viewport"
                 @scroll=${(event: Event) => this.handleViewportScroll(event)}
               >
-                ${screen.surface.lines.map((line, index) => renderLine(index + 1, line.text))}
+                ${searchResult.lines.map((line) => renderLine(line.lineIndex + 1, line.segments))}
               </div>
             `
           : html`<div class="empty-state" part="empty">No active screen yet. Start or attach a session to see output here.</div>`}
@@ -192,6 +391,138 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   private scrollLatest(): void {
     this.followOutput = true;
     this.scrollViewportToBottom();
+  }
+
+  private handleSearchInput(event: Event): void {
+    const target = event.currentTarget as HTMLInputElement;
+    const nextQuery = target.value;
+    const searchResult = this.createSearchResult(nextQuery);
+    this.searchQuery = nextQuery;
+    this.activeSearchMatchIndex = searchResult.matchCount > 0 ? 0 : null;
+  }
+
+  private handleSearchKeydown(event: KeyboardEvent): void {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      this.selectSearchMatch(event.shiftKey ? "previous" : "next");
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.clearSearch();
+    }
+  }
+
+  private selectSearchMatch(direction: "next" | "previous"): void {
+    const searchResult = this.createSearchResult();
+    if (searchResult.matchCount === 0) {
+      return;
+    }
+
+    const currentMatchIndex = searchResult.activeMatchIndex ?? 0;
+    this.activeSearchMatchIndex = direction === "next"
+      ? (currentMatchIndex + 1) % searchResult.matchCount
+      : (currentMatchIndex - 1 + searchResult.matchCount) % searchResult.matchCount;
+  }
+
+  private clearSearch(): void {
+    this.searchQuery = "";
+    this.activeSearchMatchIndex = null;
+  }
+
+  private async copyVisibleOutput(): Promise<void> {
+    const screen = this.snapshot.attachedSession?.focused_screen;
+    if (!screen) {
+      return;
+    }
+
+    const output = serializeTerminalOutputLines(screen.surface.lines.map((line) => line.text));
+    try {
+      await navigator.clipboard.writeText(output);
+      this.setCopyState("copied");
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-screen-copied", {
+          bubbles: true,
+          composed: true,
+          detail: { paneId: screen.pane_id, lineCount: screen.surface.lines.length },
+        }),
+      );
+    } catch (error) {
+      this.setCopyState("failed");
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-screen-copy-failed", {
+          bubbles: true,
+          composed: true,
+          detail: { paneId: screen.pane_id, error },
+        }),
+      );
+    }
+  }
+
+  private setCopyState(copyState: ScreenCopyState): void {
+    this.copyState = copyState;
+    this.clearCopyStateResetTimer();
+    this.#copyStateResetTimer = setTimeout(() => {
+      this.copyState = "idle";
+      this.#copyStateResetTimer = null;
+    }, 1600);
+  }
+
+  private clearCopyStateResetTimer(): void {
+    if (this.#copyStateResetTimer) {
+      clearTimeout(this.#copyStateResetTimer);
+      this.#copyStateResetTimer = null;
+    }
+  }
+
+  private syncActiveSearchMatch(): boolean {
+    const searchResult = this.createSearchResult();
+    if (searchResult.matchCount === 0) {
+      if (this.activeSearchMatchIndex !== null) {
+        this.activeSearchMatchIndex = null;
+        return true;
+      }
+      return false;
+    }
+
+    const activeSearchMatchIndex = resolveTerminalOutputSearchMatchIndex(
+      this.activeSearchMatchIndex,
+      searchResult.matchCount,
+    ) ?? 0;
+    if (activeSearchMatchIndex !== this.activeSearchMatchIndex) {
+      this.activeSearchMatchIndex = activeSearchMatchIndex;
+      return true;
+    }
+
+    this.scrollActiveSearchMatchIntoView();
+    return true;
+  }
+
+  private scrollActiveSearchMatchIntoView(): void {
+    const activeMatch = this.shadowRoot?.querySelector<HTMLElement>('[data-testid="tp-screen-active-search-match"]');
+    activeMatch?.scrollIntoView({
+      block: "center",
+      inline: "nearest",
+    });
+  }
+
+  private createSearchResult(searchQuery = this.searchQuery): TerminalOutputSearchResult {
+    const screen = this.snapshot.attachedSession?.focused_screen;
+    return createTerminalOutputSearchResult(
+      screen ? screen.surface.lines.map((line) => line.text) : [],
+      searchQuery,
+      { activeMatchIndex: this.activeSearchMatchIndex },
+    );
+  }
+
+  private syncTerminalDisplayAttributes(): void {
+    this.setAttribute("data-font-scale", this.snapshot.terminalDisplay.fontScale);
+    this.setAttribute("data-line-wrap", String(this.snapshot.terminalDisplay.lineWrap));
   }
 
   private handleViewportScroll(event: Event): void {
@@ -217,13 +548,36 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 }
 
-function renderLine(index: number, text: string): TemplateResult {
+function renderLine(
+  index: number,
+  segments: readonly TerminalOutputSearchSegment[],
+): TemplateResult {
   return html`
     <div class="line" part="screen-line">
       <span class="gutter" part="line-number">${index}</span>
-      <span class="text" part="line-text">${text.length > 0 ? text : " "}</span>
+      <span class="text" part="line-text">${renderHighlightedSegments(segments)}</span>
     </div>
   `;
+}
+
+function renderHighlightedSegments(
+  segments: readonly TerminalOutputSearchSegment[],
+): TemplateResult {
+  return html`${segments.map((segment) => {
+    if (segment.kind === "text") {
+      return segment.value;
+    }
+
+    return html`
+      <mark
+        part=${segment.active ? "search-match active-search-match" : "search-match"}
+        data-active=${String(segment.active)}
+        data-testid=${segment.active ? "tp-screen-active-search-match" : nothing}
+      >
+        ${segment.value}
+      </mark>
+    `;
+  })}`;
 }
 
 function isViewportAtBottom(viewport: HTMLElement): boolean {

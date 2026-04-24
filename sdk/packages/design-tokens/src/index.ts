@@ -37,31 +37,58 @@ export const terminalPlatformDefaultTheme: ThemeManifest = {
   },
 };
 
-export const terminalPlatformThemeManifests = [terminalPlatformDefaultTheme] as const;
+export const terminalPlatformLightTheme: ThemeManifest = {
+  id: "terminal-platform-light",
+  displayName: "Terminal Platform Light",
+  tokens: {
+    "--tp-color-bg": "#f6f8fb",
+    "--tp-color-bg-inset": "#e8edf5",
+    "--tp-color-panel": "#ffffff",
+    "--tp-color-panel-raised": "#eef3f8",
+    "--tp-color-border": "#cfd8e5",
+    "--tp-color-border-strong": "#9aa8bb",
+    "--tp-color-text": "#172033",
+    "--tp-color-text-muted": "#657086",
+    "--tp-color-accent": "#0f7ea8",
+    "--tp-color-accent-soft": "rgba(15, 126, 168, 0.12)",
+    "--tp-color-success": "#1f8f55",
+    "--tp-color-warning": "#a15c06",
+    "--tp-color-danger": "#c23838",
+    "--tp-color-danger-soft": "rgba(194, 56, 56, 0.12)",
+    "--tp-font-family-ui": "\"Inter\", \"Avenir Next\", \"Segoe UI\", sans-serif",
+    "--tp-font-family-mono": "\"Berkeley Mono\", \"JetBrains Mono\", monospace",
+    "--tp-radius-sm": "6px",
+    "--tp-radius-md": "10px",
+    "--tp-radius-lg": "14px",
+    "--tp-space-2": "0.5rem",
+    "--tp-space-3": "0.75rem",
+    "--tp-space-4": "1rem",
+    "--tp-space-5": "1.25rem",
+    "--tp-shadow-panel": "0 18px 48px rgba(23, 32, 51, 0.12)",
+  },
+};
 
-export const terminalPlatformDefaultThemeCssText = `:host, :root {
-  --tp-color-bg: ${terminalPlatformDefaultTheme.tokens["--tp-color-bg"]};
-  --tp-color-bg-inset: ${terminalPlatformDefaultTheme.tokens["--tp-color-bg-inset"]};
-  --tp-color-panel: ${terminalPlatformDefaultTheme.tokens["--tp-color-panel"]};
-  --tp-color-panel-raised: ${terminalPlatformDefaultTheme.tokens["--tp-color-panel-raised"]};
-  --tp-color-border: ${terminalPlatformDefaultTheme.tokens["--tp-color-border"]};
-  --tp-color-border-strong: ${terminalPlatformDefaultTheme.tokens["--tp-color-border-strong"]};
-  --tp-color-text: ${terminalPlatformDefaultTheme.tokens["--tp-color-text"]};
-  --tp-color-text-muted: ${terminalPlatformDefaultTheme.tokens["--tp-color-text-muted"]};
-  --tp-color-accent: ${terminalPlatformDefaultTheme.tokens["--tp-color-accent"]};
-  --tp-color-accent-soft: ${terminalPlatformDefaultTheme.tokens["--tp-color-accent-soft"]};
-  --tp-color-success: ${terminalPlatformDefaultTheme.tokens["--tp-color-success"]};
-  --tp-color-warning: ${terminalPlatformDefaultTheme.tokens["--tp-color-warning"]};
-  --tp-color-danger: ${terminalPlatformDefaultTheme.tokens["--tp-color-danger"]};
-  --tp-color-danger-soft: ${terminalPlatformDefaultTheme.tokens["--tp-color-danger-soft"]};
-  --tp-font-family-ui: ${terminalPlatformDefaultTheme.tokens["--tp-font-family-ui"]};
-  --tp-font-family-mono: ${terminalPlatformDefaultTheme.tokens["--tp-font-family-mono"]};
-  --tp-radius-sm: ${terminalPlatformDefaultTheme.tokens["--tp-radius-sm"]};
-  --tp-radius-md: ${terminalPlatformDefaultTheme.tokens["--tp-radius-md"]};
-  --tp-radius-lg: ${terminalPlatformDefaultTheme.tokens["--tp-radius-lg"]};
-  --tp-space-2: ${terminalPlatformDefaultTheme.tokens["--tp-space-2"]};
-  --tp-space-3: ${terminalPlatformDefaultTheme.tokens["--tp-space-3"]};
-  --tp-space-4: ${terminalPlatformDefaultTheme.tokens["--tp-space-4"]};
-  --tp-space-5: ${terminalPlatformDefaultTheme.tokens["--tp-space-5"]};
-  --tp-shadow-panel: ${terminalPlatformDefaultTheme.tokens["--tp-shadow-panel"]};
-}`;
+export const terminalPlatformThemeManifests = [
+  terminalPlatformDefaultTheme,
+  terminalPlatformLightTheme,
+] as const;
+
+export const terminalPlatformThemeCssText = [
+  createThemeCssRule(":host, :root", terminalPlatformDefaultTheme),
+  ...terminalPlatformThemeManifests.map((theme) =>
+    createThemeCssRule(
+      `:host([${TERMINAL_PLATFORM_THEME_ATTRIBUTE}="${theme.id}"]), :root[${TERMINAL_PLATFORM_THEME_ATTRIBUTE}="${theme.id}"]`,
+      theme,
+    ),
+  ),
+].join("\n\n");
+
+export const terminalPlatformDefaultThemeCssText = terminalPlatformThemeCssText;
+
+function createThemeCssRule(selector: string, theme: ThemeManifest): string {
+  const declarations = Object.entries(theme.tokens)
+    .map(([token, value]) => `  ${token}: ${value};`)
+    .join("\n");
+
+  return `${selector} {\n${declarations}\n}`;
+}

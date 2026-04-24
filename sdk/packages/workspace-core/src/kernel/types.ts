@@ -16,6 +16,7 @@ import type {
   WorkspaceConnectionSnapshot,
   WorkspaceDiagnosticRecord,
   WorkspaceSnapshot,
+  WorkspaceTerminalDisplaySnapshot,
 } from "../read-models/workspace-snapshot.js";
 
 export interface WorkspaceSelectors {
@@ -27,6 +28,7 @@ export interface WorkspaceSelectors {
   attachedSession(): WorkspaceSnapshot["attachedSession"];
   diagnostics(): WorkspaceDiagnosticRecord[];
   themeId(): string;
+  terminalDisplay(): WorkspaceTerminalDisplaySnapshot;
 }
 
 export interface WorkspaceCommands {
@@ -51,6 +53,8 @@ export interface WorkspaceCommands {
   updateDraft(paneId: PaneId, value: string): void;
   clearDraft(paneId: PaneId): void;
   setTheme(themeId: string): void;
+  setTerminalFontScale(fontScale: string): void;
+  setTerminalLineWrap(lineWrap: boolean): void;
   clearDiagnostics(): void;
 }
 
@@ -73,4 +77,8 @@ export interface CreateWorkspaceKernelOptions {
   transport: WorkspaceTransportClient | WorkspaceTransportFactory;
   telemetry?: TelemetrySink;
   now?: () => number;
+  availableThemeIds?: readonly string[];
+  initialThemeId?: string | null;
+  initialTerminalFontScale?: string | null;
+  initialTerminalLineWrap?: boolean | null;
 }

@@ -1,12 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import WebSocket, { WebSocketServer } from "ws";
 
 import { WebSocketTerminalRuntimeSessionStateStream } from "../dist/features/terminal-runtime-host/renderer/adapters/WebSocketTerminalRuntimeSessionStateStream.js";
 
 globalThis.WebSocket ??= WebSocket;
+
+const canBindLoopback = await probeLoopbackTcp();
+const loopbackTestOptions = canBindLoopback
+  ? undefined
+  : { skip: "loopback TCP bind is unavailable in this environment" };
 
 function createSessionState(sequence) {
   return {
@@ -66,7 +72,7 @@ async function waitUntil(predicate, timeoutMs = 2_000) {
   throw new Error("Timed out waiting for condition");
 }
 
-test("session stream reconnects and resubscribes after transient socket loss", async () => {
+test("session stream reconnects and resubscribes after transient socket loss", loopbackTestOptions, async () => {
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(server, "listening");
 
@@ -166,3 +172,25 @@ test("session stream reconnects and resubscribes after transient socket loss", a
     });
   }
 });
+
+async function probeLoopbackTcp() {
+  const server = createServer();
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      server.off("error", onError);
+      server.off("listening", onListening);
+    };
+    const onError = () => {
+      cleanup();
+      resolve(false);
+    };
+    const onListening = () => {
+      cleanup();
+      server.close(() => resolve(true));
+    };
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(0, "127.0.0.1");
+  });
+}

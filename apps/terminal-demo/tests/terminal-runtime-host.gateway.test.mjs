@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { createServer } from "node:net";
 import WebSocket from "ws";
 
 import { TerminalRuntimeGatewayServer } from "../dist/features/terminal-runtime-host/main/adapters/input/TerminalRuntimeGatewayServer.js";
@@ -8,6 +9,11 @@ import {
   TerminalRuntimeControlService,
   TerminalRuntimeSessionStreamService,
 } from "../dist/features/terminal-runtime-host/core/application/index.js";
+
+const canBindLoopback = await probeLoopbackTcp();
+const loopbackTestOptions = canBindLoopback
+  ? undefined
+  : { skip: "loopback TCP bind is unavailable in this environment" };
 
 function createControlClient(url) {
   const socket = new WebSocket(url);
@@ -241,7 +247,7 @@ function createRuntime(overrides = {}) {
   };
 }
 
-test("gateway exposes opaque import handles instead of foreign backend routes", async () => {
+test("gateway exposes opaque import handles instead of foreign backend routes", loopbackTestOptions, async () => {
   const runtime = createRuntime();
   const gateway = await TerminalRuntimeGatewayServer.start({
     runtimeSlug: "terminal-demo",
@@ -285,7 +291,7 @@ test("gateway exposes opaque import handles instead of foreign backend routes", 
   }
 });
 
-test("gateway keeps session state traffic on the stream plane only", async () => {
+test("gateway keeps session state traffic on the stream plane only", loopbackTestOptions, async () => {
   const runtime = createRuntime({
     listSessions: [
       {
@@ -342,3 +348,25 @@ test("gateway keeps session state traffic on the stream plane only", async () =>
     ]);
   }
 });
+
+async function probeLoopbackTcp() {
+  const server = createServer();
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      server.off("error", onError);
+      server.off("listening", onListening);
+    };
+    const onError = () => {
+      cleanup();
+      resolve(false);
+    };
+    const onListening = () => {
+      cleanup();
+      server.close(() => resolve(true));
+    };
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(0, "127.0.0.1");
+  });
+}

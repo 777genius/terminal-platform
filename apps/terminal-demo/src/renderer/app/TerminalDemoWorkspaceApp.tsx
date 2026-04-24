@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
 import { TerminalRuntimeBootstrapErrorView } from "@features/terminal-runtime-host/renderer";
+import { terminalPlatformThemeManifests } from "@terminal-platform/design-tokens";
 import type { CreateSessionRequest, SessionId } from "@terminal-platform/runtime-types";
 import { createWorkspaceWebSocketTransport } from "@terminal-platform/workspace-adapter-websocket";
 import {
@@ -27,6 +28,15 @@ const initialNativeSessionFormState: NativeSessionFormState = {
   args: "",
   cwd: "",
 };
+
+const TERMINAL_DEMO_THEME_STORAGE_KEY = "terminal-platform-demo.theme";
+const TERMINAL_DEMO_FONT_SCALE_STORAGE_KEY = "terminal-platform-demo.terminal-font-scale";
+const TERMINAL_DEMO_LINE_WRAP_STORAGE_KEY = "terminal-platform-demo.terminal-line-wrap";
+const terminalDemoThemeIds = terminalPlatformThemeManifests.map((theme) => theme.id);
+const defaultTerminalDisplay = {
+  fontScale: "default",
+  lineWrap: true,
+} satisfies WorkspaceSnapshot["terminalDisplay"];
 
 export function TerminalDemoWorkspaceApp(props: {
   config: TerminalRuntimeBootstrapConfig;
@@ -72,6 +82,7 @@ export function TerminalDemoWorkspaceScreen(props: {
   const activeHealth = snapshot.attachedSession?.health ?? null;
   const healthSummary = describeSessionHealth(activeHealth?.phase ?? null);
   const activeScreen = snapshot.attachedSession?.focused_screen ?? null;
+  const terminalDisplay = snapshot.terminalDisplay ?? defaultTerminalDisplay;
   const diagnosticsPreview = snapshot.diagnostics.slice(0, 3);
   const advancedNoticeCount = diagnosticsPreview.length + (actionError ? 1 : 0);
 
@@ -81,6 +92,14 @@ export function TerminalDemoWorkspaceScreen(props: {
       // Transport failures are recorded in kernel diagnostics.
     });
   }, [props.kernel]);
+
+  useEffect(() => {
+    persistTerminalDemoThemeId(snapshot.theme.themeId);
+  }, [snapshot.theme.themeId]);
+
+  useEffect(() => {
+    persistTerminalDemoDisplayPreferences(terminalDisplay);
+  }, [terminalDisplay.fontScale, terminalDisplay.lineWrap]);
 
   useEffect(() => {
     const targetSessionId = snapshot.selection.activeSessionId ?? snapshot.catalog.sessions[0]?.session_id ?? null;
@@ -474,6 +493,10 @@ function useDemoWorkspaceKernel(config: TerminalRuntimeBootstrapConfig): Workspa
         controlUrl: config.controlPlaneUrl,
         streamUrl: config.sessionStreamUrl,
       }),
+      availableThemeIds: terminalDemoThemeIds,
+      initialThemeId: readStoredTerminalDemoThemeId(),
+      initialTerminalFontScale: readStoredValue(TERMINAL_DEMO_FONT_SCALE_STORAGE_KEY),
+      initialTerminalLineWrap: readStoredBoolean(TERMINAL_DEMO_LINE_WRAP_STORAGE_KEY),
     });
 
     setKernel(nextKernel);
@@ -485,6 +508,50 @@ function useDemoWorkspaceKernel(config: TerminalRuntimeBootstrapConfig): Workspa
   }, [config.controlPlaneUrl, config.sessionStreamUrl]);
 
   return kernel;
+}
+
+function readStoredTerminalDemoThemeId(): string | null {
+  return readStoredValue(TERMINAL_DEMO_THEME_STORAGE_KEY);
+}
+
+function readStoredValue(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function readStoredBoolean(key: string): boolean | null {
+  const value = readStoredValue(key);
+  if (value === "true") {
+    return true;
+  }
+
+  if (value === "false") {
+    return false;
+  }
+
+  return null;
+}
+
+function persistTerminalDemoThemeId(themeId: string): void {
+  try {
+    window.localStorage.setItem(TERMINAL_DEMO_THEME_STORAGE_KEY, themeId);
+  } catch {
+    // Theme persistence is a convenience and must not affect terminal control.
+  }
+}
+
+function persistTerminalDemoDisplayPreferences(
+  terminalDisplay: WorkspaceSnapshot["terminalDisplay"],
+): void {
+  try {
+    window.localStorage.setItem(TERMINAL_DEMO_FONT_SCALE_STORAGE_KEY, terminalDisplay.fontScale);
+    window.localStorage.setItem(TERMINAL_DEMO_LINE_WRAP_STORAGE_KEY, String(terminalDisplay.lineWrap));
+  } catch {
+    // Display persistence is a convenience and must not affect terminal control.
+  }
 }
 
 function buildNativeSessionRequest(form: NativeSessionFormState): CreateSessionRequest {
@@ -617,9 +684,13 @@ function resolveDefaultShellProgram(): string {
 }
 
 export function createStaticWorkspaceKernel(snapshot: WorkspaceSnapshot): WorkspaceKernel {
+  const normalizedSnapshot = {
+    ...snapshot,
+    terminalDisplay: snapshot.terminalDisplay ?? defaultTerminalDisplay,
+  };
   const noopAsync = async () => {};
   const noopDiagnostics: WorkspaceDiagnostics = {
-    list: () => snapshot.diagnostics,
+    list: () => normalizedSnapshot.diagnostics,
     clear: () => {},
   };
   const noopCommands: WorkspaceCommands = {
@@ -647,21 +718,26 @@ export function createStaticWorkspaceKernel(snapshot: WorkspaceSnapshot): Worksp
     updateDraft: () => {},
     clearDraft: () => {},
     setTheme: () => {},
+    setTerminalFontScale: () => {},
+    setTerminalLineWrap: () => {},
     clearDiagnostics: () => {},
   };
   const noopSelectors: WorkspaceSelectors = {
-    connection: () => snapshot.connection,
-    sessions: () => snapshot.catalog.sessions,
-    savedSessions: () => snapshot.catalog.savedSessions,
-    activeSession: () => snapshot.catalog.sessions.find((item) => item.session_id === snapshot.selection.activeSessionId) ?? null,
-    activePaneId: () => snapshot.selection.activePaneId,
-    attachedSession: () => snapshot.attachedSession,
-    diagnostics: () => snapshot.diagnostics,
-    themeId: () => snapshot.theme.themeId,
+    connection: () => normalizedSnapshot.connection,
+    sessions: () => normalizedSnapshot.catalog.sessions,
+    savedSessions: () => normalizedSnapshot.catalog.savedSessions,
+    activeSession: () => normalizedSnapshot.catalog.sessions.find(
+      (item) => item.session_id === normalizedSnapshot.selection.activeSessionId,
+    ) ?? null,
+    activePaneId: () => normalizedSnapshot.selection.activePaneId,
+    attachedSession: () => normalizedSnapshot.attachedSession,
+    diagnostics: () => normalizedSnapshot.diagnostics,
+    themeId: () => normalizedSnapshot.theme.themeId,
+    terminalDisplay: () => normalizedSnapshot.terminalDisplay,
   };
 
   return {
-    getSnapshot: () => snapshot,
+    getSnapshot: () => normalizedSnapshot,
     subscribe: () => () => {},
     bootstrap: noopAsync,
     dispose: noopAsync,

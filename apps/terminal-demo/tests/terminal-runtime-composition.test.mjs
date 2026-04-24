@@ -116,6 +116,10 @@ test("renderer app mounts the sdk react workspace shell", () => {
     theme: {
       themeId: "terminal-platform-default",
     },
+    terminalDisplay: {
+      fontScale: "default",
+      lineWrap: true,
+    },
   };
   const kernel = createStaticWorkspaceKernel(snapshot);
 

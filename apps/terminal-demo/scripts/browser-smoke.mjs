@@ -15,6 +15,9 @@ const cdpPort = process.env.TERMINAL_DEMO_SMOKE_CDP_PORT ?? "9226";
 const chromeBinary = resolveChromeBinary();
 const screenshotPath = path.join("/tmp", `terminal-demo-browser-smoke-${Date.now()}.png`);
 const chromeUserDataDir = path.join("/tmp", `terminal-demo-browser-smoke-profile-${process.pid}`);
+const themeStorageKey = "terminal-platform-demo.theme";
+const fontScaleStorageKey = "terminal-platform-demo.terminal-font-scale";
+const lineWrapStorageKey = "terminal-platform-demo.terminal-line-wrap";
 
 let previewProcess = null;
 let browserHostProcess = null;
@@ -31,7 +34,10 @@ async function main() {
       env: process.env,
       stdio: "inherit",
     });
-    await waitForServer(rendererUrl);
+    await waitForServer(rendererUrl, {
+      child: previewProcess,
+      label: "Renderer preview",
+    });
 
     const browserUrl = await startBrowserHost(rendererUrl);
 
@@ -46,7 +52,10 @@ async function main() {
       stdio: "pipe",
     });
     pipeProcess(chromeProcess, "[browser-smoke:chrome]");
-    await waitForServer(`http://127.0.0.1:${cdpPort}/json/version`);
+    await waitForServer(`http://127.0.0.1:${cdpPort}/json/version`, {
+      child: chromeProcess,
+      label: "Chrome CDP",
+    });
 
     const result = await runSmokeScenario(browserUrl);
 
@@ -61,6 +70,10 @@ async function main() {
       || !result.afterCreate.hasStatusBar
       || !result.afterCreate.hasCommandDock
       || !result.afterCreate.hasScreenFollowControls
+      || !result.afterCreate.hasScreenSearchControls
+      || !result.afterCreate.hasScreenCopyControl
+      || !result.afterCreate.hasSaveLayoutControl
+      || !result.afterCreate.hasDisplayControls
       || !result.afterCreate.screenFollowPressed
       || result.afterCreate.savedItemsRendered > 8
       || (result.afterCreate.savedSessionCount > 8 && !result.afterCreate.hasSavedPagination)
@@ -85,6 +98,53 @@ async function main() {
           afterSavedPagination: result.afterSavedPagination,
         })}`);
       }
+    }
+
+    if (
+      !result.afterThemeSwitch.clicked
+      || result.afterThemeSwitch.themeId !== "terminal-platform-light"
+      || result.afterThemeSwitch.workspaceTheme !== "terminal-platform-light"
+      || result.afterThemeSwitch.screenTheme !== "terminal-platform-light"
+      || result.afterThemeSwitch.activeThemeButton !== "terminal-platform-light"
+      || result.afterThemeSwitch.screenBgToken !== "#f6f8fb"
+      || result.afterThemeSwitch.storedTheme !== "terminal-platform-light"
+    ) {
+      throw new Error(`Theme switch did not apply to SDK elements: ${JSON.stringify(result.afterThemeSwitch)}`);
+    }
+
+    if (
+      !result.afterDisplaySwitch.clicked
+      || result.afterDisplaySwitch.fontScale !== "large"
+      || result.afterDisplaySwitch.lineWrap !== false
+      || result.afterDisplaySwitch.screenFontScale !== "large"
+      || result.afterDisplaySwitch.screenLineWrap !== "false"
+      || result.afterDisplaySwitch.activeFontScaleButton !== "large"
+      || result.afterDisplaySwitch.wrapPressed !== "false"
+      || result.afterDisplaySwitch.storedFontScale !== "large"
+      || result.afterDisplaySwitch.storedLineWrap !== "false"
+    ) {
+      throw new Error(`Terminal display preferences did not apply to SDK elements: ${JSON.stringify(result.afterDisplaySwitch)}`);
+    }
+
+    if (
+      !result.afterSaveLayout.clicked
+      || result.afterSaveLayout.savedSessionCount < result.afterSaveLayout.beforeSavedSessionCount
+      || result.afterSaveLayout.savedItemsRendered < 1
+      || !result.afterSaveLayout.deletePrompted
+      || result.afterSaveLayout.savedSessionCountAfterDeletePrompt !== result.afterSaveLayout.savedSessionCount
+      || result.afterSaveLayout.saveEventDetail?.savedSessionCount !== result.afterSaveLayout.savedSessionCount
+    ) {
+      throw new Error(`Save layout workflow did not complete: ${JSON.stringify(result.afterSaveLayout)}`);
+    }
+
+    if (
+      !result.afterScreenSearch.searched
+      || result.afterScreenSearch.matchCount < 1
+      || !result.afterScreenSearch.hasHighlights
+      || !result.afterScreenSearch.hasActiveHighlight
+      || !result.afterScreenSearch.nextClicked
+    ) {
+      throw new Error(`Terminal screen search did not highlight output: ${JSON.stringify(result.afterScreenSearch)}`);
     }
 
     if (
@@ -206,10 +266,14 @@ async function runSmokeScenario(browserUrl) {
       const statusRoot = workspaceRoot?.querySelector('tp-terminal-status-bar')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
+      const toolbarRoot = workspaceRoot?.querySelector('tp-terminal-toolbar')?.shadowRoot ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
       const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
+      const screenSearch = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
+      const screenCopy = screenRoot?.querySelector('[data-testid="tp-screen-copy"]') ?? null;
       const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      const saveLayout = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : (screenRoot?.querySelector('[part=\"screen-lines\"]')?.textContent?.trim() ?? null);
@@ -227,6 +291,13 @@ async function runSmokeScenario(browserUrl) {
           ? String(debug.attachedSession.focused_screen.sequence)
           : null,
         hasScreenFollowControls: Boolean(screenFollow && screenRoot?.querySelector('[data-testid="tp-screen-scroll-latest"]')),
+        hasScreenSearchControls: Boolean(screenSearch),
+        hasScreenCopyControl: Boolean(screenCopy && !screenCopy.disabled),
+        hasSaveLayoutControl: Boolean(saveLayout && !saveLayout.disabled),
+        hasDisplayControls: Boolean(
+          toolbarRoot?.querySelector('[data-testid="tp-font-scale-option"][data-font-scale="large"]')
+          && toolbarRoot?.querySelector('[data-testid="tp-line-wrap-option"]')
+        ),
         screenFollowPressed: screenFollow?.getAttribute('aria-pressed') === 'true',
         screenViewportAtBottom: screenViewport
           ? screenViewport.scrollHeight - screenViewport.scrollTop - screenViewport.clientHeight <= 2
@@ -240,6 +311,46 @@ async function runSmokeScenario(browserUrl) {
     })()`);
 
     const initialSequence = afterCreate.focusedSequence;
+    const afterScreenSearch = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
+      const searchInput = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
+      const terminalScreenText = window.terminalDemoDebug?.getState?.()?.attachedSession?.focused_screen?.surface?.lines
+        ?.map((line) => line.text)
+        .join('\\n')
+        .trim() ?? '';
+      const query = terminalScreenText.match(/[A-Za-z0-9_-]{3,}/)?.[0] ?? '';
+      if (!searchInput || !query) {
+        return {
+          searched: false,
+          reason: searchInput ? 'query missing' : 'search input missing',
+          matchCount: 0,
+          hasHighlights: false,
+        };
+      }
+
+      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+      descriptor?.set?.call(searchInput, query);
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const nextButton = screenRoot?.querySelector('[data-testid="tp-screen-search-next"]') ?? null;
+      const nextClicked = Boolean(nextButton && !nextButton.disabled);
+      if (nextClicked) {
+        nextButton.click();
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }
+      const countText = screenRoot?.querySelector('[part="search-count"]')?.textContent?.trim() ?? '';
+      return {
+        searched: true,
+        query,
+        countText,
+        matchCount: Number.parseInt(countText, 10) || 0,
+        hasHighlights: Boolean(screenRoot?.querySelector('[part="search-match"]')),
+        hasActiveHighlight: Boolean(screenRoot?.querySelector('[part~="active-search-match"]')),
+        nextClicked,
+      };
+    })()`);
+
     const afterSavedPagination = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
@@ -260,6 +371,139 @@ async function runSmokeScenario(browserUrl) {
         savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
         hasCollapse: Boolean(savedRoot?.querySelector('[part="collapse"]')),
         summaryText: savedRoot?.querySelector('[part="list-summary"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+      };
+    })()`);
+
+    const afterThemeSwitch = await evaluate(send, `(async () => {
+      const debug = window.terminalDemoDebug?.getState?.();
+      const workspaceHost = document.querySelector('tp-terminal-workspace');
+      const workspaceRoot = workspaceHost?.shadowRoot ?? null;
+      const toolbarRoot = workspaceRoot?.querySelector('tp-terminal-toolbar')?.shadowRoot ?? null;
+      const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const commandDockHost = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
+      const themeButton = [...(toolbarRoot?.querySelectorAll('[part="theme-option"]') ?? [])]
+        .find((button) => button.getAttribute('data-theme-id') === 'terminal-platform-light') ?? null;
+      if (!themeButton) {
+        return {
+          clicked: false,
+          reason: 'light theme button missing',
+          themeId: debug?.theme?.themeId ?? null,
+        };
+      }
+
+      themeButton.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      return {
+        clicked: true,
+        themeId: window.terminalDemoDebug?.getState?.()?.theme?.themeId ?? null,
+        workspaceTheme: workspaceHost?.getAttribute('data-tp-theme') ?? null,
+        screenTheme: screenHost?.getAttribute('data-tp-theme') ?? null,
+        commandDockTheme: commandDockHost?.getAttribute('data-tp-theme') ?? null,
+        activeThemeButton: toolbarRoot?.querySelector('[part="theme-option"][aria-pressed="true"]')
+          ?.getAttribute('data-theme-id') ?? null,
+        storedTheme: window.localStorage.getItem(${JSON.stringify(themeStorageKey)}),
+        screenBgToken: screenHost
+          ? getComputedStyle(screenHost).getPropertyValue('--tp-color-bg').trim()
+          : null,
+      };
+    })()`);
+
+    const afterDisplaySwitch = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const toolbarRoot = workspaceRoot?.querySelector('tp-terminal-toolbar')?.shadowRoot ?? null;
+      const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const largeButton = toolbarRoot?.querySelector('[data-testid="tp-font-scale-option"][data-font-scale="large"]') ?? null;
+      const wrapButton = toolbarRoot?.querySelector('[data-testid="tp-line-wrap-option"]') ?? null;
+      if (!largeButton || !wrapButton) {
+        return {
+          clicked: false,
+          reason: largeButton ? 'wrap button missing' : 'large font button missing',
+        };
+      }
+
+      largeButton.click();
+      if (wrapButton.getAttribute('aria-pressed') === 'true') {
+        wrapButton.click();
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      const state = window.terminalDemoDebug?.getState?.();
+      return {
+        clicked: true,
+        fontScale: state?.terminalDisplay?.fontScale ?? null,
+        lineWrap: state?.terminalDisplay?.lineWrap ?? null,
+        screenFontScale: screenHost?.getAttribute('data-font-scale') ?? null,
+        screenLineWrap: screenHost?.getAttribute('data-line-wrap') ?? null,
+        activeFontScaleButton: toolbarRoot?.querySelector('[part="font-scale-option"][aria-pressed="true"]')
+          ?.getAttribute('data-font-scale') ?? null,
+        wrapPressed: wrapButton.getAttribute('aria-pressed'),
+        storedFontScale: window.localStorage.getItem(${JSON.stringify(fontScaleStorageKey)}),
+        storedLineWrap: window.localStorage.getItem(${JSON.stringify(lineWrapStorageKey)}),
+      };
+    })()`);
+
+    const afterSaveLayout = await evaluate(send, `(async () => {
+      const beforeSavedSessionCount = window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
+      const workspaceHost = document.querySelector('tp-terminal-workspace') ?? null;
+      const workspaceRoot = workspaceHost?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
+      const sessionTools = commandRoot?.querySelector('[data-testid="tp-session-tools"]') ?? null;
+      const saveLayoutButton = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
+      if (!sessionTools || !saveLayoutButton) {
+        return {
+          clicked: false,
+          reason: sessionTools ? 'save layout button missing' : 'session tools missing',
+          beforeSavedSessionCount,
+          savedSessionCount: beforeSavedSessionCount,
+          savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
+        };
+      }
+
+      sessionTools.open = true;
+      let saveEventDetail = null;
+      workspaceHost?.addEventListener('tp-terminal-layout-saved', (event) => {
+        saveEventDetail = event.detail ?? null;
+      }, { once: true });
+      if (saveLayoutButton.disabled) {
+        return {
+          clicked: false,
+          reason: 'save layout disabled',
+          beforeSavedSessionCount,
+          savedSessionCount: beforeSavedSessionCount,
+          savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
+        };
+      }
+
+      saveLayoutButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 850));
+      const state = window.terminalDemoDebug?.getState?.();
+      const deleteButton = savedRoot?.querySelector('[data-testid="tp-delete-saved-session"]') ?? null;
+      const savedSessionCount = state?.catalog?.savedSessions?.length ?? 0;
+      const deletePromptResult = {
+        deletePrompted: false,
+        deleteButtonText: deleteButton?.textContent?.trim() ?? null,
+        savedSessionCountAfterDeletePrompt: savedSessionCount,
+      };
+      if (deleteButton && !deleteButton.disabled) {
+        deleteButton.click();
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        deletePromptResult.deletePrompted = deleteButton.getAttribute('data-confirming') === 'true'
+          && /confirm delete/i.test(deleteButton.textContent ?? '');
+        deletePromptResult.deleteButtonText = deleteButton.textContent?.trim() ?? null;
+        deletePromptResult.savedSessionCountAfterDeletePrompt =
+          window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
+      }
+
+      return {
+        clicked: true,
+        beforeSavedSessionCount,
+        savedSessionCount,
+        savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
+        firstSavedTitle: state?.catalog?.savedSessions?.[0]?.title ?? null,
+        saveEventDetail,
+        ...deletePromptResult,
       };
     })()`);
 
@@ -410,7 +654,11 @@ async function runSmokeScenario(browserUrl) {
     return {
       before,
       afterCreate,
+      afterScreenSearch,
       afterSavedPagination,
+      afterThemeSwitch,
+      afterDisplaySwitch,
+      afterSaveLayout,
       afterCommand: {
         ...afterCommand,
         sequenceAdvanced: initialSequence !== null
@@ -528,10 +776,15 @@ function runSync(command, args, cwd) {
   }
 }
 
-async function waitForServer(url) {
+async function waitForServer(url, options = {}) {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < 20_000) {
+    const exitState = processExitState(options.child);
+    if (exitState) {
+      throw new Error(`${options.label ?? "Server"} exited before ${url} became ready - ${exitState}`);
+    }
+
     try {
       const response = await fetch(url, { method: "GET" });
       if (response.ok) {
@@ -545,6 +798,22 @@ async function waitForServer(url) {
   }
 
   throw new Error(`Timed out waiting for ${url}`);
+}
+
+function processExitState(child) {
+  if (!child) {
+    return null;
+  }
+
+  if (child.exitCode !== null) {
+    return `exit code ${child.exitCode}`;
+  }
+
+  if (child.signalCode !== null) {
+    return `signal ${child.signalCode}`;
+  }
+
+  return null;
 }
 
 function onceSocketOpen(socket) {

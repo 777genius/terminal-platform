@@ -256,13 +256,21 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           </div>
         </div>
 
-        <details part="session-tools">
+        <details part="session-tools" data-testid="tp-session-tools">
           <summary>Session tools</summary>
           <div class="actions">
-            <button ?disabled=${!activeSessionId || this.pending} @click=${() => this.saveLayout()}>
+            <button
+              data-testid="tp-save-layout"
+              ?disabled=${!activeSessionId || this.pending}
+              @click=${() => this.saveLayout()}
+            >
               Save layout
             </button>
-            <button ?disabled=${!activeSessionId || this.pending} @click=${() => this.refreshActiveSession()}>
+            <button
+              data-testid="tp-refresh-terminal"
+              ?disabled=${!activeSessionId || this.pending}
+              @click=${() => this.refreshActiveSession()}
+            >
               Refresh terminal
             </button>
           </div>
@@ -449,8 +457,27 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     try {
       await this.kernel?.commands.dispatchMuxCommand(sessionId, { kind: "save_session" });
       await this.kernel?.commands.refreshSavedSessions();
+      const savedSessions = this.kernel?.getSnapshot().catalog.savedSessions ?? [];
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-layout-saved", {
+          bubbles: true,
+          composed: true,
+          detail: {
+            sessionId,
+            savedSessionCount: savedSessions.length,
+            savedSessionId: savedSessions[0]?.session_id ?? null,
+          },
+        }),
+      );
     } catch (error) {
       this.actionError = getErrorMessage(error);
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-layout-save-failed", {
+          bubbles: true,
+          composed: true,
+          detail: { sessionId, error },
+        }),
+      );
     } finally {
       this.pending = false;
     }
@@ -467,8 +494,22 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
     try {
       await this.kernel?.commands.attachSession(sessionId);
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-session-refreshed", {
+          bubbles: true,
+          composed: true,
+          detail: { sessionId },
+        }),
+      );
     } catch (error) {
       this.actionError = getErrorMessage(error);
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-session-refresh-failed", {
+          bubbles: true,
+          composed: true,
+          detail: { sessionId, error },
+        }),
+      );
     } finally {
       this.pending = false;
     }

@@ -50,6 +50,7 @@ export function createMemoryWorkspaceTransport(
   const state = structuredClone(options.fixture ?? createDefaultMemoryWorkspaceFixture());
   let closed = false;
   let syntheticCounter = state.sessions.length;
+  let savedSessionCounter = resolveInitialSavedSessionCounter(state.savedSessions);
 
   return {
     async handshake() {
@@ -173,8 +174,15 @@ export function createMemoryWorkspaceTransport(
       };
       return clone(delta);
     },
-    async dispatchMuxCommand() {
+    async dispatchMuxCommand(sessionId, command) {
       assertOpen();
+      if (command.kind === "send_input" || command.kind === "send_paste") {
+        appendSyntheticInputToScreen(state, sessionId, command.pane_id, command.data, command.kind);
+      }
+      if (command.kind === "save_session") {
+        savedSessionCounter += 1;
+        saveSessionSnapshot(state, sessionId, savedSessionCounter);
+      }
       const result: MuxCommandResult = { changed: true };
       return clone(result);
     },
@@ -441,11 +449,17 @@ function createSavedSessionRecord(
   session: SessionSummary,
   topology: TopologySnapshot,
   screen: ScreenSnapshot,
+  options: {
+    savedSessionId?: SessionId;
+    savedAtMs?: bigint;
+    title?: string | null;
+    screens?: readonly ScreenSnapshot[];
+  } = {},
 ): SavedSessionRecord {
   return {
-    session_id: session.session_id,
+    session_id: options.savedSessionId ?? session.session_id,
     route: session.route,
-    title: session.title,
+    title: options.title ?? session.title,
     launch: {
       program: "/bin/sh",
       args: [],
@@ -461,9 +475,9 @@ function createSavedSessionRecord(
       can_restore: true,
       status: "compatible",
     },
-    topology,
-    screens: [screen],
-    saved_at_ms: 1n,
+    topology: clone(topology),
+    screens: clone([...(options.screens ?? [screen])]),
+    saved_at_ms: options.savedAtMs ?? 1n,
     restore_semantics: {
       restores_topology: true,
       restores_focus_state: true,
@@ -517,6 +531,112 @@ function seedSessionArtifacts(
     topology,
     focused_screen: screen,
   };
+}
+
+function appendSyntheticInputToScreen(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  paneId: PaneId,
+  data: string,
+  kind: "send_input" | "send_paste",
+): void {
+  const screens = requireRecord(state.screensBySessionId, sessionId, "screen collection");
+  const screen = requireRecord(screens, paneId, "screen snapshot");
+  const renderedLines = renderSyntheticInputLines(data, kind);
+
+  if (renderedLines.length === 0) {
+    return;
+  }
+
+  screen.sequence += 1n;
+  screen.surface.lines = [...screen.surface.lines, ...renderedLines]
+    .slice(-screen.rows);
+
+  const cursorRow = Math.max(0, screen.surface.lines.length - 1);
+  screen.surface.cursor = {
+    row: cursorRow,
+    col: screen.surface.lines[cursorRow]?.text.length ?? 0,
+  };
+
+  const attachedSession = state.attachedSessions[sessionId];
+  if (attachedSession?.focused_screen?.pane_id === paneId) {
+    attachedSession.focused_screen = screen;
+  }
+}
+
+function saveSessionSnapshot(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  savedSessionIndex: number,
+): void {
+  const session = state.sessions.find((candidate) => candidate.session_id === sessionId);
+  if (!session) {
+    throw new WorkspaceError({
+      code: "session_not_found",
+      message: `missing session for ${sessionId}`,
+      recoverable: false,
+    });
+  }
+
+  const topology = requireRecord(state.topologyBySessionId, sessionId, "topology snapshot");
+  const screens = Object.values(requireRecord(state.screensBySessionId, sessionId, "screen collection"));
+  const focusedPaneId = state.attachedSessions[sessionId]?.focused_screen?.pane_id;
+  const focusedScreen = screens.find((screen) => screen.pane_id === focusedPaneId) ?? screens[0];
+  if (!focusedScreen) {
+    throw new WorkspaceError({
+      code: "session_not_found",
+      message: `missing screen snapshot for ${sessionId}`,
+      recoverable: false,
+    });
+  }
+
+  const savedSessionId = `${sessionId}-saved-${savedSessionIndex}`;
+  const record = createSavedSessionRecord(session, topology, focusedScreen, {
+    savedSessionId,
+    savedAtMs: BigInt(savedSessionIndex),
+    title: `${session.title ?? session.session_id} snapshot ${savedSessionIndex}`,
+    screens,
+  });
+
+  state.savedSessionRecords[savedSessionId] = record;
+  state.savedSessions = [
+    savedSessionToSummary(record),
+    ...state.savedSessions.filter((savedSession) => savedSession.session_id !== savedSessionId),
+  ];
+}
+
+function resolveInitialSavedSessionCounter(savedSessions: readonly SavedSessionSummary[]): number {
+  return savedSessions.reduce((maxCounter, savedSession) => {
+    const suffixMatch = /-saved-(\d+)$/u.exec(savedSession.session_id);
+    if (!suffixMatch) {
+      return maxCounter;
+    }
+
+    const parsedCounter = Number.parseInt(suffixMatch[1]!, 10);
+    return Number.isSafeInteger(parsedCounter)
+      ? Math.max(maxCounter, parsedCounter)
+      : maxCounter;
+  }, savedSessions.length);
+}
+
+function renderSyntheticInputLines(
+  data: string,
+  kind: "send_input" | "send_paste",
+): ScreenSurface["lines"] {
+  const normalizedData = data.replace(/\r\n?/gu, "\n");
+  if (normalizedData === "\u0003") {
+    return [{ text: "^C" }];
+  }
+
+  const trimmedData = normalizedData.replace(/\s+$/u, "");
+  if (!trimmedData) {
+    return [{ text: "" }];
+  }
+
+  const prefix = kind === "send_paste" ? "paste" : "$";
+  return trimmedData.split("\n").map((line, index) => ({
+    text: index === 0 ? `${prefix} ${line}` : line,
+  }));
 }
 
 function seedSavedSessionArtifacts(state: MemoryWorkspaceFixture, record: SavedSessionRecord): void {
