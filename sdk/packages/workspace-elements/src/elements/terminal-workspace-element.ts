@@ -101,12 +101,12 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           </div>
           <div class="content" part="content">
             <tp-terminal-screen .kernel=${this.kernel}></tp-terminal-screen>
+            <tp-terminal-pane-tree .kernel=${this.kernel}></tp-terminal-pane-tree>
             <tp-terminal-command-dock .kernel=${this.kernel}></tp-terminal-command-dock>
 
             <details class="secondary-toggle workspace-tools">
               <summary>Workspace tools</summary>
               <div class="advanced-stack">
-                <tp-terminal-pane-tree .kernel=${this.kernel}></tp-terminal-pane-tree>
                 <tp-terminal-toolbar .kernel=${this.kernel}></tp-terminal-toolbar>
               </div>
             </details>

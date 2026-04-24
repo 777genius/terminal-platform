@@ -9,6 +9,7 @@ import type {
   MuxCommand,
   MuxCommandResult,
   PaneId,
+  PaneTreeNode,
   ProjectionSource,
   PruneSavedSessionsResult,
   RestoredSession,
@@ -20,9 +21,11 @@ import type {
   SessionId,
   SessionRoute,
   SessionSummary,
+  SplitDirection,
   SubscriptionEvent,
   SubscriptionMeta,
   SubscriptionSpec,
+  TabSnapshot,
   TopologySnapshot,
 } from "@terminal-platform/runtime-types";
 import type { WorkspaceSubscription, WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
@@ -50,6 +53,7 @@ export function createMemoryWorkspaceTransport(
   const state = structuredClone(options.fixture ?? createDefaultMemoryWorkspaceFixture());
   let closed = false;
   let syntheticCounter = state.sessions.length;
+  let topologyMutationCounter = countTopologyLeaves(state.topologyBySessionId) + countTopologyTabs(state.topologyBySessionId);
   let savedSessionCounter = resolveInitialSavedSessionCounter(state.savedSessions);
 
   return {
@@ -178,6 +182,23 @@ export function createMemoryWorkspaceTransport(
       assertOpen();
       if (command.kind === "send_input" || command.kind === "send_paste") {
         appendSyntheticInputToScreen(state, sessionId, command.pane_id, command.data, command.kind);
+      }
+      if (command.kind === "new_tab") {
+        topologyMutationCounter += 1;
+        addSyntheticTab(state, sessionId, topologyMutationCounter, command.title);
+      }
+      if (command.kind === "split_pane") {
+        topologyMutationCounter += 1;
+        splitSyntheticPane(state, sessionId, topologyMutationCounter, command.pane_id, command.direction);
+      }
+      if (command.kind === "focus_pane") {
+        focusSyntheticPane(state, sessionId, command.pane_id);
+      }
+      if (command.kind === "focus_tab") {
+        focusSyntheticTab(state, sessionId, command.tab_id);
+      }
+      if (command.kind === "rename_tab") {
+        renameSyntheticTab(state, sessionId, command.tab_id, command.title);
       }
       if (command.kind === "save_session") {
         savedSessionCounter += 1;
@@ -564,6 +585,199 @@ function appendSyntheticInputToScreen(
   }
 }
 
+function addSyntheticTab(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  mutationIndex: number,
+  title: string | null,
+): void {
+  const topology = requireRecord(state.topologyBySessionId, sessionId, "topology snapshot");
+  const paneId = `${sessionId}-pane-${mutationIndex}`;
+  const tab: TabSnapshot = {
+    tab_id: `${sessionId}-tab-${mutationIndex}`,
+    title,
+    root: {
+      kind: "leaf",
+      pane_id: paneId,
+    },
+    focused_pane: paneId,
+  };
+  const screen = createScreenSnapshot(paneId, title, "ready");
+
+  topology.tabs.push(tab);
+  topology.focused_tab = tab.tab_id;
+  requireRecord(state.screensBySessionId, sessionId, "screen collection")[paneId] = screen;
+  updateAttachedSessionFocus(state, sessionId, topology, screen);
+}
+
+function splitSyntheticPane(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  mutationIndex: number,
+  paneId: PaneId,
+  direction: SplitDirection,
+): void {
+  const topology = requireRecord(state.topologyBySessionId, sessionId, "topology snapshot");
+  const tab = topology.tabs.find((candidate) => containsPane(candidate.root, paneId));
+  if (!tab) {
+    throw new WorkspaceError({
+      code: "pane_not_found",
+      message: `missing pane for ${paneId}`,
+      recoverable: false,
+    });
+  }
+
+  const nextPaneId = `${sessionId}-pane-${mutationIndex}`;
+  const changed = splitPaneTreeLeaf(tab.root, paneId, direction, nextPaneId);
+  if (!changed) {
+    throw new WorkspaceError({
+      code: "pane_not_found",
+      message: `missing pane for ${paneId}`,
+      recoverable: false,
+    });
+  }
+
+  const screen = createScreenSnapshot(nextPaneId, tab.title, "ready");
+  tab.focused_pane = nextPaneId;
+  topology.focused_tab = tab.tab_id;
+  requireRecord(state.screensBySessionId, sessionId, "screen collection")[nextPaneId] = screen;
+  updateAttachedSessionFocus(state, sessionId, topology, screen);
+}
+
+function focusSyntheticPane(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  paneId: PaneId,
+): void {
+  const topology = requireRecord(state.topologyBySessionId, sessionId, "topology snapshot");
+  const tab = topology.tabs.find((candidate) => containsPane(candidate.root, paneId));
+  if (!tab) {
+    throw new WorkspaceError({
+      code: "pane_not_found",
+      message: `missing pane for ${paneId}`,
+      recoverable: false,
+    });
+  }
+
+  const screen = requireRecord(
+    requireRecord(state.screensBySessionId, sessionId, "screen collection"),
+    paneId,
+    "screen snapshot",
+  );
+  tab.focused_pane = paneId;
+  topology.focused_tab = tab.tab_id;
+  updateAttachedSessionFocus(state, sessionId, topology, screen);
+}
+
+function focusSyntheticTab(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  tabId: string,
+): void {
+  const topology = requireRecord(state.topologyBySessionId, sessionId, "topology snapshot");
+  const tab = topology.tabs.find((candidate) => candidate.tab_id === tabId);
+  if (!tab) {
+    throw new WorkspaceError({
+      code: "session_not_found",
+      message: `missing tab for ${tabId}`,
+      recoverable: false,
+    });
+  }
+
+  const paneId = tab.focused_pane ?? firstPaneId(tab.root);
+  const screen = requireRecord(
+    requireRecord(state.screensBySessionId, sessionId, "screen collection"),
+    paneId,
+    "screen snapshot",
+  );
+  tab.focused_pane = paneId;
+  topology.focused_tab = tab.tab_id;
+  updateAttachedSessionFocus(state, sessionId, topology, screen);
+}
+
+function renameSyntheticTab(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  tabId: string,
+  title: string,
+): void {
+  const topology = requireRecord(state.topologyBySessionId, sessionId, "topology snapshot");
+  const tab = topology.tabs.find((candidate) => candidate.tab_id === tabId);
+  if (!tab) {
+    throw new WorkspaceError({
+      code: "session_not_found",
+      message: `missing tab for ${tabId}`,
+      recoverable: false,
+    });
+  }
+
+  tab.title = title;
+  const attachedSession = state.attachedSessions[sessionId];
+  if (attachedSession) {
+    attachedSession.topology = topology;
+  }
+}
+
+function updateAttachedSessionFocus(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  topology: TopologySnapshot,
+  screen: ScreenSnapshot,
+): void {
+  const attachedSession = state.attachedSessions[sessionId];
+  if (attachedSession) {
+    attachedSession.topology = topology;
+    attachedSession.focused_screen = screen;
+  }
+}
+
+function splitPaneTreeLeaf(
+  node: PaneTreeNode,
+  paneId: PaneId,
+  direction: SplitDirection,
+  nextPaneId: PaneId,
+): boolean {
+  if (node.kind === "leaf") {
+    if (node.pane_id !== paneId) {
+      return false;
+    }
+
+    delete (node as { pane_id?: PaneId }).pane_id;
+    Object.assign(node, {
+      kind: "split",
+      direction,
+      first: {
+        kind: "leaf",
+        pane_id: paneId,
+      },
+      second: {
+        kind: "leaf",
+        pane_id: nextPaneId,
+      },
+    });
+    return true;
+  }
+
+  return splitPaneTreeLeaf(node.first, paneId, direction, nextPaneId)
+    || splitPaneTreeLeaf(node.second, paneId, direction, nextPaneId);
+}
+
+function containsPane(node: PaneTreeNode, paneId: PaneId): boolean {
+  if (node.kind === "leaf") {
+    return node.pane_id === paneId;
+  }
+
+  return containsPane(node.first, paneId) || containsPane(node.second, paneId);
+}
+
+function firstPaneId(node: PaneTreeNode): PaneId {
+  if (node.kind === "leaf") {
+    return node.pane_id;
+  }
+
+  return firstPaneId(node.first);
+}
+
 function saveSessionSnapshot(
   state: MemoryWorkspaceFixture,
   sessionId: SessionId,
@@ -617,6 +831,31 @@ function resolveInitialSavedSessionCounter(savedSessions: readonly SavedSessionS
       ? Math.max(maxCounter, parsedCounter)
       : maxCounter;
   }, savedSessions.length);
+}
+
+function countTopologyTabs(topologyBySessionId: Record<string, TopologySnapshot>): number {
+  return Object.values(topologyBySessionId).reduce(
+    (count, topology) => count + topology.tabs.length,
+    0,
+  );
+}
+
+function countTopologyLeaves(topologyBySessionId: Record<string, TopologySnapshot>): number {
+  return Object.values(topologyBySessionId).reduce(
+    (count, topology) => count + topology.tabs.reduce(
+      (tabCount, tab) => tabCount + countPaneTreeLeaves(tab.root),
+      0,
+    ),
+    0,
+  );
+}
+
+function countPaneTreeLeaves(node: PaneTreeNode): number {
+  if (node.kind === "leaf") {
+    return 1;
+  }
+
+  return countPaneTreeLeaves(node.first) + countPaneTreeLeaves(node.second);
 }
 
 function renderSyntheticInputLines(

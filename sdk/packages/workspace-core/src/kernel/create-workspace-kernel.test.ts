@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { BackendCapabilitiesInfo, BackendKind, Handshake } from "@terminal-platform/runtime-types";
 import type { WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
 
 import { createWorkspaceKernel } from "./create-workspace-kernel.js";
@@ -191,8 +192,128 @@ describe("createWorkspaceKernel terminal display preferences", () => {
   });
 });
 
+describe("createWorkspaceKernel bootstrap", () => {
+  it("loads advertised backend capabilities into the workspace catalog", async () => {
+    const requestedBackends: BackendKind[] = [];
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        handshake: async () => createHandshake(["native", "tmux"]),
+        listSessions: async () => [],
+        listSavedSessions: async () => [],
+        getBackendCapabilities: async (backend: BackendKind) => {
+          requestedBackends.push(backend);
+          return createCapabilities(backend);
+        },
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.bootstrap();
+
+    expect(requestedBackends).toEqual(["native", "tmux"]);
+    expect(kernel.getSnapshot().catalog.backendCapabilities.native?.backend).toBe("native");
+    expect(kernel.getSnapshot().catalog.backendCapabilities.tmux?.backend).toBe("tmux");
+
+    await kernel.dispose();
+  });
+
+  it("keeps bootstrap usable when one capability probe fails", async () => {
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        handshake: async () => createHandshake(["native", "zellij"]),
+        listSessions: async () => [],
+        listSavedSessions: async () => [],
+        getBackendCapabilities: async (backend: BackendKind) => {
+          if (backend === "zellij") {
+            throw new Error("zellij unavailable");
+          }
+
+          return createCapabilities(backend);
+        },
+      } as WorkspaceTransportClient,
+      now: () => 6000,
+    });
+
+    await kernel.bootstrap();
+
+    expect(kernel.selectors.connection().state).toBe("ready");
+    expect(kernel.getSnapshot().catalog.backendCapabilities.native?.backend).toBe("native");
+    expect(kernel.diagnostics.list()).toEqual([
+      {
+        code: "transport_failed",
+        message: "zellij unavailable",
+        recoverable: true,
+        severity: "error",
+        timestampMs: 6000,
+        cause: expect.any(Error),
+      },
+    ]);
+
+    await kernel.dispose();
+  });
+});
+
 function createUnusedTransport(): WorkspaceTransportClient {
   return {
     close: async () => {},
   } as unknown as WorkspaceTransportClient;
+}
+
+function createHandshake(availableBackends: BackendKind[]): Handshake {
+  return {
+    protocol_version: {
+      major: 0,
+      minor: 2,
+    },
+    binary_version: "0.1.0-test",
+    daemon_phase: "ready",
+    capabilities: {
+      request_reply: true,
+      topology_subscriptions: true,
+      pane_subscriptions: true,
+      backend_discovery: true,
+      backend_capability_queries: true,
+      saved_sessions: true,
+      session_restore: true,
+      degraded_error_reasons: true,
+      session_health: true,
+    },
+    available_backends: availableBackends,
+    session_scope: "test",
+  };
+}
+
+function createCapabilities(backend: BackendKind): BackendCapabilitiesInfo {
+  return {
+    backend,
+    capabilities: {
+      tiled_panes: true,
+      floating_panes: false,
+      split_resize: true,
+      tab_create: true,
+      tab_close: true,
+      tab_focus: true,
+      tab_rename: true,
+      session_scoped_tab_refs: true,
+      session_scoped_pane_refs: true,
+      pane_split: true,
+      pane_close: true,
+      pane_focus: true,
+      pane_input_write: true,
+      pane_paste_write: true,
+      raw_output_stream: false,
+      rendered_viewport_stream: true,
+      rendered_viewport_snapshot: true,
+      rendered_scrollback_snapshot: false,
+      layout_dump: true,
+      layout_override: true,
+      read_only_client_mode: false,
+      explicit_session_save: true,
+      explicit_session_restore: true,
+      plugin_panes: false,
+      advisory_metadata_subscriptions: true,
+      independent_resize_authority: true,
+    },
+  };
 }

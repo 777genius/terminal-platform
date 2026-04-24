@@ -100,6 +100,58 @@ describe("createMemoryWorkspaceTransport command projection", () => {
     await transport.close();
   });
 
+  it("projects tab, split, focus, and rename commands into topology snapshots", async () => {
+    const transport = createMemoryWorkspaceTransport();
+    const session = (await transport.listSessions())[0]!;
+    const initial = await transport.attachSession(session.session_id);
+    const initialPaneId = initial.focused_screen!.pane_id;
+    const initialTabId = initial.topology.tabs[0]!.tab_id;
+
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "new_tab",
+      title: "logs",
+    });
+    const afterNewTab = await transport.attachSession(session.session_id);
+    const createdTab = afterNewTab.topology.tabs.find((tab) => tab.tab_id !== initialTabId)!;
+    expect(afterNewTab.topology.tabs).toHaveLength(2);
+    expect(afterNewTab.topology.focused_tab).toBe(createdTab.tab_id);
+    expect(afterNewTab.focused_screen?.pane_id).toBe(createdTab.focused_pane);
+
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "split_pane",
+      pane_id: createdTab.focused_pane!,
+      direction: "horizontal",
+    });
+    const afterSplit = await transport.attachSession(session.session_id);
+    const splitTab = afterSplit.topology.tabs.find((tab) => tab.tab_id === createdTab.tab_id)!;
+    expect(splitTab.root.kind).toBe("split");
+    expect(splitTab.focused_pane).not.toBe(createdTab.focused_pane);
+    expect(afterSplit.focused_screen?.pane_id).toBe(splitTab.focused_pane);
+
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "focus_pane",
+      pane_id: initialPaneId,
+    });
+    const afterFocusPane = await transport.attachSession(session.session_id);
+    expect(afterFocusPane.topology.focused_tab).toBe(initialTabId);
+    expect(afterFocusPane.focused_screen?.pane_id).toBe(initialPaneId);
+
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "focus_tab",
+      tab_id: createdTab.tab_id,
+    });
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "rename_tab",
+      tab_id: createdTab.tab_id,
+      title: "renamed logs",
+    });
+    const afterRename = await transport.getTopologySnapshot(session.session_id);
+    expect(afterRename.focused_tab).toBe(createdTab.tab_id);
+    expect(afterRename.tabs.find((tab) => tab.tab_id === createdTab.tab_id)?.title).toBe("renamed logs");
+
+    await transport.close();
+  });
+
   it("keeps saved layout ids monotonic for custom fixtures", async () => {
     const fixture = createDefaultMemoryWorkspaceFixture();
     const seedRecord = Object.values(fixture.savedSessionRecords)[0]!;

@@ -81,10 +81,12 @@ async function main() {
       || !result.afterCreate.hasStatusBar
       || !result.afterCreate.hasCommandDock
       || !result.afterCreate.screenPrecedesCommandDock
+      || !result.afterCreate.topologyPrecedesCommandDock
       || !result.afterCreate.hasScreenFollowControls
       || !result.afterCreate.hasScreenSearchControls
       || !result.afterCreate.hasScreenCopyControl
       || !result.afterCreate.hasSaveLayoutControl
+      || !result.afterCreate.hasTopologyControls
       || !result.afterCreate.hasDisplayControls
       || result.afterCreate.savedSessionCount !== 0
       || !result.afterCreate.screenFollowPressed
@@ -137,6 +139,20 @@ async function main() {
       || result.afterDisplaySwitch.storedLineWrap !== "false"
     ) {
       throw new Error(`Terminal display preferences did not apply to SDK elements: ${JSON.stringify(result.afterDisplaySwitch)}`);
+    }
+
+    if (
+      !result.afterTopologyActions.ok
+      || !result.afterTopologyActions.splitClicked
+      || !result.afterTopologyActions.newTabClicked
+      || !result.afterTopologyActions.focusOriginalClicked
+      || result.afterTopologyActions.completedEvents < 3
+      || result.afterTopologyActions.paneCountAfterSplit <= result.afterTopologyActions.paneCountBefore
+      || result.afterTopologyActions.focusedPaneAfterSplit === result.afterTopologyActions.focusedPaneBefore
+      || result.afterTopologyActions.tabCountAfterNewTab <= result.afterTopologyActions.tabCountBefore
+      || result.afterTopologyActions.focusedTabAfterFocus !== result.afterTopologyActions.originalTabId
+    ) {
+      throw new Error(`Topology controls did not mutate and restore focus correctly: ${JSON.stringify(result.afterTopologyActions)}`);
     }
 
     if (
@@ -289,8 +305,10 @@ async function runSmokeScenario(browserUrl) {
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
       const toolbarRoot = workspaceRoot?.querySelector('tp-terminal-toolbar')?.shadowRoot ?? null;
+      const paneTreeRoot = workspaceRoot?.querySelector('tp-terminal-pane-tree')?.shadowRoot ?? null;
       const contentRoot = workspaceRoot?.querySelector('[part="content"]') ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const paneTreeHost = workspaceRoot?.querySelector('tp-terminal-pane-tree') ?? null;
       const commandDockHost = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
       const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
@@ -318,6 +336,12 @@ async function runSmokeScenario(browserUrl) {
         hasScreenSearchControls: Boolean(screenSearch),
         hasScreenCopyControl: Boolean(screenCopy && !screenCopy.disabled),
         hasSaveLayoutControl: Boolean(saveLayout && !saveLayout.disabled),
+        hasTopologyControls: Boolean(
+          paneTreeRoot?.querySelector('[data-testid="tp-new-tab"]')
+          && paneTreeRoot?.querySelector('[data-testid="tp-split-horizontal"]')
+          && paneTreeRoot?.querySelector('[data-testid="tp-split-vertical"]')
+          && paneTreeRoot?.querySelector('[data-testid="tp-pane-node"]')
+        ),
         hasDisplayControls: Boolean(
           toolbarRoot?.querySelector('[data-testid="tp-font-scale-option"][data-font-scale="large"]')
           && toolbarRoot?.querySelector('[data-testid="tp-line-wrap-option"]')
@@ -332,6 +356,13 @@ async function runSmokeScenario(browserUrl) {
           && commandDockHost
           && [...contentRoot.children].indexOf(screenHost) > -1
           && [...contentRoot.children].indexOf(screenHost) < [...contentRoot.children].indexOf(commandDockHost)
+        ),
+        topologyPrecedesCommandDock: Boolean(
+          contentRoot
+          && paneTreeHost
+          && commandDockHost
+          && [...contentRoot.children].indexOf(paneTreeHost) > -1
+          && [...contentRoot.children].indexOf(paneTreeHost) < [...contentRoot.children].indexOf(commandDockHost)
         ),
         hasScreen: Boolean(terminalScreenText),
         hasStatusBar: Boolean(statusRoot?.querySelector('[part="status-bar"]')),
@@ -440,6 +471,77 @@ async function runSmokeScenario(browserUrl) {
         wrapPressed: wrapButton.getAttribute('aria-pressed'),
         storedFontScale: window.localStorage.getItem(${JSON.stringify(fontScaleStorageKey)}),
         storedLineWrap: window.localStorage.getItem(${JSON.stringify(lineWrapStorageKey)}),
+      };
+    })()`);
+
+    const afterTopologyActions = await evaluate(send, `(async () => {
+      const countPanes = (node) => {
+        if (!node) {
+          return 0;
+        }
+        return node.kind === 'leaf'
+          ? 1
+          : countPanes(node.first) + countPanes(node.second);
+      };
+      const stateBefore = window.terminalDemoDebug?.getState?.();
+      const topologyBefore = stateBefore?.attachedSession?.topology ?? null;
+      const focusedTabBefore = topologyBefore?.tabs?.find((tab) => tab.tab_id === topologyBefore.focused_tab)
+        ?? topologyBefore?.tabs?.[0]
+        ?? null;
+      const workspaceHost = document.querySelector('tp-terminal-workspace') ?? null;
+      const paneTreeRoot = workspaceHost?.shadowRoot?.querySelector('tp-terminal-pane-tree')?.shadowRoot ?? null;
+      const splitButton = paneTreeRoot?.querySelector('[data-testid="tp-split-horizontal"]') ?? null;
+      const newTabButton = paneTreeRoot?.querySelector('[data-testid="tp-new-tab"]') ?? null;
+      if (!topologyBefore || !focusedTabBefore || !splitButton || !newTabButton) {
+        return {
+          ok: false,
+          reason: 'topology controls missing',
+          completedEvents: 0,
+        };
+      }
+
+      let completedEvents = 0;
+      const handleCompleted = () => {
+        completedEvents += 1;
+      };
+      workspaceHost?.addEventListener('tp-terminal-topology-action-completed', handleCompleted);
+
+      const paneCountBefore = countPanes(focusedTabBefore.root);
+      const focusedPaneBefore = focusedTabBefore.focused_pane;
+      splitButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+      const stateAfterSplit = window.terminalDemoDebug?.getState?.();
+      const splitTab = stateAfterSplit?.attachedSession?.topology?.tabs?.find(
+        (tab) => tab.tab_id === focusedTabBefore.tab_id,
+      ) ?? null;
+
+      newTabButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+      const stateAfterNewTab = window.terminalDemoDebug?.getState?.();
+      const topologyAfterNewTab = stateAfterNewTab?.attachedSession?.topology ?? null;
+      const originalTabButton = [...(paneTreeRoot?.querySelectorAll('[data-testid="tp-topology-tab"]') ?? [])]
+        .find((button) => button.getAttribute('data-tab-id') === focusedTabBefore.tab_id) ?? null;
+      if (originalTabButton) {
+        originalTabButton.click();
+        await new Promise((resolve) => setTimeout(resolve, 1600));
+      }
+      const topologyAfterFocus = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology ?? null;
+      workspaceHost?.removeEventListener('tp-terminal-topology-action-completed', handleCompleted);
+
+      return {
+        ok: true,
+        splitClicked: true,
+        newTabClicked: true,
+        focusOriginalClicked: Boolean(originalTabButton),
+        completedEvents,
+        tabCountBefore: topologyBefore.tabs.length,
+        tabCountAfterNewTab: topologyAfterNewTab?.tabs?.length ?? 0,
+        paneCountBefore,
+        paneCountAfterSplit: splitTab ? countPanes(splitTab.root) : 0,
+        focusedPaneBefore,
+        focusedPaneAfterSplit: splitTab?.focused_pane ?? null,
+        focusedTabAfterFocus: topologyAfterFocus?.focused_tab ?? null,
+        originalTabId: focusedTabBefore.tab_id,
       };
     })()`);
 
@@ -754,6 +856,7 @@ async function runSmokeScenario(browserUrl) {
       afterSavedPagination,
       afterThemeSwitch,
       afterDisplaySwitch,
+      afterTopologyActions,
       afterSaveLayout,
       afterCommand: {
         ...afterCommand,

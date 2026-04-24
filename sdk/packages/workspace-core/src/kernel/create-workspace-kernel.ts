@@ -131,6 +131,7 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
   async function bootstrap(): Promise<void> {
     assertNotDisposed();
     await connectionService.bootstrap();
+    await refreshAvailableBackendCapabilities();
     await catalogService.refreshSessions();
     await catalogService.refreshSavedSessions();
   }
@@ -183,6 +184,19 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
     if (disposed) {
       throw new Error("workspace kernel has been disposed");
     }
+  }
+
+  async function refreshAvailableBackendCapabilities(): Promise<void> {
+    const backends = store.getSnapshot().connection.handshake?.available_backends ?? [];
+    await Promise.all(
+      backends.map(async (backend) => {
+        try {
+          await catalogService.getBackendCapabilities(backend);
+        } catch {
+          // Capability failures are already captured as diagnostics.
+        }
+      }),
+    );
   }
 }
 
