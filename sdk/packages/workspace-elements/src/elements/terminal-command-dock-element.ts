@@ -2,6 +2,7 @@ import { css, html, nothing } from "lit";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import { resolveTerminalCommandDockControlState } from "./terminal-command-dock-controls.js";
 
 const QUICK_COMMANDS: readonly { label: string; value: string }[] = [
   { label: "pwd", value: "pwd" },
@@ -9,6 +10,8 @@ const QUICK_COMMANDS: readonly { label: string; value: string }[] = [
   { label: "git status", value: "git status" },
   { label: "hello", value: 'printf "hello from Terminal Platform\\n"' },
 ];
+
+const CLIPBOARD_READ_TIMEOUT_MS = 2500;
 
 export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -222,16 +225,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   override render() {
-    const activeSessionId =
-      this.snapshot.selection.activeSessionId ?? this.snapshot.attachedSession?.session.session_id ?? null;
-    const activePaneId =
-      this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
-    const draft = activePaneId ? (this.snapshot.drafts[activePaneId] ?? "") : "";
-    const canSend = Boolean(activeSessionId && activePaneId && draft.trim().length > 0 && !this.pending);
-    const canUsePane = Boolean(activeSessionId && activePaneId && !this.pending);
-    const commandHistory = this.snapshot.commandHistory.entries;
-    const recentCommands = [...commandHistory].slice(-5).reverse();
-    const statusLabel = this.pending ? "Sending" : activePaneId ? "Ready" : "Pick a pane";
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    const statusLabel = this.pending ? "Sending" : controls.activePaneId ? "Ready" : "Pick a pane";
+    const pasteTitle = controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
+      ? "Paste is not supported by the active backend"
+      : "Paste clipboard into the focused pane";
 
     return html`
       <div class="panel dock" part="command-dock" data-testid="tp-command-dock">
@@ -243,12 +241,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           </div>
 
           <div class="dock-status" part="status">
-            <span class="badge" data-tone=${activePaneId ? "ready" : "idle"}>
-              ${activePaneId ? `Pane ${activePaneId}` : "No pane"}
+            <span class="badge" data-tone=${controls.activePaneId ? "ready" : "idle"}>
+              ${controls.activePaneId ? `Pane ${controls.activePaneId}` : "No pane"}
             </span>
-            <span class="badge" data-tone=${canSend ? "ready" : "idle"}>${statusLabel}</span>
+            <span class="badge" data-tone=${controls.canSend ? "ready" : "idle"}>${statusLabel}</span>
             <span class="badge" data-testid="tp-command-history-count">
-              ${commandHistory.length} history
+              ${controls.commandHistory.length} history
             </span>
           </div>
         </div>
@@ -259,7 +257,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
               <button
                 class="chip"
                 type="button"
-                ?disabled=${!activePaneId || this.pending}
+                ?disabled=${!controls.activePaneId || this.pending}
                 @click=${() => this.setDraft(command.value)}
               >
                 ${command.label}
@@ -268,12 +266,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           )}
         </div>
 
-        ${recentCommands.length > 0
+        ${controls.recentCommands.length > 0
           ? html`
               <div class="history-row" part="command-history" aria-label="Recent commands">
                 <span class="history-label">Recent</span>
                 <div class="history-actions">
-                  ${recentCommands.map(
+                  ${controls.recentCommands.map(
                     (command, index) => html`
                       <button
                         class="history-chip"
@@ -281,7 +279,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                         data-testid="tp-command-history-entry"
                         data-history-index=${index}
                         title=${command}
-                        ?disabled=${!activePaneId || this.pending}
+                        ?disabled=${!controls.activePaneId || this.pending}
                         @click=${() => this.setDraft(command)}
                       >
                         <span class="history-command">${command}</span>
@@ -297,9 +295,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           <span class="prompt" aria-hidden="true">&gt;_</span>
           <textarea
             data-testid="tp-command-input"
-            .value=${draft}
-            ?disabled=${!activePaneId || this.pending}
-            placeholder=${activePaneId ? "Type shell input for the focused pane" : "Select a pane first"}
+            name="tp-command-input"
+            .value=${controls.draft}
+            ?disabled=${!controls.activePaneId || this.pending}
+            placeholder=${controls.activePaneId ? "Type shell input for the focused pane" : "Select a pane first"}
             aria-label="Focused pane command input"
             @input=${(event: Event) => this.handleInput(event)}
             @keydown=${(event: KeyboardEvent) => this.handleKeydown(event)}
@@ -317,7 +316,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
         <div class="dock-footer">
           <div class="hint" part="hint">
-            ${activePaneId
+            ${controls.activePaneId
               ? "Enter sends the command. Shift+Enter inserts a newline."
               : "Start or select a session, then choose a pane to enable input."}
           </div>
@@ -326,13 +325,21 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             <button
               class="primary"
               data-testid="tp-send-command"
-              ?disabled=${!canSend}
+              ?disabled=${!controls.canSend}
               @click=${() => this.sendDraft()}
             >
               Send command
             </button>
-            <button ?disabled=${!canUsePane} @click=${() => this.sendShortcut("\u0003")}>Ctrl+C</button>
-            <button ?disabled=${!canUsePane} @click=${() => this.sendShortcut("\r")}>Enter</button>
+            <button
+              data-testid="tp-paste-clipboard"
+              title=${pasteTitle}
+              ?disabled=${!controls.canPasteClipboard}
+              @click=${() => this.pasteClipboard()}
+            >
+              Paste
+            </button>
+            <button ?disabled=${!controls.canUsePane} @click=${() => this.sendShortcut("\u0003")}>Ctrl+C</button>
+            <button ?disabled=${!controls.canUsePane} @click=${() => this.sendShortcut("\r")}>Enter</button>
           </div>
         </div>
 
@@ -341,21 +348,21 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           <div class="actions">
             <button
               data-testid="tp-save-layout"
-              ?disabled=${!activeSessionId || this.pending}
+              ?disabled=${!controls.activeSessionId || this.pending}
               @click=${() => this.saveLayout()}
             >
               Save layout
             </button>
             <button
               data-testid="tp-refresh-terminal"
-              ?disabled=${!activeSessionId || this.pending}
+              ?disabled=${!controls.activeSessionId || this.pending}
               @click=${() => this.refreshActiveSession()}
             >
               Refresh terminal
             </button>
             <button
               data-testid="tp-clear-command-history"
-              ?disabled=${commandHistory.length === 0 || this.pending}
+              ?disabled=${controls.commandHistory.length === 0 || this.pending}
               @click=${() => this.clearCommandHistory()}
             >
               Clear history
@@ -484,6 +491,43 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     this.#historyDraftBeforeNavigation = "";
   }
 
+  private async pasteClipboard(): Promise<void> {
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    if (!controls.activeSessionId || !controls.activePaneId || !controls.canPasteClipboard) {
+      return;
+    }
+
+    this.pending = true;
+    this.actionError = null;
+
+    let pastedText = "";
+    try {
+      pastedText = await readClipboardText();
+    } catch (error) {
+      this.pending = false;
+      this.actionError = getErrorMessage(error);
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-paste-failed", {
+          bubbles: true,
+          composed: true,
+          detail: {
+            sessionId: controls.activeSessionId,
+            paneId: controls.activePaneId,
+            error,
+          },
+        }),
+      );
+      return;
+    }
+
+    if (pastedText.length === 0) {
+      this.pending = false;
+      return;
+    }
+
+    await this.dispatchPaste(controls.activeSessionId, controls.activePaneId, pastedText);
+  }
+
   private async sendShortcut(data: string): Promise<void> {
     const sessionId = this.snapshot.selection.activeSessionId ?? this.snapshot.attachedSession?.session.session_id ?? null;
     const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
@@ -493,6 +537,38 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
 
     await this.dispatchInput(sessionId, paneId, data);
+  }
+
+  private async dispatchPaste(sessionId: string, paneId: string, data: string): Promise<void> {
+    this.pending = true;
+    this.actionError = null;
+
+    try {
+      await this.kernel?.commands.dispatchMuxCommand(sessionId, {
+        kind: "send_paste",
+        pane_id: paneId,
+        data,
+      });
+      await this.kernel?.commands.attachSession(sessionId);
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-paste-submitted", {
+          bubbles: true,
+          composed: true,
+          detail: { sessionId, paneId, inputLength: data.length },
+        }),
+      );
+    } catch (error) {
+      this.actionError = getErrorMessage(error);
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-paste-failed", {
+          bubbles: true,
+          composed: true,
+          detail: { sessionId, paneId, error },
+        }),
+      );
+    } finally {
+      this.pending = false;
+    }
   }
 
   private async dispatchInput(sessionId: string, paneId: string, data: string): Promise<void> {
@@ -615,4 +691,19 @@ function getErrorMessage(error: unknown): string {
   }
 
   return "Workspace command failed";
+}
+
+async function readClipboardText(): Promise<string> {
+  if (!navigator.clipboard?.readText) {
+    throw new Error("Clipboard read is unavailable in this browser context");
+  }
+
+  return Promise.race([
+    navigator.clipboard.readText(),
+    new Promise<string>((_, reject) => {
+      window.setTimeout(() => {
+        reject(new Error("Clipboard read timed out. Check browser clipboard permissions and try again."));
+      }, CLIPBOARD_READ_TIMEOUT_MS);
+    }),
+  ]);
 }

@@ -343,6 +343,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 <label class="search" part="search">
                   <input
                     data-testid="tp-screen-search"
+                    name="tp-screen-search"
                     .value=${this.searchQuery}
                     placeholder="Find output"
                     aria-label="Find terminal output"

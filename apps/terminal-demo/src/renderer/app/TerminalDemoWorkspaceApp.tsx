@@ -345,6 +345,7 @@ export function TerminalDemoWorkspaceScreen(props: {
                   <label>
                     <span>Title</span>
                     <input
+                      name="terminal-demo-session-title"
                       value={createForm.title}
                       onChange={(event) => {
                         setCreateForm((current) => ({
@@ -357,6 +358,7 @@ export function TerminalDemoWorkspaceScreen(props: {
                   <label>
                     <span>Program</span>
                     <input
+                      name="terminal-demo-session-program"
                       value={createForm.program}
                       onChange={(event) => {
                         setCreateForm((current) => ({
@@ -369,6 +371,7 @@ export function TerminalDemoWorkspaceScreen(props: {
                   <label>
                     <span>Args</span>
                     <input
+                      name="terminal-demo-session-args"
                       value={createForm.args}
                       onChange={(event) => {
                         setCreateForm((current) => ({
@@ -381,6 +384,7 @@ export function TerminalDemoWorkspaceScreen(props: {
                   <label>
                     <span>Working directory</span>
                     <input
+                      name="terminal-demo-session-cwd"
                       value={createForm.cwd}
                       onChange={(event) => {
                         setCreateForm((current) => ({

@@ -16,6 +16,7 @@ export function TerminalInputComposerPanelView(props: {
       </div>
       <div className="composer">
         <textarea
+          name="terminal-input-composer-draft"
           placeholder="Write input for the focused pane"
           value={props.model.draft}
           onChange={(event) => props.commands.setDraft(event.target.value)}

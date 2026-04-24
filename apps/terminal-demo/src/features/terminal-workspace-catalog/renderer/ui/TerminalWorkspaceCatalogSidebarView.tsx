@@ -38,19 +38,19 @@ export function TerminalWorkspaceCatalogSidebarView(props: {
         <div className="form-grid">
           <label>
             <span>Title</span>
-            <input value={props.model.createForm.title} onChange={(event) => props.commands.setTitle(event.target.value)} />
+            <input name="terminal-catalog-title" value={props.model.createForm.title} onChange={(event) => props.commands.setTitle(event.target.value)} />
           </label>
           <label>
             <span>Program</span>
-            <input placeholder="optional custom shell" value={props.model.createForm.program} onChange={(event) => props.commands.setProgram(event.target.value)} />
+            <input name="terminal-catalog-program" placeholder="optional custom shell" value={props.model.createForm.program} onChange={(event) => props.commands.setProgram(event.target.value)} />
           </label>
           <label>
             <span>Args</span>
-            <input placeholder='for example -l "-c echo demo"' value={props.model.createForm.args} onChange={(event) => props.commands.setArgs(event.target.value)} />
+            <input name="terminal-catalog-args" placeholder='for example -l "-c echo demo"' value={props.model.createForm.args} onChange={(event) => props.commands.setArgs(event.target.value)} />
           </label>
           <label>
             <span>Cwd</span>
-            <input placeholder="optional working directory" value={props.model.createForm.cwd} onChange={(event) => props.commands.setCwd(event.target.value)} />
+            <input name="terminal-catalog-cwd" placeholder="optional working directory" value={props.model.createForm.cwd} onChange={(event) => props.commands.setCwd(event.target.value)} />
           </label>
         </div>
         <button className="button button--primary" onClick={() => void props.commands.submitCreate()}>

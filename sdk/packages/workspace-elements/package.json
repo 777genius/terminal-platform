@@ -15,6 +15,7 @@
   "types": "./dist/index.d.ts",
   "dependencies": {
     "@terminal-platform/design-tokens": "0.1.0",
+    "@terminal-platform/runtime-types": "0.1.0",
     "@terminal-platform/workspace-core": "0.1.0",
     "lit": "3.3.2"
   },

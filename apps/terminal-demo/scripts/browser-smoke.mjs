@@ -85,6 +85,7 @@ async function main() {
       || !result.afterCreate.hasScreenFollowControls
       || !result.afterCreate.hasScreenSearchControls
       || !result.afterCreate.hasScreenCopyControl
+      || !result.afterCreate.hasPasteClipboardControl
       || !result.afterCreate.hasSaveLayoutControl
       || !result.afterCreate.hasTopologyControls
       || !result.afterCreate.hasDisplayControls
@@ -223,6 +224,18 @@ async function main() {
     }
 
     if (
+      !result.afterClipboardPaste.clicked
+      || !result.afterClipboardPaste.connectionReady
+      || result.afterClipboardPaste.submittedEvents !== 1
+      || !result.afterClipboardPaste.containsPasteOutput
+      || result.afterClipboardPaste.commandHistoryCount !== result.afterCommand.commandHistoryCount
+      || !result.afterClipboardPaste.commandHistoryLatest?.includes("browser-smoke-ok")
+      || result.afterClipboardPaste.commandHistoryLatest?.includes("browser-paste-ok")
+    ) {
+      throw new Error(`Clipboard paste did not route through the command dock correctly: ${JSON.stringify(result.afterClipboardPaste)}`);
+    }
+
+    if (
       !result.afterScreenFollowToggle.paused
       || !result.afterScreenFollowToggle.resumed
       || !result.afterScreenFollowToggle.screenViewportAtBottom
@@ -318,6 +331,10 @@ async function runSmokeScenario(browserUrl) {
     await send("Page.enable");
     await send("Runtime.enable");
     await send("Log.enable");
+    await send("Browser.grantPermissions", {
+      origin: new URL(browserUrl).origin,
+      permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+    }).catch(() => undefined);
     await send("Emulation.setDeviceMetricsOverride", {
       width: 1440,
       height: 1100,
@@ -366,6 +383,7 @@ async function runSmokeScenario(browserUrl) {
       const screenCopy = screenRoot?.querySelector('[data-testid="tp-screen-copy"]') ?? null;
       const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
       const saveLayout = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
+      const pasteClipboard = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : (screenRoot?.querySelector('[part=\"screen-lines\"]')?.textContent?.trim() ?? null);
@@ -385,6 +403,7 @@ async function runSmokeScenario(browserUrl) {
         hasScreenFollowControls: Boolean(screenFollow && screenRoot?.querySelector('[data-testid="tp-screen-scroll-latest"]')),
         hasScreenSearchControls: Boolean(screenSearch),
         hasScreenCopyControl: Boolean(screenCopy && !screenCopy.disabled),
+        hasPasteClipboardControl: Boolean(pasteClipboard && !pasteClipboard.disabled),
         hasSaveLayoutControl: Boolean(saveLayout && !saveLayout.disabled),
         hasTopologyControls: Boolean(
           paneTreeRoot?.querySelector('[data-testid="tp-new-tab"]')
@@ -996,6 +1015,79 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
 
+    const clipboardSeedResult = await evaluate(send, `(async () => {
+      try {
+        await navigator.clipboard.writeText(${JSON.stringify('printf "browser-paste-ok\\n"\n')});
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: String(error?.message ?? error) };
+      }
+    })()`);
+    if (!clipboardSeedResult.ok) {
+      throw new Error(`Unable to seed clipboard for paste workflow: ${JSON.stringify(clipboardSeedResult)}`);
+    }
+
+    const pasteResult = await evaluate(send, `(async () => {
+      const workspaceHost = document.querySelector('tp-terminal-workspace') ?? null;
+      const workspaceRoot = workspaceHost?.shadowRoot ?? null;
+      const commandHost = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
+      const commandRoot = commandHost?.shadowRoot ?? null;
+      const pasteButton = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
+      if (!workspaceHost || !commandHost || !pasteButton) {
+        return {
+          ok: false,
+          reason: !workspaceHost ? 'workspace missing' : !commandHost ? 'command dock missing' : 'paste button missing',
+          pasteButtonEnabled: false,
+          submittedEvents: 0,
+        };
+      }
+
+      let submittedEvents = 0;
+      commandHost.addEventListener('tp-terminal-paste-submitted', () => {
+        submittedEvents += 1;
+      }, { once: true });
+
+      if (pasteButton.disabled) {
+        return {
+          ok: false,
+          reason: 'paste button disabled',
+          pasteButtonEnabled: false,
+          submittedEvents,
+          title: pasteButton.getAttribute('title'),
+        };
+      }
+
+      pasteButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+
+      return {
+        ok: true,
+        pasteButtonEnabled: !pasteButton.disabled,
+        submittedEvents,
+        title: pasteButton.getAttribute('title'),
+      };
+    })()`);
+    if (!pasteResult.ok) {
+      throw new Error(`Unable to paste clipboard through command dock: ${JSON.stringify(pasteResult)}`);
+    }
+
+    const afterClipboardPaste = await evaluate(send, `(() => {
+      const debug = window.terminalDemoDebug?.getState?.();
+      const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
+        ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+        : '';
+      return {
+        clicked: true,
+        pasteButtonEnabled: ${JSON.stringify(pasteResult.pasteButtonEnabled)},
+        submittedEvents: ${JSON.stringify(pasteResult.submittedEvents)},
+        connectionReady: debug?.connection?.state === 'ready',
+        commandHistoryCount: debug?.commandHistory?.entries?.length ?? 0,
+        commandHistoryLatest: debug?.commandHistory?.entries?.at(-1) ?? null,
+        terminalScreenText,
+        containsPasteOutput: /browser-paste-ok/i.test(terminalScreenText),
+      };
+    })()`);
+
     afterScreenSearch = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
@@ -1250,6 +1342,7 @@ async function runSmokeScenario(browserUrl) {
           : false,
       },
       afterRecentCommandRecall,
+      afterClipboardPaste,
       afterScreenFollowToggle,
       afterHistoryReplay: {
         ...afterHistoryReplay,

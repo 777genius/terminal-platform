@@ -310,6 +310,7 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
               <div class="rename-form" part="rename-form">
                 <input
                   data-testid="tp-rename-tab-input"
+                  name="tp-rename-tab-title"
                   aria-label="Tab title"
                   .value=${this.renameDraft}
                   ?disabled=${isPending}
