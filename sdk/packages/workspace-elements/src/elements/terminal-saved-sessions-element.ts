@@ -5,6 +5,7 @@ import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 
 const DEFAULT_VISIBLE_SAVED_SESSIONS = 4;
 const SAVED_SESSION_PAGE_SIZE = 8;
+const SAVED_SESSION_CONFIRMATION_RESET_MS = 4000;
 
 export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -12,7 +13,9 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
     visibleSavedSessionCount: { state: true },
     pendingSavedSessionId: { state: true },
     pendingSavedSessionAction: { state: true },
+    pendingBulkAction: { state: true },
     deleteConfirmationSessionId: { state: true },
+    pruneConfirmationArmed: { state: true },
     actionError: { state: true },
   };
 
@@ -70,6 +73,14 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
         gap: var(--tp-space-2);
       }
 
+      .list-controls button[data-danger="true"] {
+        margin-left: auto;
+      }
+
+      .list-controls button[data-danger="true"][data-confirming="true"] {
+        background: color-mix(in srgb, var(--tp-color-danger) 16%, var(--tp-color-panel-raised));
+      }
+
       .summary {
         display: grid;
         gap: 0.2rem;
@@ -97,22 +108,28 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   protected declare visibleSavedSessionCount: number;
   protected declare pendingSavedSessionId: string | null;
   protected declare pendingSavedSessionAction: "restore" | "delete" | null;
+  protected declare pendingBulkAction: "prune" | null;
   protected declare deleteConfirmationSessionId: string | null;
+  protected declare pruneConfirmationArmed: boolean;
   protected declare actionError: string | null;
 
   #deleteConfirmationResetTimer: ReturnType<typeof setTimeout> | null = null;
+  #pruneConfirmationResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     super();
     this.visibleSavedSessionCount = DEFAULT_VISIBLE_SAVED_SESSIONS;
     this.pendingSavedSessionId = null;
     this.pendingSavedSessionAction = null;
+    this.pendingBulkAction = null;
     this.deleteConfirmationSessionId = null;
+    this.pruneConfirmationArmed = false;
     this.actionError = null;
   }
 
   override disconnectedCallback(): void {
     this.clearDeleteConfirmationResetTimer();
+    this.clearPruneConfirmationResetTimer();
     super.disconnectedCallback();
   }
 
@@ -121,6 +138,8 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
     const visibleCount = Math.min(this.visibleSavedSessionCount, savedSessions.length);
     const visibleSessions = savedSessions.slice(0, visibleCount);
     const hiddenCount = savedSessions.length - visibleSessions.length;
+    const anyPending = Boolean(this.pendingSavedSessionId || this.pendingBulkAction);
+    const isPruning = this.pendingBulkAction === "prune";
 
     return html`
       <div class="panel saved" part="saved" data-testid="tp-saved-sessions">
@@ -153,7 +172,6 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
                     const isRestoring = isPending && this.pendingSavedSessionAction === "restore";
                     const isDeleting = isPending && this.pendingSavedSessionAction === "delete";
                     const isConfirmingDelete = this.deleteConfirmationSessionId === session.session_id;
-                    const anyPending = Boolean(this.pendingSavedSessionId);
 
                     return html`
                       <li part="item" data-testid="tp-saved-session-item" data-session-id=${session.session_id}>
@@ -219,6 +237,26 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
                         </button>
                       `
                     : null}
+                  ${hiddenCount > 0
+                    ? html`
+                        <button
+                          part="prune-hidden"
+                          data-testid="tp-prune-hidden-saved-sessions"
+                          data-danger="true"
+                          data-confirming=${String(this.pruneConfirmationArmed)}
+                          ?disabled=${anyPending}
+                          @click=${() => {
+                            void this.handlePruneHiddenClick();
+                          }}
+                        >
+                          ${isPruning
+                            ? "Pruning"
+                            : this.pruneConfirmationArmed
+                              ? `Confirm prune ${hiddenCount}`
+                              : "Prune hidden"}
+                        </button>
+                      `
+                    : null}
                 </div>
               </div>
             `}
@@ -227,6 +265,7 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   }
 
   private showMoreSavedSessions(): void {
+    this.clearPruneConfirmation();
     this.visibleSavedSessionCount = Math.min(
       this.snapshot.catalog.savedSessions.length,
       this.visibleSavedSessionCount + SAVED_SESSION_PAGE_SIZE,
@@ -234,15 +273,17 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   }
 
   private collapseSavedSessions(): void {
+    this.clearPruneConfirmation();
     this.visibleSavedSessionCount = DEFAULT_VISIBLE_SAVED_SESSIONS;
   }
 
   private async restoreSavedSession(sessionId: string): Promise<void> {
-    if (this.pendingSavedSessionId) {
+    if (this.pendingSavedSessionId || this.pendingBulkAction) {
       return;
     }
 
     this.clearDeleteConfirmation();
+    this.clearPruneConfirmation();
     this.setPendingAction(sessionId, "restore");
 
     try {
@@ -269,16 +310,39 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   }
 
   private async handleDeleteClick(sessionId: string): Promise<void> {
-    if (this.pendingSavedSessionId) {
+    if (this.pendingSavedSessionId || this.pendingBulkAction) {
       return;
     }
 
+    this.clearPruneConfirmation();
     if (this.deleteConfirmationSessionId !== sessionId) {
       this.setDeleteConfirmation(sessionId);
       return;
     }
 
     await this.deleteSavedSession(sessionId);
+  }
+
+  private async handlePruneHiddenClick(): Promise<void> {
+    if (this.pendingSavedSessionId || this.pendingBulkAction) {
+      return;
+    }
+
+    const savedSessionCount = this.snapshot.catalog.savedSessions.length;
+    const keepLatest = Math.min(this.visibleSavedSessionCount, savedSessionCount);
+    const hiddenCount = savedSessionCount - keepLatest;
+    if (hiddenCount <= 0) {
+      this.clearPruneConfirmation();
+      return;
+    }
+
+    this.clearDeleteConfirmation();
+    if (!this.pruneConfirmationArmed) {
+      this.setPruneConfirmation();
+      return;
+    }
+
+    await this.pruneHiddenSavedSessions(keepLatest);
   }
 
   private async deleteSavedSession(sessionId: string): Promise<void> {
@@ -319,6 +383,45 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
     this.pendingSavedSessionAction = null;
   }
 
+  private setPendingBulkAction(action: "prune" | null): void {
+    this.actionError = null;
+    this.pendingBulkAction = action;
+  }
+
+  private async pruneHiddenSavedSessions(keepLatest: number): Promise<void> {
+    const beforeCount = this.snapshot.catalog.savedSessions.length;
+    this.setPendingBulkAction("prune");
+
+    try {
+      const result = await this.kernel?.commands.pruneSavedSessions(keepLatest);
+      const afterCount = this.kernel?.getSnapshot().catalog.savedSessions.length ?? Math.min(beforeCount, keepLatest);
+      this.visibleSavedSessionCount = Math.min(this.visibleSavedSessionCount, afterCount);
+      this.dispatchEvent(
+        new CustomEvent("tp-saved-sessions-pruned", {
+          bubbles: true,
+          composed: true,
+          detail: {
+            keepLatest,
+            deletedCount: result?.deleted_count ?? Math.max(0, beforeCount - afterCount),
+            keptCount: result?.kept_count ?? afterCount,
+          },
+        }),
+      );
+    } catch (error) {
+      this.actionError = getErrorMessage(error);
+      this.dispatchEvent(
+        new CustomEvent("tp-saved-sessions-prune-failed", {
+          bubbles: true,
+          composed: true,
+          detail: { keepLatest, error },
+        }),
+      );
+    } finally {
+      this.clearPruneConfirmation();
+      this.setPendingBulkAction(null);
+    }
+  }
+
   private setDeleteConfirmation(sessionId: string): void {
     this.actionError = null;
     this.deleteConfirmationSessionId = sessionId;
@@ -328,7 +431,7 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
         this.deleteConfirmationSessionId = null;
       }
       this.#deleteConfirmationResetTimer = null;
-    }, 4000);
+    }, SAVED_SESSION_CONFIRMATION_RESET_MS);
   }
 
   private clearDeleteConfirmation(): void {
@@ -340,6 +443,28 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
     if (this.#deleteConfirmationResetTimer) {
       clearTimeout(this.#deleteConfirmationResetTimer);
       this.#deleteConfirmationResetTimer = null;
+    }
+  }
+
+  private setPruneConfirmation(): void {
+    this.actionError = null;
+    this.pruneConfirmationArmed = true;
+    this.clearPruneConfirmationResetTimer();
+    this.#pruneConfirmationResetTimer = setTimeout(() => {
+      this.pruneConfirmationArmed = false;
+      this.#pruneConfirmationResetTimer = null;
+    }, SAVED_SESSION_CONFIRMATION_RESET_MS);
+  }
+
+  private clearPruneConfirmation(): void {
+    this.pruneConfirmationArmed = false;
+    this.clearPruneConfirmationResetTimer();
+  }
+
+  private clearPruneConfirmationResetTimer(): void {
+    if (this.#pruneConfirmationResetTimer) {
+      clearTimeout(this.#pruneConfirmationResetTimer);
+      this.#pruneConfirmationResetTimer = null;
     }
   }
 }

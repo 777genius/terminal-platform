@@ -6,6 +6,7 @@ import type {
   MuxCommand,
   MuxCommandResult,
   PaneId,
+  PruneSavedSessionsResult,
   SessionId,
   SessionRoute,
   SubscriptionSpec,
@@ -42,7 +43,7 @@ export interface WorkspaceCommands {
   attachSession(sessionId: SessionId): Promise<void>;
   restoreSavedSession(sessionId: SessionId): Promise<void>;
   deleteSavedSession(sessionId: SessionId): Promise<void>;
-  pruneSavedSessions(keepLatest: number): Promise<void>;
+  pruneSavedSessions(keepLatest: number): Promise<PruneSavedSessionsResult>;
   dispatchMuxCommand(sessionId: SessionId, command: MuxCommand): Promise<MuxCommandResult>;
   openSubscription(
     sessionId: SessionId,

@@ -7,6 +7,7 @@ import type {
   MuxCommand,
   MuxCommandResult,
   PaneId,
+  PruneSavedSessionsResult,
   SessionId,
   SessionRoute,
   SubscriptionSpec,
@@ -129,12 +130,13 @@ export class SessionCommandService {
     });
   }
 
-  pruneSavedSessions(keepLatest: number): Promise<void> {
+  pruneSavedSessions(keepLatest: number): Promise<PruneSavedSessionsResult> {
     return this.#lane.enqueue(async () => {
       try {
         const transport = await this.#context.ensureTransport();
-        await transport.pruneSavedSessions(keepLatest);
+        const result = await transport.pruneSavedSessions(keepLatest);
         await this.#catalogService.refreshSavedSessions();
+        return result;
       } catch (error) {
         throw this.#handleTransportError(error, "failed to prune saved sessions");
       }

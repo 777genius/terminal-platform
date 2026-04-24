@@ -710,7 +710,10 @@ export function createStaticWorkspaceKernel(snapshot: WorkspaceSnapshot): Worksp
     attachSession: noopAsync,
     restoreSavedSession: noopAsync,
     deleteSavedSession: noopAsync,
-    pruneSavedSessions: noopAsync,
+    pruneSavedSessions: async (keepLatest: number) => ({
+      deleted_count: Math.max(0, normalizedSnapshot.catalog.savedSessions.length - keepLatest),
+      kept_count: Math.min(normalizedSnapshot.catalog.savedSessions.length, keepLatest),
+    }),
     dispatchMuxCommand: async () => {
       throw new Error("not implemented in static kernel");
     },

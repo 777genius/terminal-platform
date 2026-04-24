@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { BackendCapabilitiesInfo, BackendKind, Handshake } from "@terminal-platform/runtime-types";
+import type {
+  BackendCapabilitiesInfo,
+  BackendKind,
+  Handshake,
+  SavedSessionSummary,
+} from "@terminal-platform/runtime-types";
 import type { WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
 
 import { createWorkspaceKernel } from "./create-workspace-kernel.js";
@@ -254,6 +259,44 @@ describe("createWorkspaceKernel bootstrap", () => {
   });
 });
 
+describe("createWorkspaceKernel saved session maintenance", () => {
+  it("returns prune results and refreshes the saved session catalog", async () => {
+    let savedSessions = [
+      createSavedSessionSummary("saved-1", 1_000n),
+      createSavedSessionSummary("saved-2", 2_000n),
+      createSavedSessionSummary("saved-3", 3_000n),
+    ];
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        listSavedSessions: async () => savedSessions,
+        pruneSavedSessions: async (keepLatest: number) => {
+          const sorted = [...savedSessions].sort((left, right) => Number(right.saved_at_ms - left.saved_at_ms));
+          savedSessions = sorted.slice(0, keepLatest);
+          return {
+            deleted_count: sorted.length - savedSessions.length,
+            kept_count: savedSessions.length,
+          };
+        },
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.commands.refreshSavedSessions();
+    const result = await kernel.commands.pruneSavedSessions(2);
+
+    expect(result).toEqual({
+      deleted_count: 1,
+      kept_count: 2,
+    });
+    expect(kernel.getSnapshot().catalog.savedSessions.map((session) => session.session_id)).toEqual([
+      "saved-3",
+      "saved-2",
+    ]);
+
+    await kernel.dispose();
+  });
+});
+
 function createUnusedTransport(): WorkspaceTransportClient {
   return {
     close: async () => {},
@@ -314,6 +357,40 @@ function createCapabilities(backend: BackendKind): BackendCapabilitiesInfo {
       plugin_panes: false,
       advisory_metadata_subscriptions: true,
       independent_resize_authority: true,
+    },
+  };
+}
+
+function createSavedSessionSummary(sessionId: string, savedAtMs: bigint): SavedSessionSummary {
+  return {
+    session_id: sessionId,
+    route: {
+      backend: "native",
+      authority: "local_daemon",
+      foreign_reference: null,
+    },
+    title: sessionId,
+    saved_at_ms: savedAtMs,
+    manifest: {
+      format_version: 1,
+      binary_version: "0.1.0-test",
+      protocol_major: 0,
+      protocol_minor: 2,
+    },
+    compatibility: {
+      can_restore: true,
+      status: "compatible",
+    },
+    has_launch: true,
+    tab_count: 1,
+    pane_count: 1,
+    restore_semantics: {
+      restores_topology: true,
+      restores_focus_state: true,
+      restores_tab_titles: true,
+      uses_saved_launch_spec: true,
+      replays_saved_screen_buffers: false,
+      preserves_process_state: false,
     },
   };
 }

@@ -180,6 +180,18 @@ async function main() {
     }
 
     if (
+      !result.afterPruneHidden.prompted
+      || !result.afterPruneHidden.confirmed
+      || result.afterPruneHidden.savedSessionCountBefore <= result.afterPruneHidden.visibleCountBefore
+      || result.afterPruneHidden.savedSessionCountAfterPrompt !== result.afterPruneHidden.savedSessionCountBefore
+      || result.afterPruneHidden.savedSessionCountAfter !== result.afterPruneHidden.visibleCountBefore
+      || result.afterPruneHidden.eventDetail?.deletedCount !== result.afterPruneHidden.deletedCount
+      || result.afterPruneHidden.eventDetail?.keptCount !== result.afterPruneHidden.savedSessionCountAfter
+    ) {
+      throw new Error(`Saved-session prune hidden workflow did not complete: ${JSON.stringify(result.afterPruneHidden)}`);
+    }
+
+    if (
       !result.afterScreenSearch.searched
       || result.afterScreenSearch.matchCount < 1
       || !result.afterScreenSearch.hasHighlights
@@ -708,6 +720,162 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
 
+    const afterPruneHidden = await evaluate(send, `(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const waitForState = async (predicate, timeoutMs = 8000) => {
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < timeoutMs) {
+          const state = window.terminalDemoDebug?.getState?.();
+          if (predicate(state)) {
+            return state;
+          }
+          await wait(200);
+        }
+        return window.terminalDemoDebug?.getState?.();
+      };
+      const waitForSavedCount = async (expectedMin) => {
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          const count = window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
+          if (count >= expectedMin) {
+            return count;
+          }
+          await wait(200);
+        }
+        return window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
+      };
+      const workspaceHost = document.querySelector('tp-terminal-workspace') ?? null;
+      const workspaceRoot = workspaceHost?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
+      const sessionTools = commandRoot?.querySelector('[data-testid="tp-session-tools"]') ?? null;
+      const startShellButton = document.querySelector('[data-testid="start-default-shell"]') ?? null;
+      if (!workspaceHost || !savedRoot || !sessionTools || !startShellButton) {
+        return {
+          prompted: false,
+          confirmed: false,
+          reason: 'saved-session setup controls missing',
+          savedSessionCountBefore: window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0,
+          visibleCountBefore: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
+          savedSessionCountAfterPrompt: 0,
+          savedSessionCountAfter: 0,
+          deletedCount: 0,
+          eventDetail: null,
+        };
+      }
+
+      sessionTools.open = true;
+      let savedCount = window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
+      let setupAttempts = 0;
+      while (savedCount < 5 && setupAttempts < 8) {
+        setupAttempts += 1;
+        const stateBeforeCreate = window.terminalDemoDebug?.getState?.();
+        const sessionCountBefore = stateBeforeCreate?.catalog?.sessions?.length ?? 0;
+        if (startShellButton.disabled) {
+          await wait(200);
+          continue;
+        }
+        startShellButton.click();
+        const stateAfterCreate = await waitForState((state) => {
+          const nextSessionCount = state?.catalog?.sessions?.length ?? 0;
+          return nextSessionCount > sessionCountBefore && Boolean(state?.attachedSession?.focused_screen);
+        });
+        if ((stateAfterCreate?.catalog?.sessions?.length ?? 0) <= sessionCountBefore) {
+          continue;
+        }
+
+        const saveLayoutButton = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
+        if (!saveLayoutButton) {
+          return {
+            prompted: false,
+            confirmed: false,
+            reason: 'save layout missing after setup session',
+            savedSessionCountBefore: savedCount,
+            visibleCountBefore: savedRoot.querySelectorAll('[part="item"]')?.length ?? 0,
+            savedSessionCountAfterPrompt: savedCount,
+            savedSessionCountAfter: savedCount,
+            deletedCount: 0,
+            eventDetail: null,
+          };
+        }
+        if (saveLayoutButton.disabled) {
+          await wait(200);
+          continue;
+        }
+        saveLayoutButton.click();
+        const nextSavedCount = await waitForSavedCount(savedCount + 1);
+        if (nextSavedCount <= savedCount) {
+          continue;
+        }
+        savedCount = nextSavedCount;
+      }
+
+      if (savedCount < 5) {
+        return {
+          prompted: false,
+          confirmed: false,
+          reason: 'unable to seed enough saved layouts for prune workflow',
+          savedSessionCountBefore: savedCount,
+          visibleCountBefore: savedRoot.querySelectorAll('[part="item"]')?.length ?? 0,
+          savedSessionCountAfterPrompt: savedCount,
+          savedSessionCountAfter: savedCount,
+          deletedCount: 0,
+          eventDetail: null,
+        };
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      const savedSessionCountBefore = window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
+      const visibleCountBefore = savedRoot.querySelectorAll('[part="item"]')?.length ?? 0;
+      const pruneButton = savedRoot.querySelector('[data-testid="tp-prune-hidden-saved-sessions"]') ?? null;
+      if (!pruneButton || pruneButton.disabled) {
+        return {
+          prompted: false,
+          confirmed: false,
+          reason: pruneButton ? 'prune hidden disabled' : 'prune hidden missing',
+          savedSessionCountBefore,
+          visibleCountBefore,
+          savedSessionCountAfterPrompt: savedSessionCountBefore,
+          savedSessionCountAfter: savedSessionCountBefore,
+          deletedCount: Math.max(0, savedSessionCountBefore - visibleCountBefore),
+          eventDetail: null,
+        };
+      }
+
+      let eventDetail = null;
+      workspaceHost.addEventListener('tp-saved-sessions-pruned', (event) => {
+        eventDetail = event.detail ?? null;
+      }, { once: true });
+
+      pruneButton.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const armedButton = savedRoot.querySelector('[data-testid="tp-prune-hidden-saved-sessions"]') ?? null;
+      const prompted = Boolean(
+        armedButton?.getAttribute('data-confirming') === 'true'
+        && /confirm prune/i.test(armedButton.textContent ?? ''),
+      );
+      const savedSessionCountAfterPrompt =
+        window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
+      armedButton?.click();
+      await wait(1200);
+
+      const savedSessionCountAfter = window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
+      const visibleCountAfter = savedRoot.querySelectorAll('[part="item"]')?.length ?? 0;
+      const hiddenAfter = Boolean(savedRoot.querySelector('[data-testid="tp-prune-hidden-saved-sessions"]'));
+
+      return {
+        prompted,
+        confirmed: savedSessionCountAfter < savedSessionCountAfterPrompt,
+        savedSessionCountBefore,
+        visibleCountBefore,
+        savedSessionCountAfterPrompt,
+        savedSessionCountAfter,
+        visibleCountAfter,
+        hiddenAfter,
+        deletedCount: Math.max(0, savedSessionCountBefore - savedSessionCountAfter),
+        eventDetail,
+      };
+    })()`);
+
     const sendCommandResult = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
@@ -957,6 +1125,7 @@ async function runSmokeScenario(browserUrl) {
       afterDisplaySwitch,
       afterTopologyActions,
       afterSaveLayout,
+      afterPruneHidden,
       afterCommand: {
         ...afterCommand,
         sequenceAdvanced: initialSequence !== null
