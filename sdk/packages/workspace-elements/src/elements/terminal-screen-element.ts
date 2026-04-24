@@ -12,6 +12,7 @@ import {
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import { terminalInputForKeyboardEvent } from "./terminal-keyboard-input.js";
 
 type ScreenCopyState = "idle" | "copied" | "failed";
 
@@ -131,6 +132,15 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         scrollbar-gutter: stable;
       }
 
+      .viewport:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--tp-color-accent) 64%, transparent);
+        outline-offset: 3px;
+      }
+
+      .screen[data-direct-input="true"] .viewport {
+        cursor: text;
+      }
+
       .screen[data-font-scale="compact"] .viewport {
         font-size: 0.82rem;
         line-height: 1.42;
@@ -222,6 +232,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   #autoScrolling = false;
   #copyStateResetTimer: ReturnType<typeof setTimeout> | null = null;
+  #directInputQueue = Promise.resolve();
 
   constructor() {
     super();
@@ -266,6 +277,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     const screen = this.snapshot.attachedSession?.focused_screen;
     const searchResult = this.createSearchResult();
     const terminalDisplay = this.snapshot.terminalDisplay;
+    const canUseDirectInput = Boolean(
+      screen
+      && (this.snapshot.selection.activeSessionId ?? this.snapshot.attachedSession?.session.session_id)
+      && (this.snapshot.selection.activePaneId ?? screen.pane_id),
+    );
 
     return html`
       <div
@@ -274,6 +290,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         data-testid="tp-terminal-screen"
         data-font-scale=${terminalDisplay.fontScale}
         data-line-wrap=${String(terminalDisplay.lineWrap)}
+        data-direct-input=${String(canUseDirectInput)}
       >
         <div class="screen-header">
           <div class="panel-header">
@@ -371,6 +388,12 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 class="viewport"
                 part="screen-lines"
                 data-testid="tp-screen-viewport"
+                tabindex=${canUseDirectInput ? "0" : nothing}
+                role="region"
+                aria-label=${canUseDirectInput
+                  ? "Terminal output. Type here to send input to the focused pane."
+                  : "Terminal output"}
+                @keydown=${(event: KeyboardEvent) => this.handleViewportKeydown(event)}
                 @scroll=${(event: Event) => this.handleViewportScroll(event)}
               >
                 ${searchResult.lines.map((line) => renderLine(line.lineIndex + 1, line.segments))}
@@ -534,6 +557,60 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     this.followOutput = isViewportAtBottom(viewport);
   }
 
+  private handleViewportKeydown(event: KeyboardEvent): void {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    const input = terminalInputForKeyboardEvent(event);
+    if (!input) {
+      return;
+    }
+
+    event.preventDefault();
+    this.queueDirectInput(input);
+  }
+
+  private queueDirectInput(input: string): void {
+    this.#directInputQueue = this.#directInputQueue
+      .catch(() => undefined)
+      .then(() => this.dispatchDirectInput(input));
+  }
+
+  private async dispatchDirectInput(input: string): Promise<void> {
+    const sessionId = this.snapshot.selection.activeSessionId ?? this.snapshot.attachedSession?.session.session_id ?? null;
+    const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
+    if (!sessionId || !paneId) {
+      return;
+    }
+
+    try {
+      await this.kernel?.commands.dispatchMuxCommand(sessionId, {
+        kind: "send_input",
+        pane_id: paneId,
+        data: input,
+      });
+      if (shouldRefreshAfterDirectInput(input)) {
+        await this.kernel?.commands.attachSession(sessionId);
+      }
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-screen-input-submitted", {
+          bubbles: true,
+          composed: true,
+          detail: { sessionId, paneId, inputLength: input.length },
+        }),
+      );
+    } catch (error) {
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-screen-input-failed", {
+          bubbles: true,
+          composed: true,
+          detail: { sessionId, paneId, error },
+        }),
+      );
+    }
+  }
+
   private scrollViewportToBottom(): void {
     const viewport = this.shadowRoot?.querySelector<HTMLElement>('[data-testid="tp-screen-viewport"]');
     if (!viewport) {
@@ -582,4 +659,8 @@ function renderHighlightedSegments(
 
 function isViewportAtBottom(viewport: HTMLElement): boolean {
   return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2;
+}
+
+function shouldRefreshAfterDirectInput(input: string): boolean {
+  return input === "\r" || input === "\u0003" || input === "\u0004";
 }

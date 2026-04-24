@@ -186,6 +186,15 @@ async function main() {
       throw new Error(`Command history replay did not settle correctly: ${JSON.stringify(result.afterHistoryReplay)}`);
     }
 
+    if (
+      !result.afterDirectScreenInput.focused
+      || result.afterDirectScreenInput.submittedEvents < 1
+      || !result.afterDirectScreenInput.connectionReady
+      || !result.afterDirectScreenInput.containsDirectOutput
+    ) {
+      throw new Error(`Direct terminal screen input did not settle correctly: ${JSON.stringify(result.afterDirectScreenInput)}`);
+    }
+
     process.stdout.write(`Browser smoke passed - ${browserUrl}\n`);
     process.stdout.write(`Browser smoke screenshot - ${screenshotPath}\n`);
   } finally {
@@ -674,6 +683,64 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
 
+    const directScreenInputResult = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const screenRoot = screenHost?.shadowRoot ?? null;
+      const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      if (!screenHost || !screenRoot || !viewport) {
+        return {
+          ok: false,
+          reason: 'screen viewport missing',
+          focused: false,
+          submittedEvents: 0,
+        };
+      }
+
+      let submittedEvents = 0;
+      const handleSubmitted = () => {
+        submittedEvents += 1;
+      };
+      screenHost.addEventListener('tp-terminal-screen-input-submitted', handleSubmitted);
+      viewport.focus();
+      const directInput = ${JSON.stringify('printf "screen-key-ok\\n"')};
+      for (const key of [...directInput, 'Enter']) {
+        viewport.dispatchEvent(new KeyboardEvent('keydown', {
+          key,
+          bubbles: true,
+          cancelable: true,
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      screenHost.removeEventListener('tp-terminal-screen-input-submitted', handleSubmitted);
+
+      return {
+        ok: true,
+        focused: screenRoot.activeElement === viewport,
+        submittedEvents,
+      };
+    })()`);
+    if (!directScreenInputResult.ok) {
+      throw new Error(`Unable to send input through terminal screen: ${JSON.stringify(directScreenInputResult)}`);
+    }
+
+    await sleep(2500);
+
+    const afterDirectScreenInput = await evaluate(send, `(() => {
+      const debug = window.terminalDemoDebug?.getState?.();
+      const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
+        ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+        : '';
+      return {
+        focused: ${JSON.stringify(directScreenInputResult.focused)},
+        submittedEvents: ${JSON.stringify(directScreenInputResult.submittedEvents)},
+        connectionReady: debug?.connection?.state === 'ready',
+        terminalScreenText,
+        containsDirectOutput: /screen-key-ok/i.test(terminalScreenText),
+      };
+    })()`);
+
     const screenshot = await send("Page.captureScreenshot", {
       format: "png",
       captureBeyondViewport: true,
@@ -701,6 +768,7 @@ async function runSmokeScenario(browserUrl) {
           ? afterHistoryReplay.focusedSequence !== replayInitialSequence
           : false,
       },
+      afterDirectScreenInput,
       issues,
     };
   } finally {
