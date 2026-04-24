@@ -214,6 +214,15 @@ async function main() {
     }
 
     if (
+      !result.afterRecentCommandRecall.clicked
+      || !result.afterRecentCommandRecall.recalledDraft?.includes("browser-smoke-ok")
+      || !result.afterRecentCommandRecall.sendEnabled
+      || !result.afterRecentCommandRecall.historyBadgeText?.includes("history")
+    ) {
+      throw new Error(`Recent command recall did not update the draft correctly: ${JSON.stringify(result.afterRecentCommandRecall)}`);
+    }
+
+    if (
       !result.afterScreenFollowToggle.paused
       || !result.afterScreenFollowToggle.resumed
       || !result.afterScreenFollowToggle.screenViewportAtBottom
@@ -958,6 +967,35 @@ async function runSmokeScenario(browserUrl) {
     })()`);
     const replayInitialSequence = afterCommand.focusedSequence;
 
+    const afterRecentCommandRecall = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const historyEntry = commandRoot?.querySelector('[data-testid="tp-command-history-entry"]') ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      if (!historyEntry || !textarea) {
+        return {
+          clicked: false,
+          reason: historyEntry ? 'textarea missing' : 'history entry missing',
+          recalledDraft: textarea?.value ?? null,
+          sendEnabled: false,
+          historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
+            ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        };
+      }
+
+      historyEntry.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const sendButton = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
+      return {
+        clicked: true,
+        entryTitle: historyEntry.getAttribute('title'),
+        recalledDraft: textarea.value,
+        sendEnabled: Boolean(sendButton && !sendButton.disabled),
+        historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
+          ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+      };
+    })()`);
+
     afterScreenSearch = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
@@ -1211,6 +1249,7 @@ async function runSmokeScenario(browserUrl) {
           ? afterCommand.focusedSequence !== initialSequence
           : false,
       },
+      afterRecentCommandRecall,
       afterScreenFollowToggle,
       afterHistoryReplay: {
         ...afterHistoryReplay,

@@ -33,12 +33,23 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         margin-bottom: 0;
       }
 
-      .dock-header,
-      .dock-footer {
+      .dock-header {
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
         gap: var(--tp-space-3);
+      }
+
+      .dock-footer {
+        display: grid;
+        grid-template-columns: minmax(12rem, 1fr) max-content;
+        align-items: flex-start;
+        gap: var(--tp-space-3);
+      }
+
+      .dock-footer .actions {
+        flex-wrap: nowrap;
+        justify-content: flex-end;
       }
 
       .dock-status {
@@ -49,6 +60,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .chip-row,
+      .history-actions,
       .actions {
         display: flex;
         flex-wrap: wrap;
@@ -60,6 +72,38 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         font-family: var(--tp-font-family-mono);
         font-size: 0.82rem;
         padding: 0.35rem 0.55rem;
+      }
+
+      .history-row {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: var(--tp-space-2);
+        align-items: center;
+      }
+
+      .history-label {
+        color: var(--tp-color-text-muted);
+        font-size: 0.74rem;
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .history-chip {
+        max-width: min(22rem, 100%);
+        justify-content: flex-start;
+        color: var(--tp-color-text);
+        font-family: var(--tp-font-family-mono);
+        font-size: 0.82rem;
+        padding: 0.34rem 0.55rem;
+      }
+
+      .history-command {
+        display: block;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .composer {
@@ -145,9 +189,17 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       @media (max-width: 720px) {
-        .dock-header,
-        .dock-footer {
+        .dock-header {
           display: grid;
+        }
+
+        .dock-footer {
+          grid-template-columns: 1fr;
+        }
+
+        .dock-footer .actions {
+          flex-wrap: wrap;
+          justify-content: flex-start;
         }
 
         .dock-status {
@@ -178,6 +230,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     const canSend = Boolean(activeSessionId && activePaneId && draft.trim().length > 0 && !this.pending);
     const canUsePane = Boolean(activeSessionId && activePaneId && !this.pending);
     const commandHistory = this.snapshot.commandHistory.entries;
+    const recentCommands = [...commandHistory].slice(-5).reverse();
     const statusLabel = this.pending ? "Sending" : activePaneId ? "Ready" : "Pick a pane";
 
     return html`
@@ -214,6 +267,31 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             `,
           )}
         </div>
+
+        ${recentCommands.length > 0
+          ? html`
+              <div class="history-row" part="command-history" aria-label="Recent commands">
+                <span class="history-label">Recent</span>
+                <div class="history-actions">
+                  ${recentCommands.map(
+                    (command, index) => html`
+                      <button
+                        class="history-chip"
+                        type="button"
+                        data-testid="tp-command-history-entry"
+                        data-history-index=${index}
+                        title=${command}
+                        ?disabled=${!activePaneId || this.pending}
+                        @click=${() => this.setDraft(command)}
+                      >
+                        <span class="history-command">${command}</span>
+                      </button>
+                    `,
+                  )}
+                </div>
+              </div>
+            `
+          : nothing}
 
         <label class="composer" part="composer">
           <span class="prompt" aria-hidden="true">&gt;_</span>
