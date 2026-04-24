@@ -94,6 +94,7 @@ Examples:
 - `tp-select-session`
 - `tp-run-toolbar-action`
 - `tp-request-focus-input`
+- `tp-terminal-command-history-cleared`
 
 Avoid:
 

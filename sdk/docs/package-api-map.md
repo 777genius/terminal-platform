@@ -117,6 +117,8 @@ Expected exports:
 - kernel factory
 - selectors
 - diagnostics interfaces
+- workspace read models, including `WorkspaceCommandHistorySnapshot`
+- workspace preference defaults, including `DEFAULT_COMMAND_HISTORY_LIMIT`
 
 ### `@terminal-platform/workspace-adapter-websocket`
 
@@ -169,6 +171,7 @@ Expected exports:
 - public element classes
 - `defineTerminalPlatformElements()`
 - documented style helpers only if necessary
+- command dock events and parts documented in feature model docs
 
 ### `@terminal-platform/workspace-react`
 
