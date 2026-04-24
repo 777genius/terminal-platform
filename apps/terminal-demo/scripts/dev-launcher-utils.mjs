@@ -55,11 +55,12 @@ export function stopProcess(child) {
 
 export async function waitForServer(url, options = {}) {
   const startedAt = Date.now();
-  const timeoutMs = options.timeoutMs ?? 20_000;
+  const timeoutMs = options.timeoutMs ?? 30_000;
 
   while (Date.now() - startedAt < timeoutMs) {
-    if (options.child?.exitCode !== null && options.child?.exitCode !== undefined) {
-      throw new Error(`${options.label ?? "Server"} exited before ${url} became ready with code ${options.child.exitCode}`);
+    const exitState = processExitState(options.child);
+    if (exitState) {
+      throw new Error(`${options.label ?? "Server"} exited before ${url} became ready - ${exitState}`);
     }
 
     try {
@@ -75,6 +76,22 @@ export async function waitForServer(url, options = {}) {
   }
 
   throw new Error(`Timed out waiting for ${options.label ?? "server"} at ${url}`);
+}
+
+function processExitState(child) {
+  if (!child) {
+    return null;
+  }
+
+  if (child.exitCode !== null) {
+    return `exit code ${child.exitCode}`;
+  }
+
+  if (child.signalCode !== null) {
+    return `signal ${child.signalCode}`;
+  }
+
+  return null;
 }
 
 function pipeProcess(child, label) {
