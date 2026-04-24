@@ -15,6 +15,9 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
     ...WorkspaceKernelConsumerElement.properties,
     pendingAction: { state: true },
     actionError: { state: true },
+    renamingTabId: { state: true },
+    renameDraft: { state: true },
+    armedCloseAction: { state: true },
   };
 
   static styles = [
@@ -57,6 +60,31 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
         color: var(--tp-color-text);
       }
 
+      .rename-form {
+        display: grid;
+        grid-template-columns: minmax(9rem, 1fr) auto auto;
+        gap: var(--tp-space-2);
+        align-items: center;
+      }
+
+      .rename-form input {
+        min-width: 0;
+        border: 1px solid var(--tp-color-border);
+        border-radius: var(--tp-radius-sm);
+        background: color-mix(in srgb, var(--tp-color-panel-raised) 80%, transparent);
+        color: var(--tp-color-text);
+        font: inherit;
+        padding: 0.42rem 0.6rem;
+      }
+
+      .pane-row {
+        display: inline-flex;
+        max-width: 100%;
+        flex-wrap: wrap;
+        gap: var(--tp-space-2);
+        align-items: center;
+      }
+
       ul {
         list-style: none;
         margin: 0;
@@ -91,6 +119,23 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
         font-size: 0.74rem;
       }
 
+      .node-action {
+        min-height: 1.8rem;
+        border-radius: var(--tp-radius-sm);
+        padding: 0.2rem 0.5rem;
+        font-size: 0.78rem;
+      }
+
+      .danger {
+        border-color: color-mix(in srgb, var(--tp-color-danger) 38%, var(--tp-color-border));
+        color: color-mix(in srgb, var(--tp-color-danger) 82%, var(--tp-color-text));
+      }
+
+      .danger[data-confirming] {
+        background: color-mix(in srgb, var(--tp-color-danger) 16%, transparent);
+        color: var(--tp-color-text);
+      }
+
       .tree-body {
         min-width: 0;
         overflow-x: auto;
@@ -113,17 +158,27 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
         .action-strip button {
           flex: 1 1 8rem;
         }
+
+        .rename-form {
+          grid-template-columns: 1fr;
+        }
       }
     `,
   ];
 
   protected declare pendingAction: string | null;
   protected declare actionError: string | null;
+  protected declare renamingTabId: string | null;
+  protected declare renameDraft: string;
+  protected declare armedCloseAction: CloseAction | null;
 
   constructor() {
     super();
     this.pendingAction = null;
     this.actionError = null;
+    this.renamingTabId = null;
+    this.renameDraft = "";
+    this.armedCloseAction = null;
   }
 
   override render() {
@@ -133,6 +188,8 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
     const root = focusedTab?.root;
     const focusedPaneId = controls.activePaneId;
     const isPending = this.pendingAction !== null;
+    const isRenamingFocusedTab = Boolean(focusedTab && this.renamingTabId === focusedTab.tab_id);
+    const closeTabArmed = Boolean(focusedTab && this.isCloseArmed("tab", focusedTab.tab_id));
 
     return html`
       <div class="panel tree" part="tree" data-testid="tp-pane-tree">
@@ -197,7 +254,51 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
           >
             Split down
           </button>
+          <button
+            type="button"
+            data-testid="tp-rename-tab"
+            ?disabled=${isPending || !controls.canRenameTab}
+            @click=${() => this.toggleRenameTab()}
+          >
+            Rename tab
+          </button>
+          <button
+            class="danger"
+            type="button"
+            data-testid="tp-close-tab"
+            ?data-confirming=${closeTabArmed}
+            ?disabled=${isPending || !controls.canCloseTab}
+            @click=${() => this.closeTab()}
+          >
+            ${closeTabArmed ? "Confirm close tab" : "Close tab"}
+          </button>
         </div>
+
+        ${isRenamingFocusedTab
+          ? html`
+              <div class="rename-form" part="rename-form">
+                <input
+                  data-testid="tp-rename-tab-input"
+                  aria-label="Tab title"
+                  .value=${this.renameDraft}
+                  ?disabled=${isPending}
+                  @input=${this.handleRenameInput}
+                  @keydown=${this.handleRenameKeydown}
+                />
+                <button
+                  type="button"
+                  data-testid="tp-rename-tab-save"
+                  ?disabled=${isPending || !this.renameDraft.trim()}
+                  @click=${() => this.renameTab()}
+                >
+                  Save
+                </button>
+                <button type="button" data-testid="tp-rename-tab-cancel" ?disabled=${isPending} @click=${() => this.cancelRename()}>
+                  Cancel
+                </button>
+              </div>
+            `
+          : null}
 
         ${this.actionError
           ? html`
@@ -211,9 +312,12 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
         <div class="tree-body" part="tree-body">
           ${root
             ? renderNode(root, {
+                armedCloseAction: this.armedCloseAction,
+                canClosePane: controls.canClosePane,
                 canFocusPane: controls.canFocusPane,
                 focusedPaneId,
                 isPending,
+                onClose: (paneId) => this.closePane(paneId),
                 onFocus: (paneId) => this.focusPane(paneId),
               })
             : html`<div class="empty-state" part="empty">No pane tree yet</div>`}
@@ -224,6 +328,7 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
 
   private newTab(): void {
     const controls = resolveTerminalTopologyControlState(this.snapshot);
+    this.clearTransientTopologyUi();
     this.runTopologyCommand("new_tab", {
       kind: "new_tab",
       title: `Tab ${controls.tabCount + 1}`,
@@ -236,6 +341,7 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
+    this.clearTransientTopologyUi();
     this.runTopologyCommand(`split_${direction}`, {
       kind: "split_pane",
       pane_id: paneId,
@@ -248,6 +354,7 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
+    this.clearTransientTopologyUi();
     this.runTopologyCommand("focus_tab", { kind: "focus_tab", tab_id: tabId });
   }
 
@@ -256,7 +363,100 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
+    this.clearTransientTopologyUi();
     this.runTopologyCommand("focus_pane", { kind: "focus_pane", pane_id: paneId });
+  }
+
+  private toggleRenameTab(): void {
+    const tab = resolveTerminalTopologyControlState(this.snapshot).activeTab;
+    if (!tab) {
+      return;
+    }
+
+    this.armedCloseAction = null;
+    if (this.renamingTabId === tab.tab_id) {
+      this.cancelRename();
+      return;
+    }
+
+    this.renamingTabId = tab.tab_id;
+    this.renameDraft = tab.title ?? compactTerminalId(tab.tab_id);
+  }
+
+  private handleRenameInput(event: Event): void {
+    this.renameDraft = (event.currentTarget as HTMLInputElement).value;
+  }
+
+  private handleRenameKeydown(event: KeyboardEvent): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      this.renameTab();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.cancelRename();
+    }
+  }
+
+  private renameTab(): void {
+    const tab = resolveTerminalTopologyControlState(this.snapshot).activeTab;
+    const title = this.renameDraft.trim();
+    if (!tab || !title) {
+      return;
+    }
+
+    this.renamingTabId = null;
+    this.renameDraft = "";
+    this.armedCloseAction = null;
+    this.runTopologyCommand("rename_tab", {
+      kind: "rename_tab",
+      tab_id: tab.tab_id,
+      title,
+    });
+  }
+
+  private cancelRename(): void {
+    this.renamingTabId = null;
+    this.renameDraft = "";
+  }
+
+  private closePane(paneId: string): void {
+    if (!this.isCloseArmed("pane", paneId)) {
+      this.renamingTabId = null;
+      this.renameDraft = "";
+      this.armedCloseAction = { kind: "pane", id: paneId };
+      return;
+    }
+
+    this.armedCloseAction = null;
+    this.runTopologyCommand("close_pane", { kind: "close_pane", pane_id: paneId });
+  }
+
+  private closeTab(): void {
+    const tab = resolveTerminalTopologyControlState(this.snapshot).activeTab;
+    if (!tab) {
+      return;
+    }
+
+    if (!this.isCloseArmed("tab", tab.tab_id)) {
+      this.renamingTabId = null;
+      this.renameDraft = "";
+      this.armedCloseAction = { kind: "tab", id: tab.tab_id };
+      return;
+    }
+
+    this.armedCloseAction = null;
+    this.runTopologyCommand("close_tab", { kind: "close_tab", tab_id: tab.tab_id });
+  }
+
+  private isCloseArmed(kind: CloseAction["kind"], id: string): boolean {
+    return this.armedCloseAction?.kind === kind && this.armedCloseAction.id === id;
+  }
+
+  private clearTransientTopologyUi(): void {
+    this.renamingTabId = null;
+    this.renameDraft = "";
+    this.armedCloseAction = null;
   }
 
   private runTopologyCommand(action: string, command: MuxCommand): void {
@@ -308,31 +508,54 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   }
 }
 
+interface CloseAction {
+  kind: "pane" | "tab";
+  id: string;
+}
+
 interface RenderNodeOptions {
+  armedCloseAction: CloseAction | null;
+  canClosePane: boolean;
   canFocusPane: boolean;
   focusedPaneId: string | null;
   isPending: boolean;
+  onClose(paneId: string): void;
   onFocus(paneId: string): void;
 }
 
 function renderNode(node: PaneTreeNode, options: RenderNodeOptions): TemplateResult {
   if (node.kind === "leaf") {
     const focused = node.pane_id === options.focusedPaneId;
+    const closeArmed = options.armedCloseAction?.kind === "pane" && options.armedCloseAction.id === node.pane_id;
     return html`
-      <button
-        class="node"
-        type="button"
-        part="leaf"
-        data-testid="tp-pane-node"
-        data-pane-id=${node.pane_id}
-        title=${node.pane_id}
-        aria-pressed=${String(focused)}
-        ?disabled=${options.isPending || !options.canFocusPane}
-        @click=${() => options.onFocus(node.pane_id)}
-      >
-        Pane ${compactTerminalId(node.pane_id)}
-        ${focused ? html`<span class="node__meta">focused</span>` : null}
-      </button>
+      <span class="pane-row" part="pane-row">
+        <button
+          class="node"
+          type="button"
+          part="leaf"
+          data-testid="tp-pane-node"
+          data-pane-id=${node.pane_id}
+          title=${node.pane_id}
+          aria-pressed=${String(focused)}
+          ?disabled=${options.isPending || !options.canFocusPane}
+          @click=${() => options.onFocus(node.pane_id)}
+        >
+          Pane ${compactTerminalId(node.pane_id)}
+          ${focused ? html`<span class="node__meta">focused</span>` : null}
+        </button>
+        <button
+          class="node-action danger"
+          type="button"
+          part="pane-close"
+          data-testid="tp-close-pane"
+          data-pane-id=${node.pane_id}
+          ?data-confirming=${closeArmed}
+          ?disabled=${options.isPending || !options.canClosePane}
+          @click=${() => options.onClose(node.pane_id)}
+        >
+          ${closeArmed ? "Confirm close" : "Close"}
+        </button>
+      </span>
     `;
   }
 

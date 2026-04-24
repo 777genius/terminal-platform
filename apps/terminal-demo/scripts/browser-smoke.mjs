@@ -144,12 +144,22 @@ async function main() {
     if (
       !result.afterTopologyActions.ok
       || !result.afterTopologyActions.splitClicked
+      || !result.afterTopologyActions.closePanePrompted
+      || !result.afterTopologyActions.closePaneConfirmed
+      || !result.afterTopologyActions.renameClicked
       || !result.afterTopologyActions.newTabClicked
+      || !result.afterTopologyActions.closeTabPrompted
+      || !result.afterTopologyActions.closeTabConfirmed
       || !result.afterTopologyActions.focusOriginalClicked
-      || result.afterTopologyActions.completedEvents < 3
+      || result.afterTopologyActions.completedEvents < 5
       || result.afterTopologyActions.paneCountAfterSplit <= result.afterTopologyActions.paneCountBefore
       || result.afterTopologyActions.focusedPaneAfterSplit === result.afterTopologyActions.focusedPaneBefore
+      || result.afterTopologyActions.paneCountAfterClosePrompt !== result.afterTopologyActions.paneCountAfterSplit
+      || result.afterTopologyActions.paneCountAfterClosePane !== result.afterTopologyActions.paneCountBefore
+      || result.afterTopologyActions.renamedTabTitle !== "Smoke Workspace"
       || result.afterTopologyActions.tabCountAfterNewTab <= result.afterTopologyActions.tabCountBefore
+      || result.afterTopologyActions.tabCountAfterCloseTabPrompt !== result.afterTopologyActions.tabCountAfterNewTab
+      || result.afterTopologyActions.tabCountAfterCloseTab !== result.afterTopologyActions.tabCountBefore
       || result.afterTopologyActions.focusedTabAfterFocus !== result.afterTopologyActions.originalTabId
     ) {
       throw new Error(`Topology controls did not mutate and restore focus correctly: ${JSON.stringify(result.afterTopologyActions)}`);
@@ -340,7 +350,10 @@ async function runSmokeScenario(browserUrl) {
           paneTreeRoot?.querySelector('[data-testid="tp-new-tab"]')
           && paneTreeRoot?.querySelector('[data-testid="tp-split-horizontal"]')
           && paneTreeRoot?.querySelector('[data-testid="tp-split-vertical"]')
+          && paneTreeRoot?.querySelector('[data-testid="tp-rename-tab"]')
+          && paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]')
           && paneTreeRoot?.querySelector('[data-testid="tp-pane-node"]')
+          && paneTreeRoot?.querySelector('[data-testid="tp-close-pane"]')
         ),
         hasDisplayControls: Boolean(
           toolbarRoot?.querySelector('[data-testid="tp-font-scale-option"][data-font-scale="large"]')
@@ -483,6 +496,15 @@ async function runSmokeScenario(browserUrl) {
           ? 1
           : countPanes(node.first) + countPanes(node.second);
       };
+      const settle = () => new Promise((resolve) => setTimeout(resolve, 1600));
+      const settleFrame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const setInputValue = (input, value) => {
+        const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+        descriptor?.set?.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      };
+      const findPaneCloseButton = (root, paneId) => [...(root?.querySelectorAll('[data-testid="tp-close-pane"]') ?? [])]
+        .find((button) => button.getAttribute('data-pane-id') === paneId) ?? null;
       const stateBefore = window.terminalDemoDebug?.getState?.();
       const topologyBefore = stateBefore?.attachedSession?.topology ?? null;
       const focusedTabBefore = topologyBefore?.tabs?.find((tab) => tab.tab_id === topologyBefore.focused_tab)
@@ -492,7 +514,9 @@ async function runSmokeScenario(browserUrl) {
       const paneTreeRoot = workspaceHost?.shadowRoot?.querySelector('tp-terminal-pane-tree')?.shadowRoot ?? null;
       const splitButton = paneTreeRoot?.querySelector('[data-testid="tp-split-horizontal"]') ?? null;
       const newTabButton = paneTreeRoot?.querySelector('[data-testid="tp-new-tab"]') ?? null;
-      if (!topologyBefore || !focusedTabBefore || !splitButton || !newTabButton) {
+      const renameButton = paneTreeRoot?.querySelector('[data-testid="tp-rename-tab"]') ?? null;
+      const closeTabButton = paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]') ?? null;
+      if (!topologyBefore || !focusedTabBefore || !splitButton || !newTabButton || !renameButton || !closeTabButton) {
         return {
           ok: false,
           reason: 'topology controls missing',
@@ -509,21 +533,70 @@ async function runSmokeScenario(browserUrl) {
       const paneCountBefore = countPanes(focusedTabBefore.root);
       const focusedPaneBefore = focusedTabBefore.focused_pane;
       splitButton.click();
-      await new Promise((resolve) => setTimeout(resolve, 1600));
+      await settle();
       const stateAfterSplit = window.terminalDemoDebug?.getState?.();
       const splitTab = stateAfterSplit?.attachedSession?.topology?.tabs?.find(
         (tab) => tab.tab_id === focusedTabBefore.tab_id,
       ) ?? null;
+      const paneCountAfterSplit = splitTab ? countPanes(splitTab.root) : 0;
+      const paneToClose = [...(paneTreeRoot?.querySelectorAll('[data-testid="tp-close-pane"]') ?? [])]
+        .map((button) => button.getAttribute('data-pane-id'))
+        .find((paneId) => paneId && paneId !== splitTab?.focused_pane) ?? null;
+      const closePaneButton = paneToClose ? findPaneCloseButton(paneTreeRoot, paneToClose) : null;
+      closePaneButton?.click();
+      await settleFrame();
+      const armedPaneCloseButton = paneToClose ? findPaneCloseButton(paneTreeRoot, paneToClose) : null;
+      const closePanePrompted = Boolean(
+        armedPaneCloseButton?.hasAttribute('data-confirming')
+        && /confirm close/i.test(armedPaneCloseButton.textContent ?? ''),
+      );
+      const stateAfterClosePanePrompt = window.terminalDemoDebug?.getState?.();
+      const promptedTab = stateAfterClosePanePrompt?.attachedSession?.topology?.tabs?.find(
+        (tab) => tab.tab_id === focusedTabBefore.tab_id,
+      ) ?? null;
+      armedPaneCloseButton?.click();
+      await settle();
+      const stateAfterClosePane = window.terminalDemoDebug?.getState?.();
+      const tabAfterClosePane = stateAfterClosePane?.attachedSession?.topology?.tabs?.find(
+        (tab) => tab.tab_id === focusedTabBefore.tab_id,
+      ) ?? null;
+
+      renameButton.click();
+      await settleFrame();
+      const renameInput = paneTreeRoot?.querySelector('[data-testid="tp-rename-tab-input"]') ?? null;
+      const renameSave = paneTreeRoot?.querySelector('[data-testid="tp-rename-tab-save"]') ?? null;
+      if (renameInput && renameSave) {
+        setInputValue(renameInput, 'Smoke Workspace');
+        renameSave.click();
+        await settle();
+      }
+      const stateAfterRename = window.terminalDemoDebug?.getState?.();
+      const renamedTab = stateAfterRename?.attachedSession?.topology?.tabs?.find(
+        (tab) => tab.tab_id === focusedTabBefore.tab_id,
+      ) ?? null;
 
       newTabButton.click();
-      await new Promise((resolve) => setTimeout(resolve, 1600));
+      await settle();
       const stateAfterNewTab = window.terminalDemoDebug?.getState?.();
       const topologyAfterNewTab = stateAfterNewTab?.attachedSession?.topology ?? null;
+      const closeTabButtonAfterNewTab = paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]') ?? null;
+      closeTabButtonAfterNewTab?.click();
+      await settleFrame();
+      const armedCloseTabButton = paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]') ?? null;
+      const closeTabPrompted = Boolean(
+        armedCloseTabButton?.hasAttribute('data-confirming')
+        && /confirm close tab/i.test(armedCloseTabButton.textContent ?? ''),
+      );
+      const tabCountAfterCloseTabPrompt =
+        window.terminalDemoDebug?.getState?.()?.attachedSession?.topology?.tabs?.length ?? 0;
+      armedCloseTabButton?.click();
+      await settle();
+      const topologyAfterCloseTab = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology ?? null;
       const originalTabButton = [...(paneTreeRoot?.querySelectorAll('[data-testid="tp-topology-tab"]') ?? [])]
         .find((button) => button.getAttribute('data-tab-id') === focusedTabBefore.tab_id) ?? null;
       if (originalTabButton) {
         originalTabButton.click();
-        await new Promise((resolve) => setTimeout(resolve, 1600));
+        await settle();
       }
       const topologyAfterFocus = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology ?? null;
       workspaceHost?.removeEventListener('tp-terminal-topology-action-completed', handleCompleted);
@@ -531,15 +604,25 @@ async function runSmokeScenario(browserUrl) {
       return {
         ok: true,
         splitClicked: true,
+        closePanePrompted,
+        closePaneConfirmed: Boolean(paneToClose && tabAfterClosePane && countPanes(tabAfterClosePane.root) < paneCountAfterSplit),
+        renameClicked: Boolean(renameInput && renameSave),
         newTabClicked: true,
+        closeTabPrompted,
+        closeTabConfirmed: Boolean(topologyAfterCloseTab && topologyAfterCloseTab.tabs.length < (topologyAfterNewTab?.tabs?.length ?? 0)),
         focusOriginalClicked: Boolean(originalTabButton),
         completedEvents,
         tabCountBefore: topologyBefore.tabs.length,
         tabCountAfterNewTab: topologyAfterNewTab?.tabs?.length ?? 0,
+        tabCountAfterCloseTabPrompt,
+        tabCountAfterCloseTab: topologyAfterCloseTab?.tabs?.length ?? 0,
         paneCountBefore,
-        paneCountAfterSplit: splitTab ? countPanes(splitTab.root) : 0,
+        paneCountAfterSplit,
+        paneCountAfterClosePrompt: promptedTab ? countPanes(promptedTab.root) : 0,
+        paneCountAfterClosePane: tabAfterClosePane ? countPanes(tabAfterClosePane.root) : 0,
         focusedPaneBefore,
         focusedPaneAfterSplit: splitTab?.focused_pane ?? null,
+        renamedTabTitle: renamedTab?.title ?? null,
         focusedTabAfterFocus: topologyAfterFocus?.focused_tab ?? null,
         originalTabId: focusedTabBefore.tab_id,
       };

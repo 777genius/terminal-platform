@@ -21,9 +21,12 @@ describe("terminal topology controls", () => {
     expect(controls.tabCount).toBe(1);
     expect(controls.paneCount).toBe(2);
     expect(controls.canCreateTab).toBe(true);
+    expect(controls.canClosePane).toBe(true);
+    expect(controls.canCloseTab).toBe(false);
     expect(controls.canSplitPane).toBe(true);
     expect(controls.canFocusPane).toBe(true);
     expect(controls.canFocusTab).toBe(true);
+    expect(controls.canRenameTab).toBe(true);
   });
 
   it("uses loaded backend capabilities to disable unsupported topology actions", () => {
@@ -32,8 +35,11 @@ describe("terminal topology controls", () => {
         ...createInitialWorkspaceSnapshot().catalog,
         backendCapabilities: {
           native: createCapabilities({
+            pane_close: false,
             pane_split: false,
+            tab_close: false,
             tab_create: false,
+            tab_rename: false,
           }),
         },
       },
@@ -43,9 +49,41 @@ describe("terminal topology controls", () => {
 
     expect(controls.capabilityStatus).toBe("known");
     expect(controls.canCreateTab).toBe(false);
+    expect(controls.canClosePane).toBe(false);
+    expect(controls.canCloseTab).toBe(false);
     expect(controls.canSplitPane).toBe(false);
     expect(controls.canFocusPane).toBe(true);
     expect(controls.canFocusTab).toBe(true);
+    expect(controls.canRenameTab).toBe(false);
+  });
+
+  it("prevents destructive close controls from removing the last pane or tab", () => {
+    const snapshot = createWorkspaceSnapshot({
+      attachedSession: {
+        ...createWorkspaceSnapshot().attachedSession!,
+        topology: {
+          session_id: "session-1",
+          backend_kind: "native",
+          focused_tab: "tab-1",
+          tabs: [
+            {
+              tab_id: "tab-1",
+              title: "shell",
+              focused_pane: "pane-1",
+              root: { kind: "leaf", pane_id: "pane-1" },
+            },
+          ],
+        },
+      },
+    });
+
+    const controls = resolveTerminalTopologyControlState(snapshot);
+
+    expect(controls.paneCount).toBe(1);
+    expect(controls.tabCount).toBe(1);
+    expect(controls.canClosePane).toBe(false);
+    expect(controls.canCloseTab).toBe(false);
+    expect(controls.canRenameTab).toBe(true);
   });
 
   it("keeps compact ids stable and counts nested pane trees", () => {

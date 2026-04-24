@@ -191,6 +191,9 @@ export function createMemoryWorkspaceTransport(
         topologyMutationCounter += 1;
         splitSyntheticPane(state, sessionId, topologyMutationCounter, command.pane_id, command.direction);
       }
+      if (command.kind === "close_pane") {
+        closeSyntheticPane(state, sessionId, command.pane_id);
+      }
       if (command.kind === "focus_pane") {
         focusSyntheticPane(state, sessionId, command.pane_id);
       }
@@ -199,6 +202,9 @@ export function createMemoryWorkspaceTransport(
       }
       if (command.kind === "rename_tab") {
         renameSyntheticTab(state, sessionId, command.tab_id, command.title);
+      }
+      if (command.kind === "close_tab") {
+        closeSyntheticTab(state, sessionId, command.tab_id);
       }
       if (command.kind === "save_session") {
         savedSessionCounter += 1;
@@ -669,6 +675,52 @@ function focusSyntheticPane(
   updateAttachedSessionFocus(state, sessionId, topology, screen);
 }
 
+function closeSyntheticPane(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  paneId: PaneId,
+): void {
+  const topology = requireRecord(state.topologyBySessionId, sessionId, "topology snapshot");
+  const tab = topology.tabs.find((candidate) => containsPane(candidate.root, paneId));
+  if (!tab) {
+    throw new WorkspaceError({
+      code: "pane_not_found",
+      message: `missing pane for ${paneId}`,
+      recoverable: false,
+    });
+  }
+
+  if (countPaneTreeLeaves(tab.root) <= 1) {
+    throw new WorkspaceError({
+      code: "unsupported_capability",
+      message: "memory workspace keeps at least one pane per tab",
+      recoverable: false,
+    });
+  }
+
+  const removal = removePaneTreeLeaf(tab.root, paneId);
+  if (!removal.removed || !removal.node) {
+    throw new WorkspaceError({
+      code: "pane_not_found",
+      message: `missing pane for ${paneId}`,
+      recoverable: false,
+    });
+  }
+
+  tab.root = removal.node;
+  const screens = requireRecord(state.screensBySessionId, sessionId, "screen collection");
+  delete screens[paneId];
+
+  const nextPaneId = tab.focused_pane === paneId
+    ? firstPaneId(tab.root)
+    : tab.focused_pane && containsPane(tab.root, tab.focused_pane)
+      ? tab.focused_pane
+      : firstPaneId(tab.root);
+  tab.focused_pane = nextPaneId;
+  topology.focused_tab = tab.tab_id;
+  updateAttachedSessionFocus(state, sessionId, topology, requireRecord(screens, nextPaneId, "screen snapshot"));
+}
+
 function focusSyntheticTab(
   state: MemoryWorkspaceFixture,
   sessionId: SessionId,
@@ -693,6 +745,44 @@ function focusSyntheticTab(
   tab.focused_pane = paneId;
   topology.focused_tab = tab.tab_id;
   updateAttachedSessionFocus(state, sessionId, topology, screen);
+}
+
+function closeSyntheticTab(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  tabId: string,
+): void {
+  const topology = requireRecord(state.topologyBySessionId, sessionId, "topology snapshot");
+  const tabIndex = topology.tabs.findIndex((candidate) => candidate.tab_id === tabId);
+  if (tabIndex === -1) {
+    throw new WorkspaceError({
+      code: "session_not_found",
+      message: `missing tab for ${tabId}`,
+      recoverable: false,
+    });
+  }
+
+  if (topology.tabs.length <= 1) {
+    throw new WorkspaceError({
+      code: "unsupported_capability",
+      message: "memory workspace keeps at least one tab per session",
+      recoverable: false,
+    });
+  }
+
+  const [closedTab] = topology.tabs.splice(tabIndex, 1);
+  const screens = requireRecord(state.screensBySessionId, sessionId, "screen collection");
+  for (const paneId of collectPaneIds(closedTab!.root)) {
+    delete screens[paneId];
+  }
+
+  const focusedTab = topology.focused_tab === tabId
+    ? topology.tabs[Math.min(tabIndex, topology.tabs.length - 1)]!
+    : topology.tabs.find((candidate) => candidate.tab_id === topology.focused_tab) ?? topology.tabs[0]!;
+  const nextPaneId = focusedTab.focused_pane ?? firstPaneId(focusedTab.root);
+  focusedTab.focused_pane = nextPaneId;
+  topology.focused_tab = focusedTab.tab_id;
+  updateAttachedSessionFocus(state, sessionId, topology, requireRecord(screens, nextPaneId, "screen snapshot"));
 }
 
 function renameSyntheticTab(
@@ -762,6 +852,35 @@ function splitPaneTreeLeaf(
     || splitPaneTreeLeaf(node.second, paneId, direction, nextPaneId);
 }
 
+function removePaneTreeLeaf(
+  node: PaneTreeNode,
+  paneId: PaneId,
+): { node: PaneTreeNode | null; removed: boolean } {
+  if (node.kind === "leaf") {
+    return node.pane_id === paneId
+      ? { node: null, removed: true }
+      : { node, removed: false };
+  }
+
+  const first = removePaneTreeLeaf(node.first, paneId);
+  if (first.removed) {
+    return {
+      node: first.node ? { ...node, first: first.node } : node.second,
+      removed: true,
+    };
+  }
+
+  const second = removePaneTreeLeaf(node.second, paneId);
+  if (second.removed) {
+    return {
+      node: second.node ? { ...node, second: second.node } : node.first,
+      removed: true,
+    };
+  }
+
+  return { node, removed: false };
+}
+
 function containsPane(node: PaneTreeNode, paneId: PaneId): boolean {
   if (node.kind === "leaf") {
     return node.pane_id === paneId;
@@ -776,6 +895,14 @@ function firstPaneId(node: PaneTreeNode): PaneId {
   }
 
   return firstPaneId(node.first);
+}
+
+function collectPaneIds(node: PaneTreeNode): PaneId[] {
+  if (node.kind === "leaf") {
+    return [node.pane_id];
+  }
+
+  return [...collectPaneIds(node.first), ...collectPaneIds(node.second)];
 }
 
 function saveSessionSnapshot(

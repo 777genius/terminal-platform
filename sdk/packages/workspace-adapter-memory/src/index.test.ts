@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { PaneTreeNode } from "@terminal-platform/runtime-types";
+
 import {
   createDefaultMemoryWorkspaceFixture,
   createMemoryWorkspaceTransport,
@@ -100,7 +102,7 @@ describe("createMemoryWorkspaceTransport command projection", () => {
     await transport.close();
   });
 
-  it("projects tab, split, focus, and rename commands into topology snapshots", async () => {
+  it("projects tab lifecycle, split, focus, and rename commands into topology snapshots", async () => {
     const transport = createMemoryWorkspaceTransport();
     const session = (await transport.listSessions())[0]!;
     const initial = await transport.attachSession(session.session_id);
@@ -148,6 +150,76 @@ describe("createMemoryWorkspaceTransport command projection", () => {
     const afterRename = await transport.getTopologySnapshot(session.session_id);
     expect(afterRename.focused_tab).toBe(createdTab.tab_id);
     expect(afterRename.tabs.find((tab) => tab.tab_id === createdTab.tab_id)?.title).toBe("renamed logs");
+
+    const splitPaneIds = collectPaneIds(splitTab.root);
+    const paneToClose = splitPaneIds.find((paneId) => paneId !== splitTab.focused_pane)!;
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "close_pane",
+      pane_id: paneToClose,
+    });
+    const afterClosePane = await transport.attachSession(session.session_id);
+    const afterClosePaneTab = afterClosePane.topology.tabs.find((tab) => tab.tab_id === createdTab.tab_id)!;
+    expect(collectPaneIds(afterClosePaneTab.root)).not.toContain(paneToClose);
+    expect(afterClosePaneTab.focused_pane).toBe(splitTab.focused_pane);
+    await expect(transport.getScreenSnapshot(session.session_id, paneToClose)).rejects.toMatchObject({
+      code: "session_not_found",
+    });
+
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "close_tab",
+      tab_id: createdTab.tab_id,
+    });
+    const afterCloseTab = await transport.attachSession(session.session_id);
+    expect(afterCloseTab.topology.tabs).toHaveLength(1);
+    expect(afterCloseTab.topology.focused_tab).toBe(initialTabId);
+    expect(afterCloseTab.focused_screen?.pane_id).toBe(initialPaneId);
+    await expect(transport.dispatchMuxCommand(session.session_id, {
+      kind: "close_tab",
+      tab_id: initialTabId,
+    })).rejects.toMatchObject({ code: "unsupported_capability" });
+    await expect(transport.dispatchMuxCommand(session.session_id, {
+      kind: "close_pane",
+      pane_id: initialPaneId,
+    })).rejects.toMatchObject({ code: "unsupported_capability" });
+
+    await transport.close();
+  });
+
+  it("preserves sibling branches when closing nested panes", async () => {
+    const transport = createMemoryWorkspaceTransport();
+    const session = (await transport.listSessions())[0]!;
+    const initial = await transport.attachSession(session.session_id);
+    const originalPaneId = initial.focused_screen!.pane_id;
+
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "split_pane",
+      pane_id: originalPaneId,
+      direction: "horizontal",
+    });
+    const afterFirstSplit = await transport.attachSession(session.session_id);
+    const paneToNest = afterFirstSplit.topology.tabs[0]!.focused_pane!;
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "split_pane",
+      pane_id: paneToNest,
+      direction: "vertical",
+    });
+
+    const afterNestedSplit = await transport.attachSession(session.session_id);
+    const nestedTab = afterNestedSplit.topology.tabs[0]!;
+    const focusedPaneId = nestedTab.focused_pane!;
+    const nestedPaneToClose = collectPaneIds(nestedTab.root).find(
+      (paneId) => paneId !== originalPaneId && paneId !== focusedPaneId,
+    )!;
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "close_pane",
+      pane_id: nestedPaneToClose,
+    });
+
+    const afterClose = await transport.attachSession(session.session_id);
+    const remainingPaneIds = collectPaneIds(afterClose.topology.tabs[0]!.root);
+    expect(remainingPaneIds).toHaveLength(2);
+    expect(remainingPaneIds).toContain(originalPaneId);
+    expect(remainingPaneIds).toContain(focusedPaneId);
 
     await transport.close();
   });
@@ -205,3 +277,11 @@ describe("createMemoryWorkspaceTransport command projection", () => {
     await transport.close();
   });
 });
+
+function collectPaneIds(node: PaneTreeNode): string[] {
+  if (node.kind === "leaf") {
+    return [node.pane_id];
+  }
+
+  return [...collectPaneIds(node.first), ...collectPaneIds(node.second)];
+}

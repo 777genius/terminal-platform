@@ -12,8 +12,11 @@ export interface TerminalTopologyControlState {
   activePaneId: string | null;
   capabilityStatus: "known" | "unknown";
   canCreateTab: boolean;
+  canClosePane: boolean;
+  canCloseTab: boolean;
   canFocusPane: boolean;
   canFocusTab: boolean;
+  canRenameTab: boolean;
   canSplitPane: boolean;
   paneCount: number;
   tabCount: number;
@@ -35,6 +38,8 @@ export function resolveTerminalTopologyControlState(
     ?? null;
   const backend = topology?.backend_kind ?? snapshot.attachedSession?.session.route.backend ?? null;
   const capabilities = backend ? snapshot.catalog.backendCapabilities[backend] ?? null : null;
+  const paneCount = activeTab ? countPaneTreeLeaves(activeTab.root) : 0;
+  const tabCount = topology?.tabs.length ?? 0;
 
   return {
     activeSessionId,
@@ -42,11 +47,14 @@ export function resolveTerminalTopologyControlState(
     activePaneId,
     capabilityStatus: capabilities ? "known" : "unknown",
     canCreateTab: Boolean(activeSessionId && capabilityEnabled(capabilities, "tab_create")),
+    canClosePane: Boolean(activeSessionId && activePaneId && paneCount > 1 && capabilityEnabled(capabilities, "pane_close")),
+    canCloseTab: Boolean(activeSessionId && activeTab && tabCount > 1 && capabilityEnabled(capabilities, "tab_close")),
     canFocusPane: Boolean(activeSessionId && capabilityEnabled(capabilities, "pane_focus")),
     canFocusTab: Boolean(activeSessionId && capabilityEnabled(capabilities, "tab_focus")),
+    canRenameTab: Boolean(activeSessionId && activeTab && capabilityEnabled(capabilities, "tab_rename")),
     canSplitPane: Boolean(activeSessionId && activePaneId && capabilityEnabled(capabilities, "pane_split")),
-    paneCount: activeTab ? countPaneTreeLeaves(activeTab.root) : 0,
-    tabCount: topology?.tabs.length ?? 0,
+    paneCount,
+    tabCount,
   };
 }
 
