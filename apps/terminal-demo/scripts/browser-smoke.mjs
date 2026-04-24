@@ -9,12 +9,14 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
+const viteCliPath = path.join(appRoot, "node_modules", "vite", "bin", "vite.js");
 const rendererPort = process.env.TERMINAL_DEMO_SMOKE_RENDERER_PORT ?? "4273";
 const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const cdpPort = process.env.TERMINAL_DEMO_SMOKE_CDP_PORT ?? "9226";
 const chromeBinary = resolveChromeBinary();
 const screenshotPath = path.join("/tmp", `terminal-demo-browser-smoke-${Date.now()}.png`);
 const chromeUserDataDir = path.join("/tmp", `terminal-demo-browser-smoke-profile-${process.pid}`);
+const sessionStorePath = path.join("/tmp", `terminal-demo-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`);
 const themeStorageKey = "terminal-platform-demo.theme";
 const fontScaleStorageKey = "terminal-platform-demo.terminal-font-scale";
 const lineWrapStorageKey = "terminal-platform-demo.terminal-line-wrap";
@@ -29,11 +31,20 @@ async function main() {
   try {
     runSync("npm", ["run", "build"], appRoot);
 
-    previewProcess = spawn("npx", ["vite", "preview", "--host", "127.0.0.1", "--port", rendererPort, "--strictPort"], {
+    previewProcess = spawn(process.execPath, [
+      viteCliPath,
+      "preview",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      rendererPort,
+      "--strictPort",
+    ], {
       cwd: appRoot,
       env: process.env,
-      stdio: "inherit",
+      stdio: "pipe",
     });
+    pipeProcess(previewProcess, "[browser-smoke:preview]");
     await waitForServer(rendererUrl, {
       child: previewProcess,
       label: "Renderer preview",
@@ -74,6 +85,7 @@ async function main() {
       || !result.afterCreate.hasScreenCopyControl
       || !result.afterCreate.hasSaveLayoutControl
       || !result.afterCreate.hasDisplayControls
+      || result.afterCreate.savedSessionCount !== 0
       || !result.afterCreate.screenFollowPressed
       || result.afterCreate.savedItemsRendered > 8
       || (result.afterCreate.savedSessionCount > 8 && !result.afterCreate.hasSavedPagination)
@@ -311,45 +323,14 @@ async function runSmokeScenario(browserUrl) {
     })()`);
 
     const initialSequence = afterCreate.focusedSequence;
-    const afterScreenSearch = await evaluate(send, `(async () => {
-      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
-      const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
-      const searchInput = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
-      const terminalScreenText = window.terminalDemoDebug?.getState?.()?.attachedSession?.focused_screen?.surface?.lines
-        ?.map((line) => line.text)
-        .join('\\n')
-        .trim() ?? '';
-      const query = terminalScreenText.match(/[A-Za-z0-9_-]{3,}/)?.[0] ?? '';
-      if (!searchInput || !query) {
-        return {
-          searched: false,
-          reason: searchInput ? 'query missing' : 'search input missing',
-          matchCount: 0,
-          hasHighlights: false,
-        };
-      }
-
-      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      descriptor?.set?.call(searchInput, query);
-      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const nextButton = screenRoot?.querySelector('[data-testid="tp-screen-search-next"]') ?? null;
-      const nextClicked = Boolean(nextButton && !nextButton.disabled);
-      if (nextClicked) {
-        nextButton.click();
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      }
-      const countText = screenRoot?.querySelector('[part="search-count"]')?.textContent?.trim() ?? '';
-      return {
-        searched: true,
-        query,
-        countText,
-        matchCount: Number.parseInt(countText, 10) || 0,
-        hasHighlights: Boolean(screenRoot?.querySelector('[part="search-match"]')),
-        hasActiveHighlight: Boolean(screenRoot?.querySelector('[part~="active-search-match"]')),
-        nextClicked,
-      };
-    })()`);
+    let afterScreenSearch = {
+      searched: false,
+      reason: "deferred until command output is present",
+      matchCount: 0,
+      hasHighlights: false,
+      hasActiveHighlight: false,
+      nextClicked: false,
+    };
 
     const afterSavedPagination = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
@@ -567,6 +548,44 @@ async function runSmokeScenario(browserUrl) {
     })()`);
     const replayInitialSequence = afterCommand.focusedSequence;
 
+    afterScreenSearch = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
+      const searchInput = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
+      const query = 'browser-smoke-ok';
+      if (!searchInput) {
+        return {
+          searched: false,
+          reason: 'search input missing',
+          matchCount: 0,
+          hasHighlights: false,
+          hasActiveHighlight: false,
+          nextClicked: false,
+        };
+      }
+
+      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+      descriptor?.set?.call(searchInput, query);
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const nextButton = screenRoot?.querySelector('[data-testid="tp-screen-search-next"]') ?? null;
+      const nextClicked = Boolean(nextButton && !nextButton.disabled);
+      if (nextClicked) {
+        nextButton.click();
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }
+      const countText = screenRoot?.querySelector('[part="search-count"]')?.textContent?.trim() ?? '';
+      return {
+        searched: true,
+        query,
+        countText,
+        matchCount: Number.parseInt(countText, 10) || 0,
+        hasHighlights: Boolean(screenRoot?.querySelector('[part="search-match"]')),
+        hasActiveHighlight: Boolean(screenRoot?.querySelector('[part~="active-search-match"]')),
+        nextClicked,
+      };
+    })()`);
+
     const afterScreenFollowToggle = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
@@ -691,6 +710,7 @@ async function startBrowserHost(rendererUrlValue) {
         ...process.env,
         TERMINAL_DEMO_RENDERER_URL: rendererUrlValue,
         TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE: "dist-only",
+        TERMINAL_DEMO_SESSION_STORE_PATH: sessionStorePath,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -730,6 +750,11 @@ async function shutdown() {
   await stopProcess(previewProcess);
   await stopProcess(chromeProcess);
   await fs.rm(chromeUserDataDir, { recursive: true, force: true });
+  await Promise.all([
+    fs.rm(sessionStorePath, { force: true }),
+    fs.rm(`${sessionStorePath}-shm`, { force: true }),
+    fs.rm(`${sessionStorePath}-wal`, { force: true }),
+  ]);
 }
 
 async function stopProcess(child) {

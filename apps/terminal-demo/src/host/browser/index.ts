@@ -16,6 +16,7 @@ import {
 const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
 const rendererUrl = process.env.TERMINAL_DEMO_RENDERER_URL ?? "http://127.0.0.1:5173";
 const bootstrapScope = process.env.TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE ?? "public-and-dist";
+const sessionStorePath = process.env.TERMINAL_DEMO_SESSION_STORE_PATH ?? null;
 
 let hostHandle: TerminalRuntimeHostHandle | null = null;
 let shuttingDown = false;
@@ -24,6 +25,7 @@ async function bootstrap(): Promise<void> {
   hostHandle = await startTerminalRuntimeHost({
     runtimeSlug,
     forceRestartReadyDaemon: true,
+    sessionStorePath,
   });
 
   const config: TerminalRuntimeBootstrapConfig = {

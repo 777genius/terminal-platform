@@ -8,6 +8,7 @@ import {
 import { createMainWindow } from "./createMainWindow.js";
 
 const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
+const sessionStorePath = process.env.TERMINAL_DEMO_SESSION_STORE_PATH ?? null;
 let hostHandle: TerminalRuntimeHostHandle | null = null;
 
 async function bootstrap(): Promise<void> {
@@ -16,6 +17,7 @@ async function bootstrap(): Promise<void> {
   hostHandle = await startTerminalRuntimeHost({
     runtimeSlug,
     forceRestartReadyDaemon: true,
+    sessionStorePath,
   });
   const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,

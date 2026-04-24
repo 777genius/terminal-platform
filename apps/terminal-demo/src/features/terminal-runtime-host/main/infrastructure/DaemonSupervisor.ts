@@ -6,17 +6,20 @@ import { loadTerminalPlatformSdk } from "./terminal-platform-sdk.js";
 interface DaemonSupervisorOptions {
   runtimeSlug: string;
   forceRestartReadyDaemon?: boolean;
+  sessionStorePath?: string | null;
 }
 
 export class DaemonSupervisor {
   readonly #runtimeSlug: string;
   readonly #forceRestartReadyDaemon: boolean;
+  readonly #sessionStorePath: string | null;
   #child: ChildProcess | null = null;
   #ownsProcess = false;
 
   constructor(options: DaemonSupervisorOptions) {
     this.#runtimeSlug = options.runtimeSlug;
     this.#forceRestartReadyDaemon = options.forceRestartReadyDaemon ?? false;
+    this.#sessionStorePath = options.sessionStorePath ?? null;
   }
 
   async ensureRunning(): Promise<void> {
@@ -59,7 +62,12 @@ export class DaemonSupervisor {
 
   private spawnDaemon(): void {
     const binaryPath = resolveDaemonBinaryPath();
-    const child = spawn(binaryPath, ["--runtime-slug", this.#runtimeSlug], {
+    const args = ["--runtime-slug", this.#runtimeSlug];
+    if (this.#sessionStorePath) {
+      args.push("--session-store", this.#sessionStorePath);
+    }
+
+    const child = spawn(binaryPath, args, {
       cwd: resolveRepoRoot(),
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
