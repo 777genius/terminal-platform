@@ -6,6 +6,7 @@ import { terminalPlatformThemeManifests } from "@terminal-platform/design-tokens
 import type { CreateSessionRequest, SessionId } from "@terminal-platform/runtime-types";
 import { createWorkspaceWebSocketTransport } from "@terminal-platform/workspace-adapter-websocket";
 import {
+  DEFAULT_COMMAND_HISTORY_LIMIT,
   createWorkspaceKernel,
   type WorkspaceCommands,
   type WorkspaceDiagnostics,
@@ -690,6 +691,10 @@ function resolveDefaultShellProgram(): string {
 export function createStaticWorkspaceKernel(snapshot: WorkspaceSnapshot): WorkspaceKernel {
   const normalizedSnapshot = {
     ...snapshot,
+    commandHistory: snapshot.commandHistory ?? {
+      entries: [],
+      limit: DEFAULT_COMMAND_HISTORY_LIMIT,
+    },
     terminalDisplay: snapshot.terminalDisplay ?? defaultTerminalDisplay,
   };
   const noopAsync = async () => {};
@@ -724,6 +729,8 @@ export function createStaticWorkspaceKernel(snapshot: WorkspaceSnapshot): Worksp
     setActivePane: () => {},
     updateDraft: () => {},
     clearDraft: () => {},
+    recordCommandHistory: () => {},
+    clearCommandHistory: () => {},
     setTheme: () => {},
     setTerminalFontScale: () => {},
     setTerminalLineWrap: () => {},
@@ -741,6 +748,7 @@ export function createStaticWorkspaceKernel(snapshot: WorkspaceSnapshot): Worksp
     diagnostics: () => normalizedSnapshot.diagnostics,
     themeId: () => normalizedSnapshot.theme.themeId,
     terminalDisplay: () => normalizedSnapshot.terminalDisplay,
+    commandHistory: () => normalizedSnapshot.commandHistory,
   };
 
   return {

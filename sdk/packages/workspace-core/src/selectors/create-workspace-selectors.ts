@@ -37,5 +37,8 @@ export function createWorkspaceSelectors(
     terminalDisplay() {
       return getSnapshot().terminalDisplay;
     },
+    commandHistory() {
+      return getSnapshot().commandHistory;
+    },
   };
 }

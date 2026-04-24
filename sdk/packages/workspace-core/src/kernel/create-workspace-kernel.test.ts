@@ -9,7 +9,10 @@ import type {
 import type { WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
 
 import { createWorkspaceKernel } from "./create-workspace-kernel.js";
-import { DEFAULT_WORKSPACE_THEME_ID } from "../read-models/workspace-snapshot.js";
+import {
+  DEFAULT_COMMAND_HISTORY_LIMIT,
+  DEFAULT_WORKSPACE_THEME_ID,
+} from "../read-models/workspace-snapshot.js";
 
 describe("createWorkspaceKernel theme commands", () => {
   it("applies registered terminal platform themes", async () => {
@@ -192,6 +195,49 @@ describe("createWorkspaceKernel terminal display preferences", () => {
         timestampMs: 5000,
       },
     ]);
+
+    await kernel.dispose();
+  });
+});
+
+describe("createWorkspaceKernel command history", () => {
+  it("records normalized deduped command history entries in the core snapshot", async () => {
+    const kernel = createWorkspaceKernel({
+      transport: createUnusedTransport(),
+      commandHistoryLimit: 3,
+    });
+
+    kernel.commands.recordCommandHistory(" pwd \n");
+    kernel.commands.recordCommandHistory("git status");
+    kernel.commands.recordCommandHistory("pwd");
+    kernel.commands.recordCommandHistory("printf ok");
+    kernel.commands.recordCommandHistory("   ");
+
+    expect(kernel.selectors.commandHistory()).toEqual({
+      entries: ["git status", "pwd", "printf ok"],
+      limit: 3,
+    });
+
+    kernel.commands.clearCommandHistory();
+
+    expect(kernel.getSnapshot().commandHistory).toEqual({
+      entries: [],
+      limit: 3,
+    });
+
+    await kernel.dispose();
+  });
+
+  it("falls back to the default command history limit", async () => {
+    const kernel = createWorkspaceKernel({
+      transport: createUnusedTransport(),
+      commandHistoryLimit: 0,
+    });
+
+    expect(kernel.getSnapshot().commandHistory).toEqual({
+      entries: [],
+      limit: DEFAULT_COMMAND_HISTORY_LIMIT,
+    });
 
     await kernel.dispose();
   });

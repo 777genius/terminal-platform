@@ -205,6 +205,9 @@ async function main() {
       !result.afterCommand.connectionReady
       || !result.afterCommand.screenFollowPressed
       || !result.afterCommand.screenViewportAtBottom
+      || result.afterCommand.commandHistoryCount < 1
+      || !result.afterCommand.commandHistoryLatest?.includes("browser-smoke-ok")
+      || !result.afterCommand.historyBadgeText?.includes("history")
       || (!result.afterCommand.sequenceAdvanced && !result.afterCommand.containsCommandOutput)
     ) {
       throw new Error(`Command lane did not advance the focused screen: ${JSON.stringify(result.afterCommand)}`);
@@ -222,9 +225,22 @@ async function main() {
       !result.afterHistoryReplay.recalledDraft?.includes("browser-smoke-ok")
       || !result.afterHistoryReplay.replayClicked
       || !result.afterHistoryReplay.connectionReady
+      || result.afterHistoryReplay.commandHistoryCount < 1
+      || !result.afterHistoryReplay.commandHistoryLatest?.includes("browser-smoke-ok")
       || (!result.afterHistoryReplay.sequenceAdvanced && !result.afterHistoryReplay.containsCommandOutput)
     ) {
       throw new Error(`Command history replay did not settle correctly: ${JSON.stringify(result.afterHistoryReplay)}`);
+    }
+
+    if (
+      !result.afterCommandHistoryClear.clicked
+      || result.afterCommandHistoryClear.beforeCount < 1
+      || result.afterCommandHistoryClear.afterCount !== 0
+      || result.afterCommandHistoryClear.clearedEvents !== 1
+      || result.afterCommandHistoryClear.clearButtonDisabled !== true
+      || !result.afterCommandHistoryClear.historyBadgeText?.startsWith("0 ")
+    ) {
+      throw new Error(`Command history clear did not settle correctly: ${JSON.stringify(result.afterCommandHistoryClear)}`);
     }
 
     if (
@@ -907,6 +923,7 @@ async function runSmokeScenario(browserUrl) {
       const debug = window.terminalDemoDebug?.getState?.();
       const workspaceHost = document.querySelector('tp-terminal-workspace');
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
       const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
@@ -930,6 +947,11 @@ async function runSmokeScenario(browserUrl) {
               clientHeight: screenViewport.clientHeight,
             }
           : null,
+        commandHistoryCount: debug?.commandHistory?.entries?.length ?? 0,
+        commandHistoryLatest: debug?.commandHistory?.entries?.at(-1) ?? null,
+        commandHistoryLimit: debug?.commandHistory?.limit ?? null,
+        historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
+          ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         terminalScreenText,
         containsCommandOutput: /browser-smoke-ok/i.test(terminalScreenText),
       };
@@ -1047,8 +1069,65 @@ async function runSmokeScenario(browserUrl) {
         focusedSequence: debug?.attachedSession?.focused_screen?.sequence != null
           ? String(debug.attachedSession.focused_screen.sequence)
           : null,
+        commandHistoryCount: debug?.commandHistory?.entries?.length ?? 0,
+        commandHistoryLatest: debug?.commandHistory?.entries?.at(-1) ?? null,
         terminalScreenText,
         containsCommandOutput: /browser-smoke-ok/i.test(terminalScreenText),
+      };
+    })()`);
+
+    const afterCommandHistoryClear = await evaluate(send, `(async () => {
+      const workspaceHost = document.querySelector('tp-terminal-workspace') ?? null;
+      const workspaceRoot = workspaceHost?.shadowRoot ?? null;
+      const commandHost = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
+      const commandRoot = commandHost?.shadowRoot ?? null;
+      const sessionTools = commandRoot?.querySelector('[data-testid="tp-session-tools"]') ?? null;
+      const clearButton = commandRoot?.querySelector('[data-testid="tp-clear-command-history"]') ?? null;
+      const beforeCount = window.terminalDemoDebug?.getState?.()?.commandHistory?.entries?.length ?? 0;
+      if (!workspaceHost || !sessionTools || !clearButton) {
+        return {
+          clicked: false,
+          reason: 'clear history controls missing',
+          beforeCount,
+          afterCount: beforeCount,
+          clearedEvents: 0,
+          clearButtonDisabled: clearButton?.disabled ?? null,
+          historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
+            ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        };
+      }
+
+      let clearedEvents = 0;
+      workspaceHost.addEventListener('tp-terminal-command-history-cleared', () => {
+        clearedEvents += 1;
+      }, { once: true });
+
+      sessionTools.open = true;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (clearButton.disabled) {
+        return {
+          clicked: false,
+          reason: 'clear history disabled',
+          beforeCount,
+          afterCount: beforeCount,
+          clearedEvents,
+          clearButtonDisabled: true,
+          historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
+            ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        };
+      }
+
+      clearButton.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const state = window.terminalDemoDebug?.getState?.();
+      return {
+        clicked: true,
+        beforeCount,
+        afterCount: state?.commandHistory?.entries?.length ?? 0,
+        clearedEvents,
+        clearButtonDisabled: clearButton.disabled,
+        historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
+          ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
       };
     })()`);
 
@@ -1139,6 +1218,7 @@ async function runSmokeScenario(browserUrl) {
           ? afterHistoryReplay.focusedSequence !== replayInitialSequence
           : false,
       },
+      afterCommandHistoryClear,
       afterDirectScreenInput,
       issues,
     };

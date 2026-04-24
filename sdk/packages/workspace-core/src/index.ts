@@ -11,10 +11,13 @@ export type {
 export {
   DEFAULT_TERMINAL_FONT_SCALE,
   DEFAULT_WORKSPACE_THEME_ID,
+  DEFAULT_COMMAND_HISTORY_LIMIT,
   createInitialWorkspaceSnapshot,
+  normalizeCommandHistoryLimit,
   terminalPlatformTerminalFontScales,
   terminalPlatformWorkspaceThemeIds,
   type CreateInitialWorkspaceSnapshotOptions,
+  type WorkspaceCommandHistorySnapshot,
   type TerminalPlatformTerminalFontScale,
   type TerminalPlatformWorkspaceThemeId,
   type WorkspaceCatalogSnapshot,

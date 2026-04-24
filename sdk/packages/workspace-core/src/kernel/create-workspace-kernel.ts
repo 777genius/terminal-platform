@@ -1,6 +1,7 @@
 import { ResourceScope, createExternalStore, noopTelemetrySink } from "@terminal-platform/foundation";
 
 import { CatalogService } from "../services/catalog-service.js";
+import { CommandHistoryService } from "../services/command-history-service.js";
 import { ConnectionService } from "../services/connection-service.js";
 import { DiagnosticsService } from "../services/diagnostics-service.js";
 import { DraftInputService } from "../services/draft-input-service.js";
@@ -36,6 +37,9 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
     themeId: initialTheme.themeId,
     terminalFontScale: initialTerminalFontScale.fontScale,
     terminalLineWrap: options.initialTerminalLineWrap ?? true,
+    ...(options.commandHistoryLimit === undefined
+      ? {}
+      : { commandHistoryLimit: options.commandHistoryLimit }),
   }));
   const scope = new ResourceScope();
   const telemetry = options.telemetry ?? noopTelemetrySink;
@@ -99,6 +103,7 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
   const catalogService = new CatalogService(context);
   const sessionCommandService = new SessionCommandService(context, catalogService);
   const draftInputService = new DraftInputService(context);
+  const commandHistoryService = new CommandHistoryService(context);
   const themeResolutionService = new ThemeResolutionService(context, availableThemeIds);
   const terminalDisplayPreferenceService = new TerminalDisplayPreferenceService(context);
   const selectors = createWorkspaceSelectors(store.getSnapshot);
@@ -171,6 +176,8 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
       setActivePane: (paneId) => sessionCommandService.setActivePane(paneId),
       updateDraft: (paneId, value) => draftInputService.updateDraft(paneId, value),
       clearDraft: (paneId) => draftInputService.clearDraft(paneId),
+      recordCommandHistory: (value) => commandHistoryService.record(value),
+      clearCommandHistory: () => commandHistoryService.clear(),
       setTheme: (themeId) => themeResolutionService.setTheme(themeId),
       setTerminalFontScale: (fontScale) => terminalDisplayPreferenceService.setFontScale(fontScale),
       setTerminalLineWrap: (lineWrap) => terminalDisplayPreferenceService.setLineWrap(lineWrap),

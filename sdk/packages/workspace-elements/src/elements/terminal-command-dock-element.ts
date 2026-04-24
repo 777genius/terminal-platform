@@ -9,7 +9,6 @@ const QUICK_COMMANDS: readonly { label: string; value: string }[] = [
   { label: "git status", value: "git status" },
   { label: "hello", value: 'printf "hello from Terminal Platform\\n"' },
 ];
-const COMMAND_HISTORY_LIMIT = 50;
 
 export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -161,7 +160,6 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   protected declare pending: boolean;
   protected declare actionError: string | null;
 
-  #commandHistory: string[] = [];
   #historyCursor: number | null = null;
   #historyDraftBeforeNavigation = "";
 
@@ -179,6 +177,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     const draft = activePaneId ? (this.snapshot.drafts[activePaneId] ?? "") : "";
     const canSend = Boolean(activeSessionId && activePaneId && draft.trim().length > 0 && !this.pending);
     const canUsePane = Boolean(activeSessionId && activePaneId && !this.pending);
+    const commandHistory = this.snapshot.commandHistory.entries;
     const statusLabel = this.pending ? "Sending" : activePaneId ? "Ready" : "Pick a pane";
 
     return html`
@@ -195,6 +194,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
               ${activePaneId ? `Pane ${activePaneId}` : "No pane"}
             </span>
             <span class="badge" data-tone=${canSend ? "ready" : "idle"}>${statusLabel}</span>
+            <span class="badge" data-testid="tp-command-history-count">
+              ${commandHistory.length} history
+            </span>
           </div>
         </div>
 
@@ -273,6 +275,13 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             >
               Refresh terminal
             </button>
+            <button
+              data-testid="tp-clear-command-history"
+              ?disabled=${commandHistory.length === 0 || this.pending}
+              @click=${() => this.clearCommandHistory()}
+            >
+              Clear history
+            </button>
           </div>
         </details>
       </div>
@@ -331,7 +340,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
   private navigateCommandHistory(direction: "previous" | "next", target: HTMLTextAreaElement): boolean {
     const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
-    if (!paneId || this.#commandHistory.length === 0 || !this.canNavigateHistory(direction, target)) {
+    const commandHistory = this.snapshot.commandHistory.entries;
+    if (!paneId || commandHistory.length === 0 || !this.canNavigateHistory(direction, target)) {
       return false;
     }
 
@@ -341,14 +351,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       this.#historyCursor = this.#historyCursor === null
-        ? this.#commandHistory.length - 1
+        ? commandHistory.length - 1
         : Math.max(0, this.#historyCursor - 1);
     } else {
       if (this.#historyCursor === null) {
         return false;
       }
 
-      if (this.#historyCursor === this.#commandHistory.length - 1) {
+      if (this.#historyCursor === commandHistory.length - 1) {
         this.#historyCursor = null;
         this.applyHistoryDraft(paneId, target, this.#historyDraftBeforeNavigation);
         this.#historyDraftBeforeNavigation = "";
@@ -358,7 +368,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       this.#historyCursor += 1;
     }
 
-    const historyDraft = this.#commandHistory[this.#historyCursor];
+    const historyDraft = commandHistory[this.#historyCursor];
     if (!historyDraft) {
       return false;
     }
@@ -388,13 +398,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private recordCommandHistory(value: string): void {
-    if (value.trim().length === 0) {
-      return;
-    }
-
-    const historyEntry = value.replace(/\s+$/u, "");
-    const dedupedHistory = this.#commandHistory.filter((entry) => entry !== historyEntry);
-    this.#commandHistory = [...dedupedHistory, historyEntry].slice(-COMMAND_HISTORY_LIMIT);
+    this.kernel?.commands.recordCommandHistory(value);
   }
 
   private resetHistoryNavigation(): void {
@@ -513,6 +517,17 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     } finally {
       this.pending = false;
     }
+  }
+
+  private clearCommandHistory(): void {
+    this.resetHistoryNavigation();
+    this.kernel?.commands.clearCommandHistory();
+    this.dispatchEvent(
+      new CustomEvent("tp-terminal-command-history-cleared", {
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 }
 

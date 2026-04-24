@@ -16,6 +16,7 @@ export type WorkspaceDiagnosticSeverity = "info" | "warn" | "error";
 
 export const DEFAULT_WORKSPACE_THEME_ID = "terminal-platform-default" as const;
 export const DEFAULT_TERMINAL_FONT_SCALE = "default" as const;
+export const DEFAULT_COMMAND_HISTORY_LIMIT = 50 as const;
 
 export const terminalPlatformWorkspaceThemeIds = [
   DEFAULT_WORKSPACE_THEME_ID,
@@ -67,6 +68,11 @@ export interface WorkspaceTerminalDisplaySnapshot {
   lineWrap: boolean;
 }
 
+export interface WorkspaceCommandHistorySnapshot {
+  entries: string[];
+  limit: number;
+}
+
 export interface WorkspaceSnapshot {
   connection: WorkspaceConnectionSnapshot;
   catalog: WorkspaceCatalogSnapshot;
@@ -74,6 +80,7 @@ export interface WorkspaceSnapshot {
   attachedSession: AttachedSession | null;
   diagnostics: WorkspaceDiagnosticRecord[];
   drafts: Record<string, string>;
+  commandHistory: WorkspaceCommandHistorySnapshot;
   theme: WorkspaceThemeSnapshot;
   terminalDisplay: WorkspaceTerminalDisplaySnapshot;
 }
@@ -82,6 +89,7 @@ export interface CreateInitialWorkspaceSnapshotOptions {
   themeId?: string | null;
   terminalFontScale?: TerminalPlatformTerminalFontScale | null;
   terminalLineWrap?: boolean | null;
+  commandHistoryLimit?: number | null;
 }
 
 export function createInitialWorkspaceSnapshot(
@@ -106,6 +114,10 @@ export function createInitialWorkspaceSnapshot(
     attachedSession: null,
     diagnostics: [],
     drafts: {},
+    commandHistory: {
+      entries: [],
+      limit: normalizeCommandHistoryLimit(options.commandHistoryLimit),
+    },
     theme: {
       themeId: options.themeId ?? DEFAULT_WORKSPACE_THEME_ID,
     },
@@ -114,4 +126,12 @@ export function createInitialWorkspaceSnapshot(
       lineWrap: options.terminalLineWrap ?? true,
     },
   };
+}
+
+export function normalizeCommandHistoryLimit(limit: number | null | undefined): number {
+  if (typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0) {
+    return DEFAULT_COMMAND_HISTORY_LIMIT;
+  }
+
+  return Math.max(1, Math.trunc(limit));
 }
