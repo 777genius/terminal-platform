@@ -285,7 +285,7 @@ export class TerminalRuntimeGatewayServer {
         );
       case "workspace_handshake": {
         const client = await this.#clientProvider.getClient();
-        return client.handshakeInfo();
+        return (await client.handshakeInfo()).handshake;
       }
       case "workspace_list_sessions": {
         const client = await this.#clientProvider.getClient();

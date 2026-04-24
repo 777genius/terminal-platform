@@ -291,6 +291,34 @@ test("gateway exposes opaque import handles instead of foreign backend routes", 
   }
 });
 
+test("gateway exposes raw workspace handshake for SDK clients", loopbackTestOptions, async () => {
+  const sdkClient = createSdkClient();
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(createRuntime()),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(createRuntime()),
+    clientProvider: {
+      getClient: async () => sdkClient,
+    },
+  });
+
+  const client = createControlClient(gateway.controlPlaneUrl);
+  try {
+    await client.connect();
+
+    const handshake = await client.request("workspace_handshake", undefined);
+    const capabilities = await client.request("workspace_backend_capabilities", { backend: "native" });
+
+    assert.equal("assessment" in handshake, false);
+    assert.deepEqual(handshake.available_backends, ["native", "tmux"]);
+    assert.equal(capabilities.backend, "native");
+    assert.equal(capabilities.capabilities.pane_split, true);
+  } finally {
+    await client.close();
+    await gateway.dispose();
+  }
+});
+
 test("gateway keeps session state traffic on the stream plane only", loopbackTestOptions, async () => {
   const runtime = createRuntime({
     listSessions: [
@@ -348,6 +376,70 @@ test("gateway keeps session state traffic on the stream plane only", loopbackTes
     ]);
   }
 });
+
+function createSdkClient() {
+  return {
+    handshakeInfo: async () => ({
+      handshake: {
+        protocol_version: { major: 0, minor: 2 },
+        binary_version: "0.1.0-test",
+        daemon_phase: "ready",
+        capabilities: {
+          request_reply: true,
+          topology_subscriptions: true,
+          pane_subscriptions: true,
+          backend_discovery: true,
+          backend_capability_queries: true,
+          saved_sessions: true,
+          session_restore: true,
+          degraded_error_reasons: true,
+          session_health: true,
+        },
+        available_backends: ["native", "tmux"],
+        session_scope: "terminal-demo",
+      },
+      assessment: {
+        can_use: true,
+        protocol: {
+          can_connect: true,
+          status: "compatible",
+        },
+        status: "ready",
+      },
+    }),
+    backendCapabilities: async (backend) => ({
+      backend,
+      capabilities: {
+        tiled_panes: true,
+        floating_panes: false,
+        split_resize: true,
+        tab_create: true,
+        tab_close: true,
+        tab_focus: true,
+        tab_rename: true,
+        session_scoped_tab_refs: true,
+        session_scoped_pane_refs: true,
+        pane_split: true,
+        pane_close: true,
+        pane_focus: true,
+        pane_input_write: true,
+        pane_paste_write: true,
+        raw_output_stream: false,
+        rendered_viewport_stream: true,
+        rendered_viewport_snapshot: true,
+        rendered_scrollback_snapshot: false,
+        layout_dump: true,
+        layout_override: true,
+        read_only_client_mode: false,
+        explicit_session_save: true,
+        explicit_session_restore: true,
+        plugin_panes: false,
+        advisory_metadata_subscriptions: true,
+        independent_resize_authority: true,
+      },
+    }),
+  };
+}
 
 async function probeLoopbackTcp() {
   const server = createServer();
