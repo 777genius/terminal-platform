@@ -67,6 +67,33 @@ describe("createMemoryWorkspaceTransport command projection", () => {
     await transport.close();
   });
 
+  it("projects pane resize commands into screen snapshots and deltas", async () => {
+    const transport = createMemoryWorkspaceTransport();
+    const session = (await transport.listSessions())[0]!;
+    const attached = await transport.attachSession(session.session_id);
+    const paneId = attached.focused_screen!.pane_id;
+    const initialSequence = attached.focused_screen!.sequence;
+
+    await transport.dispatchMuxCommand(session.session_id, {
+      kind: "resize_pane",
+      pane_id: paneId,
+      rows: 12,
+      cols: 96,
+    });
+
+    const updated = await transport.attachSession(session.session_id);
+    const delta = await transport.getScreenDelta(session.session_id, paneId, initialSequence);
+
+    expect(updated.focused_screen?.rows).toBe(12);
+    expect(updated.focused_screen?.cols).toBe(96);
+    expect(updated.focused_screen?.sequence).toBe(initialSequence + 1n);
+    expect(delta.rows).toBe(12);
+    expect(delta.cols).toBe(96);
+    expect(delta.full_replace?.cursor?.row).toBeLessThan(12);
+
+    await transport.close();
+  });
+
   it("saves terminal layouts as immutable snapshots", async () => {
     const transport = createMemoryWorkspaceTransport();
     const session = (await transport.listSessions())[0]!;

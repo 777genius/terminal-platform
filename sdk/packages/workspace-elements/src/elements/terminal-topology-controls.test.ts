@@ -6,6 +6,7 @@ import { createInitialWorkspaceSnapshot, type WorkspaceSnapshot } from "@termina
 import {
   compactTerminalId,
   countPaneTreeLeaves,
+  resolvePaneResizeCommand,
   resolveTerminalTopologyControlState,
 } from "./terminal-topology-controls.js";
 
@@ -18,6 +19,10 @@ describe("terminal topology controls", () => {
     expect(controls.capabilityStatus).toBe("unknown");
     expect(controls.activeSessionId).toBe("session-1");
     expect(controls.activePaneId).toBe("pane-2");
+    expect(controls.activePaneSize).toEqual({
+      rows: 24,
+      cols: 80,
+    });
     expect(controls.tabCount).toBe(1);
     expect(controls.paneCount).toBe(2);
     expect(controls.canCreateTab).toBe(true);
@@ -27,6 +32,7 @@ describe("terminal topology controls", () => {
     expect(controls.canFocusPane).toBe(true);
     expect(controls.canFocusTab).toBe(true);
     expect(controls.canRenameTab).toBe(true);
+    expect(controls.canResizePane).toBe(true);
   });
 
   it("uses loaded backend capabilities to disable unsupported topology actions", () => {
@@ -37,6 +43,7 @@ describe("terminal topology controls", () => {
           native: createCapabilities({
             pane_close: false,
             pane_split: false,
+            split_resize: false,
             tab_close: false,
             tab_create: false,
             tab_rename: false,
@@ -55,6 +62,7 @@ describe("terminal topology controls", () => {
     expect(controls.canFocusPane).toBe(true);
     expect(controls.canFocusTab).toBe(true);
     expect(controls.canRenameTab).toBe(false);
+    expect(controls.canResizePane).toBe(false);
   });
 
   it("prevents destructive close controls from removing the last pane or tab", () => {
@@ -84,6 +92,24 @@ describe("terminal topology controls", () => {
     expect(controls.canClosePane).toBe(false);
     expect(controls.canCloseTab).toBe(false);
     expect(controls.canRenameTab).toBe(true);
+  });
+
+  it("builds clamped resize commands for the focused pane", () => {
+    const snapshot = createWorkspaceSnapshot();
+
+    expect(resolvePaneResizeCommand(snapshot, { cols: 8 })).toEqual({
+      kind: "resize_pane",
+      pane_id: "pane-2",
+      rows: 24,
+      cols: 88,
+    });
+    expect(resolvePaneResizeCommand(snapshot, { rows: -80, cols: -200 })).toEqual({
+      kind: "resize_pane",
+      pane_id: "pane-2",
+      rows: 4,
+      cols: 20,
+    });
+    expect(resolvePaneResizeCommand(snapshot, {})).toBeNull();
   });
 
   it("keeps compact ids stable and counts nested pane trees", () => {

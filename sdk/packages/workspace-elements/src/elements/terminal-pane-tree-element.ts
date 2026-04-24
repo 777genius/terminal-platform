@@ -7,7 +7,13 @@ import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-cons
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import {
   compactTerminalId,
+  resolvePaneResizeCommand,
   resolveTerminalTopologyControlState,
+  TERMINAL_PANE_MAX_COLS,
+  TERMINAL_PANE_MAX_ROWS,
+  TERMINAL_PANE_MIN_COLS,
+  TERMINAL_PANE_MIN_ROWS,
+  type TerminalPaneResizeDelta,
 } from "./terminal-topology-controls.js";
 
 export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
@@ -83,6 +89,29 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
         flex-wrap: wrap;
         gap: var(--tp-space-2);
         align-items: center;
+      }
+
+      .resize-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--tp-space-2);
+        align-items: center;
+        padding: var(--tp-space-2);
+        border: 1px solid color-mix(in srgb, var(--tp-color-border) 72%, transparent);
+        border-radius: var(--tp-radius-sm);
+        background: color-mix(in srgb, var(--tp-color-panel-raised) 42%, transparent);
+      }
+
+      .resize-strip__size {
+        display: inline-flex;
+        align-items: center;
+        min-height: 1.9rem;
+        border-radius: var(--tp-radius-sm);
+        background: color-mix(in srgb, var(--tp-color-bg) 62%, transparent);
+        color: var(--tp-color-text);
+        font-family: var(--tp-font-family-mono);
+        font-size: 0.82rem;
+        padding: 0.2rem 0.55rem;
       }
 
       ul {
@@ -240,17 +269,19 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
           </button>
           <button
             type="button"
-            data-testid="tp-split-horizontal"
+            data-testid="tp-split-right"
+            data-split-direction="vertical"
             ?disabled=${isPending || !controls.canSplitPane}
-            @click=${() => this.splitPane("horizontal")}
+            @click=${() => this.splitPane("vertical")}
           >
             Split right
           </button>
           <button
             type="button"
-            data-testid="tp-split-vertical"
+            data-testid="tp-split-down"
+            data-split-direction="horizontal"
             ?disabled=${isPending || !controls.canSplitPane}
-            @click=${() => this.splitPane("vertical")}
+            @click=${() => this.splitPane("horizontal")}
           >
             Split down
           </button>
@@ -295,6 +326,48 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
                 </button>
                 <button type="button" data-testid="tp-rename-tab-cancel" ?disabled=${isPending} @click=${() => this.cancelRename()}>
                   Cancel
+                </button>
+              </div>
+            `
+          : null}
+
+        ${controls.activePaneSize
+          ? html`
+              <div class="resize-strip" part="resize-controls" aria-label="Focused pane size controls">
+                <span class="resize-strip__size" part="pane-size" data-testid="tp-pane-size">
+                  ${controls.activePaneSize.cols}x${controls.activePaneSize.rows}
+                </span>
+                <button
+                  type="button"
+                  data-testid="tp-resize-narrower"
+                  ?disabled=${isPending || !controls.canResizePane || controls.activePaneSize.cols <= TERMINAL_PANE_MIN_COLS}
+                  @click=${() => this.resizePane({ cols: -8 })}
+                >
+                  Narrower
+                </button>
+                <button
+                  type="button"
+                  data-testid="tp-resize-wider"
+                  ?disabled=${isPending || !controls.canResizePane || controls.activePaneSize.cols >= TERMINAL_PANE_MAX_COLS}
+                  @click=${() => this.resizePane({ cols: 8 })}
+                >
+                  Wider
+                </button>
+                <button
+                  type="button"
+                  data-testid="tp-resize-shorter"
+                  ?disabled=${isPending || !controls.canResizePane || controls.activePaneSize.rows <= TERMINAL_PANE_MIN_ROWS}
+                  @click=${() => this.resizePane({ rows: -4 })}
+                >
+                  Shorter
+                </button>
+                <button
+                  type="button"
+                  data-testid="tp-resize-taller"
+                  ?disabled=${isPending || !controls.canResizePane || controls.activePaneSize.rows >= TERMINAL_PANE_MAX_ROWS}
+                  @click=${() => this.resizePane({ rows: 4 })}
+                >
+                  Taller
                 </button>
               </div>
             `
@@ -347,6 +420,16 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
       pane_id: paneId,
       direction,
     });
+  }
+
+  private resizePane(delta: TerminalPaneResizeDelta): void {
+    const command = resolvePaneResizeCommand(this.snapshot, delta);
+    if (!command) {
+      return;
+    }
+
+    this.clearTransientTopologyUi();
+    this.runTopologyCommand("resize_pane", command);
   }
 
   private focusTab(tabId: string): void {

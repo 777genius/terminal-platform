@@ -194,6 +194,9 @@ export function createMemoryWorkspaceTransport(
       if (command.kind === "close_pane") {
         closeSyntheticPane(state, sessionId, command.pane_id);
       }
+      if (command.kind === "resize_pane") {
+        resizeSyntheticPane(state, sessionId, command.pane_id, command.rows, command.cols);
+      }
       if (command.kind === "focus_pane") {
         focusSyntheticPane(state, sessionId, command.pane_id);
       }
@@ -719,6 +722,45 @@ function closeSyntheticPane(
   tab.focused_pane = nextPaneId;
   topology.focused_tab = tab.tab_id;
   updateAttachedSessionFocus(state, sessionId, topology, requireRecord(screens, nextPaneId, "screen snapshot"));
+}
+
+function resizeSyntheticPane(
+  state: MemoryWorkspaceFixture,
+  sessionId: SessionId,
+  paneId: PaneId,
+  rows: number,
+  cols: number,
+): void {
+  const screens = requireRecord(state.screensBySessionId, sessionId, "screen collection");
+  const screen = requireRecord(screens, paneId, "screen snapshot");
+  const nextRows = Math.max(1, Math.trunc(rows));
+  const nextCols = Math.max(1, Math.trunc(cols));
+
+  if (screen.rows === nextRows && screen.cols === nextCols) {
+    return;
+  }
+
+  screen.sequence += 1n;
+  screen.rows = nextRows;
+  screen.cols = nextCols;
+  screen.surface.lines = screen.surface.lines.slice(-nextRows);
+  const cursorRow = Math.min(
+    Math.max(screen.surface.cursor?.row ?? 0, 0),
+    Math.max(nextRows - 1, 0),
+  );
+  const cursorCol = Math.min(
+    Math.max(screen.surface.cursor?.col ?? 0, 0),
+    Math.max(nextCols - 1, 0),
+  );
+  screen.surface.cursor = {
+    row: cursorRow,
+    col: cursorCol,
+  };
+
+  const attachedSession = state.attachedSessions[sessionId];
+  if (attachedSession?.focused_screen?.pane_id === paneId) {
+    attachedSession.focused_screen = screen;
+  }
 }
 
 function focusSyntheticTab(

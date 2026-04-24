@@ -144,6 +144,7 @@ async function main() {
     if (
       !result.afterTopologyActions.ok
       || !result.afterTopologyActions.splitClicked
+      || !result.afterTopologyActions.resizeClicked
       || !result.afterTopologyActions.closePanePrompted
       || !result.afterTopologyActions.closePaneConfirmed
       || !result.afterTopologyActions.renameClicked
@@ -151,9 +152,11 @@ async function main() {
       || !result.afterTopologyActions.closeTabPrompted
       || !result.afterTopologyActions.closeTabConfirmed
       || !result.afterTopologyActions.focusOriginalClicked
-      || result.afterTopologyActions.completedEvents < 5
+      || result.afterTopologyActions.completedEvents < 6
       || result.afterTopologyActions.paneCountAfterSplit <= result.afterTopologyActions.paneCountBefore
       || result.afterTopologyActions.focusedPaneAfterSplit === result.afterTopologyActions.focusedPaneBefore
+      || result.afterTopologyActions.splitDirection !== "Split vertical"
+      || result.afterTopologyActions.resizeColsAfter <= result.afterTopologyActions.resizeColsBefore
       || result.afterTopologyActions.paneCountAfterClosePrompt !== result.afterTopologyActions.paneCountAfterSplit
       || result.afterTopologyActions.paneCountAfterClosePane !== result.afterTopologyActions.paneCountBefore
       || result.afterTopologyActions.renamedTabTitle !== "Smoke Workspace"
@@ -348,10 +351,12 @@ async function runSmokeScenario(browserUrl) {
         hasSaveLayoutControl: Boolean(saveLayout && !saveLayout.disabled),
         hasTopologyControls: Boolean(
           paneTreeRoot?.querySelector('[data-testid="tp-new-tab"]')
-          && paneTreeRoot?.querySelector('[data-testid="tp-split-horizontal"]')
-          && paneTreeRoot?.querySelector('[data-testid="tp-split-vertical"]')
+          && paneTreeRoot?.querySelector('[data-testid="tp-split-right"]')
+          && paneTreeRoot?.querySelector('[data-testid="tp-split-down"]')
           && paneTreeRoot?.querySelector('[data-testid="tp-rename-tab"]')
           && paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]')
+          && paneTreeRoot?.querySelector('[data-testid="tp-pane-size"]')
+          && paneTreeRoot?.querySelector('[data-testid="tp-resize-wider"]')
           && paneTreeRoot?.querySelector('[data-testid="tp-pane-node"]')
           && paneTreeRoot?.querySelector('[data-testid="tp-close-pane"]')
         ),
@@ -512,11 +517,12 @@ async function runSmokeScenario(browserUrl) {
         ?? null;
       const workspaceHost = document.querySelector('tp-terminal-workspace') ?? null;
       const paneTreeRoot = workspaceHost?.shadowRoot?.querySelector('tp-terminal-pane-tree')?.shadowRoot ?? null;
-      const splitButton = paneTreeRoot?.querySelector('[data-testid="tp-split-horizontal"]') ?? null;
+      const splitButton = paneTreeRoot?.querySelector('[data-testid="tp-split-right"]') ?? null;
       const newTabButton = paneTreeRoot?.querySelector('[data-testid="tp-new-tab"]') ?? null;
       const renameButton = paneTreeRoot?.querySelector('[data-testid="tp-rename-tab"]') ?? null;
       const closeTabButton = paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]') ?? null;
-      if (!topologyBefore || !focusedTabBefore || !splitButton || !newTabButton || !renameButton || !closeTabButton) {
+      const resizeWiderButton = paneTreeRoot?.querySelector('[data-testid="tp-resize-wider"]') ?? null;
+      if (!topologyBefore || !focusedTabBefore || !splitButton || !newTabButton || !renameButton || !closeTabButton || !resizeWiderButton) {
         return {
           ok: false,
           reason: 'topology controls missing',
@@ -539,6 +545,12 @@ async function runSmokeScenario(browserUrl) {
         (tab) => tab.tab_id === focusedTabBefore.tab_id,
       ) ?? null;
       const paneCountAfterSplit = splitTab ? countPanes(splitTab.root) : 0;
+      const resizeColsBefore = stateAfterSplit?.attachedSession?.focused_screen?.cols ?? 0;
+      const splitDirection = paneTreeRoot?.querySelector('[part="split"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null;
+      resizeWiderButton.click();
+      await settle();
+      const stateAfterResize = window.terminalDemoDebug?.getState?.();
+      const resizeColsAfter = stateAfterResize?.attachedSession?.focused_screen?.cols ?? 0;
       const paneToClose = [...(paneTreeRoot?.querySelectorAll('[data-testid="tp-close-pane"]') ?? [])]
         .map((button) => button.getAttribute('data-pane-id'))
         .find((paneId) => paneId && paneId !== splitTab?.focused_pane) ?? null;
@@ -604,6 +616,7 @@ async function runSmokeScenario(browserUrl) {
       return {
         ok: true,
         splitClicked: true,
+        resizeClicked: true,
         closePanePrompted,
         closePaneConfirmed: Boolean(paneToClose && tabAfterClosePane && countPanes(tabAfterClosePane.root) < paneCountAfterSplit),
         renameClicked: Boolean(renameInput && renameSave),
@@ -622,6 +635,9 @@ async function runSmokeScenario(browserUrl) {
         paneCountAfterClosePane: tabAfterClosePane ? countPanes(tabAfterClosePane.root) : 0,
         focusedPaneBefore,
         focusedPaneAfterSplit: splitTab?.focused_pane ?? null,
+        splitDirection,
+        resizeColsBefore,
+        resizeColsAfter,
         renamedTabTitle: renamedTab?.title ?? null,
         focusedTabAfterFocus: topologyAfterFocus?.focused_tab ?? null,
         originalTabId: focusedTabBefore.tab_id,
