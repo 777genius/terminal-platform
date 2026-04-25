@@ -235,8 +235,8 @@ async function main() {
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
       || !result.afterCreateMobileLayout.mainPrecedesSidebar
       || result.afterCreateMobileLayout.demoMainWidth < 430
-      || result.afterCreateMobileLayout.terminalScreenHeight > 780
-      || result.afterCreateMobileLayout.commandRegionTop > 1250
+      || result.afterCreateMobileLayout.terminalScreenHeight > 650
+      || result.afterCreateMobileLayout.commandRegionTop > 900
       || Math.abs(result.afterCreateMobileLayout.terminalComposerGapPx ?? 99) > 1
       || Math.abs(result.afterCreateMobileLayout.terminalInputGapPx ?? 99) > 12
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatus

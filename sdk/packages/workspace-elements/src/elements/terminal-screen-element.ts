@@ -405,6 +405,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           padding: var(--tp-space-2);
         }
 
+        .screen[data-placement="terminal"] .viewport {
+          min-height: var(--tp-terminal-screen-mobile-viewport-min-height, clamp(14rem, 38vh, 22rem));
+          max-height: var(--tp-terminal-screen-mobile-viewport-max-height, min(48vh, 26rem));
+        }
+
         .line {
           grid-template-columns: 2.45rem minmax(0, 1fr);
           gap: var(--tp-space-1);
