@@ -13,6 +13,7 @@ import {
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import { terminalInputForKeyboardEvent } from "./terminal-keyboard-input.js";
+import { resolveTerminalScreenControlState } from "./terminal-screen-controls.js";
 
 type ScreenCopyState = "idle" | "copied" | "failed";
 
@@ -274,14 +275,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   override render() {
-    const screen = this.snapshot.attachedSession?.focused_screen;
+    const controls = resolveTerminalScreenControlState(this.snapshot);
+    const screen = controls.screen;
     const searchResult = this.createSearchResult();
     const terminalDisplay = this.snapshot.terminalDisplay;
-    const canUseDirectInput = Boolean(
-      screen
-      && (this.snapshot.selection.activeSessionId ?? this.snapshot.attachedSession?.session.session_id)
-      && (this.snapshot.selection.activePaneId ?? screen.pane_id),
-    );
 
     return html`
       <div
@@ -290,13 +287,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         data-testid="tp-terminal-screen"
         data-font-scale=${terminalDisplay.fontScale}
         data-line-wrap=${String(terminalDisplay.lineWrap)}
-        data-direct-input=${String(canUseDirectInput)}
+        data-direct-input=${String(controls.canUseDirectInput)}
+        data-input-capability=${controls.inputCapabilityStatus}
       >
         <div class="screen-header">
           <div class="panel-header">
             <div class="panel-eyebrow">Terminal</div>
             <div class="panel-title">${screen?.surface.title ?? "Live output"}</div>
-            <div class="panel-copy">Focused pane output. Input from the command dock is routed here.</div>
+            <div class="panel-copy">Focused pane output.</div>
           </div>
           <div class="screen-actions" part="screen-actions">
             <button
@@ -319,7 +317,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
             <button
               type="button"
               data-testid="tp-screen-copy"
-              ?disabled=${!screen}
+              ?disabled=${!controls.canCopyVisibleOutput}
               @click=${() => this.copyVisibleOutput()}
             >
               ${this.copyState === "copied" ? "Copied" : this.copyState === "failed" ? "Copy failed" : "Copy visible"}
@@ -389,10 +387,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 class="viewport"
                 part="screen-lines"
                 data-testid="tp-screen-viewport"
-                tabindex=${canUseDirectInput ? "0" : nothing}
+                tabindex=${controls.canUseDirectInput ? "0" : nothing}
                 role="region"
-                aria-label=${canUseDirectInput
-                  ? "Terminal output. Type here to send input to the focused pane."
+                aria-label=${controls.canUseDirectInput
+                  ? "Terminal output and focused pane input"
                   : "Terminal output"}
                 @keydown=${(event: KeyboardEvent) => this.handleViewportKeydown(event)}
                 @scroll=${(event: Event) => this.handleViewportScroll(event)}
@@ -460,8 +458,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private async copyVisibleOutput(): Promise<void> {
-    const screen = this.snapshot.attachedSession?.focused_screen;
-    if (!screen) {
+    const controls = resolveTerminalScreenControlState(this.snapshot);
+    const screen = controls.screen;
+    if (!screen || !controls.canCopyVisibleOutput) {
       return;
     }
 
@@ -579,26 +578,29 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private async dispatchDirectInput(input: string): Promise<void> {
-    const sessionId = this.snapshot.selection.activeSessionId ?? this.snapshot.attachedSession?.session.session_id ?? null;
-    const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
-    if (!sessionId || !paneId) {
+    const controls = resolveTerminalScreenControlState(this.snapshot);
+    if (!controls.activeSessionId || !controls.activePaneId || !controls.canUseDirectInput) {
       return;
     }
 
     try {
-      await this.kernel?.commands.dispatchMuxCommand(sessionId, {
+      await this.kernel?.commands.dispatchMuxCommand(controls.activeSessionId, {
         kind: "send_input",
-        pane_id: paneId,
+        pane_id: controls.activePaneId,
         data: input,
       });
       if (shouldRefreshAfterDirectInput(input)) {
-        await this.kernel?.commands.attachSession(sessionId);
+        await this.kernel?.commands.attachSession(controls.activeSessionId);
       }
       this.dispatchEvent(
         new CustomEvent("tp-terminal-screen-input-submitted", {
           bubbles: true,
           composed: true,
-          detail: { sessionId, paneId, inputLength: input.length },
+          detail: {
+            sessionId: controls.activeSessionId,
+            paneId: controls.activePaneId,
+            inputLength: input.length,
+          },
         }),
       );
     } catch (error) {
@@ -606,7 +608,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         new CustomEvent("tp-terminal-screen-input-failed", {
           bubbles: true,
           composed: true,
-          detail: { sessionId, paneId, error },
+          detail: {
+            sessionId: controls.activeSessionId,
+            paneId: controls.activePaneId,
+            error,
+          },
         }),
       );
     }

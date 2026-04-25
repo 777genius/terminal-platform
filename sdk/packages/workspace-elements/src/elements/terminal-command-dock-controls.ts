@@ -1,7 +1,8 @@
-import type { BackendKind } from "@terminal-platform/runtime-types";
 import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
-export type TerminalCommandDockCapabilityStatus = "known" | "unknown";
+import { resolveWorkspaceCapability, type TerminalWorkspaceCapabilityStatus } from "./terminal-workspace-capabilities.js";
+
+export type TerminalCommandDockCapabilityStatus = TerminalWorkspaceCapabilityStatus;
 
 export interface TerminalCommandDockControlState {
   activeSessionId: string | null;
@@ -43,31 +44,12 @@ export function resolveTerminalCommandDockControlState(
 function resolvePasteCapability(
   snapshot: WorkspaceSnapshot,
 ): { canPaste: boolean; status: TerminalCommandDockCapabilityStatus } {
-  const backend = resolveActiveBackend(snapshot);
-  if (!backend) {
-    return { canPaste: false, status: "unknown" };
-  }
-
-  const capabilities = snapshot.catalog.backendCapabilities[backend]?.capabilities;
-  if (!capabilities) {
-    return { canPaste: true, status: "unknown" };
-  }
-
+  const capability = resolveWorkspaceCapability(snapshot, "pane_paste_write", {
+    missingBackend: false,
+    pendingCapabilities: true,
+  });
   return {
-    canPaste: capabilities.pane_paste_write,
-    status: "known",
+    canPaste: capability.enabled,
+    status: capability.status,
   };
-}
-
-function resolveActiveBackend(snapshot: WorkspaceSnapshot): BackendKind | null {
-  if (snapshot.attachedSession) {
-    return snapshot.attachedSession.session.route.backend;
-  }
-
-  const activeSessionId = snapshot.selection.activeSessionId;
-  if (!activeSessionId) {
-    return null;
-  }
-
-  return snapshot.catalog.sessions.find((session) => session.session_id === activeSessionId)?.route.backend ?? null;
 }

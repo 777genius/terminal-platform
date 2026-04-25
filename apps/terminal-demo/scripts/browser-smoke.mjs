@@ -85,6 +85,7 @@ async function main() {
       || !result.afterCreate.hasScreenFollowControls
       || !result.afterCreate.hasScreenSearchControls
       || !result.afterCreate.hasScreenCopyControl
+      || !result.afterCreate.hasScreenDirectInput
       || !result.afterCreate.hasPasteClipboardControl
       || !result.afterCreate.hasSaveLayoutControl
       || !result.afterCreate.hasTopologyControls
@@ -382,6 +383,7 @@ async function runSmokeScenario(browserUrl) {
       const screenSearch = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
       const screenCopy = screenRoot?.querySelector('[data-testid="tp-screen-copy"]') ?? null;
       const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      const screenPanel = screenRoot?.querySelector('[data-testid="tp-terminal-screen"]') ?? null;
       const saveLayout = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
       const pasteClipboard = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
@@ -403,6 +405,12 @@ async function runSmokeScenario(browserUrl) {
         hasScreenFollowControls: Boolean(screenFollow && screenRoot?.querySelector('[data-testid="tp-screen-scroll-latest"]')),
         hasScreenSearchControls: Boolean(screenSearch),
         hasScreenCopyControl: Boolean(screenCopy && !screenCopy.disabled),
+        hasScreenDirectInput: Boolean(
+          screenViewport
+          && screenViewport.getAttribute('tabindex') === '0'
+          && screenPanel?.getAttribute('data-direct-input') === 'true'
+          && screenPanel?.getAttribute('data-input-capability') === 'known'
+        ),
         hasPasteClipboardControl: Boolean(pasteClipboard && !pasteClipboard.disabled),
         hasSaveLayoutControl: Boolean(saveLayout && !saveLayout.disabled),
         hasTopologyControls: Boolean(
