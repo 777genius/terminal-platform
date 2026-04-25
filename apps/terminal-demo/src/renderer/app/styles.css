@@ -234,6 +234,10 @@ button {
 .shell[data-has-active-session="true"] tp-terminal-workspace {
   --tp-workspace-sidebar-target-width: clamp(11.5rem, 15vw, 13.5rem);
   --tp-workspace-inspector-target-width: clamp(14rem, 18vw, 18rem);
+  --tp-terminal-screen-viewport-min-height: clamp(20rem, 44vh, 32rem);
+  --tp-terminal-screen-viewport-max-height: min(52vh, 38rem);
+  --tp-terminal-screen-mobile-viewport-min-height: clamp(13rem, 34vh, 18rem);
+  --tp-terminal-screen-mobile-viewport-max-height: min(42vh, 22rem);
 }
 
 .panel--workspace {

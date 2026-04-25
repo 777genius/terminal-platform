@@ -130,8 +130,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
       .viewport {
         margin: 0;
-        min-height: clamp(18rem, 42vh, 34rem);
-        max-height: min(58vh, 44rem);
+        min-height: var(--tp-terminal-screen-viewport-min-height, clamp(18rem, 42vh, 34rem));
+        max-height: var(--tp-terminal-screen-viewport-max-height, min(58vh, 44rem));
         overflow: auto;
         border: 1px solid color-mix(in srgb, var(--tp-color-border) 70%, transparent);
         border-radius: var(--tp-radius-lg);
@@ -229,6 +229,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       @media (max-width: 720px) {
+        .screen {
+          gap: var(--tp-space-2);
+          padding: var(--tp-space-3);
+        }
+
         .screen-header {
           display: grid;
         }
@@ -247,6 +252,17 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
         .screen-actions {
           justify-content: flex-start;
+        }
+
+        .viewport {
+          min-height: var(--tp-terminal-screen-mobile-viewport-min-height, clamp(14rem, 38vh, 22rem));
+          max-height: var(--tp-terminal-screen-mobile-viewport-max-height, min(48vh, 26rem));
+          padding: var(--tp-space-2);
+        }
+
+        .line {
+          grid-template-columns: 2.45rem minmax(0, 1fr);
+          gap: var(--tp-space-1);
         }
       }
     `,
@@ -620,7 +636,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     }
 
     const viewport = event.currentTarget as HTMLElement;
-    this.followOutput = isViewportAtBottom(viewport);
+    if (!isViewportAtBottom(viewport)) {
+      this.followOutput = false;
+    }
   }
 
   private handleViewportKeydown(event: KeyboardEvent): void {

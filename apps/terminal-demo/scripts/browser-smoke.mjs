@@ -174,6 +174,9 @@ async function main() {
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
       || !result.afterCreateMobileLayout.mainPrecedesSidebar
       || result.afterCreateMobileLayout.demoMainWidth < 430
+      || result.afterCreateMobileLayout.terminalScreenHeight > 760
+      || result.afterCreateMobileLayout.commandRegionTop > 1250
+      || !result.afterCreateMobileLayout.commandRegionFollowsScreen
     ) {
       throw new Error(`Mobile active shell layout did not settle correctly: ${JSON.stringify(result.afterCreateMobileLayout)}`);
     }
@@ -380,6 +383,7 @@ async function main() {
     if (
       !result.afterScreenFollowToggle.paused
       || !result.afterScreenFollowToggle.resumed
+      || !result.afterScreenFollowToggle.startedFollowing
       || !result.afterScreenFollowToggle.screenViewportAtBottom
     ) {
       throw new Error(`Screen follow controls did not toggle correctly: ${JSON.stringify(result.afterScreenFollowToggle)}`);
@@ -693,6 +697,8 @@ async function runSmokeScenario(browserUrl) {
       const demoMain = demoShell?.querySelector('.shell__main') ?? null;
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
+      const terminalScreen = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const commandRegion = workspaceRoot?.querySelector('[data-testid="tp-workspace-command-region"]') ?? null;
       return {
         checked: Boolean(demoShell && demoSidebar && demoMain && operationsDeck),
         demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
@@ -706,6 +712,13 @@ async function runSmokeScenario(browserUrl) {
         documentHorizontalOverflow: Math.max(
           0,
           document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+        terminalScreenHeight: Math.round(terminalScreen?.getBoundingClientRect().height ?? 0),
+        commandRegionTop: Math.round(commandRegion?.getBoundingClientRect().top ?? 0),
+        commandRegionFollowsScreen: Boolean(
+          terminalScreen
+          && commandRegion
+          && terminalScreen.getBoundingClientRect().bottom <= commandRegion.getBoundingClientRect().top
         ),
         mainPrecedesSidebar: Boolean(
           demoMain
@@ -1631,10 +1644,18 @@ async function runSmokeScenario(browserUrl) {
         return {
           paused: false,
           resumed: false,
+          startedFollowing: false,
           reason: 'screen controls missing',
           screenViewportAtBottom: false,
         };
       }
+
+      if (followButton.getAttribute('aria-pressed') !== 'true') {
+        scrollLatestButton.click();
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }
+      const startedFollowing =
+        followButton.getAttribute('aria-pressed') === 'true' && followButton.textContent?.trim() === 'Following';
 
       followButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -1647,6 +1668,7 @@ async function runSmokeScenario(browserUrl) {
       return {
         paused,
         resumed,
+        startedFollowing,
         screenViewportAtBottom: viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2,
       };
     })()`);
