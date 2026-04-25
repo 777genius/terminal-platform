@@ -81,8 +81,13 @@ async function main() {
       || result.afterCreate.healthPhase !== "ready"
       || !result.afterCreate.hasStatusBar
       || !result.afterCreate.hasCommandDock
+      || result.afterCreate.workspaceLayout !== "operations-deck"
+      || !result.afterCreate.hasOperationsDeck
+      || result.afterCreate.operationsDeckColumnCount < 1
+      || !result.afterCreate.screenInTerminalColumn
+      || !result.afterCreate.commandDockInCommandRegion
+      || !result.afterCreate.topologyInInspectorColumn
       || !result.afterCreate.screenPrecedesCommandDock
-      || !result.afterCreate.topologyPrecedesCommandDock
       || !result.afterCreate.hasScreenFollowControls
       || !result.afterCreate.hasScreenSearchControls
       || !result.afterCreate.hasScreenCopyControl
@@ -498,7 +503,11 @@ async function runSmokeScenario(browserUrl) {
       const savedPanel = savedRoot?.querySelector('[data-testid="tp-saved-sessions"]') ?? null;
       const toolbarRoot = workspaceRoot?.querySelector('tp-terminal-toolbar')?.shadowRoot ?? null;
       const paneTreeRoot = workspaceRoot?.querySelector('tp-terminal-pane-tree')?.shadowRoot ?? null;
-      const contentRoot = workspaceRoot?.querySelector('[part="content"]') ?? null;
+      const layoutRoot = workspaceRoot?.querySelector('[data-testid="tp-workspace-layout"]') ?? null;
+      const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
+      const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
+      const inspectorColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-inspector-column"]') ?? null;
+      const commandRegion = workspaceRoot?.querySelector('[data-testid="tp-workspace-command-region"]') ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const paneTreeHost = workspaceRoot?.querySelector('tp-terminal-pane-tree') ?? null;
       const commandDockHost = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
@@ -611,19 +620,21 @@ async function runSmokeScenario(browserUrl) {
         screenViewportAtBottom: screenViewport
           ? screenViewport.scrollHeight - screenViewport.scrollTop - screenViewport.clientHeight <= 2
           : false,
+        workspaceLayout: layoutRoot?.getAttribute('data-layout') ?? null,
+        hasOperationsDeck: Boolean(layoutRoot && operationsDeck),
+        operationsDeckColumnCount: operationsDeck
+          ? getComputedStyle(operationsDeck).gridTemplateColumns.split(' ').filter(Boolean).length
+          : 0,
+        commandRegionPosition: commandRegion ? getComputedStyle(commandRegion).position : null,
+        screenInTerminalColumn: Boolean(terminalColumn && screenHost && terminalColumn.contains(screenHost)),
+        commandDockInCommandRegion: Boolean(commandRegion && commandDockHost && commandRegion.contains(commandDockHost)),
+        topologyInInspectorColumn: Boolean(inspectorColumn && paneTreeHost && inspectorColumn.contains(paneTreeHost)),
         screenPrecedesCommandDock: Boolean(
-          contentRoot
+          terminalColumn
           && screenHost
-          && commandDockHost
-          && [...contentRoot.children].indexOf(screenHost) > -1
-          && [...contentRoot.children].indexOf(screenHost) < [...contentRoot.children].indexOf(commandDockHost)
-        ),
-        topologyPrecedesCommandDock: Boolean(
-          contentRoot
-          && paneTreeHost
-          && commandDockHost
-          && [...contentRoot.children].indexOf(paneTreeHost) > -1
-          && [...contentRoot.children].indexOf(paneTreeHost) < [...contentRoot.children].indexOf(commandDockHost)
+          && commandRegion
+          && [...terminalColumn.children].indexOf(screenHost) > -1
+          && [...terminalColumn.children].indexOf(screenHost) < [...terminalColumn.children].indexOf(commandRegion)
         ),
         hasScreen: Boolean(terminalScreenText),
         hasStatusBar: Boolean(statusRoot?.querySelector('[part="status-bar"]')),

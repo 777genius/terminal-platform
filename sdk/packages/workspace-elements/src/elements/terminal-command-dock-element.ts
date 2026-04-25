@@ -47,13 +47,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
       .dock-footer {
         display: grid;
-        grid-template-columns: minmax(12rem, 1fr) max-content;
+        grid-template-columns: minmax(12rem, 1fr) minmax(0, auto);
         align-items: flex-start;
         gap: var(--tp-space-3);
       }
 
       .dock-footer .actions {
-        flex-wrap: nowrap;
+        min-width: 0;
+        flex-wrap: wrap;
         justify-content: flex-end;
       }
 
@@ -130,6 +131,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       textarea {
+        min-width: 0;
         min-height: 3.15rem;
         resize: vertical;
         border: 0;
