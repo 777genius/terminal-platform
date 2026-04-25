@@ -23,6 +23,7 @@ import {
 } from "./terminal-screen-input-status.js";
 import { terminalInputForKeyboardEvent } from "./terminal-keyboard-input.js";
 import { resolveTerminalScreenControlState } from "./terminal-screen-controls.js";
+import { isTerminalScreenSearchShortcut } from "./terminal-screen-shortcuts.js";
 
 type ScreenCopyState = "idle" | "copied" | "failed";
 
@@ -408,6 +409,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                     .value=${this.searchQuery}
                     placeholder="Find output"
                     aria-label="Find terminal output"
+                    aria-keyshortcuts="Control+F Meta+F"
                     @input=${(event: Event) => this.handleSearchInput(event)}
                     @keydown=${(event: KeyboardEvent) => this.handleSearchKeydown(event)}
                   />
@@ -453,6 +455,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 tabindex=${controls.canUseDirectInput ? "0" : nothing}
                 role="region"
                 aria-describedby="tp-screen-input-status"
+                aria-keyshortcuts="Control+F Meta+F"
                 aria-label=${controls.canUseDirectInput
                   ? "Terminal output and focused pane input"
                   : "Terminal output"}
@@ -501,6 +504,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     if (event.key === "Escape") {
       event.preventDefault();
       this.clearSearch();
+      this.focusViewport();
     }
   }
 
@@ -646,6 +650,12 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
+    if (isTerminalScreenSearchShortcut(event)) {
+      event.preventDefault();
+      this.focusSearchInput();
+      return;
+    }
+
     const input = terminalInputForKeyboardEvent(event);
     if (!input) {
       return;
@@ -717,6 +727,21 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     requestAnimationFrame(() => {
       this.#autoScrolling = false;
     });
+  }
+
+  private focusSearchInput(): void {
+    const searchInput = this.shadowRoot?.querySelector<HTMLInputElement>('[data-testid="tp-screen-search"]');
+    if (!searchInput || searchInput.disabled) {
+      return;
+    }
+
+    searchInput.focus({ preventScroll: true });
+    searchInput.select();
+  }
+
+  private focusViewport(): void {
+    const viewport = this.shadowRoot?.querySelector<HTMLElement>('[data-testid="tp-screen-viewport"]');
+    viewport?.focus({ preventScroll: true });
   }
 }
 

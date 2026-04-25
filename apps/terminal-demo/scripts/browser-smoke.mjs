@@ -338,6 +338,18 @@ async function main() {
     }
 
     if (
+      !result.afterScreenSearchShortcut.tested
+      || !result.afterScreenSearchShortcut.defaultPrevented
+      || !result.afterScreenSearchShortcut.searchFocused
+      || !result.afterScreenSearchShortcut.selectedExistingQuery
+      || !result.afterScreenSearchShortcut.viewportFocusedAfterEscape
+      || result.afterScreenSearchShortcut.queryAfterEscape !== ""
+      || result.afterScreenSearchShortcut.submittedEvents !== 0
+    ) {
+      throw new Error(`Terminal screen search shortcut did not stay local: ${JSON.stringify(result.afterScreenSearchShortcut)}`);
+    }
+
+    if (
       !result.afterCommand.connectionReady
       || !result.afterCommand.screenFollowPressed
       || !result.afterCommand.screenViewportAtBottom
@@ -770,6 +782,16 @@ async function runSmokeScenario(browserUrl) {
       hasHighlights: false,
       hasActiveHighlight: false,
       nextClicked: false,
+    };
+    let afterScreenSearchShortcut = {
+      tested: false,
+      reason: "deferred until command output is present",
+      defaultPrevented: false,
+      searchFocused: false,
+      selectedExistingQuery: false,
+      viewportFocusedAfterEscape: false,
+      queryAfterEscape: null,
+      submittedEvents: 0,
     };
     let afterScreenCopy = {
       clicked: false,
@@ -1636,6 +1658,62 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
 
+    afterScreenSearchShortcut = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const screenRoot = screenHost?.shadowRoot ?? null;
+      const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      const searchInput = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
+      if (!screenHost || !screenRoot || !viewport || !searchInput) {
+        return {
+          tested: false,
+          reason: !screenHost ? 'screen host missing' : !viewport ? 'viewport missing' : 'search input missing',
+          defaultPrevented: false,
+          searchFocused: false,
+          selectedExistingQuery: false,
+          viewportFocusedAfterEscape: false,
+          queryAfterEscape: null,
+          submittedEvents: 0,
+        };
+      }
+
+      let submittedEvents = 0;
+      const handleSubmitted = () => {
+        submittedEvents += 1;
+      };
+      screenHost.addEventListener('tp-terminal-screen-input-submitted', handleSubmitted);
+      viewport.focus();
+      const shortcutEvent = new KeyboardEvent('keydown', {
+        key: 'f',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      const dispatchResult = viewport.dispatchEvent(shortcutEvent);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const searchFocused = screenRoot.activeElement === searchInput;
+      const selectedExistingQuery =
+        searchInput.selectionStart === 0 && searchInput.selectionEnd === searchInput.value.length;
+
+      searchInput.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      screenHost.removeEventListener('tp-terminal-screen-input-submitted', handleSubmitted);
+
+      return {
+        tested: true,
+        defaultPrevented: !dispatchResult || shortcutEvent.defaultPrevented,
+        searchFocused,
+        selectedExistingQuery,
+        viewportFocusedAfterEscape: screenRoot.activeElement === viewport,
+        queryAfterEscape: searchInput.value,
+        submittedEvents,
+      };
+    })()`);
+
     const afterScreenFollowToggle = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
@@ -1892,6 +1970,7 @@ async function runSmokeScenario(browserUrl) {
       afterCreateMobileLayout,
       afterQuickCommandDraft,
       afterScreenSearch,
+      afterScreenSearchShortcut,
       afterSavedPagination,
       afterThemeSwitch,
       afterDisplaySwitch,
