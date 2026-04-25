@@ -139,6 +139,7 @@ export function createMemoryWorkspaceTransport(
     async restoreSavedSession(sessionId) {
       assertOpen();
       const record = requireRecord(state.savedSessionRecords, sessionId, "saved session");
+      assertSavedSessionRestorable(record);
       state.sessions.push(recordToSessionSummary(record));
       seedSavedSessionArtifacts(state, record);
       const restored: RestoredSession = {
@@ -1083,6 +1084,18 @@ function requireRecord<TRecord>(source: Record<string, TRecord>, key: string, la
   }
 
   return record;
+}
+
+function assertSavedSessionRestorable(record: SavedSessionRecord): void {
+  if (record.compatibility.can_restore) {
+    return;
+  }
+
+  throw new WorkspaceError({
+    code: "unsupported_capability",
+    message: `saved session ${record.session_id} is not restore-compatible: ${record.compatibility.status}`,
+    recoverable: false,
+  });
 }
 
 function clone<TValue>(value: TValue): TValue {

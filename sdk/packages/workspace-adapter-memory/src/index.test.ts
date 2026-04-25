@@ -303,6 +303,29 @@ describe("createMemoryWorkspaceTransport command projection", () => {
 
     await transport.close();
   });
+
+  it("rejects incompatible saved memory layouts without creating sessions", async () => {
+    const fixture = createDefaultMemoryWorkspaceFixture();
+    const saved = fixture.savedSessions[0]!;
+    const record = fixture.savedSessionRecords[saved.session_id]!;
+    const compatibility = {
+      can_restore: false,
+      status: "protocol_minor_ahead" as const,
+    };
+    saved.compatibility = compatibility;
+    record.compatibility = compatibility;
+
+    const transport = createMemoryWorkspaceTransport({ fixture });
+    const sessionCountBefore = (await transport.listSessions()).length;
+
+    await expect(transport.restoreSavedSession(saved.session_id)).rejects.toMatchObject({
+      code: "unsupported_capability",
+      recoverable: false,
+    });
+    expect(await transport.listSessions()).toHaveLength(sessionCountBefore);
+
+    await transport.close();
+  });
 });
 
 function collectPaneIds(node: PaneTreeNode): string[] {
