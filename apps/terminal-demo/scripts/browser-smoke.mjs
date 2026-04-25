@@ -169,6 +169,8 @@ async function main() {
       || !result.afterCreate.terminalComposerBeforeDockStatus
       || !result.afterCreate.terminalComposerBeforeDockStatusDom
       || !result.afterCreate.terminalComposerFirstInDockDom
+      || !result.afterCreate.terminalCommandActionsInsideComposer
+      || result.afterCreate.terminalFooterActionCount !== 0
       || /Command Input|Focused pane command lane/.test(result.afterCreate.commandDockVisibleText ?? "")
       || result.afterCreate.commandInputStatus !== "Ready"
       || !result.afterCreate.commandInputFocused
@@ -242,6 +244,8 @@ async function main() {
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatus
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatusDom
       || !result.afterCreateMobileLayout.terminalComposerFirstInDockDom
+      || !result.afterCreateMobileLayout.terminalCommandActionsInsideComposer
+      || result.afterCreateMobileLayout.terminalFooterActionCount !== 0
       || !result.afterCreateMobileLayout.commandRegionFollowsScreen
     ) {
       throw new Error(`Mobile active shell layout did not settle correctly: ${JSON.stringify(result.afterCreateMobileLayout)}`);
@@ -666,6 +670,12 @@ async function runSmokeScenario(browserUrl) {
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
       const commandActivePane = commandRoot?.querySelector('[data-testid="tp-command-active-pane"]') ?? null;
       const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
+      const commandActionButtons = [
+        commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null,
+        commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null,
+        commandRoot?.querySelector('[data-testid="tp-send-interrupt"]') ?? null,
+        commandRoot?.querySelector('[data-testid="tp-send-enter"]') ?? null,
+      ];
       const statusSession = statusRoot?.querySelector('[data-testid="tp-status-session-id"]') ?? null;
       const statusPane = statusRoot?.querySelector('[data-testid="tp-status-pane-id"]') ?? null;
       const activeSessionListId = sessionListRoot
@@ -786,6 +796,13 @@ async function runSmokeScenario(browserUrl) {
           && (commandComposer.compareDocumentPosition(commandInputStatus) & Node.DOCUMENT_POSITION_FOLLOWING)
         ),
         terminalComposerFirstInDockDom: commandDockPanel?.firstElementChild === commandComposer,
+        terminalCommandActionsInsideComposer: Boolean(
+          commandComposer
+          && commandActionButtons.every((button) => button && commandComposer.contains(button))
+        ),
+        terminalFooterActionCount: commandRoot?.querySelectorAll('.dock-footer .actions button')?.length ?? 0,
+        commandActionLabels: commandActionButtons.map((button) => button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null),
+        commandActionAriaLabels: commandActionButtons.map((button) => button?.getAttribute('aria-label') ?? null),
         commandDockVisibleText: commandDockPanel?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         commandInputFocused: commandRoot?.activeElement === input,
         saveLayoutTitle: saveLayout?.getAttribute('title') ?? null,
@@ -853,6 +870,12 @@ async function runSmokeScenario(browserUrl) {
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
       const commandComposer = commandRoot?.querySelector('[part="composer"]') ?? null;
       const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
+      const commandActionButtons = [
+        commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null,
+        commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null,
+        commandRoot?.querySelector('[data-testid="tp-send-interrupt"]') ?? null,
+        commandRoot?.querySelector('[data-testid="tp-send-enter"]') ?? null,
+      ];
       const terminalScreenRect = terminalScreen?.getBoundingClientRect() ?? null;
       const screenViewportRect = screenViewport?.getBoundingClientRect() ?? null;
       const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
@@ -893,6 +916,11 @@ async function runSmokeScenario(browserUrl) {
           && (commandComposer.compareDocumentPosition(commandInputStatus) & Node.DOCUMENT_POSITION_FOLLOWING)
         ),
         terminalComposerFirstInDockDom: commandDockPanel?.firstElementChild === commandComposer,
+        terminalCommandActionsInsideComposer: Boolean(
+          commandComposer
+          && commandActionButtons.every((button) => button && commandComposer.contains(button))
+        ),
+        terminalFooterActionCount: commandRoot?.querySelectorAll('.dock-footer .actions button')?.length ?? 0,
         commandRegionFollowsScreen: Boolean(
           terminalScreen
           && commandRegion

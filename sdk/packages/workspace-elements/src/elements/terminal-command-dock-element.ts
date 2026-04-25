@@ -78,25 +78,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
       .dock-footer {
         display: grid;
-        grid-template-columns: minmax(12rem, 1fr) minmax(0, auto);
+        grid-template-columns: 1fr;
         align-items: flex-start;
         gap: var(--tp-space-3);
-      }
-
-      .dock[data-placement="terminal"] .dock-footer {
-        grid-template-columns: 1fr;
-        align-items: center;
-        gap: var(--tp-space-2);
-      }
-
-      .dock[data-placement="terminal"] .dock-footer .actions {
-        justify-content: flex-end;
-      }
-
-      .dock-footer .actions {
-        min-width: 0;
-        flex-wrap: wrap;
-        justify-content: flex-end;
       }
 
       .dock-status {
@@ -180,13 +164,27 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
       .composer {
         display: grid;
-        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-columns: auto minmax(0, 1fr) auto;
         gap: var(--tp-space-2);
         align-items: stretch;
         border: 1px solid color-mix(in srgb, var(--tp-color-border) 82%, transparent);
         border-radius: var(--tp-radius-md);
         background: color-mix(in srgb, var(--tp-color-bg) 74%, transparent);
         padding: var(--tp-space-2);
+      }
+
+      .composer-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--tp-space-2);
+        align-content: flex-start;
+        justify-content: flex-end;
+        min-width: 0;
+      }
+
+      .composer-actions button {
+        min-width: 3rem;
+        white-space: nowrap;
       }
 
       .dock[data-placement="terminal"] .composer {
@@ -205,6 +203,28 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           ),
           color-mix(in srgb, var(--tp-terminal-color-bg) 92%, var(--tp-terminal-color-bg-raised));
         padding: 0.48rem 0.62rem;
+      }
+
+      .dock[data-placement="terminal"] .composer-actions {
+        gap: 0.35rem;
+      }
+
+      .dock[data-placement="terminal"] .composer-actions button {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-radius: 0.45rem;
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
+        color: var(--tp-terminal-color-text);
+        font-size: 0.8rem;
+        padding: 0.3rem 0.48rem;
+      }
+
+      .dock[data-placement="terminal"] .composer-actions .primary {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 54%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 16%,
+          var(--tp-terminal-color-bg-raised)
+        );
       }
 
       .prompt {
@@ -258,7 +278,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         display: none;
       }
 
-      .dock[data-placement="terminal"] .actions button {
+      .dock[data-placement="terminal"] details .actions button {
         border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
         border-radius: 0.45rem;
         background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
@@ -341,15 +361,6 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           display: grid;
         }
 
-        .dock-footer {
-          grid-template-columns: 1fr;
-        }
-
-        .dock-footer .actions {
-          flex-wrap: wrap;
-          justify-content: flex-start;
-        }
-
         .dock-status {
           justify-content: flex-start;
         }
@@ -357,11 +368,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
       @media (max-width: 720px) {
         .dock[data-placement="terminal"] {
-          padding: var(--tp-space-2);
-        }
-
-        .dock[data-placement="terminal"] .dock-footer {
-          grid-template-columns: 1fr;
+          padding: 0 var(--tp-space-2) var(--tp-space-2);
         }
       }
     `,
@@ -511,19 +518,67 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       : nothing;
 
     const composerTemplate = html`
-      <label class="composer" part="composer">
-          <span class="prompt" aria-hidden="true">&gt;_</span>
-          <textarea
-            data-testid="tp-command-input"
-            name="tp-command-input"
-            .value=${controls.draft}
+      <div class="composer" part="composer">
+        <span class="prompt" aria-hidden="true">&gt;_</span>
+        <textarea
+          data-testid="tp-command-input"
+          name="tp-command-input"
+          .value=${controls.draft}
+          ?disabled=${!controls.canWriteInput}
+          placeholder=${inputStatus.placeholder}
+          aria-label="Focused pane command input"
+          @input=${(event: Event) => this.handleInput(event)}
+          @keydown=${(event: KeyboardEvent) => this.handleKeydown(event)}
+        ></textarea>
+        <div
+          class="composer-actions"
+          part="composer-actions"
+          data-testid="tp-command-composer-actions"
+          aria-label="Command actions"
+        >
+          <button
+            class="primary"
+            type="button"
+            data-testid="tp-send-command"
+            title="Send command to the focused pane"
+            aria-label="Send command to the focused pane"
+            ?disabled=${!controls.canSend}
+            @click=${() => this.sendDraft({ focusInput: true })}
+          >
+            Run
+          </button>
+          <button
+            type="button"
+            data-testid="tp-paste-clipboard"
+            title=${pasteTitle}
+            aria-label="Paste clipboard into the focused pane"
+            ?disabled=${!controls.canPasteClipboard}
+            @click=${() => this.pasteClipboard({ focusInput: true })}
+          >
+            Paste
+          </button>
+          <button
+            type="button"
+            data-testid="tp-send-interrupt"
+            title="Send Ctrl+C to the focused pane"
+            aria-label="Send Ctrl+C to the focused pane"
             ?disabled=${!controls.canWriteInput}
-            placeholder=${inputStatus.placeholder}
-            aria-label="Focused pane command input"
-            @input=${(event: Event) => this.handleInput(event)}
-            @keydown=${(event: KeyboardEvent) => this.handleKeydown(event)}
-          ></textarea>
-      </label>
+            @click=${() => this.sendShortcut("\u0003", { focusInput: true })}
+          >
+            ^C
+          </button>
+          <button
+            type="button"
+            data-testid="tp-send-enter"
+            title="Send Enter to the focused pane"
+            aria-label="Send Enter to the focused pane"
+            ?disabled=${!controls.canWriteInput}
+            @click=${() => this.sendShortcut("\r", { focusInput: true })}
+          >
+            Enter
+          </button>
+        </div>
+      </div>
     `;
 
     const errorTemplate = this.actionError
@@ -535,46 +590,15 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         `
       : nothing;
 
-    const footerTemplate = html`
-      <div class="dock-footer">
-        <div class="hint" part="hint">
-          ${inputStatus.hint}
-        </div>
-
-        <div class="actions">
-          <button
-            class="primary"
-            data-testid="tp-send-command"
-            ?disabled=${!controls.canSend}
-            @click=${() => this.sendDraft({ focusInput: true })}
-          >
-            Send command
-          </button>
-          <button
-            data-testid="tp-paste-clipboard"
-            title=${pasteTitle}
-            ?disabled=${!controls.canPasteClipboard}
-            @click=${() => this.pasteClipboard({ focusInput: true })}
-          >
-            Paste
-          </button>
-          <button
-            data-testid="tp-send-interrupt"
-            ?disabled=${!controls.canWriteInput}
-            @click=${() => this.sendShortcut("\u0003", { focusInput: true })}
-          >
-            Ctrl+C
-          </button>
-          <button
-            data-testid="tp-send-enter"
-            ?disabled=${!controls.canWriteInput}
-            @click=${() => this.sendShortcut("\r", { focusInput: true })}
-          >
-            Enter
-          </button>
-        </div>
-      </div>
-    `;
+    const footerTemplate = isTerminalPlacement
+      ? nothing
+      : html`
+          <div class="dock-footer">
+            <div class="hint" part="hint">
+              ${inputStatus.hint}
+            </div>
+          </div>
+        `;
 
     const sessionToolsTemplate = html`
       <details part="session-tools" data-testid="tp-session-tools">
