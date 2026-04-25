@@ -216,6 +216,17 @@ async function main() {
     }
 
     if (
+      !result.afterScreenCopy.clicked
+      || result.afterScreenCopy.copiedEvents !== 1
+      || result.afterScreenCopy.failedEvents !== 0
+      || !result.afterScreenCopy.containsCopiedCommandOutput
+      || result.afterScreenCopy.buttonText !== "Copied"
+      || result.afterScreenCopy.eventDetail?.lineCount < 1
+    ) {
+      throw new Error(`Terminal screen copy did not write visible output: ${JSON.stringify(result.afterScreenCopy)}`);
+    }
+
+    if (
       !result.afterRecentCommandRecall.clicked
       || !result.afterRecentCommandRecall.recalledDraft?.includes("browser-smoke-ok")
       || !result.afterRecentCommandRecall.sendEnabled
@@ -462,6 +473,15 @@ async function runSmokeScenario(browserUrl) {
       hasHighlights: false,
       hasActiveHighlight: false,
       nextClicked: false,
+    };
+    let afterScreenCopy = {
+      clicked: false,
+      reason: "deferred until command output is present",
+      copiedEvents: 0,
+      failedEvents: 0,
+      containsCopiedCommandOutput: false,
+      buttonText: null,
+      eventDetail: null,
     };
 
     const afterSavedPagination = await evaluate(send, `(async () => {
@@ -994,6 +1014,77 @@ async function runSmokeScenario(browserUrl) {
     })()`);
     const replayInitialSequence = afterCommand.focusedSequence;
 
+    afterScreenCopy = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const screenRoot = screenHost?.shadowRoot ?? null;
+      const copyButton = screenRoot?.querySelector('[data-testid="tp-screen-copy"]') ?? null;
+      if (!screenHost || !copyButton) {
+        return {
+          clicked: false,
+          reason: screenHost ? 'copy button missing' : 'screen host missing',
+          copiedEvents: 0,
+          failedEvents: 0,
+          containsCopiedCommandOutput: false,
+          buttonText: copyButton?.textContent?.trim() ?? null,
+          eventDetail: null,
+        };
+      }
+
+      let copiedEvents = 0;
+      let failedEvents = 0;
+      let eventDetail = null;
+      screenHost.addEventListener('tp-terminal-screen-copied', (event) => {
+        copiedEvents += 1;
+        eventDetail = event.detail ?? null;
+      }, { once: true });
+      screenHost.addEventListener('tp-terminal-screen-copy-failed', () => {
+        failedEvents += 1;
+      }, { once: true });
+
+      if (copyButton.disabled) {
+        return {
+          clicked: false,
+          reason: 'copy button disabled',
+          copiedEvents,
+          failedEvents,
+          containsCopiedCommandOutput: false,
+          buttonText: copyButton.textContent?.trim() ?? null,
+          eventDetail,
+        };
+      }
+
+      copyButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      let clipboardText = '';
+      try {
+        clipboardText = await Promise.race([
+          navigator.clipboard.readText(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('clipboard read timeout')), 1500)),
+        ]);
+      } catch (error) {
+        return {
+          clicked: true,
+          readError: String(error?.message ?? error),
+          copiedEvents,
+          failedEvents,
+          containsCopiedCommandOutput: false,
+          buttonText: copyButton.textContent?.trim() ?? null,
+          eventDetail,
+        };
+      }
+
+      return {
+        clicked: true,
+        copiedEvents,
+        failedEvents,
+        containsCopiedCommandOutput: /browser-smoke-ok/i.test(clipboardText),
+        clipboardPreview: clipboardText.slice(0, 120),
+        buttonText: copyButton.textContent?.trim() ?? null,
+        eventDetail,
+      };
+    })()`);
+
     const afterRecentCommandRecall = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
@@ -1349,6 +1440,7 @@ async function runSmokeScenario(browserUrl) {
           ? afterCommand.focusedSequence !== initialSequence
           : false,
       },
+      afterScreenCopy,
       afterRecentCommandRecall,
       afterClipboardPaste,
       afterScreenFollowToggle,

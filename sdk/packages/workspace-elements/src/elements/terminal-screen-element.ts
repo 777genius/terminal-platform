@@ -12,6 +12,7 @@ import {
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import { writeClipboardText } from "./terminal-clipboard.js";
 import {
   shouldRefreshAfterTerminalDirectInput,
   TerminalDirectInputBuffer,
@@ -475,7 +476,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
     const output = serializeTerminalOutputLines(screen.surface.lines.map((line) => line.text));
     try {
-      await navigator.clipboard.writeText(output);
+      await writeClipboardText(output);
       this.setCopyState("copied");
       this.dispatchEvent(
         new CustomEvent("tp-terminal-screen-copied", {

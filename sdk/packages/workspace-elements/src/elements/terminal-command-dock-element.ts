@@ -2,6 +2,7 @@ import { css, html, nothing } from "lit";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import { readClipboardText } from "./terminal-clipboard.js";
 import { resolveTerminalCommandDockControlState } from "./terminal-command-dock-controls.js";
 
 const QUICK_COMMANDS: readonly { label: string; value: string }[] = [
@@ -10,8 +11,6 @@ const QUICK_COMMANDS: readonly { label: string; value: string }[] = [
   { label: "git status", value: "git status" },
   { label: "hello", value: 'printf "hello from Terminal Platform\\n"' },
 ];
-
-const CLIPBOARD_READ_TIMEOUT_MS = 2500;
 
 export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -691,19 +690,4 @@ function getErrorMessage(error: unknown): string {
   }
 
   return "Workspace command failed";
-}
-
-async function readClipboardText(): Promise<string> {
-  if (!navigator.clipboard?.readText) {
-    throw new Error("Clipboard read is unavailable in this browser context");
-  }
-
-  return Promise.race([
-    navigator.clipboard.readText(),
-    new Promise<string>((_, reject) => {
-      window.setTimeout(() => {
-        reject(new Error("Clipboard read timed out. Check browser clipboard permissions and try again."));
-      }, CLIPBOARD_READ_TIMEOUT_MS);
-    }),
-  ]);
 }
