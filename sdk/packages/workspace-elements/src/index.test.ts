@@ -22,6 +22,9 @@ import {
   resolveTerminalSavedSessionsControlState,
   resolveTerminalScreenControlState,
   resolveTerminalScreenInputStatus,
+  resolveTerminalToolbarFontScaleOption,
+  resolveTerminalToolbarLineWrapOption,
+  resolveTerminalToolbarThemeOption,
   resolveTerminalTopologyControlState,
   resolveTerminalTopologyStatus,
   resolveWorkspaceCapability,
@@ -45,6 +48,9 @@ import {
   type TerminalScreenInputActivity,
   type TerminalScreenInputStatus,
   type TerminalScreenInputTone,
+  type TerminalToolbarFontScaleOptionPresentation,
+  type TerminalToolbarLineWrapOptionPresentation,
+  type TerminalToolbarThemeOptionPresentation,
   type TerminalTopologyControlState,
   type TerminalTopologyStatus,
   type TerminalWorkspaceCapabilityState,
@@ -72,6 +78,9 @@ type PublicControlTypes =
   | TerminalScreenInputActivity
   | TerminalScreenInputStatus
   | TerminalScreenInputTone
+  | TerminalToolbarFontScaleOptionPresentation
+  | TerminalToolbarLineWrapOptionPresentation
+  | TerminalToolbarThemeOptionPresentation
   | TerminalTopologyControlState
   | TerminalTopologyStatus
   | TerminalWorkspaceCapabilityState
@@ -91,6 +100,9 @@ describe("workspace elements public api", () => {
       resolveTerminalSavedSessionsControlState,
       resolveTerminalScreenControlState,
       resolveTerminalScreenInputStatus,
+      resolveTerminalToolbarFontScaleOption,
+      resolveTerminalToolbarLineWrapOption,
+      resolveTerminalToolbarThemeOption,
       resolveTerminalTopologyControlState,
       resolveTerminalTopologyStatus,
       resolveWorkspaceCapability,

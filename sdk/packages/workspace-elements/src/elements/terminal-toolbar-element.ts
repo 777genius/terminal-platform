@@ -5,6 +5,11 @@ import { terminalPlatformTerminalFontScales } from "@terminal-platform/workspace
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import {
+  resolveTerminalToolbarFontScaleOption,
+  resolveTerminalToolbarLineWrapOption,
+  resolveTerminalToolbarThemeOption,
+} from "./terminal-toolbar-preferences.js";
 
 export class TerminalToolbarElement extends WorkspaceKernelConsumerElement {
   static styles = [
@@ -58,6 +63,11 @@ export class TerminalToolbarElement extends WorkspaceKernelConsumerElement {
         background: color-mix(in srgb, var(--tp-color-accent) 16%, var(--tp-color-panel-raised));
       }
 
+      .theme-options button,
+      .display-options button {
+        min-width: 5.75rem;
+      }
+
       .toolbar-body {
         display: grid;
         gap: var(--tp-space-3);
@@ -79,49 +89,49 @@ export class TerminalToolbarElement extends WorkspaceKernelConsumerElement {
           <div class="preference-group">
             <div class="preference-label">Theme</div>
             <div class="theme-options" part="theme-options" aria-label="Theme">
-              ${terminalPlatformThemeManifests.map(
-                (theme) => html`
+              ${terminalPlatformThemeManifests.map((theme) => {
+                const option = resolveTerminalToolbarThemeOption(theme, this.snapshot.theme.themeId);
+
+                return html`
                   <button
                     type="button"
                     part="theme-option"
                     data-testid="tp-theme-option"
                     data-theme-id=${theme.id}
-                    aria-pressed=${String(this.snapshot.theme.themeId === theme.id)}
+                    data-theme-label=${option.label}
+                    aria-pressed=${String(option.isActive)}
+                    title=${option.title}
                     @click=${() => this.kernel?.commands.setTheme(theme.id)}
                   >
-                    ${theme.displayName.replace("Terminal Platform ", "")}
+                    ${option.label}
                   </button>
-                `,
-              )}
+                `;
+              })}
             </div>
           </div>
 
           <div class="preference-group">
             <div class="preference-label">Terminal display</div>
             <div class="display-options" part="display-options" aria-label="Terminal display">
-              ${terminalPlatformTerminalFontScales.map(
-                (fontScale) => html`
+              ${terminalPlatformTerminalFontScales.map((fontScale) => {
+                const option = resolveTerminalToolbarFontScaleOption(fontScale, terminalDisplay.fontScale);
+
+                return html`
                   <button
                     type="button"
                     part="font-scale-option"
                     data-testid="tp-font-scale-option"
                     data-font-scale=${fontScale}
-                    aria-pressed=${String(terminalDisplay.fontScale === fontScale)}
+                    data-font-scale-label=${option.label}
+                    aria-pressed=${String(option.isActive)}
+                    title=${option.title}
                     @click=${() => this.kernel?.commands.setTerminalFontScale(fontScale)}
                   >
-                    ${titleCase(fontScale)}
+                    ${option.label}
                   </button>
-                `,
-              )}
-              <button
-                type="button"
-                part="line-wrap-option"
-                data-testid="tp-line-wrap-option"
-                aria-pressed=${String(terminalDisplay.lineWrap)}
-                @click=${() => this.kernel?.commands.setTerminalLineWrap(!terminalDisplay.lineWrap)}
-              >
-                Wrap
-              </button>
+                `;
+              })}
+              ${this.renderLineWrapOption(terminalDisplay.lineWrap)}
             </div>
           </div>
         </div>
@@ -150,8 +160,22 @@ export class TerminalToolbarElement extends WorkspaceKernelConsumerElement {
       // Command failures are already recorded in kernel diagnostics.
     });
   }
-}
 
-function titleCase(value: string): string {
-  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
+  private renderLineWrapOption(lineWrap: boolean) {
+    const option = resolveTerminalToolbarLineWrapOption(lineWrap);
+
+    return html`
+      <button
+        type="button"
+        part="line-wrap-option"
+        data-testid="tp-line-wrap-option"
+        data-line-wrap-next=${String(option.nextValue)}
+        aria-pressed=${String(option.isActive)}
+        title=${option.title}
+        @click=${() => this.kernel?.commands.setTerminalLineWrap(option.nextValue)}
+      >
+        ${option.label}
+      </button>
+    `;
+  }
 }

@@ -210,6 +210,8 @@ async function main() {
       || result.afterThemeSwitch.workspaceTheme !== "terminal-platform-light"
       || result.afterThemeSwitch.screenTheme !== "terminal-platform-light"
       || result.afterThemeSwitch.activeThemeButton !== "terminal-platform-light"
+      || result.afterThemeSwitch.themeButtonLabel !== "Light"
+      || result.afterThemeSwitch.themeButtonTitle !== "Switch workspace theme to Light."
       || result.afterThemeSwitch.screenBgToken !== "#f6f8fb"
       || result.afterThemeSwitch.storedTheme !== "terminal-platform-light"
     ) {
@@ -223,7 +225,12 @@ async function main() {
       || result.afterDisplaySwitch.screenFontScale !== "large"
       || result.afterDisplaySwitch.screenLineWrap !== "false"
       || result.afterDisplaySwitch.activeFontScaleButton !== "large"
+      || result.afterDisplaySwitch.largeButtonLabel !== "Large"
+      || result.afterDisplaySwitch.largeButtonTitle !== "Large terminal font size is active."
       || result.afterDisplaySwitch.wrapPressed !== "false"
+      || result.afterDisplaySwitch.wrapLabel !== "Wrap off"
+      || result.afterDisplaySwitch.wrapTitle !== "Enable terminal line wrapping."
+      || result.afterDisplaySwitch.wrapNext !== "true"
       || result.afterDisplaySwitch.storedFontScale !== "large"
       || result.afterDisplaySwitch.storedLineWrap !== "false"
     ) {
@@ -888,6 +895,11 @@ async function runSmokeScenario(browserUrl) {
         };
       }
 
+      const themeButtonLabel = themeButton.getAttribute('data-theme-label')
+        ?? themeButton.textContent?.replace(/\\s+/g, ' ').trim()
+        ?? null;
+      const themeButtonTitle = themeButton.getAttribute('title');
+
       themeButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
@@ -897,6 +909,8 @@ async function runSmokeScenario(browserUrl) {
         workspaceTheme: workspaceHost?.getAttribute('data-tp-theme') ?? null,
         screenTheme: screenHost?.getAttribute('data-tp-theme') ?? null,
         commandDockTheme: commandDockHost?.getAttribute('data-tp-theme') ?? null,
+        themeButtonLabel,
+        themeButtonTitle,
         activeThemeButton: toolbarRoot?.querySelector('[part="theme-option"][aria-pressed="true"]')
           ?.getAttribute('data-theme-id') ?? null,
         storedTheme: window.localStorage.getItem(${JSON.stringify(themeStorageKey)}),
@@ -926,6 +940,7 @@ async function runSmokeScenario(browserUrl) {
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
       const state = window.terminalDemoDebug?.getState?.();
+      const updatedWrapButton = toolbarRoot?.querySelector('[data-testid="tp-line-wrap-option"]') ?? wrapButton;
       return {
         clicked: true,
         fontScale: state?.terminalDisplay?.fontScale ?? null,
@@ -934,7 +949,14 @@ async function runSmokeScenario(browserUrl) {
         screenLineWrap: screenHost?.getAttribute('data-line-wrap') ?? null,
         activeFontScaleButton: toolbarRoot?.querySelector('[part="font-scale-option"][aria-pressed="true"]')
           ?.getAttribute('data-font-scale') ?? null,
-        wrapPressed: wrapButton.getAttribute('aria-pressed'),
+        largeButtonLabel: largeButton.getAttribute('data-font-scale-label')
+          ?? largeButton.textContent?.replace(/\\s+/g, ' ').trim()
+          ?? null,
+        largeButtonTitle: largeButton.getAttribute('title'),
+        wrapPressed: updatedWrapButton.getAttribute('aria-pressed'),
+        wrapLabel: updatedWrapButton.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        wrapTitle: updatedWrapButton.getAttribute('title'),
+        wrapNext: updatedWrapButton.getAttribute('data-line-wrap-next'),
         storedFontScale: window.localStorage.getItem(${JSON.stringify(fontScaleStorageKey)}),
         storedLineWrap: window.localStorage.getItem(${JSON.stringify(lineWrapStorageKey)}),
       };
