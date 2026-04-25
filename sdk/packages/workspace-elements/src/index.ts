@@ -14,3 +14,17 @@ export { TerminalStatusBarElement } from "./elements/terminal-status-bar-element
 export { TerminalScreenElement } from "./elements/terminal-screen-element.js";
 export { TerminalPaneTreeElement } from "./elements/terminal-pane-tree-element.js";
 export { TerminalSavedSessionsElement } from "./elements/terminal-saved-sessions-element.js";
+export {
+  findRestorableSavedSession,
+  hasSavedSession,
+  resolveTerminalSavedSessionsControlState,
+  TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT,
+  type TerminalSavedSessionItemControlState,
+  type TerminalSavedSessionPendingAction,
+  type TerminalSavedSessionRestoreSemanticsNote,
+  type TerminalSavedSessionRestoreSemanticsTone,
+  type TerminalSavedSessionRestoreStatus,
+  type TerminalSavedSessionsBulkAction,
+  type TerminalSavedSessionsControlOptions,
+  type TerminalSavedSessionsControlState,
+} from "./elements/terminal-saved-sessions-controls.js";
