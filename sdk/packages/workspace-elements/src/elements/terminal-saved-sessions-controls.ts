@@ -4,6 +4,14 @@ import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 export type TerminalSavedSessionPendingAction = "restore" | "delete";
 export type TerminalSavedSessionsBulkAction = "prune";
 export type TerminalSavedSessionRestoreStatus = "available" | "blocked" | "pending";
+export type TerminalSavedSessionRestoreSemanticsTone = "ok" | "info" | "warning";
+
+export interface TerminalSavedSessionRestoreSemanticsNote {
+  code: string;
+  label: string;
+  detail: string;
+  tone: TerminalSavedSessionRestoreSemanticsTone;
+}
 
 export interface TerminalSavedSessionsControlOptions {
   visibleSavedSessionCount: number;
@@ -26,6 +34,7 @@ export interface TerminalSavedSessionItemControlState {
   canDelete: boolean;
   restoreStatus: TerminalSavedSessionRestoreStatus;
   restoreTitle: string;
+  restoreSemanticsNotes: TerminalSavedSessionRestoreSemanticsNote[];
 }
 
 export interface TerminalSavedSessionsControlState {
@@ -113,6 +122,7 @@ function toSavedSessionItemControlState(
     canDelete,
     restoreStatus: resolveRestoreStatus(session, anyPending),
     restoreTitle: restoreButtonTitle(session, title, anyPending),
+    restoreSemanticsNotes: restoreSemanticsNotes(session),
   };
 }
 
@@ -163,4 +173,72 @@ function savedSessionCompatibilityLabel(session: SavedSessionSummary): string {
     default:
       return "Saved layout compatibility is unknown";
   }
+}
+
+function restoreSemanticsNotes(session: SavedSessionSummary): TerminalSavedSessionRestoreSemanticsNote[] {
+  const semantics = session.restore_semantics;
+  const notes: TerminalSavedSessionRestoreSemanticsNote[] = [];
+
+  if (semantics.restores_topology) {
+    notes.push({
+      code: "topology_restored",
+      label: "topology",
+      detail: "Pane and tab topology is restored.",
+      tone: "ok",
+    });
+  } else {
+    notes.push({
+      code: "topology_not_restored",
+      label: "topology unavailable",
+      detail: "Pane and tab topology is not restored by this saved layout.",
+      tone: "warning",
+    });
+  }
+
+  if (!semantics.restores_focus_state) {
+    notes.push({
+      code: "focus_not_restored",
+      label: "focus not restored",
+      detail: "Focused tab or pane state is not restored.",
+      tone: "info",
+    });
+  }
+
+  if (!semantics.restores_tab_titles) {
+    notes.push({
+      code: "tab_titles_not_restored",
+      label: "titles not restored",
+      detail: "Saved tab titles are not restored.",
+      tone: "info",
+    });
+  }
+
+  if (!semantics.uses_saved_launch_spec) {
+    notes.push({
+      code: "launch_spec_unavailable",
+      label: "launch unavailable",
+      detail: "The original launch specification is not available for restore.",
+      tone: "warning",
+    });
+  }
+
+  if (!semantics.preserves_process_state) {
+    notes.push({
+      code: "process_state_not_preserved",
+      label: "processes restart",
+      detail: "Restore recreates topology and launch context, but not exact running process state.",
+      tone: "warning",
+    });
+  }
+
+  if (!semantics.replays_saved_screen_buffers) {
+    notes.push({
+      code: "screen_buffers_not_replayed",
+      label: "no screen replay",
+      detail: "Viewport history is not reconstructed from the saved snapshot.",
+      tone: "info",
+    });
+  }
+
+  return notes;
 }

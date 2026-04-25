@@ -200,6 +200,10 @@ async function main() {
       || result.afterSaveLayout.firstSavedRestoreStatus !== "available"
       || result.afterSaveLayout.firstSavedRestoreDisabled !== false
       || !result.afterSaveLayout.firstSavedRestoreTitle?.includes("Restore saved layout")
+      || !result.afterSaveLayout.firstSavedSemanticsCodes?.includes("process_state_not_preserved")
+      || !result.afterSaveLayout.firstSavedSemanticsCodes?.includes("screen_buffers_not_replayed")
+      || !result.afterSaveLayout.firstSavedSemanticsLabels?.includes("processes restart")
+      || !result.afterSaveLayout.firstSavedSemanticsLabels?.includes("no screen replay")
       || !result.afterSaveLayout.deletePrompted
       || result.afterSaveLayout.savedSessionCountAfterDeletePrompt !== result.afterSaveLayout.savedSessionCount
       || result.afterSaveLayout.saveEventDetail?.savedSessionCount !== result.afterSaveLayout.savedSessionCount
@@ -854,6 +858,7 @@ async function runSmokeScenario(browserUrl) {
       const state = window.terminalDemoDebug?.getState?.();
       const deleteButton = savedRoot?.querySelector('[data-testid="tp-delete-saved-session"]') ?? null;
       const restoreButton = savedRoot?.querySelector('[data-testid="tp-restore-saved-session"]') ?? null;
+      const restoreSemantics = [...(savedRoot?.querySelectorAll('[data-testid="tp-saved-session-restore-semantics"]') ?? [])];
       const savedSessionCount = state?.catalog?.savedSessions?.length ?? 0;
       const deletePromptResult = {
         deletePrompted: false,
@@ -883,6 +888,8 @@ async function runSmokeScenario(browserUrl) {
         firstSavedRestoreStatus: restoreButton?.getAttribute('data-restore-status') ?? null,
         firstSavedRestoreDisabled: restoreButton?.disabled ?? null,
         firstSavedRestoreTitle: restoreButton?.getAttribute('title') ?? null,
+        firstSavedSemanticsCodes: restoreSemantics.map((note) => note.getAttribute('data-semantics-code')),
+        firstSavedSemanticsLabels: restoreSemantics.map((note) => note.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
         saveEventDetail,
         ...deletePromptResult,
       };

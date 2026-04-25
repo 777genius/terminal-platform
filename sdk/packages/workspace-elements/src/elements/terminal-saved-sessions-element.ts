@@ -92,6 +92,32 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
         gap: 0.2rem;
       }
 
+      .semantics {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--tp-space-2);
+        margin-top: var(--tp-space-2);
+      }
+
+      .semantic-note {
+        border: 1px solid var(--tp-color-border);
+        border-radius: var(--tp-radius-sm);
+        color: var(--tp-color-text-muted);
+        font-size: 0.72rem;
+        line-height: 1;
+        padding: 0.25rem 0.4rem;
+      }
+
+      .semantic-note[data-tone="ok"] {
+        border-color: color-mix(in srgb, var(--tp-color-success) 34%, transparent);
+        color: color-mix(in srgb, var(--tp-color-success) 76%, var(--tp-color-text));
+      }
+
+      .semantic-note[data-tone="warning"] {
+        border-color: color-mix(in srgb, var(--tp-color-warning) 42%, transparent);
+        color: color-mix(in srgb, var(--tp-color-warning) 74%, var(--tp-color-text));
+      }
+
       .meta {
         display: flex;
         flex-wrap: wrap;
@@ -185,6 +211,21 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
                             <span>${item.session.tab_count} tabs</span>
                             <span>${item.session.pane_count} panes</span>
                             ${item.isConfirmingDelete ? html`<span>confirm delete</span>` : null}
+                          </div>
+                          <div class="semantics" part="restore-semantics">
+                            ${item.restoreSemanticsNotes.map(
+                              (note) => html`
+                                <span
+                                  class="semantic-note"
+                                  data-testid="tp-saved-session-restore-semantics"
+                                  data-semantics-code=${note.code}
+                                  data-tone=${note.tone}
+                                  title=${note.detail}
+                                >
+                                  ${note.label}
+                                </span>
+                              `,
+                            )}
                           </div>
                         </div>
                         <div class="actions" part="actions">

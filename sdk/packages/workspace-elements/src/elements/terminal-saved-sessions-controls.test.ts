@@ -64,6 +64,62 @@ describe("terminal saved sessions controls", () => {
     expect(findRestorableSavedSession(snapshot, createOptions(), "saved-1")).toBeNull();
   });
 
+  it("surfaces restore semantics explicitly for degraded saved layouts", () => {
+    const snapshot = createWorkspaceSnapshot([
+      createSavedSession(1, {
+        restoreSemantics: {
+          restores_focus_state: false,
+          restores_tab_titles: false,
+          uses_saved_launch_spec: false,
+          replays_saved_screen_buffers: false,
+          preserves_process_state: false,
+        },
+      }),
+    ]);
+
+    const controls = resolveTerminalSavedSessionsControlState(snapshot, createOptions());
+
+    expect(controls.items[0]?.restoreSemanticsNotes.map((note) => note.code)).toEqual([
+      "topology_restored",
+      "focus_not_restored",
+      "tab_titles_not_restored",
+      "launch_spec_unavailable",
+      "process_state_not_preserved",
+      "screen_buffers_not_replayed",
+    ]);
+    expect(controls.items[0]?.restoreSemanticsNotes.map((note) => note.tone)).toEqual([
+      "ok",
+      "info",
+      "info",
+      "warning",
+      "warning",
+      "info",
+    ]);
+  });
+
+  it("marks missing topology restore as a warning", () => {
+    const snapshot = createWorkspaceSnapshot([
+      createSavedSession(1, {
+        restoreSemantics: {
+          restores_topology: false,
+          replays_saved_screen_buffers: true,
+          preserves_process_state: true,
+        },
+      }),
+    ]);
+
+    const controls = resolveTerminalSavedSessionsControlState(snapshot, createOptions());
+
+    expect(controls.items[0]?.restoreSemanticsNotes).toEqual([
+      {
+        code: "topology_not_restored",
+        label: "topology unavailable",
+        detail: "Pane and tab topology is not restored by this saved layout.",
+        tone: "warning",
+      },
+    ]);
+  });
+
   it("disables item and prune actions while a saved session action is pending", () => {
     const snapshot = createWorkspaceSnapshot(Array.from({ length: 5 }, (_, index) => createSavedSession(index + 1)));
 
@@ -143,6 +199,7 @@ function createSavedSession(
   overrides: {
     canRestore?: boolean;
     status?: SavedSessionCompatibilityStatus;
+    restoreSemantics?: Partial<SavedSessionSummary["restore_semantics"]>;
   } = {},
 ): SavedSessionSummary {
   return {
@@ -174,6 +231,7 @@ function createSavedSession(
       uses_saved_launch_spec: true,
       replays_saved_screen_buffers: false,
       preserves_process_state: false,
+      ...overrides.restoreSemantics,
     },
   };
 }
