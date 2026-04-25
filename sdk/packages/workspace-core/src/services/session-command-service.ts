@@ -139,8 +139,9 @@ export class SessionCommandService {
   pruneSavedSessions(keepLatest: number): Promise<PruneSavedSessionsResult> {
     return this.#lane.enqueue(async () => {
       try {
+        const keepLatestCount = normalizeSavedSessionPruneLimit(keepLatest);
         const transport = await this.#context.ensureTransport();
-        const result = await transport.pruneSavedSessions(keepLatest);
+        const result = await transport.pruneSavedSessions(keepLatestCount);
         await this.#catalogService.refreshSavedSessions();
         return result;
       } catch (error) {
@@ -209,6 +210,18 @@ export class SessionCommandService {
 
     return workspaceError;
   }
+}
+
+function normalizeSavedSessionPruneLimit(keepLatest: number): number {
+  if (!Number.isFinite(keepLatest) || keepLatest < 0) {
+    throw new WorkspaceError({
+      code: "protocol_error",
+      message: `saved session prune limit must be a non-negative finite number: ${keepLatest}`,
+      recoverable: false,
+    });
+  }
+
+  return Math.trunc(keepLatest);
 }
 
 function findSavedSessionRestoreBlocker(

@@ -110,6 +110,7 @@ export function createMemoryWorkspaceTransport(
     },
     async deleteSavedSession(sessionId) {
       assertOpen();
+      requireRecord(state.savedSessionRecords, sessionId, "saved session");
       delete state.savedSessionRecords[sessionId];
       state.savedSessions = state.savedSessions.filter((session) => session.session_id !== sessionId);
       const result: DeleteSavedSessionResult = { session_id: sessionId };
@@ -117,6 +118,7 @@ export function createMemoryWorkspaceTransport(
     },
     async pruneSavedSessions(keepLatest) {
       assertOpen();
+      const keepLatestCount = normalizeSavedSessionPruneLimit(keepLatest);
       const sorted = [...state.savedSessions].sort((left, right) => {
         if (left.saved_at_ms === right.saved_at_ms) {
           return 0;
@@ -124,7 +126,7 @@ export function createMemoryWorkspaceTransport(
 
         return left.saved_at_ms > right.saved_at_ms ? -1 : 1;
       });
-      const kept = sorted.slice(0, keepLatest);
+      const kept = sorted.slice(0, keepLatestCount);
       const keptIds = new Set(kept.map((session) => session.session_id));
       const deletedCount = sorted.length - kept.length;
       state.savedSessions = kept;
@@ -1096,6 +1098,18 @@ function assertSavedSessionRestorable(record: SavedSessionRecord): void {
     message: `saved session ${record.session_id} is not restore-compatible: ${record.compatibility.status}`,
     recoverable: false,
   });
+}
+
+function normalizeSavedSessionPruneLimit(keepLatest: number): number {
+  if (!Number.isFinite(keepLatest) || keepLatest < 0) {
+    throw new WorkspaceError({
+      code: "protocol_error",
+      message: `saved session prune limit must be a non-negative finite number: ${keepLatest}`,
+      recoverable: false,
+    });
+  }
+
+  return Math.trunc(keepLatest);
 }
 
 function clone<TValue>(value: TValue): TValue {

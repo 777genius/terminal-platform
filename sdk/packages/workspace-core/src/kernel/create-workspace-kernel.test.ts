@@ -380,6 +380,40 @@ describe("createWorkspaceKernel saved session maintenance", () => {
 
     await kernel.dispose();
   });
+
+  it("blocks invalid saved session prune limits before calling transport", async () => {
+    let pruneCalls = 0;
+    const kernel = createWorkspaceKernel({
+      now: () => 4_000,
+      transport: {
+        ...createUnusedTransport(),
+        pruneSavedSessions: async () => {
+          pruneCalls += 1;
+          return {
+            deleted_count: 0,
+            kept_count: 0,
+          };
+        },
+      } as WorkspaceTransportClient,
+    });
+
+    await expect(kernel.commands.pruneSavedSessions(-1)).rejects.toMatchObject({
+      code: "protocol_error",
+      recoverable: false,
+    });
+    await expect(kernel.commands.pruneSavedSessions(Number.POSITIVE_INFINITY)).rejects.toMatchObject({
+      code: "protocol_error",
+      recoverable: false,
+    });
+
+    expect(pruneCalls).toBe(0);
+    expect(kernel.diagnostics.list().map((diagnostic) => diagnostic.code)).toEqual([
+      "protocol_error",
+      "protocol_error",
+    ]);
+
+    await kernel.dispose();
+  });
 });
 
 function createUnusedTransport(): WorkspaceTransportClient {

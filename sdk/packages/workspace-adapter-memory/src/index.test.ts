@@ -326,6 +326,36 @@ describe("createMemoryWorkspaceTransport command projection", () => {
 
     await transport.close();
   });
+
+  it("rejects unknown saved layout deletion", async () => {
+    const transport = createMemoryWorkspaceTransport();
+    const savedCountBefore = (await transport.listSavedSessions()).length;
+
+    await expect(transport.deleteSavedSession("missing-saved")).rejects.toMatchObject({
+      code: "session_not_found",
+      recoverable: false,
+    });
+    expect(await transport.listSavedSessions()).toHaveLength(savedCountBefore);
+
+    await transport.close();
+  });
+
+  it("rejects invalid saved layout prune limits", async () => {
+    const transport = createMemoryWorkspaceTransport();
+    const savedCountBefore = (await transport.listSavedSessions()).length;
+
+    await expect(transport.pruneSavedSessions(-1)).rejects.toMatchObject({
+      code: "protocol_error",
+      recoverable: false,
+    });
+    await expect(transport.pruneSavedSessions(Number.NaN)).rejects.toMatchObject({
+      code: "protocol_error",
+      recoverable: false,
+    });
+    expect(await transport.listSavedSessions()).toHaveLength(savedCountBefore);
+
+    await transport.close();
+  });
 });
 
 function collectPaneIds(node: PaneTreeNode): string[] {
