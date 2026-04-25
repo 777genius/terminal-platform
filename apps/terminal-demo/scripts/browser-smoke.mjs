@@ -193,6 +193,9 @@ async function main() {
         !result.afterSavedPagination.clicked
         || result.afterSavedPagination.savedItemsRendered !== expectedPaginatedItems
         || !result.afterSavedPagination.hasCollapse
+        || result.afterSavedPagination.showMoreCount !== expectedPaginatedItems - result.afterCreate.savedItemsRendered
+        || !result.afterSavedPagination.showMoreText?.includes(String(expectedPaginatedItems - result.afterCreate.savedItemsRendered))
+        || !result.afterSavedPagination.collapseText?.includes(String(result.afterCreate.savedItemsRendered))
       ) {
         throw new Error(`Saved-session pagination did not expand correctly: ${JSON.stringify({
           expectedPaginatedItems,
@@ -323,6 +326,11 @@ async function main() {
       || result.afterPruneHidden.savedSessionCountBefore <= result.afterPruneHidden.visibleCountBefore
       || result.afterPruneHidden.savedSessionCountAfterPrompt !== result.afterPruneHidden.savedSessionCountBefore
       || result.afterPruneHidden.savedSessionCountAfter !== result.afterPruneHidden.visibleCountBefore
+      || result.afterPruneHidden.pruneCount !== result.afterPruneHidden.deletedCount
+      || result.afterPruneHidden.pruneKeepLatest !== result.afterPruneHidden.visibleCountBefore
+      || !result.afterPruneHidden.pruneButtonText?.includes(String(result.afterPruneHidden.deletedCount))
+      || !result.afterPruneHidden.pruneButtonTitle?.includes(`keep the latest ${result.afterPruneHidden.visibleCountBefore}`)
+      || !result.afterPruneHidden.confirmButtonText?.includes(String(result.afterPruneHidden.deletedCount))
       || result.afterPruneHidden.eventDetail?.deletedCount !== result.afterPruneHidden.deletedCount
       || result.afterPruneHidden.eventDetail?.keptCount !== result.afterPruneHidden.savedSessionCountAfter
     ) {
@@ -836,15 +844,29 @@ async function runSmokeScenario(browserUrl) {
           reason: 'show-more missing',
           savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
           hasCollapse: Boolean(savedRoot?.querySelector('[part="collapse"]')),
+          showMoreCount: 0,
+          showMoreText: null,
+          showMoreTitle: null,
+          collapseText: null,
+          collapseTitle: null,
           summaryText: savedRoot?.querySelector('[part="list-summary"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         };
       }
+      const showMoreCount = Number(showMoreButton.getAttribute('data-show-count') ?? '0');
+      const showMoreText = showMoreButton.textContent?.replace(/\\s+/g, ' ').trim() ?? null;
+      const showMoreTitle = showMoreButton.getAttribute('title');
       showMoreButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const collapseButton = savedRoot?.querySelector('[part="collapse"]') ?? null;
       return {
         clicked: true,
         savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
-        hasCollapse: Boolean(savedRoot?.querySelector('[part="collapse"]')),
+        hasCollapse: Boolean(collapseButton),
+        showMoreCount,
+        showMoreText,
+        showMoreTitle,
+        collapseText: collapseButton?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        collapseTitle: collapseButton?.getAttribute('title') ?? null,
         summaryText: savedRoot?.querySelector('[part="list-summary"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
       };
     })()`);
@@ -1362,6 +1384,11 @@ async function runSmokeScenario(browserUrl) {
           reason: pruneButton ? 'prune hidden disabled' : 'prune hidden missing',
           savedSessionCountBefore,
           visibleCountBefore,
+          pruneCount: Number(pruneButton?.getAttribute('data-prune-count') ?? '0'),
+          pruneKeepLatest: Number(pruneButton?.getAttribute('data-prune-keep-latest') ?? '0'),
+          pruneButtonText: pruneButton?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+          pruneButtonTitle: pruneButton?.getAttribute('title') ?? null,
+          confirmButtonText: null,
           savedSessionCountAfterPrompt: savedSessionCountBefore,
           savedSessionCountAfter: savedSessionCountBefore,
           deletedCount: Math.max(0, savedSessionCountBefore - visibleCountBefore),
@@ -1374,9 +1401,14 @@ async function runSmokeScenario(browserUrl) {
         eventDetail = event.detail ?? null;
       }, { once: true });
 
+      const pruneCount = Number(pruneButton.getAttribute('data-prune-count') ?? '0');
+      const pruneKeepLatest = Number(pruneButton.getAttribute('data-prune-keep-latest') ?? '0');
+      const pruneButtonText = pruneButton.textContent?.replace(/\\s+/g, ' ').trim() ?? null;
+      const pruneButtonTitle = pruneButton.getAttribute('title');
       pruneButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const armedButton = savedRoot.querySelector('[data-testid="tp-prune-hidden-saved-sessions"]') ?? null;
+      const confirmButtonText = armedButton?.textContent?.replace(/\\s+/g, ' ').trim() ?? null;
       const prompted = Boolean(
         armedButton?.getAttribute('data-confirming') === 'true'
         && /confirm prune/i.test(armedButton.textContent ?? ''),
@@ -1395,6 +1427,11 @@ async function runSmokeScenario(browserUrl) {
         confirmed: savedSessionCountAfter < savedSessionCountAfterPrompt,
         savedSessionCountBefore,
         visibleCountBefore,
+        pruneCount,
+        pruneKeepLatest,
+        pruneButtonText,
+        pruneButtonTitle,
+        confirmButtonText,
         savedSessionCountAfterPrompt,
         savedSessionCountAfter,
         visibleCountAfter,

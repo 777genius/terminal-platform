@@ -108,6 +108,10 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
         margin-left: auto;
       }
 
+      .list-controls [data-testid="tp-prune-hidden-saved-sessions"] {
+        min-width: 9rem;
+      }
+
       .summary {
         display: grid;
         gap: 0.2rem;
@@ -196,6 +200,12 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
 
   override render() {
     const controls = this.resolveControls();
+    const showMoreCount = Math.min(SAVED_SESSION_PAGE_SIZE, controls.hiddenCount);
+    const collapseCount = Math.min(DEFAULT_VISIBLE_SAVED_SESSIONS, controls.matchedSessionCount);
+    const pruneHiddenLabel = controls.pruneConfirmationArmed
+      ? `Confirm prune ${controls.hiddenCount}`
+      : `Prune ${controls.hiddenCount} hidden`;
+    const pruneHiddenTitle = `Delete ${controls.hiddenCount} hidden ${this.savedLayoutNoun(controls.hiddenCount)} and keep the latest ${controls.pruneKeepLatest}.`;
 
     return html`
       <div
@@ -348,15 +358,29 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
                 <div class="list-controls">
                   ${controls.canShowMore
                     ? html`
-                        <button part="show-more" @click=${() => this.showMoreSavedSessions()}>
-                          Show ${Math.min(SAVED_SESSION_PAGE_SIZE, controls.hiddenCount)} more
+                        <button
+                          part="show-more"
+                          data-testid="tp-show-more-saved-sessions"
+                          data-show-count=${String(showMoreCount)}
+                          title=${`Show ${showMoreCount} more saved layouts from this list.`}
+                          aria-label=${`Show ${showMoreCount} more saved layouts`}
+                          @click=${() => this.showMoreSavedSessions()}
+                        >
+                          Show ${showMoreCount} more
                         </button>
                       `
                     : null}
                   ${controls.canCollapse
                     ? html`
-                        <button part="collapse" @click=${() => this.collapseSavedSessions()}>
-                          Collapse
+                        <button
+                          part="collapse"
+                          data-testid="tp-collapse-saved-sessions"
+                          data-collapse-count=${String(collapseCount)}
+                          title=${`Collapse to the latest ${collapseCount} saved layouts.`}
+                          aria-label=${`Collapse to the latest ${collapseCount} saved layouts`}
+                          @click=${() => this.collapseSavedSessions()}
+                        >
+                          Show latest ${collapseCount}
                         </button>
                       `
                     : null}
@@ -367,16 +391,16 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
                           data-testid="tp-prune-hidden-saved-sessions"
                           data-danger="true"
                           data-confirming=${String(controls.pruneConfirmationArmed)}
+                          data-prune-count=${String(controls.hiddenCount)}
+                          data-prune-keep-latest=${String(controls.pruneKeepLatest)}
+                          title=${pruneHiddenTitle}
+                          aria-label=${pruneHiddenLabel}
                           ?disabled=${!controls.canPruneHidden}
                           @click=${() => {
                             void this.handlePruneHiddenClick();
                           }}
                         >
-                          ${controls.isPruning
-                            ? "Pruning"
-                            : controls.pruneConfirmationArmed
-                              ? `Confirm prune ${controls.hiddenCount}`
-                              : "Prune hidden"}
+                          ${controls.isPruning ? "Pruning" : pruneHiddenLabel}
                         </button>
                       `
                     : null}
@@ -399,6 +423,10 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   private collapseSavedSessions(): void {
     this.clearPruneConfirmation();
     this.visibleSavedSessionCount = DEFAULT_VISIBLE_SAVED_SESSIONS;
+  }
+
+  private savedLayoutNoun(count: number): string {
+    return count === 1 ? "saved layout" : "saved layouts";
   }
 
   private handleFilterInput(event: Event): void {
