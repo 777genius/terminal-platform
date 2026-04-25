@@ -44,6 +44,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     css`
       .screen {
         display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
         gap: var(--tp-space-3);
         padding: var(--tp-terminal-screen-panel-padding, var(--tp-space-4));
         padding-bottom: var(--tp-terminal-screen-panel-padding-bottom, var(--tp-space-4));
@@ -64,6 +65,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
       .screen[data-placement="terminal"] {
         gap: var(--tp-space-2);
+        height: 100%;
+        min-height: 0;
         color: var(--tp-terminal-color-text);
         background:
           linear-gradient(
@@ -246,6 +249,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .viewport {
+        min-height: 0;
+        max-height: none;
         border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
         border-radius: 0.6rem 0.6rem 0 0;
         border-bottom-left-radius: var(--tp-terminal-screen-viewport-border-bottom-left-radius, 0);
@@ -870,10 +875,18 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
+    const scrollToLatest = () => {
+      viewport.scrollTop = viewport.scrollHeight;
+    };
+
     this.#autoScrolling = true;
-    viewport.scrollTop = viewport.scrollHeight;
+    scrollToLatest();
     requestAnimationFrame(() => {
-      this.#autoScrolling = false;
+      scrollToLatest();
+      requestAnimationFrame(() => {
+        scrollToLatest();
+        this.#autoScrolling = false;
+      });
     });
   }
 

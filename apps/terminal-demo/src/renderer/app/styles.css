@@ -253,6 +253,8 @@ button {
 
 .shell[data-has-active-session="true"] .panel--workspace {
   gap: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
   overflow: hidden;
   padding: 0;
 }
@@ -275,17 +277,21 @@ button {
 
 .shell[data-has-active-session="true"] .workspace-stack {
   gap: 0;
+  height: 100%;
+  min-height: 0;
 }
 
 .shell[data-has-active-session="true"] .terminal-workspace-host {
+  height: 100%;
   min-height: 0;
 }
 
 .shell[data-has-active-session="true"] tp-terminal-workspace {
+  height: 100%;
   --tp-workspace-sidebar-target-width: clamp(10.5rem, 13vw, 12rem);
   --tp-workspace-inspector-target-width: clamp(13rem, 17vw, 17rem);
-  --tp-terminal-screen-viewport-min-height: clamp(24rem, 56vh, 42rem);
-  --tp-terminal-screen-viewport-max-height: min(66vh, 50rem);
+  --tp-terminal-screen-viewport-min-height: 16rem;
+  --tp-terminal-screen-viewport-max-height: none;
   --tp-terminal-screen-mobile-viewport-min-height: clamp(13rem, 34vh, 18rem);
   --tp-terminal-screen-mobile-viewport-max-height: min(42vh, 22rem);
 }

@@ -56,7 +56,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             var(--tp-terminal-color-bg)
           ),
           var(--tp-terminal-color-bg);
-        padding: var(--tp-space-2) var(--tp-space-4) var(--tp-space-3);
+        padding: 0 var(--tp-space-4) var(--tp-space-3);
       }
 
       .dock .panel-header {
@@ -71,9 +71,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .dock-header {
+        order: 3;
         align-items: center;
         justify-content: flex-start;
-        min-height: 1.75rem;
+        min-height: 1.35rem;
       }
 
       .dock-footer {
@@ -84,9 +85,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .dock-footer {
-        grid-template-columns: minmax(0, 1fr) auto;
+        order: 5;
+        grid-template-columns: 1fr;
         align-items: center;
         gap: var(--tp-space-2);
+      }
+
+      .dock[data-placement="terminal"] .dock-footer .actions {
+        justify-content: flex-end;
       }
 
       .dock-footer .actions {
@@ -119,6 +125,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         gap: 0.35rem;
       }
 
+      .dock[data-placement="terminal"] .chip-row {
+        order: 4;
+      }
+
       .chip {
         color: var(--tp-color-text-muted);
         font-family: var(--tp-font-family-mono);
@@ -139,6 +149,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         grid-template-columns: auto minmax(0, 1fr);
         gap: var(--tp-space-2);
         align-items: center;
+      }
+
+      .dock[data-placement="terminal"] .history-row {
+        order: 4;
       }
 
       .history-label {
@@ -191,7 +205,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           var(--tp-terminal-color-accent) 36%,
           var(--tp-terminal-color-border)
         );
-        border-radius: 0.55rem;
+        order: 1;
+        border-top-width: 0;
+        border-radius: 0 0 0.6rem 0.6rem;
         background:
           linear-gradient(
             180deg,
@@ -250,9 +266,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .hint {
-        color: var(--tp-terminal-color-text-muted);
-        font-size: 0.78rem;
-        line-height: 1.35;
+        display: none;
       }
 
       .dock[data-placement="terminal"] .actions button {
@@ -313,12 +327,17 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         padding: var(--tp-space-3);
       }
 
+      .dock[data-placement="terminal"] .notice {
+        order: 2;
+      }
+
       details {
         border-top: 1px solid var(--tp-color-border);
         padding-top: var(--tp-space-3);
       }
 
       .dock[data-placement="terminal"] details {
+        order: 6;
         border-top-color: color-mix(in srgb, var(--tp-terminal-color-border) 58%, transparent);
         padding-top: var(--tp-space-2);
       }

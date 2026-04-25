@@ -164,6 +164,9 @@ async function main() {
       || result.afterCreate.commandDockInputCapability !== "known"
       || result.afterCreate.commandDockPlacement !== "terminal"
       || Math.abs(result.afterCreate.terminalComposerGapPx ?? 99) > 1
+      || Math.abs(result.afterCreate.terminalInputGapPx ?? 99) > 1
+      || result.afterCreate.terminalDockBottomOverflowPx !== 0
+      || !result.afterCreate.terminalComposerBeforeDockStatus
       || /Command Input|Focused pane command lane/.test(result.afterCreate.commandDockVisibleText ?? "")
       || result.afterCreate.commandInputStatus !== "Ready"
       || !result.afterCreate.commandInputFocused
@@ -230,9 +233,11 @@ async function main() {
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
       || !result.afterCreateMobileLayout.mainPrecedesSidebar
       || result.afterCreateMobileLayout.demoMainWidth < 430
-      || result.afterCreateMobileLayout.terminalScreenHeight > 760
+      || result.afterCreateMobileLayout.terminalScreenHeight > 780
       || result.afterCreateMobileLayout.commandRegionTop > 1250
       || Math.abs(result.afterCreateMobileLayout.terminalComposerGapPx ?? 99) > 1
+      || Math.abs(result.afterCreateMobileLayout.terminalInputGapPx ?? 99) > 12
+      || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatus
       || !result.afterCreateMobileLayout.commandRegionFollowsScreen
     ) {
       throw new Error(`Mobile active shell layout did not settle correctly: ${JSON.stringify(result.afterCreateMobileLayout)}`);
@@ -677,7 +682,12 @@ async function runSmokeScenario(browserUrl) {
       const focusedPaneBadge = document.querySelector('[data-testid="workspace-focused-pane-badge"]') ?? null;
       const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
       const screenRect = screenHost?.getBoundingClientRect() ?? null;
+      const screenViewportRect = screenViewport?.getBoundingClientRect() ?? null;
       const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
+      const commandComposer = commandRoot?.querySelector('[part="composer"]') ?? null;
+      const commandComposerRect = commandComposer?.getBoundingClientRect() ?? null;
+      const commandDockPanelRect = commandDockPanel?.getBoundingClientRect() ?? null;
+      const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
       return {
         hasReady: debug?.connection?.state === 'ready',
         hasError: debug?.connection?.state === 'error',
@@ -757,6 +767,15 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerGapPx: screenRect && commandRegionRect
           ? Math.round(commandRegionRect.top - screenRect.bottom)
           : null,
+        terminalInputGapPx: screenViewportRect && commandComposerRect
+          ? Math.round(commandComposerRect.top - screenViewportRect.bottom)
+          : null,
+        terminalDockBottomOverflowPx: commandDockPanelRect
+          ? Math.max(0, Math.round(commandDockPanelRect.bottom - window.innerHeight))
+          : null,
+        terminalComposerBeforeDockStatus: commandComposerRect && dockHeaderRect
+          ? commandComposerRect.top <= dockHeaderRect.top
+          : false,
         commandDockVisibleText: commandDockPanel?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         commandInputFocused: commandRoot?.activeElement === input,
         saveLayoutTitle: saveLayout?.getAttribute('title') ?? null,
@@ -817,9 +836,18 @@ async function runSmokeScenario(browserUrl) {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
       const terminalScreen = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const screenRoot = terminalScreen?.shadowRoot ?? null;
+      const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
       const commandRegion = workspaceRoot?.querySelector('[data-testid="tp-workspace-command-region"]') ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
+      const commandComposer = commandRoot?.querySelector('[part="composer"]') ?? null;
       const terminalScreenRect = terminalScreen?.getBoundingClientRect() ?? null;
+      const screenViewportRect = screenViewport?.getBoundingClientRect() ?? null;
       const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
+      const commandDockPanelRect = commandDockPanel?.getBoundingClientRect() ?? null;
+      const commandComposerRect = commandComposer?.getBoundingClientRect() ?? null;
+      const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
       return {
         checked: Boolean(demoShell && demoSidebar && demoMain && operationsDeck),
         demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
@@ -839,6 +867,15 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerGapPx: terminalScreenRect && commandRegionRect
           ? Math.round(commandRegionRect.top - terminalScreenRect.bottom)
           : null,
+        terminalInputGapPx: screenViewportRect && commandComposerRect
+          ? Math.round(commandComposerRect.top - screenViewportRect.bottom)
+          : null,
+        terminalDockBottomOverflowPx: commandDockPanelRect
+          ? Math.max(0, Math.round(commandDockPanelRect.bottom - window.innerHeight))
+          : null,
+        terminalComposerBeforeDockStatus: commandComposerRect && dockHeaderRect
+          ? commandComposerRect.top <= dockHeaderRect.top
+          : false,
         commandRegionFollowsScreen: Boolean(
           terminalScreen
           && commandRegion

@@ -16,6 +16,12 @@ export const terminalElementStyles = css`
     display: none;
   }
 
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   .panel {
     background: var(--tp-color-panel);
     border: 1px solid var(--tp-color-border);

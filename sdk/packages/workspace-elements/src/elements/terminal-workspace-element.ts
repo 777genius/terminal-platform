@@ -30,7 +30,9 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         );
 
         display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
         gap: var(--tp-space-4);
+        height: 100%;
         min-height: 0;
       }
 
@@ -38,8 +40,9 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         display: grid;
         grid-template-columns: minmax(14rem, var(--tp-workspace-sidebar-width)) minmax(0, 1fr);
         gap: var(--tp-space-4);
+        height: 100%;
         min-height: 0;
-        align-items: start;
+        align-items: stretch;
       }
 
       .sidebar,
@@ -58,13 +61,15 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
 
       .content {
         container-type: inline-size;
+        height: 100%;
       }
 
       .operations-deck {
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(16rem, var(--tp-workspace-inspector-width));
         gap: var(--tp-space-3);
-        align-items: start;
+        align-items: stretch;
+        height: 100%;
         min-height: 0;
       }
 
@@ -72,14 +77,16 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
       .inspector-column {
         display: grid;
         gap: var(--tp-space-3);
+        height: 100%;
         min-width: 0;
         min-height: 0;
       }
 
       .terminal-column {
-        grid-template-rows: auto auto;
-        align-content: start;
+        grid-template-rows: minmax(0, 1fr) auto;
+        align-content: stretch;
         gap: 0;
+        overflow: hidden;
         --tp-terminal-screen-panel-border-bottom-left-radius: 0;
         --tp-terminal-screen-panel-border-bottom-right-radius: 0;
         --tp-terminal-screen-panel-padding-bottom: 0;
@@ -114,6 +121,11 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
       tp-terminal-saved-sessions {
         display: block;
         min-width: 0;
+      }
+
+      .terminal-column tp-terminal-screen {
+        height: 100%;
+        min-height: 0;
       }
 
       .diagnostics {
