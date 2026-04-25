@@ -86,6 +86,8 @@ async function main() {
       || !result.afterCreate.hasScreenSearchControls
       || !result.afterCreate.hasScreenCopyControl
       || !result.afterCreate.hasScreenDirectInput
+      || result.afterCreate.screenInputStatus !== "Input ready"
+      || result.afterCreate.screenInputTone !== "ready"
       || !result.afterCreate.hasPasteClipboardControl
       || !result.afterCreate.hasSaveLayoutControl
       || !result.afterCreate.hasTopologyControls
@@ -393,6 +395,7 @@ async function runSmokeScenario(browserUrl) {
       const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
       const screenSearch = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
       const screenCopy = screenRoot?.querySelector('[data-testid="tp-screen-copy"]') ?? null;
+      const screenInputStatus = screenRoot?.querySelector('[data-testid="tp-screen-input-status"]') ?? null;
       const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
       const screenPanel = screenRoot?.querySelector('[data-testid="tp-terminal-screen"]') ?? null;
       const saveLayout = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
@@ -421,7 +424,11 @@ async function runSmokeScenario(browserUrl) {
           && screenViewport.getAttribute('tabindex') === '0'
           && screenPanel?.getAttribute('data-direct-input') === 'true'
           && screenPanel?.getAttribute('data-input-capability') === 'known'
+          && screenPanel?.getAttribute('data-input-status') === 'ready'
         ),
+        screenInputStatus: screenInputStatus?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        screenInputTone: screenInputStatus?.getAttribute('data-input-tone') ?? null,
+        screenInputTitle: screenInputStatus?.getAttribute('title') ?? null,
         hasPasteClipboardControl: Boolean(pasteClipboard && !pasteClipboard.disabled),
         hasSaveLayoutControl: Boolean(saveLayout && !saveLayout.disabled),
         hasTopologyControls: Boolean(

@@ -17,6 +17,10 @@ import {
   shouldRefreshAfterTerminalDirectInput,
   TerminalDirectInputBuffer,
 } from "./terminal-direct-input-buffer.js";
+import {
+  resolveTerminalScreenInputStatus,
+  type TerminalScreenInputActivity,
+} from "./terminal-screen-input-status.js";
 import { terminalInputForKeyboardEvent } from "./terminal-keyboard-input.js";
 import { resolveTerminalScreenControlState } from "./terminal-screen-controls.js";
 
@@ -29,6 +33,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     searchQuery: { state: true },
     activeSearchMatchIndex: { state: true },
     copyState: { state: true },
+    directInputActivity: { state: true },
   };
 
   static styles = [
@@ -207,6 +212,22 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         background: color-mix(in srgb, var(--tp-color-panel-raised) 60%, transparent);
       }
 
+      .screen-meta [data-input-tone="ready"] {
+        border-color: color-mix(in srgb, var(--tp-color-success) 52%, transparent);
+        color: var(--tp-color-success);
+      }
+
+      .screen-meta [data-input-tone="pending"] {
+        border-color: color-mix(in srgb, var(--tp-color-warning) 56%, transparent);
+        color: var(--tp-color-warning);
+      }
+
+      .screen-meta [data-input-tone="failed"] {
+        border-color: color-mix(in srgb, var(--tp-color-danger) 62%, transparent);
+        background: color-mix(in srgb, var(--tp-color-danger-soft) 70%, transparent);
+        color: var(--tp-color-danger);
+      }
+
       @media (max-width: 720px) {
         .screen-header {
           display: grid;
@@ -235,9 +256,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   protected declare searchQuery: string;
   protected declare activeSearchMatchIndex: number | null;
   protected declare copyState: ScreenCopyState;
+  protected declare directInputActivity: TerminalScreenInputActivity;
 
   #autoScrolling = false;
   #copyStateResetTimer: ReturnType<typeof setTimeout> | null = null;
+  #directInputActivityResetTimer: ReturnType<typeof setTimeout> | null = null;
   #directInputQueue = Promise.resolve();
   #directInputBuffer: TerminalDirectInputBuffer;
 
@@ -247,6 +270,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     this.searchQuery = "";
     this.activeSearchMatchIndex = null;
     this.copyState = "idle";
+    this.directInputActivity = "idle";
     this.#directInputBuffer = new TerminalDirectInputBuffer({
       flush: (input) => this.queueDirectInput(input),
     });
@@ -254,6 +278,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   override disconnectedCallback(): void {
     this.clearCopyStateResetTimer();
+    this.clearDirectInputActivityResetTimer();
     this.#directInputBuffer.dispose();
     super.disconnectedCallback();
   }
@@ -287,6 +312,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   override render() {
     const controls = resolveTerminalScreenControlState(this.snapshot);
     const screen = controls.screen;
+    const inputStatus = resolveTerminalScreenInputStatus(controls, this.directInputActivity);
     const searchResult = this.createSearchResult();
     const terminalDisplay = this.snapshot.terminalDisplay;
 
@@ -299,6 +325,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         data-line-wrap=${String(terminalDisplay.lineWrap)}
         data-direct-input=${String(controls.canUseDirectInput)}
         data-input-capability=${controls.inputCapabilityStatus}
+        data-input-status=${inputStatus.tone}
       >
         <div class="screen-header">
           <div class="panel-header">
@@ -343,6 +370,16 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 <span>${screen.source}</span>
                 <span>${terminalDisplay.fontScale}</span>
                 <span>${terminalDisplay.lineWrap ? "wrapped" : "nowrap"}</span>
+                <span
+                  id="tp-screen-input-status"
+                  part=${`input-status input-status-${inputStatus.tone}`}
+                  data-testid="tp-screen-input-status"
+                  data-input-tone=${inputStatus.tone}
+                  title=${inputStatus.title}
+                  aria-live="polite"
+                >
+                  ${inputStatus.label}
+                </span>
                 ${screen.surface.cursor
                   ? html`<span>cursor ${screen.surface.cursor.row + 1}:${screen.surface.cursor.col + 1}</span>`
                   : null}
@@ -399,6 +436,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 data-testid="tp-screen-viewport"
                 tabindex=${controls.canUseDirectInput ? "0" : nothing}
                 role="region"
+                aria-describedby="tp-screen-input-status"
                 aria-label=${controls.canUseDirectInput
                   ? "Terminal output and focused pane input"
                   : "Terminal output"}
@@ -513,6 +551,24 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     }
   }
 
+  private setDirectInputActivity(activity: TerminalScreenInputActivity): void {
+    this.directInputActivity = activity;
+    this.clearDirectInputActivityResetTimer();
+    if (activity === "failed") {
+      this.#directInputActivityResetTimer = setTimeout(() => {
+        this.directInputActivity = "idle";
+        this.#directInputActivityResetTimer = null;
+      }, 2800);
+    }
+  }
+
+  private clearDirectInputActivityResetTimer(): void {
+    if (this.#directInputActivityResetTimer) {
+      clearTimeout(this.#directInputActivityResetTimer);
+      this.#directInputActivityResetTimer = null;
+    }
+  }
+
   private syncActiveSearchMatch(): boolean {
     const searchResult = this.createSearchResult();
     if (searchResult.matchCount === 0) {
@@ -602,6 +658,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       if (shouldRefreshAfterTerminalDirectInput(input)) {
         await this.kernel?.commands.attachSession(controls.activeSessionId);
       }
+      if (this.directInputActivity !== "idle") {
+        this.setDirectInputActivity("idle");
+      }
       this.dispatchEvent(
         new CustomEvent("tp-terminal-screen-input-submitted", {
           bubbles: true,
@@ -614,6 +673,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         }),
       );
     } catch (error) {
+      this.setDirectInputActivity("failed");
       this.dispatchEvent(
         new CustomEvent("tp-terminal-screen-input-failed", {
           bubbles: true,
