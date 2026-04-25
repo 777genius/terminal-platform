@@ -5,6 +5,7 @@ import type { MuxCommand, PaneTreeNode, SplitDirection } from "@terminal-platfor
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import { TERMINAL_DESTRUCTIVE_CONFIRMATION_RESET_MS } from "./terminal-destructive-action.js";
 import {
   canRunTerminalTopologyCommand,
   compactTerminalId,
@@ -184,16 +185,6 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
         font-size: 0.78rem;
       }
 
-      .danger {
-        border-color: color-mix(in srgb, var(--tp-color-danger) 38%, var(--tp-color-border));
-        color: color-mix(in srgb, var(--tp-color-danger) 82%, var(--tp-color-text));
-      }
-
-      .danger[data-confirming] {
-        background: color-mix(in srgb, var(--tp-color-danger) 16%, transparent);
-        color: var(--tp-color-text);
-      }
-
       .tree-body {
         min-width: 0;
         overflow-x: auto;
@@ -230,6 +221,9 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   protected declare renameDraft: string;
   protected declare armedCloseAction: CloseAction | null;
 
+  #closeConfirmationResetTimer: ReturnType<typeof setTimeout> | null = null;
+  #closeConfirmationGeneration = 0;
+
   constructor() {
     super();
     this.pendingAction = null;
@@ -237,6 +231,11 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
     this.renamingTabId = null;
     this.renameDraft = "";
     this.armedCloseAction = null;
+  }
+
+  override disconnectedCallback(): void {
+    this.clearCloseConfirmationResetTimer();
+    super.disconnectedCallback();
   }
 
   override render() {
@@ -248,6 +247,11 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
     const isPending = this.pendingAction !== null;
     const isRenamingFocusedTab = Boolean(focusedTab && this.renamingTabId === focusedTab.tab_id);
     const closeTabArmed = Boolean(focusedTab && this.isCloseArmed("tab", focusedTab.tab_id));
+    const closeTabTitle = focusedTab
+      ? closeTabArmed
+        ? `Confirm closing tab ${focusedTab.title ?? compactTerminalId(focusedTab.tab_id)}`
+        : `Close tab ${focusedTab.title ?? compactTerminalId(focusedTab.tab_id)}`
+      : "Close focused tab";
     const topologyStatus = resolveTerminalTopologyStatus(controls);
 
     return html`
@@ -343,10 +347,12 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
             Rename tab
           </button>
           <button
-            class="danger"
             type="button"
             data-testid="tp-close-tab"
-            ?data-confirming=${closeTabArmed}
+            data-danger="true"
+            data-confirming=${String(closeTabArmed)}
+            title=${closeTabTitle}
+            aria-label=${closeTabTitle}
             ?disabled=${isPending || !controls.canCloseTab}
             @click=${() => this.closeTab()}
           >
@@ -513,7 +519,7 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
-    this.armedCloseAction = null;
+    this.clearCloseConfirmation();
     if (this.renamingTabId === tab.tab_id) {
       this.cancelRename();
       return;
@@ -548,7 +554,7 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
 
     this.renamingTabId = null;
     this.renameDraft = "";
-    this.armedCloseAction = null;
+    this.clearCloseConfirmation();
     this.runTopologyCommand("rename_tab", {
       kind: "rename_tab",
       tab_id: tab.tab_id,
@@ -569,11 +575,11 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
     if (!this.isCloseArmed("pane", paneId)) {
       this.renamingTabId = null;
       this.renameDraft = "";
-      this.armedCloseAction = { kind: "pane", id: paneId };
+      this.setCloseConfirmation({ kind: "pane", id: paneId });
       return;
     }
 
-    this.armedCloseAction = null;
+    this.clearCloseConfirmation();
     this.runTopologyCommand("close_pane", { kind: "close_pane", pane_id: paneId });
   }
 
@@ -587,11 +593,11 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
     if (!this.isCloseArmed("tab", tab.tab_id)) {
       this.renamingTabId = null;
       this.renameDraft = "";
-      this.armedCloseAction = { kind: "tab", id: tab.tab_id };
+      this.setCloseConfirmation({ kind: "tab", id: tab.tab_id });
       return;
     }
 
-    this.armedCloseAction = null;
+    this.clearCloseConfirmation();
     this.runTopologyCommand("close_tab", { kind: "close_tab", tab_id: tab.tab_id });
   }
 
@@ -602,7 +608,33 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   private clearTransientTopologyUi(): void {
     this.renamingTabId = null;
     this.renameDraft = "";
+    this.clearCloseConfirmation();
+  }
+
+  private setCloseConfirmation(action: CloseAction): void {
+    this.actionError = null;
+    this.armedCloseAction = action;
+    this.clearCloseConfirmationResetTimer();
+    const generation = ++this.#closeConfirmationGeneration;
+    this.#closeConfirmationResetTimer = setTimeout(() => {
+      if (generation === this.#closeConfirmationGeneration && isSameCloseAction(this.armedCloseAction, action)) {
+        this.armedCloseAction = null;
+      }
+      this.#closeConfirmationResetTimer = null;
+    }, TERMINAL_DESTRUCTIVE_CONFIRMATION_RESET_MS);
+  }
+
+  private clearCloseConfirmation(): void {
+    this.#closeConfirmationGeneration += 1;
     this.armedCloseAction = null;
+    this.clearCloseConfirmationResetTimer();
+  }
+
+  private clearCloseConfirmationResetTimer(): void {
+    if (this.#closeConfirmationResetTimer) {
+      clearTimeout(this.#closeConfirmationResetTimer);
+      this.#closeConfirmationResetTimer = null;
+    }
   }
 
   private runTopologyCommand(action: string, command: MuxCommand): void {
@@ -660,6 +692,10 @@ interface CloseAction {
   id: string;
 }
 
+function isSameCloseAction(left: CloseAction | null, right: CloseAction): boolean {
+  return left?.kind === right.kind && left.id === right.id;
+}
+
 interface RenderNodeOptions {
   armedCloseAction: CloseAction | null;
   canClosePane: boolean;
@@ -674,6 +710,8 @@ function renderNode(node: PaneTreeNode, options: RenderNodeOptions): TemplateRes
   if (node.kind === "leaf") {
     const focused = node.pane_id === options.focusedPaneId;
     const closeArmed = options.armedCloseAction?.kind === "pane" && options.armedCloseAction.id === node.pane_id;
+    const paneLabel = compactTerminalId(node.pane_id);
+    const closePaneTitle = closeArmed ? `Confirm closing pane ${paneLabel}` : `Close pane ${paneLabel}`;
     return html`
       <span class="pane-row" part="pane-row">
         <button
@@ -691,12 +729,15 @@ function renderNode(node: PaneTreeNode, options: RenderNodeOptions): TemplateRes
           ${focused ? html`<span class="node__meta">focused</span>` : null}
         </button>
         <button
-          class="node-action danger"
+          class="node-action"
           type="button"
           part="pane-close"
           data-testid="tp-close-pane"
           data-pane-id=${node.pane_id}
-          ?data-confirming=${closeArmed}
+          data-danger="true"
+          data-confirming=${String(closeArmed)}
+          title=${closePaneTitle}
+          aria-label=${closePaneTitle}
           ?disabled=${options.isPending || !options.canClosePane}
           @click=${() => options.onClose(node.pane_id)}
         >

@@ -202,10 +202,14 @@ async function main() {
       || !result.afterTopologyActions.splitClicked
       || !result.afterTopologyActions.resizeClicked
       || !result.afterTopologyActions.closePanePrompted
+      || result.afterTopologyActions.closePaneDanger !== "true"
+      || !result.afterTopologyActions.closePaneTitle?.includes("Confirm closing pane")
       || !result.afterTopologyActions.closePaneConfirmed
       || !result.afterTopologyActions.renameClicked
       || !result.afterTopologyActions.newTabClicked
       || !result.afterTopologyActions.closeTabPrompted
+      || result.afterTopologyActions.closeTabDanger !== "true"
+      || !result.afterTopologyActions.closeTabTitle?.includes("Confirm closing tab")
       || !result.afterTopologyActions.closeTabConfirmed
       || !result.afterTopologyActions.focusOriginalClicked
       || result.afterTopologyActions.completedEvents < 6
@@ -832,9 +836,11 @@ async function runSmokeScenario(browserUrl) {
       await settleFrame();
       const armedPaneCloseButton = paneToClose ? findPaneCloseButton(paneTreeRoot, paneToClose) : null;
       const closePanePrompted = Boolean(
-        armedPaneCloseButton?.hasAttribute('data-confirming')
+        armedPaneCloseButton?.getAttribute('data-confirming') === 'true'
         && /confirm close/i.test(armedPaneCloseButton.textContent ?? ''),
       );
+      const closePaneDanger = armedPaneCloseButton?.getAttribute('data-danger') ?? null;
+      const closePaneTitle = armedPaneCloseButton?.getAttribute('title') ?? null;
       const stateAfterClosePanePrompt = window.terminalDemoDebug?.getState?.();
       const promptedTab = stateAfterClosePanePrompt?.attachedSession?.topology?.tabs?.find(
         (tab) => tab.tab_id === focusedTabBefore.tab_id,
@@ -869,9 +875,11 @@ async function runSmokeScenario(browserUrl) {
       await settleFrame();
       const armedCloseTabButton = paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]') ?? null;
       const closeTabPrompted = Boolean(
-        armedCloseTabButton?.hasAttribute('data-confirming')
+        armedCloseTabButton?.getAttribute('data-confirming') === 'true'
         && /confirm close tab/i.test(armedCloseTabButton.textContent ?? ''),
       );
+      const closeTabDanger = armedCloseTabButton?.getAttribute('data-danger') ?? null;
+      const closeTabTitle = armedCloseTabButton?.getAttribute('title') ?? null;
       const tabCountAfterCloseTabPrompt =
         window.terminalDemoDebug?.getState?.()?.attachedSession?.topology?.tabs?.length ?? 0;
       armedCloseTabButton?.click();
@@ -891,10 +899,14 @@ async function runSmokeScenario(browserUrl) {
         splitClicked: true,
         resizeClicked: true,
         closePanePrompted,
+        closePaneDanger,
+        closePaneTitle,
         closePaneConfirmed: Boolean(paneToClose && tabAfterClosePane && countPanes(tabAfterClosePane.root) < paneCountAfterSplit),
         renameClicked: Boolean(renameInput && renameSave),
         newTabClicked: true,
         closeTabPrompted,
+        closeTabDanger,
+        closeTabTitle,
         closeTabConfirmed: Boolean(topologyAfterCloseTab && topologyAfterCloseTab.tabs.length < (topologyAfterNewTab?.tabs?.length ?? 0)),
         focusOriginalClicked: Boolean(originalTabButton),
         completedEvents,
