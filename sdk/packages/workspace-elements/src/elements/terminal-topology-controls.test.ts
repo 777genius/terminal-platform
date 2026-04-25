@@ -4,6 +4,7 @@ import type { BackendCapabilitiesInfo } from "@terminal-platform/runtime-types";
 import { createInitialWorkspaceSnapshot, type WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
 import {
+  canRunTerminalTopologyCommand,
   compactTerminalId,
   countPaneTreeLeaves,
   resolvePaneResizeCommand,
@@ -33,6 +34,12 @@ describe("terminal topology controls", () => {
     expect(controls.canFocusTab).toBe(true);
     expect(controls.canRenameTab).toBe(true);
     expect(controls.canResizePane).toBe(true);
+    expect(canRunTerminalTopologyCommand(controls, { kind: "new_tab", title: null })).toBe(true);
+    expect(canRunTerminalTopologyCommand(controls, {
+      kind: "split_pane",
+      pane_id: "pane-2",
+      direction: "vertical",
+    })).toBe(true);
   });
 
   it("uses loaded backend capabilities to disable unsupported topology actions", () => {
@@ -63,6 +70,24 @@ describe("terminal topology controls", () => {
     expect(controls.canFocusTab).toBe(true);
     expect(controls.canRenameTab).toBe(false);
     expect(controls.canResizePane).toBe(false);
+    expect(canRunTerminalTopologyCommand(controls, { kind: "new_tab", title: null })).toBe(false);
+    expect(canRunTerminalTopologyCommand(controls, {
+      kind: "split_pane",
+      pane_id: "pane-2",
+      direction: "vertical",
+    })).toBe(false);
+    expect(canRunTerminalTopologyCommand(controls, {
+      kind: "resize_pane",
+      pane_id: "pane-2",
+      rows: 24,
+      cols: 88,
+    })).toBe(false);
+    expect(canRunTerminalTopologyCommand(controls, {
+      kind: "send_input",
+      pane_id: "pane-2",
+      data: "pwd\n",
+    })).toBe(false);
+    expect(resolvePaneResizeCommand(snapshot, { cols: 8 })).toBeNull();
   });
 
   it("prevents destructive close controls from removing the last pane or tab", () => {
@@ -92,6 +117,51 @@ describe("terminal topology controls", () => {
     expect(controls.canClosePane).toBe(false);
     expect(controls.canCloseTab).toBe(false);
     expect(controls.canRenameTab).toBe(true);
+    expect(canRunTerminalTopologyCommand(controls, {
+      kind: "close_pane",
+      pane_id: "pane-1",
+    })).toBe(false);
+    expect(canRunTerminalTopologyCommand(controls, {
+      kind: "close_tab",
+      tab_id: "tab-1",
+    })).toBe(false);
+  });
+
+  it("does not expose layout commands before an attached topology snapshot exists", () => {
+    const snapshot = createWorkspaceSnapshot({
+      selection: {
+        activeSessionId: "session-1",
+        activePaneId: null,
+      },
+      attachedSession: null,
+      catalog: {
+        ...createInitialWorkspaceSnapshot().catalog,
+        sessions: [
+          {
+            session_id: "session-1",
+            route: {
+              backend: "native",
+              authority: "local_daemon",
+              external: null,
+            },
+            title: "SDK shell",
+          },
+        ],
+        backendCapabilities: {
+          native: createCapabilities({}),
+        },
+      },
+    });
+
+    const controls = resolveTerminalTopologyControlState(snapshot);
+
+    expect(controls.capabilityStatus).toBe("known");
+    expect(controls.activeSessionId).toBe("session-1");
+    expect(controls.activeTab).toBeNull();
+    expect(controls.canCreateTab).toBe(false);
+    expect(controls.canFocusPane).toBe(false);
+    expect(controls.canFocusTab).toBe(false);
+    expect(canRunTerminalTopologyCommand(controls, { kind: "new_tab", title: null })).toBe(false);
   });
 
   it("builds clamped resize commands for the focused pane", () => {

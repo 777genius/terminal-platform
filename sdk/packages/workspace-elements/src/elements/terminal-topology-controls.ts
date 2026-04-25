@@ -1,5 +1,6 @@
 import type {
   BackendCapabilitiesInfo,
+  BackendKind,
   MuxCommand,
   PaneTreeNode,
   PaneId,
@@ -45,6 +46,7 @@ export function resolveTerminalTopologyControlState(
   snapshot: WorkspaceSnapshot,
 ): TerminalTopologyControlState {
   const topology = snapshot.attachedSession?.topology ?? null;
+  const hasTopology = Boolean(topology && topology.tabs.length > 0);
   const activeSessionId = snapshot.selection.activeSessionId
     ?? snapshot.attachedSession?.session.session_id
     ?? null;
@@ -55,7 +57,9 @@ export function resolveTerminalTopologyControlState(
     ?? activeTab?.focused_pane
     ?? snapshot.attachedSession?.focused_screen?.pane_id
     ?? null;
-  const backend = topology?.backend_kind ?? snapshot.attachedSession?.session.route.backend ?? null;
+  const backend = topology?.backend_kind
+    ?? snapshot.attachedSession?.session.route.backend
+    ?? resolveCatalogSessionBackend(snapshot, activeSessionId);
   const capabilities = backend ? snapshot.catalog.backendCapabilities[backend] ?? null : null;
   const paneCount = activeTab ? countPaneTreeLeaves(activeTab.root) : 0;
   const tabCount = topology?.tabs.length ?? 0;
@@ -73,11 +77,11 @@ export function resolveTerminalTopologyControlState(
     activePaneId,
     activePaneSize,
     capabilityStatus: capabilities ? "known" : "unknown",
-    canCreateTab: Boolean(activeSessionId && capabilityEnabled(capabilities, "tab_create")),
+    canCreateTab: Boolean(activeSessionId && hasTopology && capabilityEnabled(capabilities, "tab_create")),
     canClosePane: Boolean(activeSessionId && activePaneId && paneCount > 1 && capabilityEnabled(capabilities, "pane_close")),
     canCloseTab: Boolean(activeSessionId && activeTab && tabCount > 1 && capabilityEnabled(capabilities, "tab_close")),
-    canFocusPane: Boolean(activeSessionId && capabilityEnabled(capabilities, "pane_focus")),
-    canFocusTab: Boolean(activeSessionId && capabilityEnabled(capabilities, "tab_focus")),
+    canFocusPane: Boolean(activeSessionId && activePaneId && capabilityEnabled(capabilities, "pane_focus")),
+    canFocusTab: Boolean(activeSessionId && activeTab && capabilityEnabled(capabilities, "tab_focus")),
     canRenameTab: Boolean(activeSessionId && activeTab && capabilityEnabled(capabilities, "tab_rename")),
     canResizePane: Boolean(activeSessionId && activePaneId && activePaneSize && capabilityEnabled(capabilities, "split_resize")),
     canSplitPane: Boolean(activeSessionId && activePaneId && capabilityEnabled(capabilities, "pane_split")),
@@ -118,6 +122,32 @@ export function resolvePaneResizeCommand(
   };
 }
 
+export function canRunTerminalTopologyCommand(
+  controls: TerminalTopologyControlState,
+  command: MuxCommand,
+): boolean {
+  switch (command.kind) {
+    case "new_tab":
+      return controls.canCreateTab;
+    case "split_pane":
+      return controls.canSplitPane;
+    case "resize_pane":
+      return controls.canResizePane;
+    case "focus_tab":
+      return controls.canFocusTab;
+    case "focus_pane":
+      return controls.canFocusPane;
+    case "rename_tab":
+      return controls.canRenameTab;
+    case "close_pane":
+      return controls.canClosePane;
+    case "close_tab":
+      return controls.canCloseTab;
+    default:
+      return false;
+  }
+}
+
 export function countPaneTreeLeaves(node: PaneTreeNode): number {
   if (node.kind === "leaf") {
     return 1;
@@ -139,6 +169,17 @@ function capabilityEnabled(
   key: keyof BackendCapabilitiesInfo["capabilities"],
 ): boolean {
   return capabilities?.capabilities[key] ?? true;
+}
+
+function resolveCatalogSessionBackend(
+  snapshot: WorkspaceSnapshot,
+  activeSessionId: SessionId | null,
+): BackendKind | null {
+  if (!activeSessionId) {
+    return null;
+  }
+
+  return snapshot.catalog.sessions.find((session) => session.session_id === activeSessionId)?.route.backend ?? null;
 }
 
 function clampTerminalDimension(value: number, min: number, max: number): number {

@@ -6,6 +6,7 @@ import type { MuxCommand, PaneTreeNode, SplitDirection } from "@terminal-platfor
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import {
+  canRunTerminalTopologyCommand,
   compactTerminalId,
   resolvePaneResizeCommand,
   resolveTerminalTopologyControlState,
@@ -15,6 +16,7 @@ import {
   TERMINAL_PANE_MIN_ROWS,
   type TerminalPaneResizeDelta,
 } from "./terminal-topology-controls.js";
+import { resolveTerminalTopologyStatus } from "./terminal-topology-status.js";
 
 export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -37,7 +39,8 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
 
       .topology-summary,
       .tab-strip,
-      .action-strip {
+      .action-strip,
+      .topology-badges {
         display: flex;
         flex-wrap: wrap;
         gap: var(--tp-space-2);
@@ -46,6 +49,32 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
 
       .topology-summary {
         justify-content: space-between;
+      }
+
+      .topology-badges {
+        justify-content: flex-end;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 1.6rem;
+        border: 1px solid var(--tp-color-border);
+        border-radius: 999px;
+        color: var(--tp-color-text-muted);
+        font-size: 0.76rem;
+        padding: 0.16rem 0.55rem;
+      }
+
+      .badge[data-tone="ready"] {
+        border-color: color-mix(in srgb, var(--tp-color-success) 50%, transparent);
+        color: var(--tp-color-success);
+      }
+
+      .badge[data-tone="pending"],
+      .badge[data-tone="limited"] {
+        border-color: color-mix(in srgb, var(--tp-color-warning) 50%, transparent);
+        color: var(--tp-color-warning);
       }
 
       .tab-strip {
@@ -219,19 +248,39 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
     const isPending = this.pendingAction !== null;
     const isRenamingFocusedTab = Boolean(focusedTab && this.renamingTabId === focusedTab.tab_id);
     const closeTabArmed = Boolean(focusedTab && this.isCloseArmed("tab", focusedTab.tab_id));
+    const topologyStatus = resolveTerminalTopologyStatus(controls);
 
     return html`
-      <div class="panel tree" part="tree" data-testid="tp-pane-tree">
+      <div
+        class="panel tree"
+        part="tree"
+        data-testid="tp-pane-tree"
+        data-topology-status=${topologyStatus.tone}
+        data-capability-status=${controls.capabilityStatus}
+        data-layout-write=${String(topologyStatus.canMutateLayout)}
+      >
         <div class="topology-summary">
           <div class="panel-header">
             <div class="panel-eyebrow">Layout</div>
             <div class="panel-title">Pane structure</div>
             <div class="panel-copy">
               ${focusedTab?.title ?? "Focused tab"} routing map.
-              ${controls.capabilityStatus === "known" ? "Backend capabilities loaded." : "Backend capabilities pending."}
             </div>
           </div>
-          <div class="muted" part="summary">${controls.tabCount} tabs / ${controls.paneCount} panes</div>
+          <div class="topology-badges" part="summary">
+            <span
+              class="badge"
+              data-testid="tp-topology-status"
+              data-tone=${topologyStatus.tone}
+              title=${topologyStatus.title}
+            >
+              ${topologyStatus.label}
+            </span>
+            <span class="badge" data-testid="tp-topology-capabilities">
+              ${topologyStatus.capabilityLabel}
+            </span>
+            <span class="muted">${controls.tabCount} tabs / ${controls.paneCount} panes</span>
+          </div>
         </div>
 
         ${topology && topology.tabs.length > 0
@@ -402,6 +451,10 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
 
   private newTab(): void {
     const controls = resolveTerminalTopologyControlState(this.snapshot);
+    if (!controls.canCreateTab) {
+      return;
+    }
+
     this.clearTransientTopologyUi();
     this.runTopologyCommand("new_tab", {
       kind: "new_tab",
@@ -410,15 +463,15 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   }
 
   private splitPane(direction: SplitDirection): void {
-    const paneId = resolveTerminalTopologyControlState(this.snapshot).activePaneId;
-    if (!paneId) {
+    const controls = resolveTerminalTopologyControlState(this.snapshot);
+    if (!controls.activePaneId || !controls.canSplitPane) {
       return;
     }
 
     this.clearTransientTopologyUi();
     this.runTopologyCommand(`split_${direction}`, {
       kind: "split_pane",
-      pane_id: paneId,
+      pane_id: controls.activePaneId,
       direction,
     });
   }
@@ -434,7 +487,8 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   }
 
   private focusTab(tabId: string): void {
-    if (this.snapshot.attachedSession?.topology.focused_tab === tabId) {
+    const controls = resolveTerminalTopologyControlState(this.snapshot);
+    if (!controls.canFocusTab || this.snapshot.attachedSession?.topology.focused_tab === tabId) {
       return;
     }
 
@@ -443,7 +497,8 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   }
 
   private focusPane(paneId: string): void {
-    if (resolveTerminalTopologyControlState(this.snapshot).activePaneId === paneId) {
+    const controls = resolveTerminalTopologyControlState(this.snapshot);
+    if (!controls.canFocusPane || controls.activePaneId === paneId) {
       return;
     }
 
@@ -452,8 +507,9 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   }
 
   private toggleRenameTab(): void {
-    const tab = resolveTerminalTopologyControlState(this.snapshot).activeTab;
-    if (!tab) {
+    const controls = resolveTerminalTopologyControlState(this.snapshot);
+    const tab = controls.activeTab;
+    if (!tab || !controls.canRenameTab) {
       return;
     }
 
@@ -483,9 +539,10 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   }
 
   private renameTab(): void {
-    const tab = resolveTerminalTopologyControlState(this.snapshot).activeTab;
+    const controls = resolveTerminalTopologyControlState(this.snapshot);
+    const tab = controls.activeTab;
     const title = this.renameDraft.trim();
-    if (!tab || !title) {
+    if (!tab || !title || !controls.canRenameTab) {
       return;
     }
 
@@ -505,6 +562,10 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   }
 
   private closePane(paneId: string): void {
+    if (!resolveTerminalTopologyControlState(this.snapshot).canClosePane) {
+      return;
+    }
+
     if (!this.isCloseArmed("pane", paneId)) {
       this.renamingTabId = null;
       this.renameDraft = "";
@@ -517,8 +578,9 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   }
 
   private closeTab(): void {
-    const tab = resolveTerminalTopologyControlState(this.snapshot).activeTab;
-    if (!tab) {
+    const controls = resolveTerminalTopologyControlState(this.snapshot);
+    const tab = controls.activeTab;
+    if (!tab || !controls.canCloseTab) {
       return;
     }
 
@@ -544,8 +606,9 @@ export class TerminalPaneTreeElement extends WorkspaceKernelConsumerElement {
   }
 
   private runTopologyCommand(action: string, command: MuxCommand): void {
-    const sessionId = resolveTerminalTopologyControlState(this.snapshot).activeSessionId;
-    if (!sessionId || this.pendingAction) {
+    const controls = resolveTerminalTopologyControlState(this.snapshot);
+    const sessionId = controls.activeSessionId;
+    if (!sessionId || this.pendingAction || !canRunTerminalTopologyCommand(controls, command)) {
       return;
     }
 

@@ -91,6 +91,10 @@ async function main() {
       || !result.afterCreate.hasPasteClipboardControl
       || !result.afterCreate.hasSaveLayoutControl
       || !result.afterCreate.hasTopologyControls
+      || result.afterCreate.topologyStatus !== "Topology ready"
+      || result.afterCreate.topologyCapabilityStatus !== "known"
+      || result.afterCreate.topologyCanMutateLayout !== "true"
+      || !result.afterCreate.hasEnabledTopologyMutationControls
       || !result.afterCreate.hasDisplayControls
       || result.afterCreate.commandDockCanWrite !== "true"
       || result.afterCreate.commandDockInputCapability !== "known"
@@ -412,6 +416,15 @@ async function runSmokeScenario(browserUrl) {
       const quickCommands = [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])];
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
       const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
+      const paneTreePanel = paneTreeRoot?.querySelector('[data-testid="tp-pane-tree"]') ?? null;
+      const topologyStatus = paneTreeRoot?.querySelector('[data-testid="tp-topology-status"]') ?? null;
+      const topologyMutationControls = [
+        paneTreeRoot?.querySelector('[data-testid="tp-new-tab"]') ?? null,
+        paneTreeRoot?.querySelector('[data-testid="tp-split-right"]') ?? null,
+        paneTreeRoot?.querySelector('[data-testid="tp-split-down"]') ?? null,
+        paneTreeRoot?.querySelector('[data-testid="tp-rename-tab"]') ?? null,
+        paneTreeRoot?.querySelector('[data-testid="tp-resize-wider"]') ?? null,
+      ];
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : (screenRoot?.querySelector('[part=\"screen-lines\"]')?.textContent?.trim() ?? null);
@@ -454,6 +467,12 @@ async function runSmokeScenario(browserUrl) {
           && paneTreeRoot?.querySelector('[data-testid="tp-pane-node"]')
           && paneTreeRoot?.querySelector('[data-testid="tp-close-pane"]')
         ),
+        topologyStatus: topologyStatus?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        topologyStatusTitle: topologyStatus?.getAttribute('title') ?? null,
+        topologyCapabilityStatus: paneTreePanel?.getAttribute('data-capability-status') ?? null,
+        topologyStatusTone: paneTreePanel?.getAttribute('data-topology-status') ?? null,
+        topologyCanMutateLayout: paneTreePanel?.getAttribute('data-layout-write') ?? null,
+        hasEnabledTopologyMutationControls: topologyMutationControls.every((control) => control && !control.disabled),
         hasDisplayControls: Boolean(
           toolbarRoot?.querySelector('[data-testid="tp-font-scale-option"][data-font-scale="large"]')
           && toolbarRoot?.querySelector('[data-testid="tp-line-wrap-option"]')
