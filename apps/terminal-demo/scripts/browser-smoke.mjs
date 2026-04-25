@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import WebSocket from "ws";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -212,6 +213,25 @@ async function main() {
     }
 
     if (
+      !result.afterAdvancedSavedLayouts.opened
+      || result.afterAdvancedSavedLayouts.savedItemsRendered < 1
+      || result.afterAdvancedSavedLayouts.savedPanelCount !== String(result.afterSaveLayout.savedSessionCount)
+      || result.afterAdvancedSavedLayouts.savedVisibleCount !== String(Math.min(6, result.afterSaveLayout.savedSessionCount))
+      || result.afterAdvancedSavedLayouts.firstSavedCanRestore !== "true"
+      || result.afterAdvancedSavedLayouts.firstSavedRestoreStatus !== "available"
+      || result.afterAdvancedSavedLayouts.firstSavedRestoreDisabled !== false
+      || !result.afterAdvancedSavedLayouts.firstSavedRestoreTitle?.includes("Restore saved layout")
+      || !result.afterAdvancedSavedLayouts.firstSavedSemanticsCodes?.includes("process_state_not_preserved")
+      || !result.afterAdvancedSavedLayouts.firstSavedSemanticsCodes?.includes("screen_buffers_not_replayed")
+      || !result.afterAdvancedSavedLayouts.firstSavedSemanticsLabels?.includes("processes restart")
+      || !result.afterAdvancedSavedLayouts.firstSavedSemanticsLabels?.includes("no screen replay")
+      || !result.afterAdvancedSavedLayouts.deletePrompted
+      || result.afterAdvancedSavedLayouts.savedSessionCountAfterDeletePrompt !== result.afterSaveLayout.savedSessionCount
+    ) {
+      throw new Error(`Advanced saved layout controls did not settle: ${JSON.stringify(result.afterAdvancedSavedLayouts)}`);
+    }
+
+    if (
       !result.afterPruneHidden.prompted
       || !result.afterPruneHidden.confirmed
       || result.afterPruneHidden.savedSessionCountBefore <= result.afterPruneHidden.visibleCountBefore
@@ -334,8 +354,8 @@ async function runSmokeScenario(browserUrl) {
   const pending = new Map();
   const issues = [];
 
-  socket.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data.toString());
+  socket.on("message", (data) => {
+    const message = JSON.parse(data.toString());
     if (message.id && pending.has(message.id)) {
       const request = pending.get(message.id);
       pending.delete(message.id);
@@ -891,6 +911,50 @@ async function runSmokeScenario(browserUrl) {
         firstSavedSemanticsCodes: restoreSemantics.map((note) => note.getAttribute('data-semantics-code')),
         firstSavedSemanticsLabels: restoreSemantics.map((note) => note.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
         saveEventDetail,
+        ...deletePromptResult,
+      };
+    })()`);
+
+    const afterAdvancedSavedLayouts = await evaluate(send, `(async () => {
+      const details = document.querySelector('.details-panel') ?? null;
+      if (details) {
+        details.open = true;
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      const savedPanel = document.querySelector('[data-testid="advanced-saved-layouts"]') ?? null;
+      const restoreButton = savedPanel?.querySelector('[data-testid="advanced-restore-saved-layout"]') ?? null;
+      const deleteButton = savedPanel?.querySelector('[data-testid="advanced-delete-saved-layout"]') ?? null;
+      const restoreSemantics = [...(savedPanel?.querySelectorAll('[data-testid="advanced-saved-layout-restore-semantics"]') ?? [])];
+      const savedSessionCount = window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
+      const deletePromptResult = {
+        deletePrompted: false,
+        deleteButtonText: deleteButton?.textContent?.trim() ?? null,
+        savedSessionCountAfterDeletePrompt: savedSessionCount,
+      };
+
+      if (deleteButton && !deleteButton.disabled) {
+        deleteButton.click();
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        deletePromptResult.deletePrompted = deleteButton.getAttribute('data-confirming') === 'true'
+          && /confirm delete/i.test(deleteButton.textContent ?? '');
+        deletePromptResult.deleteButtonText = deleteButton.textContent?.trim() ?? null;
+        deletePromptResult.savedSessionCountAfterDeletePrompt =
+          window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
+      }
+
+      return {
+        opened: Boolean(details?.open),
+        savedPanelCount: savedPanel?.getAttribute('data-saved-count') ?? null,
+        savedVisibleCount: savedPanel?.getAttribute('data-visible-count') ?? null,
+        savedHiddenCount: savedPanel?.getAttribute('data-hidden-count') ?? null,
+        savedItemsRendered: savedPanel?.querySelectorAll('[data-testid="advanced-saved-layout"]')?.length ?? 0,
+        firstSavedCanRestore: restoreButton?.getAttribute('data-can-restore') ?? null,
+        firstSavedRestoreStatus: restoreButton?.getAttribute('data-restore-status') ?? null,
+        firstSavedRestoreDisabled: restoreButton?.disabled ?? null,
+        firstSavedRestoreTitle: restoreButton?.getAttribute('title') ?? null,
+        firstSavedSemanticsCodes: restoreSemantics.map((note) => note.getAttribute('data-semantics-code')),
+        firstSavedSemanticsLabels: restoreSemantics.map((note) => note.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
         ...deletePromptResult,
       };
     })()`);
@@ -1537,6 +1601,7 @@ async function runSmokeScenario(browserUrl) {
       afterDisplaySwitch,
       afterTopologyActions,
       afterSaveLayout,
+      afterAdvancedSavedLayouts,
       afterPruneHidden,
       afterCommand: {
         ...afterCommand,
@@ -1559,7 +1624,7 @@ async function runSmokeScenario(browserUrl) {
       issues,
     };
   } finally {
-    socket.close();
+    await closeWebSocket(socket);
   }
 }
 
@@ -1708,8 +1773,43 @@ function processExitState(child) {
 
 function onceSocketOpen(socket) {
   return new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", reject, { once: true });
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+}
+
+function closeWebSocket(socket) {
+  if (!socket || socket.readyState === WebSocket.CLOSED) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      socket.off("close", settle);
+      socket.off("error", settle);
+      resolve();
+    };
+    const timeout = setTimeout(() => {
+      if (socket.readyState !== WebSocket.CLOSED) {
+        socket.terminate();
+      }
+      settle();
+    }, 1_000);
+
+    socket.once("close", settle);
+    socket.once("error", settle);
+
+    try {
+      socket.close();
+    } catch {
+      settle();
+    }
   });
 }
 

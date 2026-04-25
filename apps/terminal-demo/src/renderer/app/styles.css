@@ -467,9 +467,57 @@ textarea:focus-visible {
   align-items: flex-start;
 }
 
+.list-card--saved .button-row--compact {
+  flex: 0 0 auto;
+  width: min(170px, 100%);
+}
+
+.list-card--saved .button-row--compact .button {
+  min-width: 96px;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.list-card--advanced-saved {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.list-card--advanced-saved .button-row--compact {
+  width: 100%;
+  justify-content: stretch;
+}
+
+.list-card--advanced-saved .button-row--compact .button {
+  flex: 1 1 0;
+  width: auto;
+}
+
 .list-card--saved small {
   display: block;
   margin-top: 4px;
+}
+
+.saved-layout-card__body {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.saved-layout-card__body strong,
+.saved-layout-card__body small {
+  overflow-wrap: anywhere;
+}
+
+.saved-layout-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.saved-layout-card__badges .badge {
+  padding: 4px 8px;
+  font-size: 0.72rem;
 }
 
 .tab-strip {
@@ -665,5 +713,22 @@ textarea:focus-visible {
 
   .shell[data-has-active-session="true"] .shell__sidebar {
     order: 2;
+  }
+}
+
+@media (max-width: 720px) {
+  .list-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .list-card--saved .button-row--compact {
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .list-card--saved .button-row--compact .button {
+    flex: 1 1 0;
+    width: auto;
   }
 }

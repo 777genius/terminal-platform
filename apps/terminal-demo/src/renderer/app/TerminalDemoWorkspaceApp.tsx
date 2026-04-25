@@ -16,8 +16,13 @@ import {
 } from "@terminal-platform/workspace-core";
 import {
   TerminalWorkspace,
+  findRestorableSavedSession,
+  hasSavedSession,
+  resolveTerminalSavedSessionsControlState,
   useWorkspaceSnapshot,
   type TerminalCommandQuickCommand,
+  type TerminalSavedSessionPendingAction,
+  type TerminalSavedSessionRestoreSemanticsTone,
 } from "@terminal-platform/workspace-react";
 
 interface NativeSessionFormState {
@@ -37,6 +42,7 @@ const initialNativeSessionFormState: NativeSessionFormState = {
 const TERMINAL_DEMO_THEME_STORAGE_KEY = "terminal-platform-demo.theme";
 const TERMINAL_DEMO_FONT_SCALE_STORAGE_KEY = "terminal-platform-demo.terminal-font-scale";
 const TERMINAL_DEMO_LINE_WRAP_STORAGE_KEY = "terminal-platform-demo.terminal-line-wrap";
+const ADVANCED_SAVED_LAYOUT_VISIBLE_COUNT = 6;
 const terminalDemoThemeIds = terminalPlatformThemeManifests.map((theme) => theme.id);
 const terminalDemoQuickCommands = [
   {
@@ -97,8 +103,13 @@ export function TerminalDemoWorkspaceScreen(props: {
   const snapshot = useWorkspaceSnapshot(props.kernel);
   const [createForm, setCreateForm] = useState(initialNativeSessionFormState);
   const [createPending, setCreatePending] = useState(false);
-  const [commandPending, setCommandPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [advancedSavedSessionAction, setAdvancedSavedSessionAction] = useState<{
+    sessionId: SessionId;
+    action: TerminalSavedSessionPendingAction;
+  } | null>(null);
+  const [advancedSavedSessionDeleteConfirmationId, setAdvancedSavedSessionDeleteConfirmationId] =
+    useState<SessionId | null>(null);
   const autoAttachAttemptRef = useRef<SessionId | null>(null);
 
   const activeSessionId = snapshot.selection.activeSessionId ?? snapshot.catalog.sessions[0]?.session_id ?? null;
@@ -117,6 +128,17 @@ export function TerminalDemoWorkspaceScreen(props: {
   const terminalDisplay = snapshot.terminalDisplay ?? defaultTerminalDisplay;
   const diagnosticsPreview = snapshot.diagnostics.slice(0, 3);
   const advancedNoticeCount = diagnosticsPreview.length + (actionError ? 1 : 0);
+  const advancedSavedSessionsControl = useMemo(
+    () => resolveTerminalSavedSessionsControlState(snapshot, {
+      visibleSavedSessionCount: ADVANCED_SAVED_LAYOUT_VISIBLE_COUNT,
+      pendingSavedSessionId: advancedSavedSessionAction?.sessionId ?? null,
+      pendingSavedSessionAction: advancedSavedSessionAction?.action ?? null,
+      pendingBulkAction: null,
+      deleteConfirmationSessionId: advancedSavedSessionDeleteConfirmationId,
+      pruneConfirmationArmed: false,
+    }),
+    [advancedSavedSessionAction, advancedSavedSessionDeleteConfirmationId, snapshot],
+  );
 
   useEffect(() => {
     autoAttachAttemptRef.current = null;
@@ -215,7 +237,27 @@ export function TerminalDemoWorkspaceScreen(props: {
 
   async function handleRestoreSavedSession(sessionId: SessionId) {
     setActionError(null);
-    setCommandPending(true);
+    if (advancedSavedSessionAction) {
+      setActionError("Wait for the current saved layout action to finish.");
+      return;
+    }
+
+    setAdvancedSavedSessionDeleteConfirmationId(null);
+    const currentSnapshot = props.kernel.getSnapshot();
+    const session = findRestorableSavedSession(currentSnapshot, {
+      visibleSavedSessionCount: currentSnapshot.catalog.savedSessions.length,
+      pendingSavedSessionId: null,
+      pendingSavedSessionAction: null,
+      pendingBulkAction: null,
+      deleteConfirmationSessionId: null,
+      pruneConfirmationArmed: false,
+    }, sessionId);
+    if (!session) {
+      setActionError(resolveSavedLayoutRestoreBlockedMessage(currentSnapshot, sessionId));
+      return;
+    }
+
+    setAdvancedSavedSessionAction({ sessionId, action: "restore" });
     try {
       await props.kernel.commands.restoreSavedSession(sessionId);
       await props.kernel.commands.refreshSessions();
@@ -223,20 +265,38 @@ export function TerminalDemoWorkspaceScreen(props: {
     } catch (error) {
       setActionError(getErrorMessage(error));
     } finally {
-      setCommandPending(false);
+      setAdvancedSavedSessionAction(null);
     }
   }
 
   async function handleDeleteSavedSession(sessionId: SessionId) {
     setActionError(null);
-    setCommandPending(true);
+    if (advancedSavedSessionAction) {
+      setActionError("Wait for the current saved layout action to finish.");
+      return;
+    }
+
+    const currentSnapshot = props.kernel.getSnapshot();
+    if (!hasSavedSession(currentSnapshot, sessionId)) {
+      setActionError("Saved layout is no longer available.");
+      setAdvancedSavedSessionDeleteConfirmationId(null);
+      return;
+    }
+
+    if (advancedSavedSessionDeleteConfirmationId !== sessionId) {
+      setAdvancedSavedSessionDeleteConfirmationId(sessionId);
+      return;
+    }
+
+    setAdvancedSavedSessionDeleteConfirmationId(null);
+    setAdvancedSavedSessionAction({ sessionId, action: "delete" });
     try {
       await props.kernel.commands.deleteSavedSession(sessionId);
       await props.kernel.commands.refreshSavedSessions();
     } catch (error) {
       setActionError(getErrorMessage(error));
     } finally {
-      setCommandPending(false);
+      setAdvancedSavedSessionAction(null);
     }
   }
 
@@ -447,38 +507,73 @@ export function TerminalDemoWorkspaceScreen(props: {
                 </dl>
               </div>
 
-              {snapshot.catalog.savedSessions.length > 0 ? (
+              {advancedSavedSessionsControl.savedSessionCount > 0 ? (
                 <div className="advanced-block">
                   <div className="section__eyebrow">Saved layouts</div>
-                  <div className="list-stack list-stack--scroll">
-                    {snapshot.catalog.savedSessions.slice(0, 6).map((session) => (
-                      <div className="list-card list-card--saved" key={session.session_id}>
-                        <div>
-                          <strong>{session.title ?? session.session_id}</strong>
-                          <small>{session.compatibility.status}</small>
+                  <div
+                    className="list-stack list-stack--scroll"
+                    data-testid="advanced-saved-layouts"
+                    data-saved-count={advancedSavedSessionsControl.savedSessionCount}
+                    data-visible-count={advancedSavedSessionsControl.visibleCount}
+                    data-hidden-count={advancedSavedSessionsControl.hiddenCount}
+                    data-pending={advancedSavedSessionsControl.anyPending ? "true" : "false"}
+                  >
+                    {advancedSavedSessionsControl.items.map((item) => (
+                      <div
+                        className="list-card list-card--saved list-card--advanced-saved"
+                        data-testid="advanced-saved-layout"
+                        data-can-restore={item.canRestore ? "true" : "false"}
+                        data-restore-status={item.restoreStatus}
+                        key={item.session.session_id}
+                      >
+                        <div className="saved-layout-card__body">
+                          <strong>{item.title}</strong>
+                          <small>{item.compatibilityLabel}</small>
+                          <div className="saved-layout-card__badges" aria-label="Restore semantics">
+                            {item.restoreSemanticsNotes.map((note) => (
+                              <span
+                                className={`badge ${badgeClassForRestoreSemantics(note.tone)}`}
+                                data-semantics-code={note.code}
+                                data-semantics-tone={note.tone}
+                                data-testid="advanced-saved-layout-restore-semantics"
+                                key={note.code}
+                                title={note.detail}
+                              >
+                                {note.label}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                        <div className="button-row">
+                        <div className="button-row button-row--compact">
                           <button
                             className="button"
-                            disabled={commandPending}
-                            onClick={() => void handleRestoreSavedSession(session.session_id)}
+                            data-can-restore={item.canRestore ? "true" : "false"}
+                            data-restore-status={item.restoreStatus}
+                            data-testid="advanced-restore-saved-layout"
+                            disabled={!item.canRestore}
+                            onClick={() => void handleRestoreSavedSession(item.session.session_id)}
+                            title={item.restoreTitle}
                           >
-                            Restore
+                            {item.isRestoring ? "Restoring..." : "Restore"}
                           </button>
                           <button
-                            className="button"
-                            disabled={commandPending}
-                            onClick={() => void handleDeleteSavedSession(session.session_id)}
+                            className="button button--danger"
+                            data-confirming={item.isConfirmingDelete ? "true" : "false"}
+                            data-testid="advanced-delete-saved-layout"
+                            disabled={!item.canDelete}
+                            onClick={() => void handleDeleteSavedSession(item.session.session_id)}
+                            title={item.isConfirmingDelete ? "Confirm saved layout deletion." : "Delete saved layout."}
                           >
-                            Delete
+                            {item.isDeleting ? "Deleting..." : item.isConfirmingDelete ? "Confirm delete" : "Delete"}
                           </button>
                         </div>
                       </div>
                     ))}
                   </div>
-                  {snapshot.catalog.savedSessions.length > 6 ? (
+                  {advancedSavedSessionsControl.hiddenCount > 0 ? (
                     <small className="section__copy">
-                      Showing 6 of {snapshot.catalog.savedSessions.length} saved layouts.
+                      Showing {advancedSavedSessionsControl.visibleCount} of{" "}
+                      {advancedSavedSessionsControl.savedSessionCount} saved layouts.
                     </small>
                   ) : null}
                 </div>
@@ -630,6 +725,32 @@ function badgeToneForConnection(state: WorkspaceSnapshot["connection"]["state"])
   }
 
   return "badge--neutral";
+}
+
+function badgeClassForRestoreSemantics(tone: TerminalSavedSessionRestoreSemanticsTone): string {
+  if (tone === "ok") {
+    return "badge--success";
+  }
+
+  if (tone === "warning") {
+    return "badge--warning";
+  }
+
+  return "badge--neutral";
+}
+
+function resolveSavedLayoutRestoreBlockedMessage(snapshot: WorkspaceSnapshot, sessionId: SessionId): string {
+  const controls = resolveTerminalSavedSessionsControlState(snapshot, {
+    visibleSavedSessionCount: snapshot.catalog.savedSessions.length,
+    pendingSavedSessionId: null,
+    pendingSavedSessionAction: null,
+    pendingBulkAction: null,
+    deleteConfirmationSessionId: null,
+    pruneConfirmationArmed: false,
+  });
+  const item = controls.items.find((candidate) => candidate.session.session_id === sessionId);
+
+  return item?.restoreTitle ?? "Saved layout is no longer available.";
 }
 
 function describeConnectionState(state: WorkspaceSnapshot["connection"]["state"]): {
