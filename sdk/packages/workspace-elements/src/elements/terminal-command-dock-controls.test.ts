@@ -28,6 +28,8 @@ describe("terminal command dock controls", () => {
     expect(controls.inputCapabilityStatus).toBe("known");
     expect(controls.canPasteClipboard).toBe(true);
     expect(controls.pasteCapabilityStatus).toBe("known");
+    expect(controls.canSaveLayout).toBe(true);
+    expect(controls.saveCapabilityStatus).toBe("known");
     expect(controls.recentCommands).toEqual([
       "git diff",
       "cargo test",
@@ -75,6 +77,23 @@ describe("terminal command dock controls", () => {
     expect(controls.pasteCapabilityStatus).toBe("known");
   });
 
+  it("disables save layout when loaded backend capabilities reject explicit session saves", () => {
+    const snapshot = createWorkspaceSnapshot({
+      catalog: {
+        ...createInitialWorkspaceSnapshot().catalog,
+        backendCapabilities: {
+          native: createCapabilities({ explicit_session_save: false }),
+        },
+      },
+    });
+
+    const controls = resolveTerminalCommandDockControlState(snapshot, { pending: false });
+
+    expect(controls.activeSessionId).toBe("session-1");
+    expect(controls.canSaveLayout).toBe(false);
+    expect(controls.saveCapabilityStatus).toBe("known");
+  });
+
   it("keeps command input enabled while capabilities are pending and a focused pane exists", () => {
     const snapshot = createWorkspaceSnapshot({
       catalog: {
@@ -109,6 +128,21 @@ describe("terminal command dock controls", () => {
     expect(controls.pasteCapabilityStatus).toBe("unknown");
   });
 
+  it("keeps save layout disabled while capabilities are pending", () => {
+    const snapshot = createWorkspaceSnapshot({
+      catalog: {
+        ...createInitialWorkspaceSnapshot().catalog,
+        backendCapabilities: {},
+      },
+    });
+
+    const controls = resolveTerminalCommandDockControlState(snapshot, { pending: false });
+
+    expect(controls.activeSessionId).toBe("session-1");
+    expect(controls.canSaveLayout).toBe(false);
+    expect(controls.saveCapabilityStatus).toBe("unknown");
+  });
+
   it("disables all pane actions while pending", () => {
     const controls = resolveTerminalCommandDockControlState(createWorkspaceSnapshot(), { pending: true });
 
@@ -116,6 +150,7 @@ describe("terminal command dock controls", () => {
     expect(controls.canUsePane).toBe(false);
     expect(controls.canWriteInput).toBe(false);
     expect(controls.canPasteClipboard).toBe(false);
+    expect(controls.canSaveLayout).toBe(false);
   });
 });
 

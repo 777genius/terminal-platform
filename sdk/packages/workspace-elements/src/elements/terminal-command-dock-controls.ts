@@ -14,8 +14,10 @@ export interface TerminalCommandDockControlState {
   canUsePane: boolean;
   canWriteInput: boolean;
   canPasteClipboard: boolean;
+  canSaveLayout: boolean;
   inputCapabilityStatus: TerminalCommandDockCapabilityStatus;
   pasteCapabilityStatus: TerminalCommandDockCapabilityStatus;
+  saveCapabilityStatus: TerminalCommandDockCapabilityStatus;
 }
 
 export function resolveTerminalCommandDockControlState(
@@ -30,6 +32,7 @@ export function resolveTerminalCommandDockControlState(
   const canUsePane = Boolean(activeSessionId && activePaneId && !options.pending);
   const inputCapability = resolveInputCapability(snapshot);
   const pasteCapability = resolvePasteCapability(snapshot);
+  const saveCapability = resolveSaveCapability(snapshot);
   const canWriteInput = Boolean(canUsePane && inputCapability.canWrite);
 
   return {
@@ -42,8 +45,10 @@ export function resolveTerminalCommandDockControlState(
     canUsePane,
     canWriteInput,
     canPasteClipboard: Boolean(canUsePane && pasteCapability.canPaste),
+    canSaveLayout: Boolean(activeSessionId && !options.pending && saveCapability.canSave),
     inputCapabilityStatus: inputCapability.status,
     pasteCapabilityStatus: pasteCapability.status,
+    saveCapabilityStatus: saveCapability.status,
   };
 }
 
@@ -69,6 +74,19 @@ function resolvePasteCapability(
   });
   return {
     canPaste: capability.enabled,
+    status: capability.status,
+  };
+}
+
+function resolveSaveCapability(
+  snapshot: WorkspaceSnapshot,
+): { canSave: boolean; status: TerminalCommandDockCapabilityStatus } {
+  const capability = resolveWorkspaceCapability(snapshot, "explicit_session_save", {
+    missingBackend: false,
+    pendingCapabilities: false,
+  });
+  return {
+    canSave: capability.enabled,
     status: capability.status,
   };
 }

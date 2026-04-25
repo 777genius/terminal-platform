@@ -237,6 +237,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     const pasteTitle = controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
       ? "Paste is not supported by the active backend"
       : "Paste clipboard into the focused pane";
+    const saveLayoutTitle = controls.saveCapabilityStatus === "known" && !controls.canSaveLayout
+      ? "Save layout is not supported by the active backend"
+      : controls.saveCapabilityStatus === "unknown"
+        ? "Save layout is disabled until backend capabilities load"
+        : "Save the focused session layout";
 
     return html`
       <div
@@ -245,6 +250,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         data-testid="tp-command-dock"
         data-command-input=${String(controls.canWriteInput)}
         data-input-capability=${controls.inputCapabilityStatus}
+        data-save-capability=${controls.saveCapabilityStatus}
+        data-save-layout=${String(controls.canSaveLayout)}
       >
         <div class="dock-header">
           <div class="panel-header">
@@ -306,7 +313,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                         data-testid="tp-command-history-entry"
                         data-history-index=${index}
                         title=${command}
-                        ?disabled=${!controls.activePaneId || this.pending}
+                        ?disabled=${!controls.canWriteInput}
                         @click=${() => this.setDraft(command)}
                       >
                         <span class="history-command">${command}</span>
@@ -385,7 +392,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           <div class="actions">
             <button
               data-testid="tp-save-layout"
-              ?disabled=${!controls.activeSessionId || this.pending}
+              title=${saveLayoutTitle}
+              ?disabled=${!controls.canSaveLayout}
               @click=${() => this.saveLayout()}
             >
               Save layout
@@ -411,14 +419,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private setDraft(value: string): void {
-    const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
-    if (!paneId) {
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    if (!controls.activePaneId || !controls.canWriteInput) {
       return;
     }
 
     this.actionError = null;
     this.resetHistoryNavigation();
-    this.kernel?.commands.updateDraft(paneId, value);
+    this.kernel?.commands.updateDraft(controls.activePaneId, value);
   }
 
   private handleInput(event: Event): void {
@@ -636,8 +644,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private async saveLayout(): Promise<void> {
-    const sessionId = this.snapshot.selection.activeSessionId ?? this.snapshot.attachedSession?.session.session_id ?? null;
-    if (!sessionId || this.pending) {
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    if (!controls.activeSessionId || !controls.canSaveLayout) {
       return;
     }
 
@@ -645,7 +653,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     this.actionError = null;
 
     try {
-      await this.kernel?.commands.dispatchMuxCommand(sessionId, { kind: "save_session" });
+      await this.kernel?.commands.dispatchMuxCommand(controls.activeSessionId, { kind: "save_session" });
       await this.kernel?.commands.refreshSavedSessions();
       const savedSessions = this.kernel?.getSnapshot().catalog.savedSessions ?? [];
       this.dispatchEvent(
@@ -653,7 +661,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: {
-            sessionId,
+            sessionId: controls.activeSessionId,
             savedSessionCount: savedSessions.length,
             savedSessionId: savedSessions[0]?.session_id ?? null,
           },
@@ -665,7 +673,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         new CustomEvent("tp-terminal-layout-save-failed", {
           bubbles: true,
           composed: true,
-          detail: { sessionId, error },
+          detail: { sessionId: controls.activeSessionId, error },
         }),
       );
     } finally {

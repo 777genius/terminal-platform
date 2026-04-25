@@ -68,8 +68,10 @@ function createControls(
     canUsePane: true,
     canWriteInput: true,
     canPasteClipboard: true,
+    canSaveLayout: true,
     inputCapabilityStatus: "known",
     pasteCapabilityStatus: "known",
+    saveCapabilityStatus: "known",
     ...overrides,
   };
 }

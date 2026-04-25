@@ -90,6 +90,8 @@ async function main() {
       || result.afterCreate.screenInputTone !== "ready"
       || !result.afterCreate.hasPasteClipboardControl
       || !result.afterCreate.hasSaveLayoutControl
+      || result.afterCreate.commandDockCanSave !== "true"
+      || result.afterCreate.commandDockSaveCapability !== "known"
       || !result.afterCreate.hasTopologyControls
       || result.afterCreate.topologyStatus !== "Topology ready"
       || result.afterCreate.topologyCapabilityStatus !== "known"
@@ -479,6 +481,9 @@ async function runSmokeScenario(browserUrl) {
         ),
         commandDockCanWrite: commandDockPanel?.getAttribute('data-command-input') ?? null,
         commandDockInputCapability: commandDockPanel?.getAttribute('data-input-capability') ?? null,
+        commandDockCanSave: commandDockPanel?.getAttribute('data-save-layout') ?? null,
+        commandDockSaveCapability: commandDockPanel?.getAttribute('data-save-capability') ?? null,
+        saveLayoutTitle: saveLayout?.getAttribute('title') ?? null,
         commandInputStatus: commandInputStatus?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         commandInputStatusTitle: commandInputStatus?.getAttribute('title') ?? null,
         quickCommandLabels: quickCommands.map((button) => button.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
