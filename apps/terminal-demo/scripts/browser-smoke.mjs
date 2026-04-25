@@ -81,9 +81,16 @@ async function main() {
       || result.afterCreate.healthPhase !== "ready"
       || !result.afterCreate.hasStatusBar
       || !result.afterCreate.hasCommandDock
+      || result.afterCreate.demoShellActive !== "true"
+      || result.afterCreate.demoShellColumnCount !== 2
+      || result.afterCreate.demoMainWidth < 1000
+      || result.afterCreate.demoMainWidth <= result.afterCreate.demoSidebarWidth * 3
+      || result.afterCreate.workspaceHostWidth < 1000
+      || result.afterCreate.workspaceContentWidth < 800
+      || result.afterCreate.documentHorizontalOverflow > 1
       || result.afterCreate.workspaceLayout !== "operations-deck"
       || !result.afterCreate.hasOperationsDeck
-      || result.afterCreate.operationsDeckColumnCount < 1
+      || result.afterCreate.operationsDeckColumnCount < 2
       || !result.afterCreate.screenInTerminalColumn
       || !result.afterCreate.commandDockInCommandRegion
       || !result.afterCreate.topologyInInspectorColumn
@@ -157,6 +164,18 @@ async function main() {
       || !result.afterCreate.inputEnabled
     ) {
       throw new Error(`Session creation did not settle correctly: ${JSON.stringify(result.afterCreate)}`);
+    }
+
+    if (
+      !result.afterCreateMobileLayout.checked
+      || result.afterCreateMobileLayout.demoShellActive !== "true"
+      || result.afterCreateMobileLayout.demoShellColumnCount !== 1
+      || result.afterCreateMobileLayout.operationsDeckColumnCount !== 1
+      || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
+      || !result.afterCreateMobileLayout.mainPrecedesSidebar
+      || result.afterCreateMobileLayout.demoMainWidth < 430
+    ) {
+      throw new Error(`Mobile active shell layout did not settle correctly: ${JSON.stringify(result.afterCreateMobileLayout)}`);
     }
 
     if (result.afterCreate.savedSessionCount > result.afterCreate.savedItemsRendered) {
@@ -494,6 +513,10 @@ async function runSmokeScenario(browserUrl) {
 
     const afterCreate = await evaluate(send, `(() => {
       const debug = window.terminalDemoDebug?.getState?.();
+      const demoShell = document.querySelector('[data-testid="terminal-demo-shell"]') ?? null;
+      const demoSidebar = demoShell?.querySelector('.shell__sidebar') ?? null;
+      const demoMain = demoShell?.querySelector('.shell__main') ?? null;
+      const workspaceHostSlot = document.querySelector('[data-testid="terminal-workspace-host"]') ?? null;
       const workspaceHost = document.querySelector('tp-terminal-workspace');
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
       const statusRoot = workspaceRoot?.querySelector('tp-terminal-status-bar')?.shadowRoot ?? null;
@@ -508,6 +531,7 @@ async function runSmokeScenario(browserUrl) {
       const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
       const inspectorColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-inspector-column"]') ?? null;
       const commandRegion = workspaceRoot?.querySelector('[data-testid="tp-workspace-command-region"]') ?? null;
+      const workspaceContent = workspaceRoot?.querySelector('[part="content"]') ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const paneTreeHost = workspaceRoot?.querySelector('tp-terminal-pane-tree') ?? null;
       const commandDockHost = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
@@ -558,6 +582,18 @@ async function runSmokeScenario(browserUrl) {
         hasSavedPagination: Boolean(savedRoot?.querySelector('[part="show-more"]')),
         hasSavedFilter: Boolean(savedRoot?.querySelector('[data-testid="tp-saved-session-filter"]')),
         healthPhase: debug?.attachedSession?.health?.phase ?? null,
+        demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
+        demoShellColumnCount: demoShell
+          ? getComputedStyle(demoShell).gridTemplateColumns.split(' ').filter(Boolean).length
+          : 0,
+        demoSidebarWidth: Math.round(demoSidebar?.getBoundingClientRect().width ?? 0),
+        demoMainWidth: Math.round(demoMain?.getBoundingClientRect().width ?? 0),
+        workspaceHostWidth: Math.round(workspaceHostSlot?.getBoundingClientRect().width ?? 0),
+        workspaceContentWidth: Math.round(workspaceContent?.getBoundingClientRect().width ?? 0),
+        documentHorizontalOverflow: Math.max(
+          0,
+          document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
         focusedSequence: debug?.attachedSession?.focused_screen?.sequence != null
           ? String(debug.attachedSession.focused_screen.sequence)
           : null,
@@ -643,6 +679,48 @@ async function runSmokeScenario(browserUrl) {
         inputEnabled: Boolean(input && !input.disabled),
       };
     })()`);
+
+    await send("Emulation.setDeviceMetricsOverride", {
+      width: 500,
+      height: 900,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await sleep(300);
+    const afterCreateMobileLayout = await evaluate(send, `(() => {
+      const demoShell = document.querySelector('[data-testid="terminal-demo-shell"]') ?? null;
+      const demoSidebar = demoShell?.querySelector('.shell__sidebar') ?? null;
+      const demoMain = demoShell?.querySelector('.shell__main') ?? null;
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
+      return {
+        checked: Boolean(demoShell && demoSidebar && demoMain && operationsDeck),
+        demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
+        demoShellColumnCount: demoShell
+          ? getComputedStyle(demoShell).gridTemplateColumns.split(' ').filter(Boolean).length
+          : 0,
+        operationsDeckColumnCount: operationsDeck
+          ? getComputedStyle(operationsDeck).gridTemplateColumns.split(' ').filter(Boolean).length
+          : 0,
+        demoMainWidth: Math.round(demoMain?.getBoundingClientRect().width ?? 0),
+        documentHorizontalOverflow: Math.max(
+          0,
+          document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+        mainPrecedesSidebar: Boolean(
+          demoMain
+          && demoSidebar
+          && demoMain.getBoundingClientRect().top < demoSidebar.getBoundingClientRect().top
+        ),
+      };
+    })()`);
+    await send("Emulation.setDeviceMetricsOverride", {
+      width: 1440,
+      height: 1100,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await sleep(300);
 
     const initialSequence = afterCreate.focusedSequence;
     const afterQuickCommandDraft = await evaluate(send, `(async () => {
@@ -1787,6 +1865,7 @@ async function runSmokeScenario(browserUrl) {
     return {
       before,
       afterCreate,
+      afterCreateMobileLayout,
       afterQuickCommandDraft,
       afterScreenSearch,
       afterSavedPagination,

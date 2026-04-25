@@ -17,8 +17,16 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     terminalElementStyles,
     css`
       .workspace {
-        --tp-workspace-sidebar-width: clamp(14rem, 21vw, 19rem);
-        --tp-workspace-inspector-width: clamp(16rem, 24vw, 24rem);
+        --tp-workspace-sidebar-default-width: clamp(14rem, 21vw, 19rem);
+        --tp-workspace-inspector-default-width: clamp(16rem, 24vw, 24rem);
+        --tp-workspace-sidebar-width: var(
+          --tp-workspace-sidebar-target-width,
+          var(--tp-workspace-sidebar-default-width)
+        );
+        --tp-workspace-inspector-width: var(
+          --tp-workspace-inspector-target-width,
+          var(--tp-workspace-inspector-default-width)
+        );
 
         display: grid;
         gap: var(--tp-space-4);
@@ -149,7 +157,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         }
       }
 
-      @container (max-width: 62rem) {
+      @container (max-width: 50rem) {
         .operations-deck {
           grid-template-columns: 1fr;
         }

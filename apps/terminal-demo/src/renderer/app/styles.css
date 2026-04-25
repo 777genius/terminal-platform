@@ -56,6 +56,12 @@ button {
   animation: shell-enter 220ms ease-out;
 }
 
+.shell[data-has-active-session="true"] {
+  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+}
+
 .shell--error {
   grid-template-columns: minmax(0, 760px);
   justify-content: center;
@@ -99,6 +105,11 @@ button {
   border-color: var(--border-strong);
 }
 
+.shell[data-has-active-session="true"] .hero {
+  gap: 12px;
+  padding: 16px;
+}
+
 .hero__content {
   display: grid;
   gap: 14px;
@@ -109,6 +120,20 @@ button {
   font-size: clamp(1.55rem, 3vw, 2.35rem);
   line-height: 1.03;
   max-width: 14ch;
+}
+
+.shell[data-has-active-session="true"] .hero__content {
+  gap: 10px;
+}
+
+.shell[data-has-active-session="true"] .hero__title {
+  margin-bottom: 4px;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+  max-width: 12ch;
+}
+
+.shell[data-has-active-session="true"] .hero__copy {
+  font-size: 0.9rem;
 }
 
 .hero__copy,
@@ -157,6 +182,10 @@ button {
   gap: 8px;
 }
 
+.shell[data-has-active-session="true"] .hero__kpis {
+  grid-template-columns: 1fr;
+}
+
 .hero__stat {
   display: grid;
   gap: 4px;
@@ -196,6 +225,15 @@ button {
   padding: 18px;
   display: grid;
   gap: 16px;
+}
+
+.shell[data-has-active-session="true"] .panel--surface {
+  padding: 16px;
+}
+
+.shell[data-has-active-session="true"] tp-terminal-workspace {
+  --tp-workspace-sidebar-target-width: clamp(11.5rem, 15vw, 13.5rem);
+  --tp-workspace-inspector-target-width: clamp(14rem, 18vw, 18rem);
 }
 
 .panel--workspace {
@@ -690,10 +728,13 @@ textarea:focus-visible {
 }
 
 @media (max-width: 1180px) {
-  .shell {
+  .shell,
+  .shell[data-has-active-session="true"] {
     grid-template-columns: 1fr;
     height: auto;
+    gap: 18px;
     overflow: visible;
+    padding: 18px;
   }
 
   .shell__sidebar,
