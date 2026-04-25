@@ -71,7 +71,6 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .dock-header {
-        order: 3;
         align-items: center;
         justify-content: flex-start;
         min-height: 1.35rem;
@@ -85,7 +84,6 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .dock-footer {
-        order: 5;
         grid-template-columns: 1fr;
         align-items: center;
         gap: var(--tp-space-2);
@@ -125,10 +123,6 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         gap: 0.35rem;
       }
 
-      .dock[data-placement="terminal"] .chip-row {
-        order: 4;
-      }
-
       .chip {
         color: var(--tp-color-text-muted);
         font-family: var(--tp-font-family-mono);
@@ -149,10 +143,6 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         grid-template-columns: auto minmax(0, 1fr);
         gap: var(--tp-space-2);
         align-items: center;
-      }
-
-      .dock[data-placement="terminal"] .history-row {
-        order: 4;
       }
 
       .history-label {
@@ -205,7 +195,6 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           var(--tp-terminal-color-accent) 36%,
           var(--tp-terminal-color-border)
         );
-        order: 1;
         border-top-width: 0;
         border-radius: 0 0 0.6rem 0.6rem;
         background:
@@ -327,17 +316,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         padding: var(--tp-space-3);
       }
 
-      .dock[data-placement="terminal"] .notice {
-        order: 2;
-      }
-
       details {
         border-top: 1px solid var(--tp-color-border);
         padding-top: var(--tp-space-3);
       }
 
       .dock[data-placement="terminal"] details {
-        order: 6;
         border-top-color: color-mix(in srgb, var(--tp-terminal-color-border) 58%, transparent);
         padding-top: var(--tp-space-2);
       }
@@ -441,100 +425,93 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     const clearHistoryTitle = isHistoryClearConfirming
       ? `Confirm clearing ${historyCountLabel}`
       : `Clear ${historyCountLabel}`;
+    const isTerminalPlacement = this.placement === "terminal";
 
-    return html`
-      <div
-        class="panel dock"
-        part="command-dock"
-        data-testid="tp-command-dock"
-        data-placement=${this.placement}
-        data-command-input=${String(controls.canWriteInput)}
-        data-input-capability=${controls.inputCapabilityStatus}
-        data-save-capability=${controls.saveCapabilityStatus}
-        data-save-layout=${String(controls.canSaveLayout)}
-      >
-        <div class="dock-header">
-          ${this.placement === "terminal"
-            ? nothing
-            : html`
-                <div class="panel-header">
-                  <div class="panel-eyebrow">Command Input</div>
-                  <div class="panel-title">Focused pane command lane</div>
-                  <div class="panel-copy">Send shell input to the selected pane without leaving the workspace.</div>
-                </div>
-              `}
+    const headerTemplate = html`
+      <div class="dock-header">
+        ${isTerminalPlacement
+          ? nothing
+          : html`
+              <div class="panel-header">
+                <div class="panel-eyebrow">Command Input</div>
+                <div class="panel-title">Focused pane command lane</div>
+                <div class="panel-copy">Send shell input to the selected pane without leaving the workspace.</div>
+              </div>
+            `}
 
-          <div class="dock-status" part="status">
-            <span
-              class="badge"
-              data-testid="tp-command-active-pane"
-              data-tone=${controls.activePaneId ? "ready" : "idle"}
-              title=${activePaneIdentity?.title ?? ""}
-            >
-              ${activePaneIdentity?.label ?? "No pane"}
-            </span>
-            <span
-              class="badge"
-              data-testid="tp-command-input-status"
-              data-tone=${inputStatus.tone}
-              title=${inputStatus.title}
-            >
-              ${inputStatus.label}
-            </span>
-            <span class="badge" data-testid="tp-command-history-count">
-              ${controls.commandHistory.length} history
-            </span>
-          </div>
+        <div class="dock-status" part="status">
+          <span
+            class="badge"
+            data-testid="tp-command-active-pane"
+            data-tone=${controls.activePaneId ? "ready" : "idle"}
+            title=${activePaneIdentity?.title ?? ""}
+          >
+            ${activePaneIdentity?.label ?? "No pane"}
+          </span>
+          <span
+            class="badge"
+            data-testid="tp-command-input-status"
+            data-tone=${inputStatus.tone}
+            title=${inputStatus.title}
+          >
+            ${inputStatus.label}
+          </span>
+          <span class="badge" data-testid="tp-command-history-count">
+            ${controls.commandHistory.length} history
+          </span>
         </div>
+      </div>
+    `;
 
-        ${quickCommands.length > 0
-          ? html`
-              <div class="chip-row" part="quick-commands" aria-label="Quick commands">
-                ${quickCommands.map(
-                  (command) => html`
-                    <button
-                      class="chip"
-                      type="button"
-                      part="quick-command"
-                      data-testid="tp-quick-command"
-                      title=${command.description ?? `Insert ${command.label}`}
-                      ?disabled=${!controls.canWriteInput}
-                      @click=${() => this.setDraft(command.value, { focusInput: true })}
-                    >
-                      ${command.label}
-                    </button>
-                  `,
-                )}
-              </div>
-            `
-          : nothing}
+    const quickCommandsTemplate = quickCommands.length > 0
+      ? html`
+          <div class="chip-row" part="quick-commands" aria-label="Quick commands">
+            ${quickCommands.map(
+              (command) => html`
+                <button
+                  class="chip"
+                  type="button"
+                  part="quick-command"
+                  data-testid="tp-quick-command"
+                  title=${command.description ?? `Insert ${command.label}`}
+                  ?disabled=${!controls.canWriteInput}
+                  @click=${() => this.setDraft(command.value, { focusInput: true })}
+                >
+                  ${command.label}
+                </button>
+              `,
+            )}
+          </div>
+        `
+      : nothing;
 
-        ${controls.recentCommands.length > 0
-          ? html`
-              <div class="history-row" part="command-history" aria-label="Recent commands">
-                <span class="history-label">Recent</span>
-                <div class="history-actions">
-                  ${controls.recentCommands.map(
-                    (command, index) => html`
-                      <button
-                        class="history-chip"
-                        type="button"
-                        data-testid="tp-command-history-entry"
-                        data-history-index=${index}
-                        title=${command}
-                        ?disabled=${!controls.canWriteInput}
-                        @click=${() => this.setDraft(command, { focusInput: true })}
-                      >
-                        <span class="history-command">${command}</span>
-                      </button>
-                    `,
-                  )}
-                </div>
-              </div>
-            `
-          : nothing}
+    const commandHistoryTemplate = controls.recentCommands.length > 0
+      ? html`
+          <div class="history-row" part="command-history" aria-label="Recent commands">
+            <span class="history-label">Recent</span>
+            <div class="history-actions">
+              ${controls.recentCommands.map(
+                (command, index) => html`
+                  <button
+                    class="history-chip"
+                    type="button"
+                    data-testid="tp-command-history-entry"
+                    data-history-index=${index}
+                    title=${command}
+                    ?disabled=${!controls.canWriteInput}
+                    @click=${() => this.setDraft(command, { focusInput: true })}
+                  >
+                    <span class="history-command">${command}</span>
+                  </button>
+                `,
+              )}
+            </div>
+          </div>
+        `
+      : nothing;
 
-        <label class="composer" part="composer">
+    const composerTemplate = html`
+      <label class="composer" part="composer">
           <span class="prompt" aria-hidden="true">&gt;_</span>
           <textarea
             data-testid="tp-command-input"
@@ -546,57 +523,61 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             @input=${(event: Event) => this.handleInput(event)}
             @keydown=${(event: KeyboardEvent) => this.handleKeydown(event)}
           ></textarea>
-        </label>
+      </label>
+    `;
 
-        ${this.actionError
-          ? html`
-              <div class="notice" part="error">
-                <strong>Command failed</strong>
-                <div>${this.actionError}</div>
-              </div>
-            `
-          : nothing}
-
-        <div class="dock-footer">
-          <div class="hint" part="hint">
-            ${inputStatus.hint}
+    const errorTemplate = this.actionError
+      ? html`
+          <div class="notice" part="error">
+            <strong>Command failed</strong>
+            <div>${this.actionError}</div>
           </div>
+        `
+      : nothing;
 
-          <div class="actions">
-            <button
-              class="primary"
-              data-testid="tp-send-command"
-              ?disabled=${!controls.canSend}
-              @click=${() => this.sendDraft({ focusInput: true })}
-            >
-              Send command
-            </button>
-            <button
-              data-testid="tp-paste-clipboard"
-              title=${pasteTitle}
-              ?disabled=${!controls.canPasteClipboard}
-              @click=${() => this.pasteClipboard({ focusInput: true })}
-            >
-              Paste
-            </button>
-            <button
-              data-testid="tp-send-interrupt"
-              ?disabled=${!controls.canWriteInput}
-              @click=${() => this.sendShortcut("\u0003", { focusInput: true })}
-            >
-              Ctrl+C
-            </button>
-            <button
-              data-testid="tp-send-enter"
-              ?disabled=${!controls.canWriteInput}
-              @click=${() => this.sendShortcut("\r", { focusInput: true })}
-            >
-              Enter
-            </button>
-          </div>
+    const footerTemplate = html`
+      <div class="dock-footer">
+        <div class="hint" part="hint">
+          ${inputStatus.hint}
         </div>
 
-        <details part="session-tools" data-testid="tp-session-tools">
+        <div class="actions">
+          <button
+            class="primary"
+            data-testid="tp-send-command"
+            ?disabled=${!controls.canSend}
+            @click=${() => this.sendDraft({ focusInput: true })}
+          >
+            Send command
+          </button>
+          <button
+            data-testid="tp-paste-clipboard"
+            title=${pasteTitle}
+            ?disabled=${!controls.canPasteClipboard}
+            @click=${() => this.pasteClipboard({ focusInput: true })}
+          >
+            Paste
+          </button>
+          <button
+            data-testid="tp-send-interrupt"
+            ?disabled=${!controls.canWriteInput}
+            @click=${() => this.sendShortcut("\u0003", { focusInput: true })}
+          >
+            Ctrl+C
+          </button>
+          <button
+            data-testid="tp-send-enter"
+            ?disabled=${!controls.canWriteInput}
+            @click=${() => this.sendShortcut("\r", { focusInput: true })}
+          >
+            Enter
+          </button>
+        </div>
+      </div>
+    `;
+
+    const sessionToolsTemplate = html`
+      <details part="session-tools" data-testid="tp-session-tools">
           <summary>Session tools</summary>
           <div class="actions">
             <button
@@ -628,6 +609,40 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             </button>
           </div>
         </details>
+    `;
+
+    const orderedDockContent = isTerminalPlacement
+      ? [
+          composerTemplate,
+          errorTemplate,
+          headerTemplate,
+          quickCommandsTemplate,
+          commandHistoryTemplate,
+          footerTemplate,
+          sessionToolsTemplate,
+        ]
+      : [
+          headerTemplate,
+          quickCommandsTemplate,
+          commandHistoryTemplate,
+          composerTemplate,
+          errorTemplate,
+          footerTemplate,
+          sessionToolsTemplate,
+        ];
+
+    return html`
+      <div
+        class="panel dock"
+        part="command-dock"
+        data-testid="tp-command-dock"
+        data-placement=${this.placement}
+        data-command-input=${String(controls.canWriteInput)}
+        data-input-capability=${controls.inputCapabilityStatus}
+        data-save-capability=${controls.saveCapabilityStatus}
+        data-save-layout=${String(controls.canSaveLayout)}
+      >
+        ${orderedDockContent}
       </div>
     `;
   }

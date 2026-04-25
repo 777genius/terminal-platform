@@ -167,6 +167,8 @@ async function main() {
       || Math.abs(result.afterCreate.terminalInputGapPx ?? 99) > 1
       || result.afterCreate.terminalDockBottomOverflowPx !== 0
       || !result.afterCreate.terminalComposerBeforeDockStatus
+      || !result.afterCreate.terminalComposerBeforeDockStatusDom
+      || !result.afterCreate.terminalComposerFirstInDockDom
       || /Command Input|Focused pane command lane/.test(result.afterCreate.commandDockVisibleText ?? "")
       || result.afterCreate.commandInputStatus !== "Ready"
       || !result.afterCreate.commandInputFocused
@@ -238,6 +240,8 @@ async function main() {
       || Math.abs(result.afterCreateMobileLayout.terminalComposerGapPx ?? 99) > 1
       || Math.abs(result.afterCreateMobileLayout.terminalInputGapPx ?? 99) > 12
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatus
+      || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatusDom
+      || !result.afterCreateMobileLayout.terminalComposerFirstInDockDom
       || !result.afterCreateMobileLayout.commandRegionFollowsScreen
     ) {
       throw new Error(`Mobile active shell layout did not settle correctly: ${JSON.stringify(result.afterCreateMobileLayout)}`);
@@ -776,6 +780,12 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerBeforeDockStatus: commandComposerRect && dockHeaderRect
           ? commandComposerRect.top <= dockHeaderRect.top
           : false,
+        terminalComposerBeforeDockStatusDom: Boolean(
+          commandComposer
+          && commandInputStatus
+          && (commandComposer.compareDocumentPosition(commandInputStatus) & Node.DOCUMENT_POSITION_FOLLOWING)
+        ),
+        terminalComposerFirstInDockDom: commandDockPanel?.firstElementChild === commandComposer,
         commandDockVisibleText: commandDockPanel?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         commandInputFocused: commandRoot?.activeElement === input,
         saveLayoutTitle: saveLayout?.getAttribute('title') ?? null,
@@ -842,6 +852,7 @@ async function runSmokeScenario(browserUrl) {
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
       const commandComposer = commandRoot?.querySelector('[part="composer"]') ?? null;
+      const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
       const terminalScreenRect = terminalScreen?.getBoundingClientRect() ?? null;
       const screenViewportRect = screenViewport?.getBoundingClientRect() ?? null;
       const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
@@ -876,6 +887,12 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerBeforeDockStatus: commandComposerRect && dockHeaderRect
           ? commandComposerRect.top <= dockHeaderRect.top
           : false,
+        terminalComposerBeforeDockStatusDom: Boolean(
+          commandComposer
+          && commandInputStatus
+          && (commandComposer.compareDocumentPosition(commandInputStatus) & Node.DOCUMENT_POSITION_FOLLOWING)
+        ),
+        terminalComposerFirstInDockDom: commandDockPanel?.firstElementChild === commandComposer,
         commandRegionFollowsScreen: Boolean(
           terminalScreen
           && commandRegion
