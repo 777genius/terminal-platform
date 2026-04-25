@@ -151,6 +151,8 @@ async function main() {
       || !result.afterQuickCommandDraft.clicked
       || result.afterQuickCommandDraft.draft !== "node -v"
       || result.afterQuickCommandDraft.kernelDraft !== "node -v"
+      || !result.afterQuickCommandDraft.inputFocused
+      || !result.afterQuickCommandDraft.cursorAtEnd
       || result.afterCreate.savedSessionCount !== 0
       || result.afterCreate.savedPanelCount !== "0"
       || result.afterCreate.savedMatchedCount !== "0"
@@ -376,6 +378,8 @@ async function main() {
       !result.afterRecentCommandRecall.clicked
       || !result.afterRecentCommandRecall.recalledDraft?.includes("browser-smoke-ok")
       || !result.afterRecentCommandRecall.sendEnabled
+      || !result.afterRecentCommandRecall.inputFocused
+      || !result.afterRecentCommandRecall.cursorAtEnd
       || !result.afterRecentCommandRecall.historyBadgeText?.includes("history")
     ) {
       throw new Error(`Recent command recall did not update the draft correctly: ${JSON.stringify(result.afterRecentCommandRecall)}`);
@@ -762,6 +766,8 @@ async function runSmokeScenario(browserUrl) {
           reason: !textarea ? 'textarea missing' : 'node quick command missing',
           draft: textarea?.value ?? null,
           kernelDraft: null,
+          inputFocused: false,
+          cursorAtEnd: false,
         };
       }
 
@@ -773,6 +779,8 @@ async function runSmokeScenario(browserUrl) {
         clicked: true,
         draft: textarea.value,
         kernelDraft: paneId ? (debug?.drafts?.[paneId] ?? null) : null,
+        inputFocused: commandRoot.activeElement === textarea,
+        cursorAtEnd: textarea.selectionStart === textarea.value.length && textarea.selectionEnd === textarea.value.length,
       };
     })()`);
     let afterScreenSearch = {
@@ -1529,6 +1537,8 @@ async function runSmokeScenario(browserUrl) {
           reason: historyEntry ? 'textarea missing' : 'history entry missing',
           recalledDraft: textarea?.value ?? null,
           sendEnabled: false,
+          inputFocused: false,
+          cursorAtEnd: false,
           historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
             ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         };
@@ -1542,6 +1552,8 @@ async function runSmokeScenario(browserUrl) {
         entryTitle: historyEntry.getAttribute('title'),
         recalledDraft: textarea.value,
         sendEnabled: Boolean(sendButton && !sendButton.disabled),
+        inputFocused: commandRoot.activeElement === textarea,
+        cursorAtEnd: textarea.selectionStart === textarea.value.length && textarea.selectionEnd === textarea.value.length,
         historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
           ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
       };

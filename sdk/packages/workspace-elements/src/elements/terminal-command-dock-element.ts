@@ -331,7 +331,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                       data-testid="tp-quick-command"
                       title=${command.description ?? `Insert ${command.label}`}
                       ?disabled=${!controls.canWriteInput}
-                      @click=${() => this.setDraft(command.value)}
+                      @click=${() => this.setDraft(command.value, { focusInput: true })}
                     >
                       ${command.label}
                     </button>
@@ -355,7 +355,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                         data-history-index=${index}
                         title=${command}
                         ?disabled=${!controls.canWriteInput}
-                        @click=${() => this.setDraft(command)}
+                        @click=${() => this.setDraft(command, { focusInput: true })}
                       >
                         <span class="history-command">${command}</span>
                       </button>
@@ -464,7 +464,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     `;
   }
 
-  private setDraft(value: string): void {
+  private setDraft(value: string, options: { focusInput?: boolean } = {}): void {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
     if (!controls.activePaneId || !controls.canWriteInput) {
       return;
@@ -474,6 +474,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     this.clearHistoryClearConfirmation();
     this.resetHistoryNavigation();
     this.kernel?.commands.updateDraft(controls.activePaneId, value);
+    if (options.focusInput) {
+      void this.updateComplete.then(() => {
+        this.focusCommandInput();
+      });
+    }
   }
 
   private handleInput(event: Event): void {
@@ -599,13 +604,21 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
 
     const textarea = this.shadowRoot?.querySelector<HTMLTextAreaElement>('[data-testid="tp-command-input"]');
+    if (this.focusCommandInput(textarea)) {
+      this.#lastAutoFocusedPaneId = controls.activePaneId;
+    }
+  }
+
+  private focusCommandInput(
+    textarea = this.shadowRoot?.querySelector<HTMLTextAreaElement>('[data-testid="tp-command-input"]'),
+  ): boolean {
     if (!textarea || textarea.disabled) {
-      return;
+      return false;
     }
 
     textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-    this.#lastAutoFocusedPaneId = controls.activePaneId;
+    return true;
   }
 
   private async pasteClipboard(): Promise<void> {
