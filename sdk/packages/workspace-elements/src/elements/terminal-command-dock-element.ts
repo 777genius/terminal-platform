@@ -47,10 +47,15 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         border-top-left-radius: 0;
         border-top-right-radius: 0;
         box-shadow: none;
+        color: var(--tp-terminal-color-text);
         gap: var(--tp-space-2);
         background:
-          linear-gradient(180deg, color-mix(in srgb, #05070b 86%, transparent), #05070b),
-          #05070b;
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--tp-terminal-color-bg) 86%, transparent),
+            var(--tp-terminal-color-bg)
+          ),
+          var(--tp-terminal-color-bg);
         padding: var(--tp-space-2) var(--tp-space-4) var(--tp-space-3);
       }
 
@@ -122,8 +127,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .chip {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-color-bg-inset) 72%, transparent);
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 78%, transparent);
+        color: var(--tp-terminal-color-text-muted);
         padding: 0.3rem 0.5rem;
       }
 
@@ -152,8 +159,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .history-chip {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-color-bg-inset) 72%, transparent);
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 78%, transparent);
+        color: var(--tp-terminal-color-text);
         padding: 0.3rem 0.5rem;
       }
 
@@ -177,11 +186,19 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .composer {
-        border-color: color-mix(in srgb, var(--tp-color-accent) 32%, var(--tp-color-border));
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 36%,
+          var(--tp-terminal-color-border)
+        );
         border-radius: 0.55rem;
         background:
-          linear-gradient(180deg, color-mix(in srgb, var(--tp-color-bg-inset) 86%, transparent), transparent),
-          color-mix(in srgb, #05070b 92%, var(--tp-color-bg-inset));
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--tp-terminal-color-bg-raised) 86%, transparent),
+            transparent
+          ),
+          color-mix(in srgb, var(--tp-terminal-color-bg) 92%, var(--tp-terminal-color-bg-raised));
         padding: 0.48rem 0.62rem;
       }
 
@@ -193,6 +210,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .prompt {
+        color: var(--tp-terminal-color-accent);
         padding-top: 0.28rem;
       }
 
@@ -208,12 +226,17 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] textarea {
+        color: var(--tp-terminal-color-text);
         min-height: 2rem;
         resize: none;
       }
 
       textarea::placeholder {
         color: color-mix(in srgb, var(--tp-color-text-muted) 72%, transparent);
+      }
+
+      .dock[data-placement="terminal"] textarea::placeholder {
+        color: color-mix(in srgb, var(--tp-terminal-color-text-muted) 78%, transparent);
       }
 
       textarea:disabled {
@@ -227,13 +250,30 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .hint {
+        color: var(--tp-terminal-color-text-muted);
         font-size: 0.78rem;
         line-height: 1.35;
+      }
+
+      .dock[data-placement="terminal"] .actions button {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-radius: 0.45rem;
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
+        color: var(--tp-terminal-color-text);
       }
 
       .primary {
         border-color: color-mix(in srgb, var(--tp-color-accent) 52%, transparent);
         background: color-mix(in srgb, var(--tp-color-accent) 18%, var(--tp-color-panel-raised));
+      }
+
+      .dock[data-placement="terminal"] .primary {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 54%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 16%,
+          var(--tp-terminal-color-bg-raised)
+        );
       }
 
       .badge {
@@ -248,8 +288,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .badge {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-color-bg-inset) 72%, transparent);
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 78%, transparent);
+        color: var(--tp-terminal-color-text-muted);
         padding: 0.2rem 0.48rem;
       }
 
@@ -277,7 +319,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] details {
-        border-top-color: color-mix(in srgb, var(--tp-color-border) 58%, transparent);
+        border-top-color: color-mix(in srgb, var(--tp-terminal-color-border) 58%, transparent);
         padding-top: var(--tp-space-2);
       }
 
@@ -285,6 +327,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         cursor: pointer;
         color: var(--tp-color-text-muted);
         font-weight: 600;
+      }
+
+      .dock[data-placement="terminal"] summary {
+        color: var(--tp-terminal-color-text-muted);
       }
 
       @media (max-width: 720px) {

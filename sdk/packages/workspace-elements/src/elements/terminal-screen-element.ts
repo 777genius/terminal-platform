@@ -64,9 +64,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
       .screen[data-placement="terminal"] {
         gap: var(--tp-space-2);
+        color: var(--tp-terminal-color-text);
         background:
-          linear-gradient(180deg, color-mix(in srgb, #0b111a 92%, transparent), #05070b),
-          #05070b;
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--tp-terminal-color-bg-raised) 92%, transparent),
+            var(--tp-terminal-color-bg)
+          ),
+          var(--tp-terminal-color-bg);
       }
 
       .screen-header {
@@ -90,7 +95,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
       .screen[data-placement="terminal"] .panel-title {
         overflow: hidden;
-        color: var(--tp-color-text);
+        color: var(--tp-terminal-color-text);
         font-size: 0.96rem;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -112,8 +117,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .screen-actions button {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-color-bg-inset) 76%, transparent);
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 84%, transparent);
+        color: var(--tp-terminal-color-text);
         font-size: 0.82rem;
         padding: 0.32rem 0.55rem;
       }
@@ -154,10 +161,16 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .search input {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-color-bg-inset) 76%, transparent);
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 84%, transparent);
+        color: var(--tp-terminal-color-text);
         font-size: 0.84rem;
         padding: 0.34rem 0.55rem;
+      }
+
+      .screen[data-placement="terminal"] .search input::placeholder {
+        color: color-mix(in srgb, var(--tp-terminal-color-text-muted) 72%, transparent);
       }
 
       .search input:focus-visible {
@@ -174,6 +187,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         color: var(--tp-color-text-muted);
         font-size: 0.82rem;
         white-space: nowrap;
+      }
+
+      .screen[data-placement="terminal"] .search-count {
+        color: var(--tp-terminal-color-text-muted);
       }
 
       .screen[data-placement="terminal"] .search-count[data-search-active="false"] {
@@ -196,8 +213,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .search-actions button {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-color-bg-inset) 76%, transparent);
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 84%, transparent);
+        color: var(--tp-terminal-color-text);
         font-size: 0.82rem;
         padding: 0.34rem 0.55rem;
       }
@@ -217,7 +236,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           --tp-terminal-screen-viewport-border-bottom-right-radius,
           var(--tp-radius-lg)
         );
-        background: #05070b;
+        background: var(--tp-terminal-color-bg);
+        color: var(--tp-terminal-color-text);
         padding: var(--tp-space-3);
         font-family: var(--tp-font-family-mono);
         font-size: 0.9rem;
@@ -226,11 +246,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .viewport {
-        border-color: color-mix(in srgb, var(--tp-color-border) 62%, transparent);
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
         border-radius: 0.6rem 0.6rem 0 0;
         border-bottom-left-radius: var(--tp-terminal-screen-viewport-border-bottom-left-radius, 0);
         border-bottom-right-radius: var(--tp-terminal-screen-viewport-border-bottom-right-radius, 0);
-        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--tp-color-accent) 16%, transparent);
+        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--tp-terminal-color-accent) 18%, transparent);
       }
 
       .viewport:focus-visible {
@@ -270,6 +290,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         user-select: none;
       }
 
+      .screen[data-placement="terminal"] .gutter {
+        color: color-mix(in srgb, var(--tp-terminal-color-text-muted) 58%, transparent);
+      }
+
       .text {
         white-space: pre-wrap;
         overflow-wrap: anywhere;
@@ -285,6 +309,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       mark[data-active="true"] {
         outline: 1px solid color-mix(in srgb, var(--tp-color-warning) 80%, transparent);
         background: color-mix(in srgb, var(--tp-color-warning) 58%, var(--tp-color-bg));
+      }
+
+      .screen[data-placement="terminal"] mark {
+        color: var(--tp-terminal-color-text);
+      }
+
+      .screen[data-placement="terminal"] mark[data-active="true"] {
+        background: color-mix(in srgb, var(--tp-color-warning) 58%, var(--tp-terminal-color-bg));
       }
 
       .screen-meta {
@@ -303,13 +335,15 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .screen-meta {
+        color: var(--tp-terminal-color-text-muted);
         gap: 0.35rem;
         font-size: 0.78rem;
       }
 
       .screen[data-placement="terminal"] .screen-meta span {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-color-bg-inset) 76%, transparent);
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 78%, transparent);
         padding: 0.18rem 0.45rem;
       }
 
