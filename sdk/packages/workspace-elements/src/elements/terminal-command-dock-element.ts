@@ -4,6 +4,7 @@ import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-cons
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import { readClipboardText } from "./terminal-clipboard.js";
 import { resolveTerminalCommandInputStatus } from "./terminal-command-input-status.js";
+import { TERMINAL_DESTRUCTIVE_CONFIRMATION_RESET_MS } from "./terminal-destructive-action.js";
 import {
   defaultTerminalCommandQuickCommands,
   resolveTerminalCommandQuickCommands,
@@ -18,6 +19,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     quickCommands: { attribute: false },
     pending: { state: true },
     actionError: { state: true },
+    historyClearConfirmationArmed: { state: true },
   };
 
   static styles = [
@@ -220,15 +222,23 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   declare quickCommands: readonly TerminalCommandQuickCommand[] | null | undefined;
   protected declare pending: boolean;
   protected declare actionError: string | null;
+  protected declare historyClearConfirmationArmed: boolean;
 
   #historyCursor: number | null = null;
   #historyDraftBeforeNavigation = "";
+  #historyClearConfirmationResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     super();
     this.quickCommands = defaultTerminalCommandQuickCommands;
     this.pending = false;
     this.actionError = null;
+    this.historyClearConfirmationArmed = false;
+  }
+
+  override disconnectedCallback(): void {
+    this.clearHistoryClearConfirmationResetTimer();
+    super.disconnectedCallback();
   }
 
   override render() {
@@ -246,6 +256,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     const activePaneIdentity = controls.activePaneId
       ? resolveTerminalEntityIdLabel(controls.activePaneId, { prefix: "Pane" })
       : null;
+    const historyCountLabel = formatCommandHistoryCount(controls.commandHistory.length);
+    const isHistoryClearConfirming =
+      this.historyClearConfirmationArmed && controls.commandHistory.length > 0 && !this.pending;
+    const clearHistoryTitle = isHistoryClearConfirming
+      ? `Confirm clearing ${historyCountLabel}`
+      : `Clear ${historyCountLabel}`;
 
     return html`
       <div
@@ -416,10 +432,15 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             </button>
             <button
               data-testid="tp-clear-command-history"
+              data-danger="true"
+              data-confirming=${String(isHistoryClearConfirming)}
+              data-history-count=${String(controls.commandHistory.length)}
+              title=${clearHistoryTitle}
+              aria-label=${clearHistoryTitle}
               ?disabled=${controls.commandHistory.length === 0 || this.pending}
-              @click=${() => this.clearCommandHistory()}
+              @click=${() => this.handleClearCommandHistoryClick()}
             >
-              Clear history
+              ${isHistoryClearConfirming ? `Confirm clear ${controls.commandHistory.length}` : "Clear history"}
             </button>
           </div>
         </details>
@@ -434,6 +455,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
 
     this.actionError = null;
+    this.clearHistoryClearConfirmation();
     this.resetHistoryNavigation();
     this.kernel?.commands.updateDraft(controls.activePaneId, value);
   }
@@ -470,6 +492,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
     await this.dispatchInput(controls.activeSessionId, controls.activePaneId, `${controls.draft}\n`);
     this.recordCommandHistory(controls.draft);
+    this.clearHistoryClearConfirmation();
     this.resetHistoryNavigation();
     this.kernel?.commands.clearDraft(controls.activePaneId);
   }
@@ -528,6 +551,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private applyHistoryDraft(paneId: string, target: HTMLTextAreaElement, value: string): void {
+    this.clearHistoryClearConfirmation();
     target.value = value;
     target.setSelectionRange(value.length, value.length);
     this.kernel?.commands.updateDraft(paneId, value);
@@ -550,6 +574,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
     this.pending = true;
     this.actionError = null;
+    this.clearHistoryClearConfirmation();
 
     let pastedText = "";
     try {
@@ -585,12 +610,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
+    this.clearHistoryClearConfirmation();
     await this.dispatchInput(controls.activeSessionId, controls.activePaneId, data);
   }
 
   private async dispatchPaste(sessionId: string, paneId: string, data: string): Promise<void> {
     this.pending = true;
     this.actionError = null;
+    this.clearHistoryClearConfirmation();
 
     try {
       await this.kernel?.commands.dispatchMuxCommand(sessionId, {
@@ -623,6 +650,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   private async dispatchInput(sessionId: string, paneId: string, data: string): Promise<void> {
     this.pending = true;
     this.actionError = null;
+    this.clearHistoryClearConfirmation();
 
     try {
       await this.kernel?.commands.dispatchMuxCommand(sessionId, {
@@ -660,6 +688,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
     this.pending = true;
     this.actionError = null;
+    this.clearHistoryClearConfirmation();
 
     try {
       await this.kernel?.commands.dispatchMuxCommand(controls.activeSessionId, { kind: "save_session" });
@@ -698,6 +727,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
     this.pending = true;
     this.actionError = null;
+    this.clearHistoryClearConfirmation();
 
     try {
       await this.kernel?.commands.attachSession(sessionId);
@@ -722,7 +752,23 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
   }
 
+  private handleClearCommandHistoryClick(): void {
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    if (controls.commandHistory.length === 0 || this.pending) {
+      this.clearHistoryClearConfirmation();
+      return;
+    }
+
+    if (!this.historyClearConfirmationArmed) {
+      this.setHistoryClearConfirmation();
+      return;
+    }
+
+    this.clearCommandHistory();
+  }
+
   private clearCommandHistory(): void {
+    this.clearHistoryClearConfirmation();
     this.resetHistoryNavigation();
     this.kernel?.commands.clearCommandHistory();
     this.dispatchEvent(
@@ -732,6 +778,28 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }),
     );
   }
+
+  private setHistoryClearConfirmation(): void {
+    this.actionError = null;
+    this.historyClearConfirmationArmed = true;
+    this.clearHistoryClearConfirmationResetTimer();
+    this.#historyClearConfirmationResetTimer = setTimeout(() => {
+      this.historyClearConfirmationArmed = false;
+      this.#historyClearConfirmationResetTimer = null;
+    }, TERMINAL_DESTRUCTIVE_CONFIRMATION_RESET_MS);
+  }
+
+  private clearHistoryClearConfirmation(): void {
+    this.historyClearConfirmationArmed = false;
+    this.clearHistoryClearConfirmationResetTimer();
+  }
+
+  private clearHistoryClearConfirmationResetTimer(): void {
+    if (this.#historyClearConfirmationResetTimer) {
+      clearTimeout(this.#historyClearConfirmationResetTimer);
+      this.#historyClearConfirmationResetTimer = null;
+    }
+  }
 }
 
 function getErrorMessage(error: unknown): string {
@@ -740,4 +808,8 @@ function getErrorMessage(error: unknown): string {
   }
 
   return "Workspace command failed";
+}
+
+function formatCommandHistoryCount(count: number): string {
+  return `${count} command history ${count === 1 ? "entry" : "entries"}`;
 }

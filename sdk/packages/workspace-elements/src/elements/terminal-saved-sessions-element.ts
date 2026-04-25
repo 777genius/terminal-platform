@@ -2,6 +2,7 @@ import { css, html } from "lit";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import { TERMINAL_DESTRUCTIVE_CONFIRMATION_RESET_MS } from "./terminal-destructive-action.js";
 import {
   findRestorableSavedSession,
   hasSavedSession,
@@ -11,7 +12,6 @@ import {
 
 const DEFAULT_VISIBLE_SAVED_SESSIONS = TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT;
 const SAVED_SESSION_PAGE_SIZE = 8;
-const SAVED_SESSION_CONFIRMATION_RESET_MS = 4000;
 
 export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -92,15 +92,6 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
         margin-top: var(--tp-space-2);
       }
 
-      button[data-danger="true"] {
-        border-color: color-mix(in srgb, var(--tp-color-danger) 42%, transparent);
-        color: var(--tp-color-danger);
-      }
-
-      button[data-confirming="true"] {
-        background: color-mix(in srgb, var(--tp-color-danger) 16%, var(--tp-color-panel-raised));
-      }
-
       .list-footer {
         display: grid;
         gap: var(--tp-space-2);
@@ -115,10 +106,6 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
 
       .list-controls button[data-danger="true"] {
         margin-left: auto;
-      }
-
-      .list-controls button[data-danger="true"][data-confirming="true"] {
-        background: color-mix(in srgb, var(--tp-color-danger) 16%, var(--tp-color-panel-raised));
       }
 
       .summary {
@@ -580,7 +567,7 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
         this.deleteConfirmationSessionId = null;
       }
       this.#deleteConfirmationResetTimer = null;
-    }, SAVED_SESSION_CONFIRMATION_RESET_MS);
+    }, TERMINAL_DESTRUCTIVE_CONFIRMATION_RESET_MS);
   }
 
   private clearDeleteConfirmation(): void {
@@ -602,7 +589,7 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
     this.#pruneConfirmationResetTimer = setTimeout(() => {
       this.pruneConfirmationArmed = false;
       this.#pruneConfirmationResetTimer = null;
-    }, SAVED_SESSION_CONFIRMATION_RESET_MS);
+    }, TERMINAL_DESTRUCTIVE_CONFIRMATION_RESET_MS);
   }
 
   private clearPruneConfirmation(): void {

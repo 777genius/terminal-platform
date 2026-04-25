@@ -83,6 +83,15 @@ export const terminalElementStyles = css`
     opacity: 0.5;
   }
 
+  button[data-danger="true"] {
+    border-color: color-mix(in srgb, var(--tp-color-danger) 42%, transparent);
+    color: var(--tp-color-danger);
+  }
+
+  button[data-confirming="true"] {
+    background: color-mix(in srgb, var(--tp-color-danger) 16%, var(--tp-color-panel-raised));
+  }
+
   code,
   pre {
     font-family: var(--tp-font-family-mono);

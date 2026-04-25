@@ -371,9 +371,14 @@ async function main() {
     if (
       !result.afterCommandHistoryClear.clicked
       || result.afterCommandHistoryClear.beforeCount < 1
+      || !result.afterCommandHistoryClear.firstClickArmed
+      || !result.afterCommandHistoryClear.firstClickLabel?.includes("Confirm clear")
+      || result.afterCommandHistoryClear.afterFirstCount !== result.afterCommandHistoryClear.beforeCount
+      || result.afterCommandHistoryClear.clearedEventsAfterFirst !== 0
       || result.afterCommandHistoryClear.afterCount !== 0
       || result.afterCommandHistoryClear.clearedEvents !== 1
       || result.afterCommandHistoryClear.clearButtonDisabled !== true
+      || result.afterCommandHistoryClear.finalConfirming !== false
       || !result.afterCommandHistoryClear.historyBadgeText?.startsWith("0 ")
     ) {
       throw new Error(`Command history clear did not settle correctly: ${JSON.stringify(result.afterCommandHistoryClear)}`);
@@ -1608,8 +1613,13 @@ async function runSmokeScenario(browserUrl) {
           clicked: false,
           reason: 'clear history controls missing',
           beforeCount,
+          afterFirstCount: beforeCount,
           afterCount: beforeCount,
           clearedEvents: 0,
+          clearedEventsAfterFirst: 0,
+          firstClickArmed: false,
+          firstClickLabel: null,
+          finalConfirming: false,
           clearButtonDisabled: clearButton?.disabled ?? null,
           historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
             ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
@@ -1628,8 +1638,13 @@ async function runSmokeScenario(browserUrl) {
           clicked: false,
           reason: 'clear history disabled',
           beforeCount,
+          afterFirstCount: beforeCount,
           afterCount: beforeCount,
           clearedEvents,
+          clearedEventsAfterFirst: clearedEvents,
+          firstClickArmed: false,
+          firstClickLabel: clearButton.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+          finalConfirming: clearButton.getAttribute('data-confirming') === 'true',
           clearButtonDisabled: true,
           historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
             ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
@@ -1638,13 +1653,45 @@ async function runSmokeScenario(browserUrl) {
 
       clearButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const armedButton = commandRoot.querySelector('[data-testid="tp-clear-command-history"]');
+      const firstClickLabel = armedButton?.textContent?.replace(/\\s+/g, ' ').trim() ?? null;
+      const firstClickArmed = armedButton?.getAttribute('data-confirming') === 'true';
+      const afterFirstCount = window.terminalDemoDebug?.getState?.()?.commandHistory?.entries?.length ?? 0;
+      const clearedEventsAfterFirst = clearedEvents;
+
+      if (!armedButton || armedButton.disabled) {
+        return {
+          clicked: true,
+          reason: armedButton ? 'clear history confirmation disabled' : 'clear history confirmation missing',
+          beforeCount,
+          afterFirstCount,
+          afterCount: afterFirstCount,
+          clearedEvents,
+          clearedEventsAfterFirst,
+          firstClickArmed,
+          firstClickLabel,
+          finalConfirming: firstClickArmed,
+          clearButtonDisabled: armedButton?.disabled ?? null,
+          historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
+            ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        };
+      }
+
+      armedButton.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const finalButton = commandRoot.querySelector('[data-testid="tp-clear-command-history"]');
       const state = window.terminalDemoDebug?.getState?.();
       return {
         clicked: true,
         beforeCount,
+        afterFirstCount,
         afterCount: state?.commandHistory?.entries?.length ?? 0,
         clearedEvents,
-        clearButtonDisabled: clearButton.disabled,
+        clearedEventsAfterFirst,
+        firstClickArmed,
+        firstClickLabel,
+        finalConfirming: finalButton?.getAttribute('data-confirming') === 'true',
+        clearButtonDisabled: finalButton?.disabled ?? null,
         historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
           ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
       };
