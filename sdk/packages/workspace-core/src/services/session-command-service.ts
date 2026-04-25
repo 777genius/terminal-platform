@@ -1,5 +1,5 @@
 import { AsyncLane } from "@terminal-platform/foundation";
-import { toWorkspaceError } from "@terminal-platform/workspace-contracts";
+import { toWorkspaceError, WorkspaceError } from "@terminal-platform/workspace-contracts";
 
 import type {
   BackendKind,
@@ -14,6 +14,7 @@ import type {
 } from "@terminal-platform/runtime-types";
 import type { WorkspaceSubscription } from "@terminal-platform/workspace-contracts";
 
+import type { WorkspaceSnapshot } from "../read-models/workspace-snapshot.js";
 import type { CatalogService } from "./catalog-service.js";
 import type { ServiceContext } from "./service-context.js";
 
@@ -96,6 +97,11 @@ export class SessionCommandService {
   restoreSavedSession(sessionId: SessionId): Promise<void> {
     return this.#lane.enqueue(async () => {
       try {
+        const restoreBlocker = findSavedSessionRestoreBlocker(this.#context.getSnapshot(), sessionId);
+        if (restoreBlocker) {
+          throw restoreBlocker;
+        }
+
         const transport = await this.#context.ensureTransport();
         const restored = await transport.restoreSavedSession(sessionId);
 
@@ -203,6 +209,22 @@ export class SessionCommandService {
 
     return workspaceError;
   }
+}
+
+function findSavedSessionRestoreBlocker(
+  snapshot: WorkspaceSnapshot,
+  sessionId: SessionId,
+): WorkspaceError | null {
+  const savedSession = snapshot.catalog.savedSessions.find((candidate) => candidate.session_id === sessionId);
+  if (!savedSession || savedSession.compatibility.can_restore) {
+    return null;
+  }
+
+  return new WorkspaceError({
+    code: "unsupported_capability",
+    message: `saved session ${sessionId} is not restore-compatible: ${savedSession.compatibility.status}`,
+    recoverable: false,
+  });
 }
 
 function mergeSession<TSession extends { session_id: string }>(

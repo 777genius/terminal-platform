@@ -341,6 +341,45 @@ describe("createWorkspaceKernel saved session maintenance", () => {
 
     await kernel.dispose();
   });
+
+  it("blocks incompatible saved session restore before calling transport", async () => {
+    const savedSession = createSavedSessionSummary("saved-1", 1_000n);
+    savedSession.compatibility = {
+      can_restore: false,
+      status: "protocol_minor_ahead",
+    };
+    let restoreCalls = 0;
+    const kernel = createWorkspaceKernel({
+      now: () => 3_000,
+      transport: {
+        ...createUnusedTransport(),
+        listSavedSessions: async () => [savedSession],
+        restoreSavedSession: async () => {
+          restoreCalls += 1;
+          throw new Error("transport should not be called");
+        },
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.commands.refreshSavedSessions();
+    await expect(kernel.commands.restoreSavedSession("saved-1")).rejects.toMatchObject({
+      code: "unsupported_capability",
+      recoverable: false,
+    });
+
+    expect(restoreCalls).toBe(0);
+    expect(kernel.diagnostics.list()).toEqual([
+      {
+        code: "unsupported_capability",
+        message: "saved session saved-1 is not restore-compatible: protocol_minor_ahead",
+        recoverable: false,
+        severity: "error",
+        timestampMs: 3_000,
+      },
+    ]);
+
+    await kernel.dispose();
+  });
 });
 
 function createUnusedTransport(): WorkspaceTransportClient {
