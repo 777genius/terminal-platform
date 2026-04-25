@@ -57,9 +57,9 @@ button {
 }
 
 .shell[data-has-active-session="true"] {
-  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
-  gap: 14px;
-  padding: 14px;
+  grid-template-columns: minmax(13.5rem, 16rem) minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
 }
 
 .shell--error {
@@ -106,8 +106,8 @@ button {
 }
 
 .shell[data-has-active-session="true"] .hero {
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 10px;
 }
 
 .hero__content {
@@ -123,17 +123,18 @@ button {
 }
 
 .shell[data-has-active-session="true"] .hero__content {
-  gap: 10px;
+  gap: 6px;
 }
 
 .shell[data-has-active-session="true"] .hero__title {
-  margin-bottom: 4px;
-  font-size: clamp(1.35rem, 2vw, 1.8rem);
-  max-width: 12ch;
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.12;
+  max-width: none;
 }
 
 .shell[data-has-active-session="true"] .hero__copy {
-  font-size: 0.9rem;
+  display: none;
 }
 
 .hero__copy,
@@ -183,7 +184,21 @@ button {
 }
 
 .shell[data-has-active-session="true"] .hero__kpis {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.shell[data-has-active-session="true"] .hero__stat {
+  gap: 2px;
+  padding: 7px;
+}
+
+.shell[data-has-active-session="true"] .hero__stat span {
+  font-size: 0.62rem;
+}
+
+.shell[data-has-active-session="true"] .hero__stat strong {
+  font-size: 0.82rem;
 }
 
 .hero__stat {
@@ -228,14 +243,49 @@ button {
 }
 
 .shell[data-has-active-session="true"] .panel--surface {
-  padding: 16px;
+  padding: 10px;
+}
+
+.shell[data-has-active-session="true"] .shell__sidebar,
+.shell[data-has-active-session="true"] .shell__main {
+  gap: 10px;
+}
+
+.shell[data-has-active-session="true"] .panel--workspace {
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.shell[data-has-active-session="true"] .panel__header--workspace {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: rgba(7, 9, 12, 0.48);
+  padding: 9px 12px;
+}
+
+.shell[data-has-active-session="true"] .panel__header--workspace .section__eyebrow,
+.shell[data-has-active-session="true"] .panel__header--workspace .section__copy {
+  display: none;
+}
+
+.shell[data-has-active-session="true"] .workspace-summary__title {
+  font-size: 0.98rem;
+}
+
+.shell[data-has-active-session="true"] .workspace-stack {
+  gap: 0;
+}
+
+.shell[data-has-active-session="true"] .terminal-workspace-host {
+  min-height: 0;
 }
 
 .shell[data-has-active-session="true"] tp-terminal-workspace {
-  --tp-workspace-sidebar-target-width: clamp(11.5rem, 15vw, 13.5rem);
-  --tp-workspace-inspector-target-width: clamp(14rem, 18vw, 18rem);
-  --tp-terminal-screen-viewport-min-height: clamp(20rem, 44vh, 32rem);
-  --tp-terminal-screen-viewport-max-height: min(52vh, 38rem);
+  --tp-workspace-sidebar-target-width: clamp(10.5rem, 13vw, 12rem);
+  --tp-workspace-inspector-target-width: clamp(13rem, 17vw, 17rem);
+  --tp-terminal-screen-viewport-min-height: clamp(24rem, 56vh, 42rem);
+  --tp-terminal-screen-viewport-max-height: min(66vh, 50rem);
   --tp-terminal-screen-mobile-viewport-min-height: clamp(13rem, 34vh, 18rem);
   --tp-terminal-screen-mobile-viewport-max-height: min(42vh, 22rem);
 }

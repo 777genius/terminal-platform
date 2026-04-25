@@ -131,6 +131,8 @@ async function main() {
       || result.afterCreate.demoMainWidth < 1000
       || result.afterCreate.demoMainWidth <= result.afterCreate.demoSidebarWidth * 3
       || result.afterCreate.workspaceHostWidth < 1000
+      || result.afterCreate.workspaceHostTopOffset == null
+      || result.afterCreate.workspaceHostTopOffset > 90
       || result.afterCreate.workspaceContentWidth < 800
       || result.afterCreate.documentHorizontalOverflow > 1
       || result.afterCreate.workspaceLayout !== "operations-deck"
@@ -698,6 +700,9 @@ async function runSmokeScenario(browserUrl) {
         demoSidebarWidth: Math.round(demoSidebar?.getBoundingClientRect().width ?? 0),
         demoMainWidth: Math.round(demoMain?.getBoundingClientRect().width ?? 0),
         workspaceHostWidth: Math.round(workspaceHostSlot?.getBoundingClientRect().width ?? 0),
+        workspaceHostTopOffset: demoMain && workspaceHostSlot
+          ? Math.round(workspaceHostSlot.getBoundingClientRect().top - demoMain.getBoundingClientRect().top)
+          : null,
         workspaceContentWidth: Math.round(workspaceContent?.getBoundingClientRect().width ?? 0),
         documentHorizontalOverflow: Math.max(
           0,

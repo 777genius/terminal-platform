@@ -599,7 +599,7 @@ export function TerminalDemoWorkspaceScreen(props: {
 
       <main className="shell__main">
         <section className="panel panel--surface panel--workspace">
-          <div className="panel__header">
+          <div className="panel__header panel__header--workspace">
             <div>
               <div className="section__eyebrow">Workspace</div>
               <h2 className="section__title workspace-summary__title" data-testid="workspace-active-title">
@@ -631,7 +631,7 @@ export function TerminalDemoWorkspaceScreen(props: {
           </div>
 
           <div className="workspace-stack">
-            <div data-testid="terminal-workspace-host">
+            <div className="terminal-workspace-host" data-testid="terminal-workspace-host">
               <TerminalWorkspace
                 autoFocusCommandInput={true}
                 kernel={props.kernel}
