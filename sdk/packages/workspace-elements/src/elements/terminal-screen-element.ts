@@ -12,6 +12,10 @@ import {
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import {
+  shouldRefreshAfterTerminalDirectInput,
+  TerminalDirectInputBuffer,
+} from "./terminal-direct-input-buffer.js";
 import { terminalInputForKeyboardEvent } from "./terminal-keyboard-input.js";
 import { resolveTerminalScreenControlState } from "./terminal-screen-controls.js";
 
@@ -234,6 +238,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   #autoScrolling = false;
   #copyStateResetTimer: ReturnType<typeof setTimeout> | null = null;
   #directInputQueue = Promise.resolve();
+  #directInputBuffer: TerminalDirectInputBuffer;
 
   constructor() {
     super();
@@ -241,10 +246,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     this.searchQuery = "";
     this.activeSearchMatchIndex = null;
     this.copyState = "idle";
+    this.#directInputBuffer = new TerminalDirectInputBuffer({
+      flush: (input) => this.queueDirectInput(input),
+    });
   }
 
   override disconnectedCallback(): void {
     this.clearCopyStateResetTimer();
+    this.#directInputBuffer.dispose();
     super.disconnectedCallback();
   }
 
@@ -568,7 +577,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     }
 
     event.preventDefault();
-    this.queueDirectInput(input);
+    this.#directInputBuffer.push(input);
   }
 
   private queueDirectInput(input: string): void {
@@ -589,7 +598,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         pane_id: controls.activePaneId,
         data: input,
       });
-      if (shouldRefreshAfterDirectInput(input)) {
+      if (shouldRefreshAfterTerminalDirectInput(input)) {
         await this.kernel?.commands.attachSession(controls.activeSessionId);
       }
       this.dispatchEvent(
@@ -666,8 +675,4 @@ function renderHighlightedSegments(
 
 function isViewportAtBottom(viewport: HTMLElement): boolean {
   return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2;
-}
-
-function shouldRefreshAfterDirectInput(input: string): boolean {
-  return input === "\r" || input === "\u0003" || input === "\u0004";
 }
