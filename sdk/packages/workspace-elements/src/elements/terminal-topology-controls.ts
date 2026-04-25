@@ -9,6 +9,8 @@ import type {
 } from "@terminal-platform/runtime-types";
 import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
+export { compactTerminalId } from "./terminal-identity.js";
+
 export const TERMINAL_PANE_MIN_ROWS = 4;
 export const TERMINAL_PANE_MIN_COLS = 20;
 export const TERMINAL_PANE_MAX_ROWS = 80;
@@ -154,14 +156,6 @@ export function countPaneTreeLeaves(node: PaneTreeNode): number {
   }
 
   return countPaneTreeLeaves(node.first) + countPaneTreeLeaves(node.second);
-}
-
-export function compactTerminalId(id: string): string {
-  if (id.length <= 18) {
-    return id;
-  }
-
-  return `${id.slice(0, 8)}...${id.slice(-6)}`;
 }
 
 function capabilityEnabled(

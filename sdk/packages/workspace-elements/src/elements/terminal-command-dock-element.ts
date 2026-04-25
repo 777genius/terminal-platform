@@ -10,6 +10,7 @@ import {
   type TerminalCommandQuickCommand,
 } from "./terminal-command-quick-commands.js";
 import { resolveTerminalCommandDockControlState } from "./terminal-command-dock-controls.js";
+import { resolveTerminalEntityIdLabel } from "./terminal-identity.js";
 
 export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -242,6 +243,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       : controls.saveCapabilityStatus === "unknown"
         ? "Save layout is disabled until backend capabilities load"
         : "Save the focused session layout";
+    const activePaneIdentity = controls.activePaneId
+      ? resolveTerminalEntityIdLabel(controls.activePaneId, { prefix: "Pane" })
+      : null;
 
     return html`
       <div
@@ -261,8 +265,13 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           </div>
 
           <div class="dock-status" part="status">
-            <span class="badge" data-tone=${controls.activePaneId ? "ready" : "idle"}>
-              ${controls.activePaneId ? `Pane ${controls.activePaneId}` : "No pane"}
+            <span
+              class="badge"
+              data-testid="tp-command-active-pane"
+              data-tone=${controls.activePaneId ? "ready" : "idle"}
+              title=${activePaneIdentity?.title ?? ""}
+            >
+              ${activePaneIdentity?.label ?? "No pane"}
             </span>
             <span
               class="badge"

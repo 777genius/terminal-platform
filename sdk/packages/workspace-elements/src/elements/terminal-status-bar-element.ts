@@ -2,6 +2,7 @@ import { css, html } from "lit";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import { resolveTerminalEntityIdLabel } from "./terminal-identity.js";
 
 export class TerminalStatusBarElement extends WorkspaceKernelConsumerElement {
   static styles = [
@@ -88,12 +89,18 @@ export class TerminalStatusBarElement extends WorkspaceKernelConsumerElement {
     const health = this.snapshot.attachedSession?.health ?? null;
     const connectionTone = connectionToneFor(this.snapshot.connection.state);
     const healthTone = healthToneFor(health?.phase ?? null);
+    const sessionIdentity = activeSession
+      ? resolveTerminalEntityIdLabel(activeSession.session_id, { prefix: "Session" })
+      : null;
+    const paneIdentity = screen
+      ? resolveTerminalEntityIdLabel(screen.pane_id, { prefix: "Pane" })
+      : null;
 
     return html`
       <div class="panel status" part="status-bar" data-testid="tp-status-bar">
         <div class="primary">
-          <span class="title" part="title">
-            ${activeSession ? activeSession.title ?? activeSession.session_id : "No active session"}
+          <span class="title" part="title" title=${activeSession?.session_id ?? ""}>
+            ${activeSession ? activeSession.title ?? sessionIdentity?.label : "No active session"}
           </span>
           <span class="pill" part="connection" data-tone=${connectionTone}>
             ${connectionLabelFor(this.snapshot.connection.state)}
@@ -105,11 +112,27 @@ export class TerminalStatusBarElement extends WorkspaceKernelConsumerElement {
 
         <div class="metrics" part="metrics">
           ${activeSession
-            ? html`<span class="pill" part="session"><code>${activeSession.session_id}</code></span>`
+            ? html`
+                <span
+                  class="pill"
+                  part="session"
+                  data-testid="tp-status-session-id"
+                  title=${sessionIdentity?.title ?? activeSession.session_id}
+                >
+                  <code>${sessionIdentity?.label}</code>
+                </span>
+              `
             : null}
           ${screen
             ? html`
-                <span class="pill" part="pane"><code>${screen.pane_id}</code></span>
+                <span
+                  class="pill"
+                  part="pane"
+                  data-testid="tp-status-pane-id"
+                  title=${paneIdentity?.title ?? screen.pane_id}
+                >
+                  <code>${paneIdentity?.label}</code>
+                </span>
                 <span class="pill" part="screen-size">${screen.cols}x${screen.rows}</span>
               `
             : null}

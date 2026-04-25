@@ -33,12 +33,17 @@ export {
 } from "./elements/terminal-screen-input-status.js";
 export { TerminalPaneTreeElement } from "./elements/terminal-pane-tree-element.js";
 export {
+  compactTerminalId,
+  resolveTerminalEntityIdLabel,
+  type TerminalEntityIdLabel,
+  type TerminalEntityIdLabelOptions,
+} from "./elements/terminal-identity.js";
+export {
   TERMINAL_PANE_MAX_COLS,
   TERMINAL_PANE_MAX_ROWS,
   TERMINAL_PANE_MIN_COLS,
   TERMINAL_PANE_MIN_ROWS,
   canRunTerminalTopologyCommand,
-  compactTerminalId,
   countPaneTreeLeaves,
   resolvePaneResizeCommand,
   resolveTerminalTopologyControlState,

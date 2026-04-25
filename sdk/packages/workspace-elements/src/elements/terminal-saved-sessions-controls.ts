@@ -1,6 +1,8 @@
 import type { SavedSessionSummary } from "@terminal-platform/runtime-types";
 import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
+import { compactTerminalId } from "./terminal-identity.js";
+
 export type TerminalSavedSessionPendingAction = "restore" | "delete";
 export type TerminalSavedSessionsBulkAction = "prune";
 export type TerminalSavedSessionRestoreStatus = "available" | "blocked" | "pending";
@@ -103,7 +105,7 @@ function toSavedSessionItemControlState(
   options: TerminalSavedSessionsControlOptions,
   anyPending: boolean,
 ): TerminalSavedSessionItemControlState {
-  const title = session.title ?? session.session_id;
+  const title = session.title ?? compactTerminalId(session.session_id);
   const isPending = options.pendingSavedSessionId === session.session_id;
   const isRestoring = isPending && options.pendingSavedSessionAction === "restore";
   const isDeleting = isPending && options.pendingSavedSessionAction === "delete";

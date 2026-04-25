@@ -2,6 +2,7 @@ import { css, html } from "lit";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import { resolveTerminalEntityIdLabel } from "./terminal-identity.js";
 
 export class TerminalSessionListElement extends WorkspaceKernelConsumerElement {
   static styles = [
@@ -82,26 +83,30 @@ export class TerminalSessionListElement extends WorkspaceKernelConsumerElement {
           : html`
               <ul part="list">
                 ${this.snapshot.catalog.sessions.map(
-                  (session) => html`
-                    <li part="item">
-                      <button
-                        part="button"
-                        data-active=${String(this.snapshot.selection.activeSessionId === session.session_id)}
-                        @click=${() => {
-                          this.kernel?.commands.setActiveSession(session.session_id);
-                          void this.kernel?.commands.attachSession(session.session_id).catch(() => {
-                            // Command failures are already recorded in kernel diagnostics.
-                          });
-                        }}
-                      >
-                        <span class="row">
-                          <strong class="title">${session.title ?? session.session_id}</strong>
-                          <span class="backend">${session.route.backend}</span>
-                        </span>
-                        <code>${session.session_id}</code>
-                      </button>
-                    </li>
-                  `,
+                  (session) => {
+                    const identity = resolveTerminalEntityIdLabel(session.session_id, { prefix: "Session" });
+                    return html`
+                      <li part="item" data-testid="tp-session-list-item" data-session-id=${session.session_id}>
+                        <button
+                          part="button"
+                          data-active=${String(this.snapshot.selection.activeSessionId === session.session_id)}
+                          title=${session.session_id}
+                          @click=${() => {
+                            this.kernel?.commands.setActiveSession(session.session_id);
+                            void this.kernel?.commands.attachSession(session.session_id).catch(() => {
+                              // Command failures are already recorded in kernel diagnostics.
+                            });
+                          }}
+                        >
+                          <span class="row">
+                            <strong class="title">${session.title ?? identity.label}</strong>
+                            <span class="backend">${session.route.backend}</span>
+                          </span>
+                          <code data-testid="tp-session-id" title=${identity.title}>${identity.label}</code>
+                        </button>
+                      </li>
+                    `;
+                  },
                 )}
               </ul>
             `}

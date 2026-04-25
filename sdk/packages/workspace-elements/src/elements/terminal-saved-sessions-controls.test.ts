@@ -97,6 +97,20 @@ describe("terminal saved sessions controls", () => {
     ]);
   });
 
+  it("uses compact ids for untitled saved layout fallbacks", () => {
+    const session = createSavedSession(1, {
+      sessionId: "d5bcf588-f6ba-46f9-a9b2-d77e6f7258cd-saved-1",
+      title: null,
+    });
+    const snapshot = createWorkspaceSnapshot([session]);
+
+    const controls = resolveTerminalSavedSessionsControlState(snapshot, createOptions());
+
+    expect(controls.items[0]?.title).toBe("d5bcf588...aved-1");
+    expect(controls.items[0]?.restoreTitle).toContain("d5bcf588...aved-1");
+    expect(controls.items[0]?.restoreTitle).not.toContain(session.session_id);
+  });
+
   it("marks missing topology restore as a warning", () => {
     const snapshot = createWorkspaceSnapshot([
       createSavedSession(1, {
@@ -200,16 +214,18 @@ function createSavedSession(
     canRestore?: boolean;
     status?: SavedSessionCompatibilityStatus;
     restoreSemantics?: Partial<SavedSessionSummary["restore_semantics"]>;
+    sessionId?: string;
+    title?: string | null;
   } = {},
 ): SavedSessionSummary {
   return {
-    session_id: `saved-${index}`,
+    session_id: overrides.sessionId ?? `saved-${index}`,
     route: {
       backend: "native",
       authority: "local_daemon",
       external: null,
     },
-    title: `Saved ${index}`,
+    title: overrides.title === undefined ? `Saved ${index}` : overrides.title,
     saved_at_ms: BigInt(1_700_000_000_000 + index),
     manifest: {
       format_version: 1,

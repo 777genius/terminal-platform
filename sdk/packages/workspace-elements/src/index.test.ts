@@ -18,6 +18,7 @@ import {
   resolveTerminalCommandDockControlState,
   resolveTerminalCommandInputStatus,
   resolveTerminalCommandQuickCommands,
+  resolveTerminalEntityIdLabel,
   resolveTerminalSavedSessionsControlState,
   resolveTerminalScreenControlState,
   resolveTerminalScreenInputStatus,
@@ -28,6 +29,8 @@ import {
   type TerminalCommandDockControlState,
   type TerminalCommandInputStatus,
   type TerminalCommandQuickCommand,
+  type TerminalEntityIdLabel,
+  type TerminalEntityIdLabelOptions,
   type TerminalPaneResizeDelta,
   type TerminalPaneSize,
   type TerminalSavedSessionItemControlState,
@@ -53,6 +56,8 @@ type PublicControlTypes =
   | TerminalCommandDockControlState
   | TerminalCommandInputStatus
   | TerminalCommandQuickCommand
+  | TerminalEntityIdLabel
+  | TerminalEntityIdLabelOptions
   | TerminalPaneResizeDelta
   | TerminalPaneSize
   | TerminalSavedSessionItemControlState
@@ -82,6 +87,7 @@ describe("workspace elements public api", () => {
       resolveTerminalCommandDockControlState,
       resolveTerminalCommandInputStatus,
       resolveTerminalCommandQuickCommands,
+      resolveTerminalEntityIdLabel,
       resolveTerminalSavedSessionsControlState,
       resolveTerminalScreenControlState,
       resolveTerminalScreenInputStatus,

@@ -103,12 +103,33 @@ async function main() {
       || result.afterCreate.commandDockInputCapability !== "known"
       || result.afterCreate.commandInputStatus !== "Ready"
       || !result.afterCreate.focusedPaneBadgeText?.includes("Focused pane")
+      || result.afterCreate.statusSessionTitle !== result.afterCreate.activeSessionId
+      || !result.afterCreate.statusSessionText?.includes("Session")
+      || result.afterCreate.activeSessionListIdTitle !== result.afterCreate.activeSessionId
+      || !result.afterCreate.activeSessionListIdText?.includes("Session")
+      || result.afterCreate.commandActivePaneTitle !== result.afterCreate.activePaneId
+      || !result.afterCreate.commandActivePaneText?.includes("Pane")
+      || result.afterCreate.statusPaneTitle !== result.afterCreate.activePaneId
+      || !result.afterCreate.statusPaneText?.includes("Pane")
       || (
         result.afterCreate.activePaneId?.length > 18
         && (
           result.afterCreate.focusedPaneBadgeTitle !== result.afterCreate.activePaneId
           || result.afterCreate.focusedPaneBadgeText.includes(result.afterCreate.activePaneId)
           || !result.afterCreate.focusedPaneBadgeText.includes("...")
+          || result.afterCreate.commandActivePaneText.includes(result.afterCreate.activePaneId)
+          || !result.afterCreate.commandActivePaneText.includes("...")
+          || result.afterCreate.statusPaneText.includes(result.afterCreate.activePaneId)
+          || !result.afterCreate.statusPaneText.includes("...")
+        )
+      )
+      || (
+        result.afterCreate.activeSessionId?.length > 18
+        && (
+          result.afterCreate.statusSessionText.includes(result.afterCreate.activeSessionId)
+          || !result.afterCreate.statusSessionText.includes("...")
+          || result.afterCreate.activeSessionListIdText.includes(result.afterCreate.activeSessionId)
+          || !result.afterCreate.activeSessionListIdText.includes("...")
         )
       )
       || !Array.isArray(result.afterCreate.quickCommandLabels)
@@ -441,6 +462,7 @@ async function runSmokeScenario(browserUrl) {
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
       const statusRoot = workspaceRoot?.querySelector('tp-terminal-status-bar')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const sessionListRoot = workspaceRoot?.querySelector('tp-terminal-session-list')?.shadowRoot ?? null;
       const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
       const savedPanel = savedRoot?.querySelector('[data-testid="tp-saved-sessions"]') ?? null;
       const toolbarRoot = workspaceRoot?.querySelector('tp-terminal-toolbar')?.shadowRoot ?? null;
@@ -460,7 +482,12 @@ async function runSmokeScenario(browserUrl) {
       const pasteClipboard = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
       const quickCommands = [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])];
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
+      const commandActivePane = commandRoot?.querySelector('[data-testid="tp-command-active-pane"]') ?? null;
       const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
+      const statusSession = statusRoot?.querySelector('[data-testid="tp-status-session-id"]') ?? null;
+      const statusPane = statusRoot?.querySelector('[data-testid="tp-status-pane-id"]') ?? null;
+      const activeSessionListId = sessionListRoot
+        ?.querySelector('[data-active="true"] [data-testid="tp-session-id"]') ?? null;
       const paneTreePanel = paneTreeRoot?.querySelector('[data-testid="tp-pane-tree"]') ?? null;
       const topologyStatus = paneTreeRoot?.querySelector('[data-testid="tp-topology-status"]') ?? null;
       const topologyMutationControls = [
@@ -534,6 +561,14 @@ async function runSmokeScenario(browserUrl) {
         saveLayoutTitle: saveLayout?.getAttribute('title') ?? null,
         focusedPaneBadgeText: focusedPaneBadge?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         focusedPaneBadgeTitle: focusedPaneBadge?.getAttribute('title') ?? null,
+        commandActivePaneText: commandActivePane?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        commandActivePaneTitle: commandActivePane?.getAttribute('title') ?? null,
+        statusSessionText: statusSession?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        statusSessionTitle: statusSession?.getAttribute('title') ?? null,
+        statusPaneText: statusPane?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        statusPaneTitle: statusPane?.getAttribute('title') ?? null,
+        activeSessionListIdText: activeSessionListId?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        activeSessionListIdTitle: activeSessionListId?.getAttribute('title') ?? null,
         commandInputStatus: commandInputStatus?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         commandInputStatusTitle: commandInputStatus?.getAttribute('title') ?? null,
         quickCommandLabels: quickCommands.map((button) => button.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
