@@ -98,22 +98,31 @@ impl TerminalDaemon {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "native-backend")]
     use std::path::PathBuf;
 
+    #[cfg(feature = "native-backend")]
     use terminal_backend_api::{
         CreateSessionSpec, MuxCommand, NewTabSpec, ShellLaunchSpec, SubscriptionSpec,
     };
     use terminal_domain::{
         CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR, OperationId,
+    };
+    #[cfg(feature = "native-backend")]
+    use terminal_domain::{
         SavedSessionCompatibilityStatus, SavedSessionManifest, local_native_route,
     };
+    #[cfg(feature = "native-backend")]
     use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
+    #[cfg(feature = "native-backend")]
     use terminal_persistence::SqliteSessionStore;
+    #[cfg(feature = "native-backend")]
     use terminal_projection::TopologySnapshot;
     use terminal_protocol::{RequestEnvelope, RequestPayload, ResponsePayload};
 
     use super::TerminalDaemon;
 
+    #[cfg(feature = "native-backend")]
     fn isolated_store_path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "terminal-platform-daemon-service-{label}-{}-{}.sqlite3",
@@ -122,6 +131,7 @@ mod tests {
         ))
     }
 
+    #[cfg(feature = "native-backend")]
     fn cat_launch_spec() -> ShellLaunchSpec {
         #[cfg(unix)]
         {
@@ -146,6 +156,7 @@ mod tests {
         TerminalDaemon::with_persistence(store)
     }
 
+    #[cfg(feature = "native-backend")]
     fn save_incompatible_snapshot(
         label: &str,
         manifest: SavedSessionManifest,
@@ -200,11 +211,7 @@ mod tests {
                 assert_eq!(handshake.daemon_phase, terminal_protocol::DaemonPhase::Ready);
                 assert_eq!(
                     handshake.available_backends,
-                    vec![
-                        terminal_domain::BackendKind::Native,
-                        terminal_domain::BackendKind::Tmux,
-                        terminal_domain::BackendKind::Zellij
-                    ]
+                    crate::backend_registry::compiled_backend_kinds()
                 );
                 assert_eq!(handshake.binary_version, CURRENT_BINARY_VERSION.to_string());
                 assert_eq!(handshake.protocol_version.major, CURRENT_PROTOCOL_MAJOR);
@@ -223,6 +230,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_create_and_list_session_requests() {
         let daemon = isolated_daemon();
@@ -265,6 +273,32 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn routes_backend_capabilities_requests() {
+        let backend = crate::backend_registry::compiled_backend_kinds()
+            .into_iter()
+            .next()
+            .expect("at least one backend should be compiled");
+        let daemon = TerminalDaemon::default();
+        let response = daemon
+            .handle_request(RequestEnvelope {
+                operation_id: OperationId::new(),
+                payload: RequestPayload::GetBackendCapabilities(
+                    terminal_protocol::GetBackendCapabilitiesRequest { backend },
+                ),
+            })
+            .await
+            .expect("capabilities routing should succeed");
+
+        match response.payload {
+            ResponsePayload::BackendCapabilities(capabilities) => {
+                assert_eq!(capabilities.backend, backend);
+            }
+            other => panic!("unexpected payload: {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_list_and_get_saved_session_requests() {
         let daemon = isolated_daemon();
@@ -357,6 +391,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_delete_saved_session_requests() {
         let daemon = isolated_daemon();
@@ -419,6 +454,7 @@ mod tests {
         assert!(missing.is_err());
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_restore_saved_session_requests() {
         let daemon = isolated_daemon();
@@ -483,6 +519,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_prune_saved_sessions_requests() {
         let daemon = isolated_daemon();
@@ -555,6 +592,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn exposes_saved_session_degraded_reason_when_manifest_is_incompatible() {
         let manifest = SavedSessionManifest {
@@ -624,6 +662,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_topology_screen_and_subscription_requests() {
         let daemon = isolated_daemon();
@@ -698,6 +737,7 @@ mod tests {
         assert!(!subscription.subscription_id.0.as_hyphenated().to_string().is_empty());
     }
 
+    #[cfg(feature = "native-backend")]
     #[tokio::test(flavor = "multi_thread")]
     async fn routes_dispatch_mux_command_requests() {
         let daemon = isolated_daemon();

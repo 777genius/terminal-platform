@@ -384,29 +384,35 @@ impl LocalSocketDaemonClient {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        thread,
-        time::{Duration, SystemTime, UNIX_EPOCH},
-    };
+    #[cfg(unix)]
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+    #[cfg(unix)]
     use rusqlite::{Connection, params};
-    use terminal_backend_api::{
-        CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SubscriptionSpec,
-    };
+    use terminal_backend_api::{CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec};
+    #[cfg(unix)]
+    use terminal_backend_api::{SendInputSpec, ShellLaunchSpec};
     use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+    use terminal_domain::{BackendKind, CURRENT_BINARY_VERSION};
+    #[cfg(unix)]
     use terminal_domain::{
-        BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
-        CURRENT_SAVED_SESSION_FORMAT_VERSION, DegradedModeReason, PaneId,
-        SavedSessionCompatibilityStatus, SavedSessionManifest, SessionId, TabId,
-        local_native_route,
+        CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR, CURRENT_SAVED_SESSION_FORMAT_VERSION,
+        DegradedModeReason, PaneId, SavedSessionCompatibilityStatus, SavedSessionManifest,
+        SessionId, TabId, local_native_route,
     };
+    #[cfg(unix)]
     use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
+    #[cfg(unix)]
     use terminal_persistence::SqliteSessionStore;
+    #[cfg(unix)]
     use terminal_projection::TopologySnapshot;
     use terminal_protocol::{
         DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion, SubscriptionEvent,
     };
-    use tokio::time::{sleep, timeout};
+    #[cfg(unix)]
+    use tokio::time::sleep;
+    use tokio::time::timeout;
 
     use super::{HandshakeAssessmentStatus, LocalSocketDaemonClient};
 
@@ -445,6 +451,7 @@ mod tests {
         Err(last_error.unwrap_or_else(|| std::io::Error::other("daemon never rebound on address")))
     }
 
+    #[cfg(unix)]
     fn isolated_daemon() -> TerminalDaemon {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -459,6 +466,7 @@ mod tests {
         TerminalDaemon::with_persistence(store)
     }
 
+    #[cfg(unix)]
     fn isolated_daemon_with_saved_snapshot(
         label: &str,
         manifest: SavedSessionManifest,
@@ -503,6 +511,7 @@ mod tests {
         (TerminalDaemon::with_persistence(store), session_id)
     }
 
+    #[cfg(unix)]
     fn isolated_daemon_with_valid_and_corrupted_saved_rows(
         label: &str,
     ) -> (TerminalDaemon, SessionId, SessionId) {
@@ -580,27 +589,17 @@ mod tests {
         (TerminalDaemon::with_persistence(store), valid_session_id, corrupt_session_id)
     }
 
+    #[cfg(unix)]
     fn cat_launch_spec() -> ShellLaunchSpec {
-        #[cfg(unix)]
-        {
-            ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
-        }
-
-        #[cfg(windows)]
-        {
-            let program = std::env::var("COMSPEC")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "cmd.exe".to_string());
-
-            ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
-        }
+        ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
     }
 
+    #[cfg(unix)]
     fn submitted_input(text: &str) -> String {
-        if cfg!(windows) { format!("echo {text}\r\n") } else { format!("{text}\n") }
+        if cfg!(windows) { format!("{text}\r\n") } else { format!("{text}\n") }
     }
 
+    #[cfg(unix)]
     async fn wait_for_screen_line(
         client: &LocalSocketDaemonClient,
         session_id: terminal_domain::SessionId,

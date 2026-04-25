@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2024"
 license.workspace = true
 
+[features]
+default = ["native-backend", "tmux-backend", "zellij-backend"]
+native-backend = ["terminal-node/native-backend", "terminal-daemon/native-backend", "terminal-testing/native-backend"]
+tmux-backend = ["terminal-node/tmux-backend", "terminal-daemon/tmux-backend", "terminal-testing/tmux-backend"]
+zellij-backend = ["terminal-node/zellij-backend", "terminal-daemon/zellij-backend", "terminal-testing/zellij-backend"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -19,9 +25,9 @@ terminal-protocol = { path = "../terminal-protocol" }
 napi-build = "2.3.1"
 
 [dev-dependencies]
-terminal-daemon = { path = "../terminal-daemon" }
+terminal-daemon = { path = "../terminal-daemon", default-features = false }
 terminal-daemon-client = { path = "../terminal-daemon-client" }
-terminal-testing = { path = "../terminal-testing" }
+terminal-testing = { path = "../terminal-testing", default-features = false }
 tokio = { workspace = true }
 
 [lints.clippy]

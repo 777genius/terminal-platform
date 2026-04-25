@@ -14,12 +14,7 @@ const ZELLIJ_TOPOLOGY_POLL_ATTEMPTS = process.platform === "win32" ? 80 : 120;
 
 function readyEchoLaunch() {
   if (process.platform === "win32") {
-    const program =
-      process.env.COMSPEC && process.env.COMSPEC.trim() ? process.env.COMSPEC : "cmd.exe";
-    return {
-      program,
-      args: ["/D", "/Q", "/K", "echo ready"],
-    };
+    return null;
   }
 
   return {
@@ -28,7 +23,38 @@ function readyEchoLaunch() {
   };
 }
 
-async function runSmoke(createClient) {
+async function assertEnvironmentReport(client, sdk) {
+  if (!sdk || typeof sdk.collectEnvironmentReport !== "function") {
+    return;
+  }
+
+  const report = await sdk.collectEnvironmentReport(client);
+  const native = report.backends.find((backend) => backend.backend === "native");
+  const tmux = report.backends.find((backend) => backend.backend === "tmux");
+  const zellij = report.backends.find((backend) => backend.backend === "zellij");
+
+  assert.equal(report.runtime.platform, process.platform);
+  assert.equal(report.runtime.arch, process.arch);
+  assert.equal(report.runtime.nodeVersion, process.version);
+  assert.equal(typeof report.binding.version.protocol.major, "number");
+  assert.equal(report.daemon.address, typeof client.address === "string" ? client.address : null);
+  assert.equal(report.daemon.handshake.assessment.can_use, true);
+  assert.equal(Array.isArray(report.supportMatrix.promisedBackends), true);
+  assert.equal(Array.isArray(report.supportMatrix.unpromisedBackends), true);
+  assert.equal(report.backends.length, 3);
+  assert.equal(typeof native?.promisedInV1, "boolean");
+  assert.equal(tmux?.promisedInV1, process.platform !== "win32");
+  assert.equal(typeof zellij?.promisedInV1, "boolean");
+  if (process.platform === "win32") {
+    assert.deepEqual(report.supportMatrix.promisedBackends, ["native", "zellij"]);
+    assert.deepEqual(report.supportMatrix.unpromisedBackends, ["tmux"]);
+  } else if (process.platform === "darwin" || process.platform === "linux") {
+    assert.deepEqual(report.supportMatrix.promisedBackends, ["native", "tmux", "zellij"]);
+    assert.deepEqual(report.supportMatrix.unpromisedBackends, []);
+  }
+}
+
+async function runSmoke(createClient, sdk = null) {
   const client = createClient();
 
   const version = client.bindingVersion();
@@ -97,6 +123,8 @@ async function runSmoke(createClient) {
   const restored = await client.restoreSavedSession(created.session_id);
   const deleted = await client.deleteSavedSession(created.session_id);
   const savedAfterDelete = await client.listSavedSessions();
+
+  await assertEnvironmentReport(client, sdk);
 
   assert.equal(typeof client.address, "string");
   assert.equal(version.protocol.major, 0);
@@ -693,6 +721,7 @@ async function runPackageWatchSmoke(createClient, sdk) {
     true,
   );
   await runSessionStateFocusChurnSmoke(createClient);
+  await runResizeChurnSmoke(() => createClient(), "package-watch");
 
   await runElectronBridgeSmoke(createClient, sdk);
 }
@@ -785,6 +814,218 @@ async function runSessionStateFocusChurnSmoke(createClient) {
     observedStates.some((state) => state.topology.focused_tab === expectedFinalTab),
     true,
   );
+}
+
+function buildResizeSequence(initialRows, initialCols) {
+  const candidates = [
+    {
+      rows: Math.max(8, initialRows > 12 ? initialRows - 4 : initialRows),
+      cols: Math.max(30, initialCols > 50 ? initialCols - 12 : initialCols),
+    },
+    {
+      rows: Math.min(120, initialRows + 3),
+      cols: Math.min(240, initialCols + 12),
+    },
+    {
+      rows: initialRows,
+      cols: initialCols,
+    },
+  ];
+  const seen = new Set();
+
+  return candidates.filter((candidate) => {
+    const key = `${candidate.rows}x${candidate.cols}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+async function waitForScreenSize(client, sessionId, paneId, rows, cols, label) {
+  let lastSize = null;
+
+  for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
+    const snapshot = await client.screenSnapshot(sessionId, paneId);
+    if (snapshot.rows === rows && snapshot.cols === cols) {
+      return snapshot;
+    }
+    lastSize = { rows: snapshot.rows, cols: snapshot.cols };
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(
+    `Timed out waiting for screen size ${rows}x${cols}: ${label}; last size: ${JSON.stringify(lastSize)}`,
+  );
+}
+
+async function waitForPaneSize(subscription, rows, cols, label) {
+  for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
+    const event = await withTimeout(
+      subscription.nextEvent(),
+      DEFAULT_EVENT_TIMEOUT_MS,
+      `Timed out waiting for pane resize delta: ${label}`,
+    );
+    if (event?.kind === "screen_delta" && event.rows === rows && event.cols === cols) {
+      return event;
+    }
+  }
+
+  throw new Error(`Timed out waiting for pane resize delta ${rows}x${cols}: ${label}`);
+}
+
+async function runResizeChurnSmoke(createClient, label) {
+  const client = createClient();
+  const created = await client.createNativeSession({
+    title: `resize-churn-${label}`,
+    launch: readyEchoLaunch(),
+  });
+  const attached = await client.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+  const initialScreen = await waitForInteractiveScreen(
+    client,
+    created.session_id,
+    paneId,
+    `resize-${label}`,
+  );
+  const sizeSequence = buildResizeSequence(initialScreen.rows, initialScreen.cols);
+  const observedStateSizes = new Set();
+  const observedPaneSizes = new Set();
+  const marker = `resize churn ${label}`;
+  const expectedFinalSize = sizeSequence[sizeSequence.length - 1];
+  const watchAbort = new AbortController();
+  const watchPromise = client.watchSessionState(created.session_id, {
+    signal: watchAbort.signal,
+    onState: async (state) => {
+      const focusedScreen = state.focusedScreen;
+      const expectedPaneId = focusedPaneIdFromTopology(state.topology);
+
+      assert.equal(
+        expectedPaneId ? focusedScreen?.pane_id === expectedPaneId : true,
+        true,
+      );
+
+      if (!focusedScreen) {
+        return;
+      }
+
+      observedStateSizes.add(`${focusedScreen.rows}x${focusedScreen.cols}`);
+      if (
+        focusedScreen.rows === expectedFinalSize.rows &&
+        focusedScreen.cols === expectedFinalSize.cols &&
+        focusedScreen.surface.lines.some((line) => line.text.includes(marker))
+      ) {
+        watchAbort.abort();
+      }
+    },
+  });
+  const paneSubscription =
+    typeof client.subscribePane === "function"
+      ? await client.subscribePane(created.session_id, paneId)
+      : null;
+
+  try {
+    if (paneSubscription) {
+      const initialEvent = await withTimeout(
+        paneSubscription.nextEvent(),
+        DEFAULT_EVENT_TIMEOUT_MS,
+        `Timed out waiting for initial pane event before resize churn: ${label}`,
+      );
+      assert.equal(initialEvent?.kind, "screen_delta");
+    }
+
+    let previousSequence = initialScreen.sequence;
+    for (let index = 0; index < sizeSequence.length; index += 1) {
+      const target = sizeSequence[index];
+      const resized = await client.dispatchMuxCommand(created.session_id, {
+        kind: "resize_pane",
+        pane_id: paneId,
+        rows: target.rows,
+        cols: target.cols,
+      });
+
+      assert.equal(resized.changed, true);
+
+      if (paneSubscription) {
+        const paneUpdate = await waitForPaneSize(
+          paneSubscription,
+          target.rows,
+          target.cols,
+          `${label} cycle ${index}`,
+        );
+        observedPaneSizes.add(`${paneUpdate.rows}x${paneUpdate.cols}`);
+      }
+
+      const screen = await waitForScreenSize(
+        client,
+        created.session_id,
+        paneId,
+        target.rows,
+        target.cols,
+        `${label} cycle ${index}`,
+      );
+      const delta = await client.screenDelta(
+        created.session_id,
+        paneId,
+        previousSequence,
+      );
+
+      assert.equal(screen.rows, target.rows);
+      assert.equal(screen.cols, target.cols);
+      assert.equal(delta.rows, target.rows);
+      assert.equal(delta.cols, target.cols);
+      assert.equal(delta.to_sequence >= delta.from_sequence, true);
+      assert.equal(delta.patch !== null || delta.full_replace !== null, true);
+
+      previousSequence = screen.sequence;
+    }
+
+    await client.dispatchMuxCommand(created.session_id, {
+      kind: "send_input",
+      pane_id: paneId,
+      data: submittedInput(marker),
+    });
+
+    if (paneSubscription) {
+      const markerEvent = await waitForSubscriptionText(paneSubscription, marker, label);
+      assert.equal(deltaContainsText(markerEvent, marker), true);
+    }
+
+    const finalScreen = await waitForLine(client, created.session_id, paneId, marker);
+    const finalDelta = await client.screenDelta(
+      created.session_id,
+      paneId,
+      previousSequence,
+    );
+
+    assert.equal(finalScreen.rows, expectedFinalSize.rows);
+    assert.equal(finalScreen.cols, expectedFinalSize.cols);
+    assert.equal(deltaContainsText(finalDelta, marker), true);
+
+    await withTimeout(
+      watchPromise,
+      DEFAULT_HOST_TIMEOUT_MS,
+      `Timed out waiting for resize churn watcher to finish: ${label}`,
+    );
+
+    assert.equal(observedStateSizes.size >= 2, true);
+    assert.equal(
+      observedStateSizes.has(`${expectedFinalSize.rows}x${expectedFinalSize.cols}`),
+      true,
+    );
+    if (paneSubscription) {
+      assert.equal(observedPaneSizes.size >= 2, true);
+      assert.equal(
+        observedPaneSizes.has(`${expectedFinalSize.rows}x${expectedFinalSize.cols}`),
+        true,
+      );
+    }
+  } finally {
+    if (paneSubscription) {
+      await paneSubscription.close();
+    }
+  }
 }
 
 async function runShutdownSmoke(createClient, options = {}) {
@@ -956,15 +1197,21 @@ async function runRestartRecoverySmoke(createClient, options = {}) {
 }
 
 async function waitForLine(client, sessionId, paneId, needle) {
+  let lastLines = [];
   for (let attempt = 0; attempt < DEFAULT_POLL_ATTEMPTS; attempt += 1) {
     const snapshot = await client.screenSnapshot(sessionId, paneId);
     if (snapshot.surface.lines.some((line) => line.text.includes(needle))) {
       return snapshot;
     }
+    lastLines = snapshot.surface.lines
+      .slice(0, 12)
+      .map((line) => line.text);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  throw new Error(`Timed out waiting for screen line: ${needle}`);
+  throw new Error(
+    `Timed out waiting for screen line: ${needle}; last lines: ${JSON.stringify(lastLines)}`,
+  );
 }
 
 async function waitForInteractiveScreen(client, sessionId, paneId, label) {
@@ -1295,7 +1542,7 @@ function fallbackZellijCandidate(sessionName) {
 
 function submittedInput(text) {
   if (process.platform === "win32") {
-    return `echo ${text}\r\n`;
+    return `${text}\r\n`;
   }
 
   return `${text}\r`;
@@ -1396,6 +1643,7 @@ async function runElectronBridgeSmoke(createClient, sdk) {
     }),
     true,
   );
+  await runResizeChurnSmoke(() => rendererClient, "electron-bridge");
 
   bridge.dispose();
   await runElectronBridgeDisposeSmoke(createClient, sdk);
@@ -1527,6 +1775,7 @@ async function runElectronPreloadSmoke(createClient, sdk) {
   );
   bridge.dispose();
   await runElectronBridgeStopDrainSmoke(sdk);
+  await runElectronPreloadResizeChurnSmoke(createClient, sdk);
   await runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk);
   await runElectronPreloadDisposeSmoke(createClient, sdk);
 }
@@ -1706,6 +1955,144 @@ async function runElectronBridgeStopDrainSmoke(sdk) {
   assert.equal(watchFinished, true);
 
   bridge.dispose();
+}
+
+async function runElectronPreloadResizeChurnSmoke(createClient, sdk) {
+  const client = createClient();
+  const { ipcMain, ipcRenderer } = createFakeElectronIpc();
+  const bridge = sdk.createElectronMainBridge({
+    channelPrefix: "terminal-platform-preload-resize-smoke",
+    client,
+    ipcMain,
+  });
+  const preloadApi = sdk.createElectronPreloadApi({
+    channelPrefix: "terminal-platform-preload-resize-smoke",
+    ipcRenderer,
+  });
+  const created = await preloadApi.createNativeSession({
+    title: "electron-preload-resize-smoke",
+    launch: readyEchoLaunch(),
+  });
+  const attached = await preloadApi.attachSession(created.session_id);
+  const paneId = attached.focused_screen.pane_id;
+  const initialScreen = await waitForInteractiveScreen(
+    preloadApi,
+    created.session_id,
+    paneId,
+    "electron-preload-resize",
+  );
+  const sizeSequence = buildResizeSequence(initialScreen.rows, initialScreen.cols);
+  const expectedFinalSize = sizeSequence[sizeSequence.length - 1];
+  const observedStateSizes = new Set();
+  const marker = "electron preload resize churn";
+  let resolveState;
+  let rejectState;
+  const finalStatePromise = new Promise((resolve, reject) => {
+    resolveState = resolve;
+    rejectState = reject;
+  });
+  const subscriptionId = await preloadApi.subscribeSessionState(
+    created.session_id,
+    async (state) => {
+      const expectedPaneId = focusedPaneIdFromTopology(state.topology);
+      assert.equal(
+        expectedPaneId ? state.focusedScreen?.pane_id === expectedPaneId : true,
+        true,
+      );
+
+      const focusedScreen = state.focusedScreen;
+      if (!focusedScreen) {
+        return;
+      }
+
+      observedStateSizes.add(`${focusedScreen.rows}x${focusedScreen.cols}`);
+      if (
+        focusedScreen.rows === expectedFinalSize.rows &&
+        focusedScreen.cols === expectedFinalSize.cols &&
+        focusedScreen.surface.lines.some((line) => line.text.includes(marker))
+      ) {
+        resolveState(state);
+      }
+    },
+    async (error) => {
+      rejectState(error);
+    },
+  );
+
+  try {
+    let previousSequence = initialScreen.sequence;
+    for (let index = 0; index < sizeSequence.length; index += 1) {
+      const target = sizeSequence[index];
+      const resized = await preloadApi.dispatchMuxCommand(created.session_id, {
+        kind: "resize_pane",
+        pane_id: paneId,
+        rows: target.rows,
+        cols: target.cols,
+      });
+
+      assert.equal(resized.changed, true);
+
+      const screen = await waitForScreenSize(
+        preloadApi,
+        created.session_id,
+        paneId,
+        target.rows,
+        target.cols,
+        `electron preload cycle ${index}`,
+      );
+      const delta = await preloadApi.screenDelta(
+        created.session_id,
+        paneId,
+        previousSequence,
+      );
+
+      assert.equal(screen.rows, target.rows);
+      assert.equal(screen.cols, target.cols);
+      assert.equal(delta.rows, target.rows);
+      assert.equal(delta.cols, target.cols);
+      assert.equal(delta.patch !== null || delta.full_replace !== null, true);
+
+      previousSequence = screen.sequence;
+    }
+
+    await preloadApi.dispatchMuxCommand(created.session_id, {
+      kind: "send_input",
+      pane_id: paneId,
+      data: submittedInput(marker),
+    });
+
+    const finalState = await withTimeout(
+      finalStatePromise,
+      DEFAULT_HOST_TIMEOUT_MS,
+      "Timed out waiting for Electron preload resize churn state",
+    );
+    const finalScreen = await waitForLine(preloadApi, created.session_id, paneId, marker);
+    const finalDelta = await preloadApi.screenDelta(
+      created.session_id,
+      paneId,
+      previousSequence,
+    );
+
+    assert.equal(finalState.session.session_id, created.session_id);
+    assert.equal(finalState.focusedScreen?.pane_id, paneId);
+    assert.equal(finalScreen.rows, expectedFinalSize.rows);
+    assert.equal(finalScreen.cols, expectedFinalSize.cols);
+    assert.equal(deltaContainsText(finalDelta, marker), true);
+    assert.equal(observedStateSizes.size >= 2, true);
+    assert.equal(
+      observedStateSizes.has(`${expectedFinalSize.rows}x${expectedFinalSize.cols}`),
+      true,
+    );
+  } finally {
+    assert.equal(await preloadApi.unsubscribeSessionState(subscriptionId), true);
+    assert.equal(await preloadApi.unsubscribeSessionState(subscriptionId), false);
+    await withTimeout(
+      preloadApi.dispose(),
+      DEFAULT_HOST_TIMEOUT_MS,
+      "Timed out waiting for Electron preload resize dispose()",
+    );
+    bridge.dispose();
+  }
 }
 
 async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {

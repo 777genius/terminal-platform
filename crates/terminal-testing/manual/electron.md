@@ -6,3 +6,4 @@
 - Stop the daemon under an active watcher and verify closure is explicit, not hanging.
 - Restart the daemon on the same address and confirm client recovery behavior.
 - Verify focused screen stays aligned with topology during pane/tab changes.
+- Stress renderer resize churn while the bridge is streaming screen updates.

@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend"))]
 use std::sync::Arc;
 #[cfg(windows)]
 use std::{
@@ -23,14 +23,14 @@ use std::{
 
 #[cfg(windows)]
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend"))]
 use terminal_backend_api::MuxBackendPort;
 use terminal_backend_api::ShellLaunchSpec;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend", feature = "native-backend"))]
 use terminal_backend_native::NativeBackend;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend"))]
 use terminal_backend_tmux::TmuxBackend;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend", feature = "zellij-backend"))]
 use terminal_backend_zellij::ZellijBackend;
 use terminal_daemon::{LocalSocketServerHandle, TerminalDaemon, spawn_local_socket_server};
 use terminal_daemon_client::LocalSocketDaemonClient;
@@ -123,18 +123,53 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "cmd.exe".to_string());
 
+        // Hosted Windows has been more reliable with a plain `cmd` bootstrap than with a
+        // prompt mutation or a separate Node echo loop.
         ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
     }
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
+fn resolve_windows_executable(program: &str) -> String {
+    let has_path_separator = program.contains('\\') || program.contains('/');
+    if has_path_separator {
+        return program.to_string();
+    }
+
+    let candidates = if program.to_ascii_lowercase().ends_with(".exe") {
+        vec![program.to_string()]
+    } else {
+        vec![program.to_string(), format!("{program}.exe")]
+    };
+
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            for candidate in &candidates {
+                let path = dir.join(candidate);
+                if path.is_file() {
+                    return path.display().to_string();
+                }
+            }
+        }
+    }
+
+    program.to_string()
+}
+
+#[cfg(all(unix, feature = "tmux-backend"))]
 #[must_use]
 pub fn tmux_daemon(socket_name: &str) -> TerminalDaemon {
-    TerminalDaemon::new(TerminalRuntime::new(BackendCatalog::new([
-        Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
-        Arc::new(TmuxBackend::with_socket_name(socket_name)) as Arc<dyn MuxBackendPort>,
-        Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>,
-    ])))
+    let mut backends = Vec::<Arc<dyn MuxBackendPort>>::new();
+
+    #[cfg(feature = "native-backend")]
+    backends.push(Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>);
+
+    backends.push(Arc::new(TmuxBackend::with_socket_name(socket_name)) as Arc<dyn MuxBackendPort>);
+
+    #[cfg(feature = "zellij-backend")]
+    backends.push(Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>);
+
+    TerminalDaemon::new(TerminalRuntime::new(BackendCatalog::new(backends)))
 }
 
 #[cfg(unix)]
@@ -397,33 +432,6 @@ fn spawn_windows_zellij_pty(session_name: &str) -> Result<WindowsZellijPtyGuard,
     Ok(WindowsZellijPtyGuard { child, _master: pty_pair.master, output })
 }
 
-#[cfg(windows)]
-fn resolve_windows_executable(program: &str) -> String {
-    let has_path_separator = program.contains('\\') || program.contains('/');
-    if has_path_separator {
-        return program.to_string();
-    }
-
-    let candidates = if program.to_ascii_lowercase().ends_with(".exe") {
-        vec![program.to_string()]
-    } else {
-        vec![program.to_string(), format!("{program}.exe")]
-    };
-
-    if let Some(paths) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&paths) {
-            for candidate in &candidates {
-                let path = dir.join(candidate);
-                if path.is_file() {
-                    return path.display().to_string();
-                }
-            }
-        }
-    }
-
-    program.to_string()
-}
-
 #[cfg(any(unix, windows))]
 impl Drop for ZellijSessionGuard {
     fn drop(&mut self) {
@@ -498,12 +506,12 @@ fn zellij_command_timeout() -> Duration {
     if cfg!(windows) { Duration::from_secs(10) } else { Duration::from_secs(5) }
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 fn zellij_create_timeout() -> Duration {
     if cfg!(windows) { Duration::from_secs(20) } else { Duration::from_secs(10) }
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
     stderr.contains("could not get terminal attribute")
         || stderr.contains("could not enable raw mode")

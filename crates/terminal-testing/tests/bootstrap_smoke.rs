@@ -1,20 +1,18 @@
-use std::{
-    thread,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::{
     fs,
-    process::Command,
-    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(unix)]
+use std::{process::Command, sync::Arc, thread};
 use terminal_backend_api::{
-    CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, OverrideLayoutSpec, ResizePaneSpec,
-    SendInputSpec, ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
+    CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SubscriptionSpec,
 };
+#[cfg(unix)]
+use terminal_backend_api::{MuxBackendPort, OverrideLayoutSpec, ResizePaneSpec, SplitPaneSpec};
 #[cfg(unix)]
 use terminal_backend_native::NativeBackend;
 #[cfg(unix)]
@@ -60,7 +58,7 @@ fn bootstrap_smoke_exposes_empty_daemon() {
     assert_eq!(handshake.daemon_phase, DaemonPhase::Ready);
     assert_eq!(
         handshake.available_backends,
-        vec![BackendKind::Native, BackendKind::Tmux, BackendKind::Zellij]
+        terminal_daemon::backend_registry::compiled_backend_kinds()
     );
     assert!(handshake.capabilities.request_reply);
     assert!(handshake.capabilities.topology_subscriptions);
@@ -1962,9 +1960,266 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
+#[cfg(any(unix, windows))]
+fn fullscreen_tools_available() -> bool {
+    let missing = ["vim", "less", "fzf"]
+        .into_iter()
+        .filter(|command| !command_on_path(command))
+        .collect::<Vec<_>>();
+
+    if missing.is_empty() {
+        return true;
+    }
+
+    if std::env::var_os("CI").is_some() {
+        panic!("fullscreen viewport smoke requires tools on PATH: {}", missing.join(", "));
+    }
+
+    eprintln!(
+        "skipping fullscreen viewport smoke locally because tools are missing: {}",
+        missing.join(", ")
+    );
+    false
+}
+
+#[cfg(any(unix, windows))]
+fn command_on_path(command: &str) -> bool {
+    let has_separator = command.contains(std::path::MAIN_SEPARATOR) || command.contains('/');
+    if has_separator {
+        return std::path::Path::new(command).is_file();
+    }
+
+    let candidates = if cfg!(windows) {
+        if command.contains('.') {
+            vec![command.to_string()]
+        } else {
+            vec![
+                format!("{command}.exe"),
+                format!("{command}.cmd"),
+                format!("{command}.bat"),
+                command.to_string(),
+            ]
+        }
+    } else {
+        vec![command.to_string()]
+    };
+
+    std::env::var_os("PATH")
+        .map(|paths| {
+            std::env::split_paths(&paths)
+                .any(|dir| candidates.iter().any(|candidate| dir.join(candidate).is_file()))
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(any(unix, windows))]
+fn resolve_command_on_path(command: &str) -> Option<String> {
+    let has_separator = command.contains(std::path::MAIN_SEPARATOR) || command.contains('/');
+    if has_separator {
+        return std::path::Path::new(command).is_file().then(|| command.to_string());
+    }
+
+    let candidates = if cfg!(windows) {
+        if command.contains('.') {
+            vec![command.to_string()]
+        } else {
+            vec![
+                format!("{command}.exe"),
+                format!("{command}.cmd"),
+                format!("{command}.bat"),
+                command.to_string(),
+            ]
+        }
+    } else {
+        vec![command.to_string()]
+    };
+
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|dir| {
+            candidates.iter().find_map(|candidate| {
+                let path = dir.join(candidate);
+                path.is_file().then(|| path.display().to_string())
+            })
+        })
+    })
+}
+
+#[cfg(any(unix, windows))]
+fn quoted_command_path(path: &std::path::Path) -> String {
+    format!("\"{}\"", path.display())
+}
+
+#[cfg(any(unix, windows))]
+fn temp_fullscreen_paths(label: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let temp_name = format!(
+        "terminal-platform-fullscreen-{label}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    );
+    let viewport_file = std::env::temp_dir().join(format!("{temp_name}.txt"));
+    let fzf_file = std::env::temp_dir().join(format!("{temp_name}-fzf.txt"));
+    (viewport_file, fzf_file)
+}
+
+#[cfg(any(unix, windows))]
+async fn send_pane_input(
+    fixture: &terminal_testing::DaemonFixture,
+    session_id: terminal_domain::SessionId,
+    pane_id: terminal_domain::PaneId,
+    data: String,
+) {
+    fixture
+        .client
+        .dispatch(session_id, MuxCommand::SendInput(SendInputSpec { pane_id, data }))
+        .await
+        .expect("pane input should succeed");
+}
+
+#[cfg(any(unix, windows))]
+async fn wait_for_shell_marker(
+    fixture: &terminal_testing::DaemonFixture,
+    session_id: terminal_domain::SessionId,
+    pane_id: terminal_domain::PaneId,
+    label: &str,
+) {
+    let marker = format!(
+        "terminal-platform-shell-{label}-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    );
+
+    let max_attempts = if cfg!(windows) { 240 } else { 120 };
+    for attempt in 0..max_attempts {
+        if attempt % 6 == 0 {
+            send_pane_input(
+                fixture,
+                session_id,
+                pane_id,
+                submitted_input(&format!("echo {marker}")),
+            )
+            .await;
+        }
+
+        let screen = fixture
+            .client
+            .screen_snapshot(session_id, pane_id)
+            .await
+            .expect("screen_snapshot should succeed");
+        if screen.surface.lines.iter().any(|line| line.text.contains(&marker)) {
+            return;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!("shell never echoed marker for {label}");
+}
+
+#[cfg(any(unix, windows))]
+fn fullscreen_fzf_command(path: &std::path::Path) -> String {
+    let quoted = quoted_command_path(path);
+    if cfg!(windows) {
+        let fzf = resolve_command_on_path("fzf").unwrap_or_else(|| "fzf".to_string());
+        // `cmd.exe` handles a bare executable path more reliably inside a pipe when the resolved
+        // path has no spaces, while still keeping the quoted fallback for local paths that do.
+        let fzf = if fzf.contains(' ') { format!("\"{fzf}\"") } else { fzf };
+        format!("type {quoted} | {fzf}")
+    } else {
+        format!("fzf < {quoted}")
+    }
+}
+
+#[cfg(any(unix, windows))]
+fn fullscreen_less_command(path: &std::path::Path, prefix: &str) -> String {
+    let quoted = quoted_command_path(path);
+    if cfg!(unix) && prefix == "zellij" {
+        // Zellij `dump-screen` is not a truthful proof source for `less` in alternate screen mode
+        // on hosted Linux, so keep the pager in the main buffer for imported-backend acceptance.
+        format!("less -X +/{prefix}-less-gamma {quoted}")
+    } else {
+        format!("less +/{prefix}-less-gamma {quoted}")
+    }
+}
+
+#[cfg(any(unix, windows))]
+async fn run_fullscreen_viewport_flow(
+    fixture: &terminal_testing::DaemonFixture,
+    session_id: terminal_domain::SessionId,
+    pane_id: terminal_domain::PaneId,
+    prefix: &str,
+    exercise_less: bool,
+    exercise_fzf: bool,
+) {
+    let (viewport_file, fzf_file) = temp_fullscreen_paths(prefix);
+    fs::write(
+        &viewport_file,
+        format!(
+            "{prefix}-vim-alpha\n\
+{prefix}-vim-beta\n\
+{prefix}-less-gamma\n\
+{prefix}-less-delta\n"
+        ),
+    )
+    .expect("viewport fixture file should write");
+    fs::write(&fzf_file, format!("{prefix}-fzf-alpha\n{prefix}-fzf-beta\n{prefix}-fzf-gamma\n"))
+        .expect("fzf fixture file should write");
+
+    send_pane_input(
+        fixture,
+        session_id,
+        pane_id,
+        submitted_input(&format!("vim {}", quoted_command_path(&viewport_file))),
+    )
+    .await;
+    wait_for_screen_line(fixture, session_id, pane_id, &format!("{prefix}-vim-alpha")).await;
+
+    send_pane_input(fixture, session_id, pane_id, submitted_input(":q!")).await;
+    wait_for_shell_marker(fixture, session_id, pane_id, &format!("{prefix}-vim-exit")).await;
+
+    if exercise_less {
+        send_pane_input(
+            fixture,
+            session_id,
+            pane_id,
+            submitted_input(&fullscreen_less_command(&viewport_file, prefix)),
+        )
+        .await;
+        wait_for_screen_line(fixture, session_id, pane_id, &format!("{prefix}-less-gamma")).await;
+
+        send_pane_input(fixture, session_id, pane_id, "q".to_string()).await;
+        wait_for_shell_marker(fixture, session_id, pane_id, &format!("{prefix}-less-exit")).await;
+    }
+
+    if exercise_fzf {
+        send_pane_input(
+            fixture,
+            session_id,
+            pane_id,
+            submitted_input(&fullscreen_fzf_command(&fzf_file)),
+        )
+        .await;
+        wait_for_screen_line(fixture, session_id, pane_id, &format!("{prefix}-fzf-beta")).await;
+
+        send_pane_input(fixture, session_id, pane_id, submitted_input("beta")).await;
+        wait_for_screen_line(fixture, session_id, pane_id, &format!("{prefix}-fzf-beta")).await;
+        wait_for_shell_marker(fixture, session_id, pane_id, &format!("{prefix}-fzf-exit")).await;
+    }
+
+    let _ = fs::remove_file(viewport_file);
+    let _ = fs::remove_file(fzf_file);
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_preserves_tmux_fullscreen_viewports_for_vim_less_and_fzf() {
+    if !fullscreen_tools_available() {
+        return;
+    }
+
     let socket_name = unique_tmux_socket_name("bootstrap-tmux-fullscreen");
     let session_name = unique_tmux_session_name("workspace");
     let _tmux = TmuxServerGuard::spawn_with_shell(&socket_name, &session_name)
@@ -1997,110 +2252,122 @@ async fn bootstrap_smoke_preserves_tmux_fullscreen_viewports_for_vim_less_and_fz
 
     wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "terminal-platform$")
         .await;
-
-    let temp_name = format!(
-        "terminal-platform-fullscreen-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or_default()
-    );
-    let viewport_file = std::env::temp_dir().join(format!("{temp_name}.txt"));
-    let fzf_file = std::env::temp_dir().join(format!("{temp_name}-fzf.txt"));
-    fs::write(
-        &viewport_file,
-        "tmux-vim-alpha\n\
-tmux-vim-beta\n\
-tmux-less-gamma\n\
-tmux-less-delta\n",
+    run_fullscreen_viewport_flow(
+        &fixture,
+        imported.session.session_id,
+        focused_pane,
+        "tmux",
+        true,
+        true,
     )
-    .expect("viewport fixture file should write");
-    fs::write(&fzf_file, "tmux-fzf-alpha\ntmux-fzf-beta\ntmux-fzf-gamma\n")
-        .expect("fzf fixture file should write");
+    .await;
 
-    fixture
-        .client
-        .dispatch(
-            imported.session.session_id,
-            MuxCommand::SendInput(SendInputSpec {
-                pane_id: focused_pane,
-                data: submitted_input(&format!("vim {}", viewport_file.display())),
-            }),
-        )
-        .await
-        .expect("vim should launch");
-    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "tmux-vim-alpha")
-        .await;
-    fixture
-        .client
-        .dispatch(
-            imported.session.session_id,
-            MuxCommand::SendInput(SendInputSpec {
-                pane_id: focused_pane,
-                data: submitted_input(":q!"),
-            }),
-        )
-        .await
-        .expect("vim should exit");
-    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "terminal-platform$")
-        .await;
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
 
-    fixture
-        .client
-        .dispatch(
-            imported.session.session_id,
-            MuxCommand::SendInput(SendInputSpec {
-                pane_id: focused_pane,
-                data: submitted_input(&format!("less {}", viewport_file.display())),
-            }),
-        )
-        .await
-        .expect("less should launch");
-    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "tmux-less-gamma")
-        .await;
-    fixture
-        .client
-        .dispatch(
-            imported.session.session_id,
-            MuxCommand::SendInput(SendInputSpec { pane_id: focused_pane, data: "q".to_string() }),
-        )
-        .await
-        .expect("less should exit");
-    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "terminal-platform$")
-        .await;
+#[cfg(any(unix, windows))]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_preserves_zellij_fullscreen_viewports_for_imported_tuis() {
+    if !fullscreen_tools_available() {
+        return;
+    }
 
-    fixture
+    let session_name = unique_zellij_session_name("full");
+    let _zellij = ZellijSessionGuard::spawn(&session_name).expect("zellij session should start");
+    let fixture = daemon_fixture("bootstrap-zellij-fullscreen").expect("fixture should start");
+    let capabilities = fixture
         .client
-        .dispatch(
-            imported.session.session_id,
-            MuxCommand::SendInput(SendInputSpec {
-                pane_id: focused_pane,
-                data: submitted_input(&format!("fzf < {}", fzf_file.display())),
-            }),
-        )
+        .backend_capabilities(BackendKind::Zellij)
         .await
-        .expect("fzf should launch");
-    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "tmux-fzf-beta")
-        .await;
-    fixture
-        .client
-        .dispatch(
-            imported.session.session_id,
-            MuxCommand::SendInput(SendInputSpec {
-                pane_id: focused_pane,
-                data: submitted_input("beta"),
-            }),
-        )
-        .await
-        .expect("fzf should accept selection");
-    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "tmux-fzf-beta")
-        .await;
-    wait_for_screen_line(&fixture, imported.session.session_id, focused_pane, "terminal-platform$")
-        .await;
+        .expect("zellij capabilities should succeed");
 
-    let _ = fs::remove_file(viewport_file);
-    let _ = fs::remove_file(fzf_file);
+    if !capabilities.capabilities.rendered_viewport_snapshot {
+        fixture.shutdown().await.expect("fixture should stop cleanly");
+        return;
+    }
+
+    let candidate = wait_for_discovered_zellij_session(&fixture.client, &session_name).await;
+    let imported = tokio::time::timeout(
+        zellij_operation_timeout(),
+        fixture.client.import_session(candidate.route, candidate.title),
+    )
+    .await
+    .expect("zellij import should not hang")
+    .expect("zellij import should succeed");
+    let topology = wait_for_topology(
+        &fixture,
+        imported.session.session_id,
+        |snapshot| !snapshot.tabs.is_empty(),
+        "zellij fullscreen initial topology",
+    )
+    .await;
+    let focused_tab = topology
+        .tabs
+        .iter()
+        .find(|tab| Some(tab.tab_id) == topology.focused_tab)
+        .or_else(|| topology.tabs.first())
+        .expect("zellij fullscreen tab should exist");
+    let focused_pane = focused_tab
+        .focused_pane
+        .or_else(|| collect_pane_ids(&focused_tab.root).first().copied())
+        .expect("zellij fullscreen pane should exist");
+
+    wait_for_shell_marker(&fixture, imported.session.session_id, focused_pane, "zellij-initial")
+        .await;
+    // Imported Unix Zellij sessions do not expose a truthful automated proof source for plain
+    // `less` through `dump-screen`, so keep automated parity honest there and leave pager
+    // validation to the documented manual `less -X` acceptance path.
+    let exercise_less = cfg!(windows);
+    // Hosted Windows import coverage still cannot prove `fzf` viewport fidelity through the
+    // imported Zellij screen path without lying about parity, so keep that specific proof manual.
+    let exercise_fzf = !cfg!(windows);
+    run_fullscreen_viewport_flow(
+        &fixture,
+        imported.session.session_id,
+        focused_pane,
+        "zellij",
+        exercise_less,
+        exercise_fzf,
+    )
+    .await;
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_preserves_native_fullscreen_viewports_for_vim_less_and_fzf() {
+    if !fullscreen_tools_available() {
+        return;
+    }
+
+    let fixture = daemon_fixture("bootstrap-native-fullscreen").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: None },
+        )
+        .await
+        .expect("native fullscreen session should create");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let focused_pane = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_shell_marker(&fixture, created.session.session_id, focused_pane, "native-initial")
+        .await;
+    run_fullscreen_viewport_flow(
+        &fixture,
+        created.session.session_id,
+        focused_pane,
+        "native",
+        true,
+        true,
+    )
+    .await;
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
@@ -2703,7 +2970,7 @@ fn fallback_zellij_candidate(session_name: &str) -> terminal_backend_api::Discov
 
 #[cfg(any(unix, windows))]
 fn submitted_input(text: &str) -> String {
-    if cfg!(windows) { format!("echo {text}\r\n") } else { format!("{text}\n") }
+    if cfg!(windows) { format!("{text}\r\n") } else { format!("{text}\n") }
 }
 
 #[cfg(any(unix, windows))]

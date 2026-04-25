@@ -12,6 +12,7 @@ env:
 jobs:
   release-readiness:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v6
@@ -33,8 +34,16 @@ jobs:
       - name: Readiness audit
         run: cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
 
+      - name: Install nightly for cargo-public-api
+        run: rustup toolchain install nightly --profile minimal
+
+      - name: Public API smoke
+        run: |
+          cargo +nightly public-api -p terminal-domain > /dev/null
+          cargo +nightly public-api -p terminal-protocol > /dev/null
+          cargo +nightly public-api -p terminal-node > /dev/null
+
       - name: Tooling smoke
         run: |
-          cargo public-api --version
           cargo semver-checks --version
           release-plz --version

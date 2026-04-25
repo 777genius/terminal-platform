@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{HashSet, VecDeque},
     io::{Read as _, Write as _},
     sync::{Arc, Mutex},
@@ -88,7 +89,7 @@ struct LayoutResizeOutcome {
 
 struct NativePtyProcess {
     master: Box<dyn portable_pty::MasterPty + Send>,
-    writer: Box<dyn std::io::Write + Send>,
+    writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
@@ -359,6 +360,7 @@ fn spawn_pane(
         .master
         .take_writer()
         .map_err(|error| BackendError::transport(format!("failed to take pty writer - {error}")))?;
+    let writer = Arc::new(Mutex::new(writer));
     let emulator = Arc::new(EmulatorBuffer::new(rows, cols));
     let transcript = Arc::new(TranscriptBuffer::default());
     let pane_id = PaneId::new();
@@ -366,6 +368,7 @@ fn spawn_pane(
 
     spawn_reader_thread(
         reader,
+        Arc::clone(&writer),
         Arc::clone(&transcript),
         Arc::clone(&emulator),
         surface_tick.clone(),
@@ -395,6 +398,7 @@ fn build_command(launch: &ShellLaunchSpec) -> CommandBuilder {
 
 fn spawn_reader_thread(
     mut reader: Box<dyn std::io::Read + Send>,
+    writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
     transcript: Arc<TranscriptBuffer>,
     emulator: Arc<EmulatorBuffer>,
     surface_tick: watch::Sender<u64>,
@@ -405,6 +409,7 @@ fn spawn_reader_thread(
             match reader.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(read) => {
+                    respond_to_cursor_inherit_query(&chunk[..read], &writer);
                     transcript.append(&chunk[..read]);
                     emulator.advance(&chunk[..read]);
                     bump_watch(&surface_tick);
@@ -1065,7 +1070,7 @@ fn dispatch_send_input(
         .iter()
         .find_map(|tab| tab.pane(spec.pane_id))
         .ok_or_else(|| BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)))?;
-    pane.write_all(spec.data.as_bytes())?;
+    pane.write_text(&spec.data)?;
     Ok(false)
 }
 
@@ -1078,20 +1083,29 @@ fn dispatch_send_paste(
         .iter()
         .find_map(|tab| tab.pane(spec.pane_id))
         .ok_or_else(|| BackendError::not_found(format!("unknown pane {:?}", spec.pane_id)))?;
-    pane.write_all(spec.data.as_bytes())?;
+    pane.write_text(&spec.data)?;
     Ok(false)
 }
 
 impl NativePaneRuntime {
+    fn write_text(&self, text: &str) -> Result<(), BackendError> {
+        let normalized = normalize_pty_input(text);
+        self.write_all(normalized.as_bytes())
+    }
+
     fn write_all(&self, bytes: &[u8]) -> Result<(), BackendError> {
-        let mut process = self
+        let process = self
             .process
             .lock()
             .map_err(|_| BackendError::internal("native pane process lock poisoned"))?;
-        process.writer.write_all(bytes).map_err(|error| {
+        let mut writer = process
+            .writer
+            .lock()
+            .map_err(|_| BackendError::internal("native pane writer lock poisoned"))?;
+        writer.write_all(bytes).map_err(|error| {
             BackendError::transport(format!("failed to write to pty - {error}"))
         })?;
-        process.writer.flush().map_err(|error| {
+        writer.flush().map_err(|error| {
             BackendError::transport(format!("failed to flush pty writer - {error}"))
         })?;
         Ok(())
@@ -1120,7 +1134,82 @@ impl NativePaneRuntime {
     }
 }
 
+fn respond_to_cursor_inherit_query(
+    chunk: &[u8],
+    writer: &Arc<Mutex<Box<dyn std::io::Write + Send>>>,
+) {
+    #[cfg(windows)]
+    {
+        // CreatePseudoConsole warns that inheriting the cursor can deadlock unless the host
+        // answers the cursor-position query received on the output pipe. v1 now pins the
+        // vendored portable-pty path to dwFlags = 0, but keep this safeguard so unexpected
+        // ConPTY hosts or future vendor drift do not wedge the pipe.
+        if chunk.windows(4).any(|window| window == b"\x1b[6n")
+            && let Ok(mut writer) = writer.lock()
+        {
+            let _ = writer.write_all(b"\x1b[1;1R");
+            let _ = writer.flush();
+        }
+    }
+
+    #[cfg(not(windows))]
+    let _ = (chunk, writer);
+}
+
+fn normalize_pty_input(text: &str) -> Cow<'_, str> {
+    #[cfg(windows)]
+    {
+        normalize_windows_pty_input(text)
+    }
+
+    #[cfg(not(windows))]
+    {
+        Cow::Borrowed(text)
+    }
+}
+
+#[cfg(any(test, windows))]
+fn normalize_windows_pty_input(text: &str) -> Cow<'_, str> {
+    if !text.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
+        return Cow::Borrowed(text);
+    }
+
+    let mut normalized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\r' => {
+                if matches!(chars.peek(), Some('\n')) {
+                    chars.next();
+                }
+                normalized.push('\r');
+            }
+            '\n' => normalized.push('\r'),
+            _ => normalized.push(ch),
+        }
+    }
+
+    Cow::Owned(normalized)
+}
+
 fn bump_watch(sender: &watch::Sender<u64>) {
     let next = sender.borrow().wrapping_add(1);
     let _ = sender.send(next);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_windows_pty_input;
+
+    #[test]
+    fn normalize_windows_pty_input_preserves_plain_text() {
+        assert_eq!(normalize_windows_pty_input("plain text").as_ref(), "plain text");
+    }
+
+    #[test]
+    fn normalize_windows_pty_input_collapses_newline_variants_to_carriage_return() {
+        assert_eq!(normalize_windows_pty_input("alpha\r\nbeta").as_ref(), "alpha\rbeta");
+        assert_eq!(normalize_windows_pty_input("alpha\nbeta").as_ref(), "alpha\rbeta");
+        assert_eq!(normalize_windows_pty_input("alpha\rbeta").as_ref(), "alpha\rbeta");
+    }
 }

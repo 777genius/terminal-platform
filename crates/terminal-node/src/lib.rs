@@ -565,7 +565,7 @@ mod tests {
             node.list_saved_sessions().await.expect("list_saved_sessions should succeed");
 
         assert!(handshake.assessment.can_use);
-        assert_eq!(handshake.handshake.available_backends.len(), 3);
+        assert!(handshake.handshake.available_backends.contains(&NodeBackendKind::Native));
         assert_eq!(native_capabilities.backend, NodeBackendKind::Native);
         assert!(native_capabilities.capabilities.explicit_session_save);
         assert_eq!(tmux_capabilities.backend, NodeBackendKind::Tmux);
@@ -607,12 +607,9 @@ mod tests {
         assert!(saved.iter().any(|session| session.session_id == created.session_id));
         assert_eq!(loaded.session_id, created.session_id);
         assert!(loaded.compatibility.can_restore);
-        let expected_launch =
-            cat_launch_request("shell").launch.expect("cat launch request should include launch");
-        assert_eq!(
-            loaded.launch.as_ref().map(|launch| launch.program.as_str()),
-            Some(expected_launch.program.as_str())
-        );
+        let expected_launch = cat_launch_request("shell").launch;
+        assert_eq!(loaded.launch, expected_launch);
+        assert_eq!(loaded.restore_semantics.uses_saved_launch_spec, loaded.launch.is_some());
         assert!(after_input.sequence >= ready_screen.sequence);
         assert!(after_input.surface.lines.iter().any(|line| line.text.contains("node host input")));
         assert_eq!(delta.pane_id, focused_pane_id);
@@ -1378,14 +1375,45 @@ mod tests {
     }
 
     fn cat_launch_request(title: &str) -> NodeCreateSessionRequest {
-        let launch = echo_shell_launch_spec();
         NodeCreateSessionRequest {
             title: Some(title.to_string()),
-            launch: Some(super::NodeShellLaunchSpec {
+            launch: node_host_launch_spec().map(|launch| super::NodeShellLaunchSpec {
                 program: launch.program,
                 args: launch.args,
                 cwd: launch.cwd.map(|cwd| cwd.display().to_string()),
             }),
+        }
+    }
+
+    fn node_host_launch_spec() -> Option<terminal_backend_api::ShellLaunchSpec> {
+        #[cfg(unix)]
+        {
+            Some(echo_shell_launch_spec())
+        }
+
+        #[cfg(windows)]
+        {
+            None
+        }
+    }
+
+    #[test]
+    fn uses_platform_appropriate_launch_contract_for_node_host_smoke() {
+        let request = cat_launch_request("shell");
+
+        #[cfg(unix)]
+        {
+            let launch = request.launch.expect("cat launch request should include launch");
+            assert_eq!(launch.program, "/bin/sh");
+            assert_eq!(
+                launch.args,
+                vec!["-lc".to_string(), "printf 'ready\\n'; exec cat".to_string()]
+            );
+        }
+
+        #[cfg(windows)]
+        {
+            assert!(request.launch.is_none());
         }
     }
 
@@ -1395,6 +1423,7 @@ mod tests {
         pane_id: &str,
         needle: &str,
     ) -> super::NodeScreenSnapshot {
+        let mut last_lines = Vec::new();
         for _ in 0..screen_wait_attempts() {
             let snapshot = node
                 .screen_snapshot(session_id, pane_id)
@@ -1403,10 +1432,12 @@ mod tests {
             if snapshot.surface.lines.iter().any(|line| line.text.contains(needle)) {
                 return snapshot;
             }
+            last_lines =
+                snapshot.surface.lines.iter().map(|line| line.text.clone()).take(12).collect();
             sleep(Duration::from_millis(100)).await;
         }
 
-        panic!("screen never contained expected line: {needle}");
+        panic!("screen never contained expected line: {needle}; last lines: {last_lines:?}");
     }
 
     async fn wait_for_interactive_screen(
@@ -1568,7 +1599,7 @@ mod tests {
     }
 
     fn submitted_input(text: &str) -> String {
-        if cfg!(windows) { format!("echo {text}\r\n") } else { format!("{text}\n") }
+        if cfg!(windows) { format!("{text}\r\n") } else { format!("{text}\n") }
     }
 
     fn spawn_daemon_with_retry(

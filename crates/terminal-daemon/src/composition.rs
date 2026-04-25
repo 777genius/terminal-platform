@@ -1,18 +1,20 @@
-use std::sync::Arc;
-
-use terminal_backend_api::MuxBackendPort;
-use terminal_backend_native::NativeBackend;
-use terminal_backend_tmux::TmuxBackend;
-use terminal_backend_zellij::ZellijBackend;
 use terminal_persistence::SqliteSessionStore;
 use terminal_runtime::{BackendCatalog, TerminalRuntime};
 
+use crate::{
+    TerminalDaemonBackendConfig, TerminalDaemonBackendRegistry,
+    backend_registry::TerminalDaemonBackendBuildError,
+};
+
 pub(crate) fn default_backend_catalog() -> BackendCatalog {
-    BackendCatalog::new([
-        Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
-        Arc::new(TmuxBackend::default()) as Arc<dyn MuxBackendPort>,
-        Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>,
-    ])
+    backend_catalog(TerminalDaemonBackendConfig::default())
+        .expect("compiled default terminal-daemon backend catalog should build")
+}
+
+pub(crate) fn backend_catalog(
+    backend_config: TerminalDaemonBackendConfig,
+) -> Result<BackendCatalog, TerminalDaemonBackendBuildError> {
+    TerminalDaemonBackendRegistry::compiled_default().build_catalog(backend_config)
 }
 
 pub(crate) fn runtime_with_persistence(persistence: SqliteSessionStore) -> TerminalRuntime {

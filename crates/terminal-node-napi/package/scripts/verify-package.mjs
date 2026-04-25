@@ -60,12 +60,12 @@ function main() {
   }
 
   process.stdout.write(
-    JSON.stringify({
+    `${JSON.stringify({
       packageDir: rootDir,
       version: packageJson.version,
       bindings: bindingFiles.length,
       targets: nativeManifest.targets.length,
-    }),
+    })}\n`,
   );
 }
 
@@ -78,7 +78,7 @@ function parseArgs(argv) {
     const arg = argv[index];
 
     if (arg === "--package-dir") {
-      options.packageDir = argv[index + 1];
+      options.packageDir = readFlagValue(argv, index, arg);
       index += 1;
       continue;
     }
@@ -87,6 +87,14 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function readFlagValue(argv, index, flag) {
+  const value = argv[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
 }
 
 function readJson(value) {

@@ -18,15 +18,22 @@ function main() {
   run("node", buildArgs, packageDir);
   run("node", ["./scripts/verify-package.mjs", "--package-dir", options.out], packageDir);
 
-  const packResult = spawnSync("npm", ["pack", "--json"], {
+  const packResult = spawnSync(nodePackageManager(), ["pack", "--json"], {
     cwd: options.out,
-    env: process.env,
+    env: packageManagerEnv(options),
     encoding: "utf8",
+    shell: packageManagerShell(),
     stdio: ["ignore", "pipe", "inherit"],
   });
 
+  if (packResult.error) {
+    throw new Error(`npm pack failed to launch - ${packResult.error.message}`);
+  }
+
   if (packResult.status !== 0) {
-    throw new Error(`npm pack failed with exit code ${packResult.status}`);
+    throw new Error(
+      `npm pack failed with exit code ${packResult.status} signal ${packResult.signal ?? "<none>"}`,
+    );
   }
 
   const payload = JSON.parse(packResult.stdout);
@@ -48,7 +55,7 @@ function parseArgs(argv) {
     const arg = argv[index];
 
     if (arg === "--out") {
-      options.out = path.resolve(argv[index + 1]);
+      options.out = path.resolve(readFlagValue(argv, index, arg));
       index += 1;
       continue;
     }
@@ -64,6 +71,14 @@ function parseArgs(argv) {
   return options;
 }
 
+function readFlagValue(argv, index, flag) {
+  const value = argv[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
+}
+
 function run(command, args, cwd) {
   const result = spawnSync(command, args, {
     cwd,
@@ -74,6 +89,21 @@ function run(command, args, cwd) {
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);
   }
+}
+
+function packageManagerEnv(options) {
+  return {
+    ...process.env,
+    npm_config_cache: process.env.npm_config_cache ?? path.join(options.out, ".npm-cache"),
+  };
+}
+
+function nodePackageManager() {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function packageManagerShell() {
+  return process.platform === "win32" ? process.env.ComSpec ?? true : false;
 }
 
 main();

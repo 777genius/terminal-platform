@@ -4,6 +4,7 @@ const require = createRequire(import.meta.url);
 const cjs = require("./index.cjs");
 
 export const applyScreenDelta = cjs.applyScreenDelta;
+export const collectEnvironmentReport = cjs.collectEnvironmentReport;
 export const createElectronMainBridge = cjs.createElectronMainBridge;
 export const createElectronPreloadApi = cjs.createElectronPreloadApi;
 export const createSessionState = cjs.createSessionState;

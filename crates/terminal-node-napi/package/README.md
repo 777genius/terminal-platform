@@ -21,7 +21,7 @@ This package gives JavaScript hosts a typed client surface over the Rust runtime
 
 - `macOS + Linux` - `Native + tmux + Zellij`
 - `Windows` - `Native + Zellij`
-- `tmux` stays Unix-only in v1 acceptance and docs
+- `tmux` stays Unix-only in v1 docs, tests, CI, and acceptance
 
 ## Current Package Surface
 
@@ -116,6 +116,31 @@ The package-level watch helpers are explicitly tested for:
 - restart recovery on the same client instance
 - main and preload disposal during live session-state watchers
 
+## Environment Report
+
+For host diagnostics and support tickets, the package can collect a structured environment report without guessing backend truth:
+
+```js
+const {
+  TerminalNodeClient,
+  collectEnvironmentReport,
+} = require("terminal-platform-node");
+
+const client = TerminalNodeClient.fromRuntimeSlug("default");
+const report = await collectEnvironmentReport(client);
+
+console.log(report.supportMatrix);
+console.log(report.backends);
+```
+
+The report includes:
+
+- current Node platform and arch
+- resolved addon path when available
+- binding and daemon handshake versions
+- backend capability snapshots for `native`, `tmux`, and `zellij`
+- the published v1 support matrix for the current host platform
+
 ## Packaging And Local Staging
 
 Stage a publishable package directory from a compiled addon:
@@ -136,6 +161,20 @@ Build, verify, and pack a local tarball:
 
 ```bash
 node ./scripts/pack-local-package.mjs --out /tmp/terminal-platform-node
+```
+
+Verify a local install from the produced tarball:
+
+```bash
+export npm_config_cache=/tmp/terminal-platform-node-npm-cache
+TARBALL="$(node ./scripts/pack-local-package.mjs --out /tmp/terminal-platform-node-pack | tail -n 1)"
+test -f "$TARBALL"
+mkdir -p /tmp/terminal-platform-node-consumer
+printf '{ "name": "terminal-platform-node-install-smoke", "private": true }\n' > /tmp/terminal-platform-node-consumer/package.json
+cd /tmp/terminal-platform-node-consumer
+npm install --ignore-scripts --no-audit --no-fund --no-package-lock "$TARBALL"
+node -e "const sdk = require('terminal-platform-node'); if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+node --input-type=module -e "import sdk from 'terminal-platform-node'; if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
 ```
 
 The staged package contains:

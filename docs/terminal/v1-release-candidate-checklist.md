@@ -26,10 +26,53 @@ cargo nextest run --workspace
 cargo run -p xtask -- verify-v1-readiness
 ```
 
+Package layout and install proof:
+
+```bash
+node crates/terminal-node-napi/package/scripts/build-local-package.mjs --out /tmp/terminal-platform-node
+node crates/terminal-node-napi/package/scripts/verify-package.mjs --package-dir /tmp/terminal-platform-node
+export npm_config_cache=/tmp/terminal-platform-node-npm-cache
+TARBALL="$(node crates/terminal-node-napi/package/scripts/pack-local-package.mjs --out /tmp/terminal-platform-node-pack | tail -n 1)"
+test -f "$TARBALL"
+mkdir -p /tmp/terminal-platform-node-consumer
+printf '{ "name": "terminal-platform-node-install-smoke", "private": true }\n' > /tmp/terminal-platform-node-consumer/package.json
+cd /tmp/terminal-platform-node-consumer
+npm install --ignore-scripts --no-audit --no-fund --no-package-lock "$TARBALL"
+node -e "const sdk = require('terminal-platform-node'); if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+node --input-type=module -e "import sdk from 'terminal-platform-node'; if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+cd -
+cargo build -p terminal-capi
+cargo run -p xtask -- stage-capi-package --out /tmp/terminal-capi
+cargo run -p xtask -- verify-capi-package --package-dir /tmp/terminal-capi
+cargo run -p xtask -- install-capi-package --package-dir /tmp/terminal-capi --prefix /tmp/terminal-capi-install
+cargo run -p xtask -- verify-capi-install --prefix /tmp/terminal-capi-install
+```
+
 After the recorded manual pass files are added:
 
 ```bash
 cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
+```
+
+## Offline handoff when push is unavailable
+
+If the working environment cannot reach GitHub, do not treat local commits as shipped.
+Create both a patch stream and a Git bundle, verify the bundle, then apply one of them from a
+network-enabled checkout before running hosted CI.
+
+```bash
+git format-patch origin/main..HEAD --stdout > terminal-platform-v1-closeout-local.patch
+git bundle create terminal-platform-v1-closeout.bundle origin/main..HEAD
+git bundle verify terminal-platform-v1-closeout.bundle
+```
+
+In the network-enabled checkout, apply the handoff and push only after the local readiness
+audit still passes:
+
+```bash
+git am terminal-platform-v1-closeout-local.patch
+cargo run -p xtask -- verify-v1-readiness
+git push origin main
 ```
 
 ## GitHub closeout steps

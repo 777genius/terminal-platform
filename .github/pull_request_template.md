@@ -23,6 +23,10 @@
 - [ ] cargo clippy --workspace --all-targets --all-features
 - [ ] cargo nextest run --workspace
 - [ ] cargo run -p xtask -- verify-v1-readiness
+- [ ] Node staged package smoke, if Node/Electron surface or CI changed
+- [ ] Node installed package smoke, if Node/Electron surface or CI changed
+- [ ] C ABI package stage/install smoke, if C ABI or packaging changed
+- [ ] cargo run -p xtask -- verify-v1-readiness --require-recorded-passes, before release handoff
 
 List any focused extra checks here:
 
@@ -33,6 +37,7 @@ List any focused extra checks here:
 
 - hosted CI links, if relevant
 - manual pass artifacts, if relevant
+- Windows Native + Zellij recorded pass, if v1 acceptance is being claimed
 - note any intentionally deferred evidence
 
 ## Risks

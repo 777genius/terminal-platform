@@ -117,6 +117,48 @@ For the v1 readiness audit:
 cargo run -p xtask -- verify-v1-readiness
 ```
 
+## Backend Modularity
+
+`terminal-daemon` now supports honest compile-time and config-time backend composition.
+
+Compile only the backend families you want:
+
+```bash
+cargo test -p terminal-daemon --no-default-features --features native-backend
+cargo test -p terminal-daemon --no-default-features --features tmux-backend
+cargo test -p terminal-daemon --no-default-features --features zellij-backend
+```
+
+Or keep the default full bundle and disable specific compiled backends at runtime:
+
+```rust
+use terminal_daemon::{TerminalDaemonBackendConfig, TerminalDaemonState};
+use terminal_domain::BackendKind;
+
+let state = TerminalDaemonState::with_backend_config(
+    TerminalDaemonBackendConfig::default()
+        .enable(BackendKind::Tmux, false)
+        .enable(BackendKind::Zellij, false),
+) ?;
+```
+
+Or use the canonical bootstrap config contract for embedders:
+
+```rust
+use terminal_daemon::TerminalDaemonBootstrapConfig;
+
+let daemon = TerminalDaemonBootstrapConfig::from_backend_csv("native,zellij")?
+    .build_daemon()?;
+```
+
+Environment-driven bootstrap is also supported:
+
+```bash
+export TERMINAL_DAEMON_BACKENDS=native,zellij
+```
+
+The daemon handshake will report only the backends that are actually compiled and enabled. Unsupported combinations fail explicitly instead of silently degrading into fake parity, and backend wiring now lives behind a provider registry instead of being hard-coded inside daemon state.
+
 ## Main Surfaces
 
 ### Rust Core
@@ -163,6 +205,7 @@ Quality gates currently include:
 - `cargo fmt`
 - `cargo clippy`
 - `cargo nextest`
+- a vendored Windows `portable-pty` guardrail that pins `CreatePseudoConsole(..., 0, ...)` until broader flag behavior is proven in hosted CI
 - fuzz baseline runs under `fuzz/`
 - staged and installed package smoke for Node
 - staged and installed package smoke for the C ABI

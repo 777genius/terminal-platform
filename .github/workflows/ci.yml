@@ -18,6 +18,48 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  backend-bundles:
+    name: backend-bundles-${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: native-only
+            features: native-backend
+          - label: tmux-only
+            features: tmux-backend
+          - label: zellij-only
+            features: zellij-backend
+          - label: native-zellij
+            features: native-backend,zellij-backend
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Daemon bundle test
+        shell: bash
+        run: cargo test -p terminal-daemon --no-default-features --features "${{ matrix.features }}" -- --nocapture
+
+      - name: Embed surface bundle compile
+        shell: bash
+        run: |
+          cargo check -p terminal-testing --no-default-features --features "${{ matrix.features }}" --lib
+          cargo check -p terminal-daemon-client --no-default-features --features "${{ matrix.features }}" --lib
+          cargo check -p terminal-node --no-default-features --features "${{ matrix.features }}" --lib
+          cargo check -p terminal-node-napi --no-default-features --features "${{ matrix.features }}" --lib
+          cargo check -p terminal-capi --no-default-features --features "${{ matrix.features }}" --lib
+
   unix-matrix:
     name: unix-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -49,11 +91,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y tmux fzf
+          sudo apt-get install -y tmux fzf vim
 
       - name: Install tmux on macOS
         if: runner.os == 'macOS'
-        run: brew install tmux fzf
+        run: brew install tmux fzf vim
 
       - name: Install Zellij
         shell: bash
@@ -69,6 +111,9 @@ jobs:
           rustc --version
           cargo --version
           node --version
+          vim --version | head -n 1
+          less --version | head -n 1
+          fzf --version
           tmux -V
           zellij --version
 
@@ -77,6 +122,37 @@ jobs:
 
       - name: Nextest
         run: cargo nextest run --profile ci --workspace
+
+      - name: Node staged package layout smoke
+        shell: bash
+        run: |
+          node crates/terminal-node-napi/package/scripts/build-local-package.mjs --out "$RUNNER_TEMP/terminal-platform-node"
+          node crates/terminal-node-napi/package/scripts/verify-package.mjs --package-dir "$RUNNER_TEMP/terminal-platform-node"
+
+      - name: Node installed package smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_WORK_DIR="$RUNNER_TEMP/terminal-platform-node-install"
+          export npm_config_cache="$PACKAGE_WORK_DIR/npm-cache"
+          TARBALL="$(node crates/terminal-node-napi/package/scripts/pack-local-package.mjs --out "$PACKAGE_WORK_DIR/package" | tail -n 1)"
+          test -f "$TARBALL"
+          INSTALL_DIR="$PACKAGE_WORK_DIR/consumer"
+          mkdir -p "$INSTALL_DIR"
+          printf '{ "name": "terminal-platform-node-install-smoke", "private": true }\n' > "$INSTALL_DIR/package.json"
+          cd "$INSTALL_DIR"
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock "$TARBALL"
+          node -e "const sdk = require('terminal-platform-node'); if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+          node --input-type=module -e "import sdk from 'terminal-platform-node'; if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+
+      - name: C ABI package stage/install smoke
+        shell: bash
+        run: |
+          cargo build -p terminal-capi
+          cargo run -p xtask -- stage-capi-package --out "$RUNNER_TEMP/terminal-capi"
+          cargo run -p xtask -- verify-capi-package --package-dir "$RUNNER_TEMP/terminal-capi"
+          cargo run -p xtask -- install-capi-package --package-dir "$RUNNER_TEMP/terminal-capi" --prefix "$RUNNER_TEMP/terminal-capi-install"
+          cargo run -p xtask -- verify-capi-install --prefix "$RUNNER_TEMP/terminal-capi-install"
 
   windows-v1:
     name: windows-v1
@@ -107,16 +183,47 @@ jobs:
           $binDir = python .github/scripts/install_zellij.py --out "$env:RUNNER_TEMP\zellij-bin"
           $binDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Install fullscreen TUI tools
+        shell: pwsh
+        run: |
+          choco install -y vim less
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Chocolatey failed to provision one or more Windows TUI tools; continuing with explicit verification and direct fzf install."
+          }
+          $fzfBinDir = python .github/scripts/install_fzf.py --out "$env:RUNNER_TEMP\fzf-bin"
+          $fzfBinDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:PATH = "$fzfBinDir;$env:PATH"
+          foreach ($tool in @("vim", "less", "fzf")) {
+            if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+              throw "Required fullscreen TUI tool is missing from PATH after provisioning: $tool"
+            }
+          }
+
       - name: Print tool versions
         shell: pwsh
         run: |
           rustc --version
           cargo --version
           node --version
+          vim --version | Select-Object -First 1
+          less --version | Select-Object -First 1
+          fzf --version
           zellij --version
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features
+
+      - name: Windows backend bundle compile
+        shell: pwsh
+        run: |
+          cargo check -p terminal-daemon --no-default-features --features native-backend --tests
+          cargo check -p terminal-daemon --no-default-features --features zellij-backend --tests
+          cargo check -p terminal-daemon --no-default-features --features native-backend,zellij-backend --tests
+          cargo check -p terminal-testing --no-default-features --features native-backend,zellij-backend --lib
+          cargo check -p terminal-daemon-client --no-default-features --features native-backend,zellij-backend --lib
+          cargo check -p terminal-node --no-default-features --features native-backend,zellij-backend --lib
+          cargo check -p terminal-node-napi --no-default-features --features native-backend,zellij-backend --lib
+          cargo check -p terminal-capi --no-default-features --features native-backend,zellij-backend --lib
 
       - name: Nextest
         run: >
@@ -130,6 +237,34 @@ jobs:
           -p terminal-node-napi
           -p terminal-protocol
           -p terminal-testing
+
+      - name: Node staged package layout smoke
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:RUNNER_TEMP "terminal-platform-node"
+          node crates/terminal-node-napi/package/scripts/build-local-package.mjs --out $packageDir
+          node crates/terminal-node-napi/package/scripts/verify-package.mjs --package-dir $packageDir
+
+      - name: Node installed package smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $workDir = Join-Path $env:RUNNER_TEMP "terminal-platform-node-install"
+          $env:npm_config_cache = Join-Path $workDir "npm-cache"
+          $packageDir = Join-Path $workDir "package"
+          $tarball = node crates/terminal-node-napi/package/scripts/pack-local-package.mjs --out $packageDir | Select-Object -Last 1
+          if (-not (Test-Path -Path $tarball -PathType Leaf)) {
+            throw "Packed terminal-platform-node tarball was not created: $tarball"
+          }
+          $installDir = Join-Path $workDir "consumer"
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          '{ "name": "terminal-platform-node-install-smoke", "private": true }' | Out-File -FilePath (Join-Path $installDir "package.json") -Encoding utf8
+          Push-Location $installDir
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock $tarball
+          node -e "const sdk = require('terminal-platform-node'); if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+          node --input-type=module -e "import sdk from 'terminal-platform-node'; if (!sdk.TerminalNodeClient) throw new Error('missing TerminalNodeClient')"
+          Pop-Location
 
   governance:
     name: governance
@@ -150,6 +285,9 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
+      - name: Readiness audit
+        run: cargo run -p xtask -- verify-v1-readiness
+
       - name: cargo-deny
         run: cargo deny check bans licenses advisories sources
 
@@ -158,12 +296,14 @@ jobs:
 
       - name: cargo-public-api
         run: |
-          cargo public-api -p terminal-domain > /dev/null
-          cargo public-api -p terminal-protocol > /dev/null
-          cargo public-api -p terminal-node > /dev/null
+          cargo +nightly public-api -p terminal-domain > /dev/null
+          cargo +nightly public-api -p terminal-protocol > /dev/null
+          cargo +nightly public-api -p terminal-node > /dev/null
 
       - name: release-plz config smoke
-        run: release-plz --version
+        run: |
+          cargo semver-checks --version
+          release-plz --version
 
       - name: cargo-semver-checks
         if: github.event_name == 'pull_request'

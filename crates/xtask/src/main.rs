@@ -14,14 +14,36 @@ const LICENSE_PATH: &str = "LICENSE";
 const CONTRIBUTING_PATH: &str = "CONTRIBUTING.md";
 const SECURITY_PATH: &str = "SECURITY.md";
 const CODE_OF_CONDUCT_PATH: &str = "CODE_OF_CONDUCT.md";
+const PULL_REQUEST_TEMPLATE_PATH: &str = ".github/pull_request_template.md";
+const WORKSPACE_MANIFEST_PATH: &str = "Cargo.toml";
 const ROOT_README_PATH: &str = "README.md";
 const NODE_PACKAGE_README_PATH: &str = "crates/terminal-node-napi/package/README.md";
+const NODE_PACKAGE_STAGE_SCRIPT_PATH: &str =
+    "crates/terminal-node-napi/package/scripts/stage-package.mjs";
+const NODE_PACKAGE_BUILD_SCRIPT_PATH: &str =
+    "crates/terminal-node-napi/package/scripts/build-local-package.mjs";
+const NODE_PACKAGE_PACK_SCRIPT_PATH: &str =
+    "crates/terminal-node-napi/package/scripts/pack-local-package.mjs";
+const NODE_PACKAGE_VERIFY_SCRIPT_PATH: &str =
+    "crates/terminal-node-napi/package/scripts/verify-package.mjs";
+const NODE_SMOKE_TEST_PATH: &str = "crates/terminal-node-napi/tests/node_smoke.rs";
+const NODE_PACKAGE_SMOKE_TEST_PATH: &str = "crates/terminal-node-napi/tests/package_smoke.rs";
+const NODE_PACKAGE_INSTALL_SMOKE_TEST_PATH: &str =
+    "crates/terminal-node-napi/tests/package_install_smoke.rs";
+const ZELLIJ_INSTALLER_PATH: &str = ".github/scripts/install_zellij.py";
 const MANUAL_DIR: &str = "crates/terminal-testing/manual";
 const MANUAL_DRAFTS_DIR: &str = "crates/terminal-testing/manual/drafts";
 const MANUAL_RUNS_DIR: &str = "crates/terminal-testing/manual/runs";
+const CI_WORKFLOW_PATH: &str = ".github/workflows/ci.yml";
 const RELEASE_READINESS_WORKFLOW_PATH: &str = ".github/workflows/release-readiness.yml";
+const RELEASE_PLZ_WORKFLOW_PATH: &str = ".github/workflows/release-plz.yml";
+const RELEASE_CANDIDATE_CHECKLIST_PATH: &str = "docs/terminal/v1-release-candidate-checklist.md";
 const RELEASE_CANDIDATE_SUMMARY_PATH: &str = "docs/terminal/v1-release-candidate-summary.md";
 const RELEASE_SUMMARY_TEMPLATE_PATH: &str = "docs/terminal/v1-release-summary-template.md";
+const RELEASE_PLZ_CONFIG_PATH: &str = "release-plz.toml";
+const DENY_CONFIG_PATH: &str = "deny.toml";
+const FUZZ_DIR: &str = "fuzz";
+const VENDORED_PORTABLE_PTY_PSEUDOCON_PATH: &str = "vendor/portable-pty/src/win/psuedocon.rs";
 const MANUAL_RUN_TEMPLATE_DATE_PLACEHOLDER: &str = "Date: YYYY-MM-DD";
 const MANUAL_RUN_TEMPLATE_OS_PLACEHOLDER: &str = "OS: macOS 15.4 / Ubuntu 24.04 / Windows 11 24H2";
 const MANUAL_RUN_TEMPLATE_CHECKLIST_PLACEHOLDER: &str =
@@ -93,11 +115,33 @@ fn run() -> Result<(), String> {
             println!("v1 readiness audit passed");
             Ok(())
         }
-        Command::ScaffoldManualRun { kind, date, output, os, rust, node, tmux, zellij, force } => {
+        Command::ScaffoldManualRun {
+            kind,
+            date,
+            output,
+            os,
+            rust,
+            node,
+            tmux,
+            zellij,
+            workflow,
+            job,
+            force,
+        } => {
             let output_path = scaffold_manual_run(
                 kind,
                 &date,
-                ManualRunScaffoldOptions { output, os, rust, node, tmux, zellij, force },
+                ManualRunScaffoldOptions {
+                    output,
+                    os,
+                    rust,
+                    node,
+                    tmux,
+                    zellij,
+                    workflow,
+                    job,
+                    force,
+                },
             )?;
             println!("{}", output_path.display());
             Ok(())
@@ -134,6 +178,8 @@ enum Command {
         node: Option<String>,
         tmux: Option<String>,
         zellij: Option<String>,
+        workflow: Option<String>,
+        job: Option<String>,
         force: bool,
     },
 }
@@ -152,6 +198,8 @@ struct ManualRunScaffoldOptions {
     node: Option<String>,
     tmux: Option<String>,
     zellij: Option<String>,
+    workflow: Option<String>,
+    job: Option<String>,
     force: bool,
 }
 
@@ -291,6 +339,8 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
             let mut node = None;
             let mut tmux = None;
             let mut zellij = None;
+            let mut workflow = None;
+            let mut job = None;
             let mut force = false;
 
             while let Some(arg) = args.next() {
@@ -333,6 +383,16 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
                             args.next().ok_or_else(|| "missing value for --zellij".to_string())?,
                         );
                     }
+                    "--workflow" => {
+                        workflow = Some(
+                            args.next()
+                                .ok_or_else(|| "missing value for --workflow".to_string())?,
+                        );
+                    }
+                    "--job" => {
+                        job =
+                            Some(args.next().ok_or_else(|| "missing value for --job".to_string())?);
+                    }
                     "--force" => {
                         force = true;
                     }
@@ -354,6 +414,8 @@ fn parse_command(mut args: impl Iterator<Item = String>) -> Result<Command, Stri
                 node,
                 tmux,
                 zellij,
+                workflow,
+                job,
                 force,
             })
         }
@@ -367,35 +429,162 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     let contributing = workspace_root.join(CONTRIBUTING_PATH);
     let security = workspace_root.join(SECURITY_PATH);
     let code_of_conduct = workspace_root.join(CODE_OF_CONDUCT_PATH);
+    let pull_request_template = workspace_root.join(PULL_REQUEST_TEMPLATE_PATH);
+    let workspace_manifest = workspace_root.join(WORKSPACE_MANIFEST_PATH);
     let root_readme = workspace_root.join(ROOT_README_PATH);
     let node_package_readme = workspace_root.join(NODE_PACKAGE_README_PATH);
+    let node_package_stage_script = workspace_root.join(NODE_PACKAGE_STAGE_SCRIPT_PATH);
+    let node_package_build_script = workspace_root.join(NODE_PACKAGE_BUILD_SCRIPT_PATH);
+    let node_package_pack_script = workspace_root.join(NODE_PACKAGE_PACK_SCRIPT_PATH);
+    let node_package_verify_script = workspace_root.join(NODE_PACKAGE_VERIFY_SCRIPT_PATH);
+    let node_smoke_test = workspace_root.join(NODE_SMOKE_TEST_PATH);
+    let node_package_smoke_test = workspace_root.join(NODE_PACKAGE_SMOKE_TEST_PATH);
+    let node_package_install_smoke_test = workspace_root.join(NODE_PACKAGE_INSTALL_SMOKE_TEST_PATH);
+    let zellij_installer = workspace_root.join(ZELLIJ_INSTALLER_PATH);
     let manual_dir = workspace_root.join(MANUAL_DIR);
     let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
     let manual_runs_dir = workspace_root.join(MANUAL_RUNS_DIR);
+    let manual_readme = manual_dir.join("README.md");
+    let electron_checklist = manual_dir.join("electron.md");
+    let native_checklist = manual_dir.join("native.md");
+    let tmux_checklist = manual_dir.join("tmux.md");
+    let zellij_checklist = manual_dir.join("zellij.md");
+    let windows_native_zellij_checklist = manual_dir.join("windows-native-zellij.md");
+    let ci_workflow = workspace_root.join(CI_WORKFLOW_PATH);
     let release_readiness_workflow = workspace_root.join(RELEASE_READINESS_WORKFLOW_PATH);
+    let release_plz_workflow = workspace_root.join(RELEASE_PLZ_WORKFLOW_PATH);
+    let release_candidate_checklist = workspace_root.join(RELEASE_CANDIDATE_CHECKLIST_PATH);
     let release_candidate_summary = workspace_root.join(RELEASE_CANDIDATE_SUMMARY_PATH);
     let release_summary_template = workspace_root.join(RELEASE_SUMMARY_TEMPLATE_PATH);
+    let release_plz_config = workspace_root.join(RELEASE_PLZ_CONFIG_PATH);
+    let deny_config = workspace_root.join(DENY_CONFIG_PATH);
+    let fuzz_dir = workspace_root.join(FUZZ_DIR);
+    let vendored_portable_pty_psuedocon = workspace_root.join(VENDORED_PORTABLE_PTY_PSEUDOCON_PATH);
 
     assert_value(license.is_file(), "root LICENSE is missing")?;
     assert_value(contributing.is_file(), "root CONTRIBUTING.md is missing")?;
     assert_value(security.is_file(), "root SECURITY.md is missing")?;
     assert_value(code_of_conduct.is_file(), "root CODE_OF_CONDUCT.md is missing")?;
+    assert_value(pull_request_template.is_file(), "pull request template is missing")?;
+    assert_value(workspace_manifest.is_file(), "workspace Cargo.toml is missing")?;
     assert_value(root_readme.is_file(), "root README is missing")?;
     assert_value(node_package_readme.is_file(), "Node package README is missing")?;
+    assert_value(node_package_stage_script.is_file(), "Node package stage script is missing")?;
+    assert_value(node_package_build_script.is_file(), "Node package build script is missing")?;
+    assert_value(node_package_pack_script.is_file(), "Node package pack script is missing")?;
+    assert_value(node_package_verify_script.is_file(), "Node package verify script is missing")?;
+    assert_value(node_smoke_test.is_file(), "Node addon smoke test is missing")?;
+    assert_value(node_package_smoke_test.is_file(), "Node package smoke test is missing")?;
+    assert_value(
+        node_package_install_smoke_test.is_file(),
+        "Node installed package smoke test is missing",
+    )?;
+    assert_value(zellij_installer.is_file(), "Zellij installer script is missing")?;
     assert_value(manual_dir.is_dir(), "manual QA directory is missing")?;
+    assert_value(manual_readme.is_file(), "manual QA README is missing")?;
+    assert_value(electron_checklist.is_file(), "Electron manual checklist is missing")?;
+    assert_value(native_checklist.is_file(), "native manual checklist is missing")?;
+    assert_value(tmux_checklist.is_file(), "tmux manual checklist is missing")?;
+    assert_value(zellij_checklist.is_file(), "Zellij manual checklist is missing")?;
+    assert_value(
+        windows_native_zellij_checklist.is_file(),
+        "Windows Native + Zellij manual checklist is missing",
+    )?;
     assert_value(manual_drafts_dir.is_dir(), "manual draft capture directory is missing")?;
     assert_value(manual_runs_dir.is_dir(), "manual run capture directory is missing")?;
+    assert_value(ci_workflow.is_file(), "ci workflow is missing")?;
     assert_value(release_readiness_workflow.is_file(), "release readiness workflow is missing")?;
+    assert_value(release_plz_workflow.is_file(), "release-plz workflow is missing")?;
+    assert_value(release_candidate_checklist.is_file(), "release candidate checklist is missing")?;
     assert_value(release_candidate_summary.is_file(), "release candidate summary is missing")?;
     assert_value(release_summary_template.is_file(), "release summary template is missing")?;
+    assert_value(release_plz_config.is_file(), "release-plz config is missing")?;
+    assert_value(deny_config.is_file(), "cargo-deny config is missing")?;
+    assert_value(fuzz_dir.is_dir(), "fuzz directory is missing")?;
+    assert_value(
+        vendored_portable_pty_psuedocon.is_file(),
+        "vendored portable-pty Windows ConPTY source is missing",
+    )?;
 
+    let workspace_manifest_contents = fs::read_to_string(&workspace_manifest)
+        .map_err(|error| format!("failed to read {} - {error}", workspace_manifest.display()))?;
     let root_readme_contents = fs::read_to_string(&root_readme)
         .map_err(|error| format!("failed to read {} - {error}", root_readme.display()))?;
+    let contributing_contents = fs::read_to_string(&contributing)
+        .map_err(|error| format!("failed to read {} - {error}", contributing.display()))?;
     let node_package_readme_contents = fs::read_to_string(&node_package_readme)
         .map_err(|error| format!("failed to read {} - {error}", node_package_readme.display()))?;
+    let node_package_stage_script_contents = fs::read_to_string(&node_package_stage_script)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", node_package_stage_script.display())
+        })?;
+    let node_package_build_script_contents = fs::read_to_string(&node_package_build_script)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", node_package_build_script.display())
+        })?;
+    let node_package_pack_script_contents =
+        fs::read_to_string(&node_package_pack_script).map_err(|error| {
+            format!("failed to read {} - {error}", node_package_pack_script.display())
+        })?;
+    let node_package_verify_script_contents = fs::read_to_string(&node_package_verify_script)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", node_package_verify_script.display())
+        })?;
+    let node_smoke_test_contents = fs::read_to_string(&node_smoke_test)
+        .map_err(|error| format!("failed to read {} - {error}", node_smoke_test.display()))?;
+    let node_package_smoke_test_contents =
+        fs::read_to_string(&node_package_smoke_test).map_err(|error| {
+            format!("failed to read {} - {error}", node_package_smoke_test.display())
+        })?;
+    let node_package_install_smoke_test_contents =
+        fs::read_to_string(&node_package_install_smoke_test).map_err(|error| {
+            format!("failed to read {} - {error}", node_package_install_smoke_test.display())
+        })?;
+    let zellij_installer_contents = fs::read_to_string(&zellij_installer)
+        .map_err(|error| format!("failed to read {} - {error}", zellij_installer.display()))?;
+    let manual_readme_contents = fs::read_to_string(&manual_readme)
+        .map_err(|error| format!("failed to read {} - {error}", manual_readme.display()))?;
+    let electron_checklist_contents = fs::read_to_string(&electron_checklist)
+        .map_err(|error| format!("failed to read {} - {error}", electron_checklist.display()))?;
+    let native_checklist_contents = fs::read_to_string(&native_checklist)
+        .map_err(|error| format!("failed to read {} - {error}", native_checklist.display()))?;
+    let tmux_checklist_contents = fs::read_to_string(&tmux_checklist)
+        .map_err(|error| format!("failed to read {} - {error}", tmux_checklist.display()))?;
+    let zellij_checklist_contents = fs::read_to_string(&zellij_checklist)
+        .map_err(|error| format!("failed to read {} - {error}", zellij_checklist.display()))?;
+    let windows_native_zellij_checklist_contents =
+        fs::read_to_string(&windows_native_zellij_checklist).map_err(|error| {
+            format!("failed to read {} - {error}", windows_native_zellij_checklist.display())
+        })?;
     let release_candidate_summary_contents = fs::read_to_string(&release_candidate_summary)
         .map_err(|error| {
             format!("failed to read {} - {error}", release_candidate_summary.display())
+        })?;
+    let release_summary_template_contents =
+        fs::read_to_string(&release_summary_template).map_err(|error| {
+            format!("failed to read {} - {error}", release_summary_template.display())
+        })?;
+    let ci_workflow_contents = fs::read_to_string(&ci_workflow)
+        .map_err(|error| format!("failed to read {} - {error}", ci_workflow.display()))?;
+    let release_readiness_workflow_contents = fs::read_to_string(&release_readiness_workflow)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", release_readiness_workflow.display())
+        })?;
+    let release_plz_workflow_contents = fs::read_to_string(&release_plz_workflow)
+        .map_err(|error| format!("failed to read {} - {error}", release_plz_workflow.display()))?;
+    let release_candidate_checklist_contents = fs::read_to_string(&release_candidate_checklist)
+        .map_err(|error| {
+            format!("failed to read {} - {error}", release_candidate_checklist.display())
+        })?;
+    let release_plz_config_contents = fs::read_to_string(&release_plz_config)
+        .map_err(|error| format!("failed to read {} - {error}", release_plz_config.display()))?;
+    let deny_config_contents = fs::read_to_string(&deny_config)
+        .map_err(|error| format!("failed to read {} - {error}", deny_config.display()))?;
+    let pull_request_template_contents = fs::read_to_string(&pull_request_template)
+        .map_err(|error| format!("failed to read {} - {error}", pull_request_template.display()))?;
+    let vendored_portable_pty_psuedocon_contents =
+        fs::read_to_string(&vendored_portable_pty_psuedocon).map_err(|error| {
+            format!("failed to read {} - {error}", vendored_portable_pty_psuedocon.display())
         })?;
 
     for expected_line in [
@@ -412,13 +601,30 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     for expected_line in [
         "- `macOS + Linux` - `Native + tmux + Zellij`",
         "- `Windows` - `Native + Zellij`",
-        "- `tmux` stays Unix-only in v1 acceptance and docs",
+        "- `tmux` stays Unix-only in v1 docs, tests, CI, and acceptance",
     ] {
         assert_value(
             node_package_readme_contents.contains(expected_line),
             &format!("Node package README is missing support matrix line: {expected_line}"),
         )?;
     }
+    assert_contains_all(
+        &node_package_readme_contents,
+        "Node package README install proof",
+        &[
+            "pack-local-package.mjs",
+            "npm_config_cache",
+            "test -f \"$TARBALL\"",
+            "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
+            "node --input-type=module",
+        ],
+    )?;
+    verify_node_package_scripts(
+        &node_package_stage_script_contents,
+        &node_package_build_script_contents,
+        &node_package_pack_script_contents,
+        &node_package_verify_script_contents,
+    )?;
 
     for expected_line in [
         "- `macOS + Linux` - `Native + tmux + Zellij`",
@@ -430,6 +636,17 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
             &format!("release candidate summary is missing support matrix line: {expected_line}"),
         )?;
     }
+    for expected_line in [
+        "- `macOS + Linux` - `Native + tmux + Zellij`",
+        "- `Windows` - `Native + Zellij`",
+        "- `tmux` remains Unix-only in docs, CI, and acceptance",
+        "- recorded manual pass artifacts captured for Electron embed, Unix `tmux`, and Windows `Native + Zellij`",
+    ] {
+        assert_value(
+            release_summary_template_contents.contains(expected_line),
+            &format!("release summary template is missing v1 line: {expected_line}"),
+        )?;
+    }
 
     assert_value(
         !release_candidate_summary_contents.contains("TODO"),
@@ -438,6 +655,107 @@ fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
     assert_value(
         !release_candidate_summary_contents.contains("TBD"),
         "release candidate summary still contains TBD placeholders",
+    )?;
+    assert_value(
+        !release_summary_template_contents.contains("TODO"),
+        "release summary template still contains TODO placeholders",
+    )?;
+    assert_value(
+        !release_summary_template_contents.contains("TBD"),
+        "release summary template still contains TBD placeholders",
+    )?;
+
+    verify_v1_workflows(
+        &ci_workflow_contents,
+        &release_readiness_workflow_contents,
+        &release_plz_workflow_contents,
+    )?;
+    verify_v1_release_configs(&release_plz_config_contents, &deny_config_contents)?;
+    verify_windows_conpty_vendor_patch(
+        &workspace_manifest_contents,
+        &vendored_portable_pty_psuedocon_contents,
+    )?;
+    assert_contains_all(
+        &contributing_contents,
+        "contributing v1 package proof",
+        &[
+            "build-local-package.mjs",
+            "verify-package.mjs",
+            "pack-local-package.mjs",
+            "npm_config_cache",
+            "test -f \"$TARBALL\"",
+            "stage-capi-package",
+            "verify-capi-package",
+            "install-capi-package",
+            "verify-capi-install",
+            "verify-v1-readiness --require-recorded-passes",
+            "git format-patch origin/main..HEAD --stdout",
+            "git bundle create terminal-platform-v1-closeout.bundle origin/main..HEAD",
+            "git bundle verify terminal-platform-v1-closeout.bundle",
+        ],
+    )?;
+    assert_contains_all(
+        &pull_request_template_contents,
+        "pull request template v1 gates",
+        &[
+            "Node staged package smoke",
+            "Node installed package smoke",
+            "C ABI package stage/install smoke",
+            "verify-v1-readiness --require-recorded-passes",
+            "Windows Native + Zellij recorded pass",
+        ],
+    )?;
+    assert_contains_all(
+        &release_candidate_checklist_contents,
+        "release candidate checklist package proof",
+        &[
+            "build-local-package.mjs",
+            "verify-package.mjs",
+            "pack-local-package.mjs",
+            "npm_config_cache",
+            "test -f \"$TARBALL\"",
+            "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
+            "stage-capi-package",
+            "verify-capi-package",
+            "install-capi-package",
+            "verify-capi-install",
+            "Offline handoff when push is unavailable",
+            "git format-patch origin/main..HEAD --stdout",
+            "git bundle create terminal-platform-v1-closeout.bundle origin/main..HEAD",
+            "git bundle verify terminal-platform-v1-closeout.bundle",
+            "git am terminal-platform-v1-closeout-local.patch",
+        ],
+    )?;
+    verify_windows_zellij_package_smoke(
+        &node_smoke_test_contents,
+        &node_package_smoke_test_contents,
+        &node_package_install_smoke_test_contents,
+    )?;
+    assert_contains_all(
+        &zellij_installer_contents,
+        "Zellij installer",
+        &["assert_supported_zellij_release", "below the v1 minimum 0.44.0"],
+    )?;
+    assert_contains_all(
+        &zellij_installer_contents,
+        "Zellij installer retry policy",
+        &["REQUEST_TIMEOUT_SECONDS", "REQUEST_ATTEMPTS", "open_url_with_retries"],
+    )?;
+    assert_value(
+        manual_readme_contents.contains("one Windows `Native + Zellij` pass"),
+        "manual QA README must require a Windows Native + Zellij pass",
+    )?;
+    assert_value(
+        windows_native_zellij_checklist_contents
+            .contains("live `Zellij` import/control path through the package surface"),
+        "Windows Native + Zellij checklist must cover Zellij through package smoke",
+    )?;
+    verify_manual_qa_scope(
+        &electron_checklist_contents,
+        &native_checklist_contents,
+        &tmux_checklist_contents,
+        &zellij_checklist_contents,
+        &windows_native_zellij_checklist_contents,
     )?;
 
     for relative_path in [
@@ -502,7 +820,10 @@ fn verify_recorded_passes(manual_runs_dir: &Path) -> Result<(), String> {
             .iter()
             .find(|expectation| name.starts_with(expectation.file_prefix))
         else {
-            continue;
+            return Err(format!(
+                "unexpected manual run artifact in strict v1 gate: {}",
+                path.display()
+            ));
         };
 
         verify_recorded_pass(&path, name, &contents, *expectation)?;
@@ -521,6 +842,328 @@ fn verify_recorded_passes(manual_runs_dir: &Path) -> Result<(), String> {
         has_windows_zellij_pass,
         "missing recorded Windows Native + Zellij pass in manual/runs",
     )?;
+
+    Ok(())
+}
+
+fn verify_v1_workflows(
+    ci_workflow: &str,
+    release_readiness_workflow: &str,
+    release_plz_workflow: &str,
+) -> Result<(), String> {
+    assert_contains_all(
+        ci_workflow,
+        "ci workflow",
+        &[
+            "ubuntu-latest",
+            "macos-latest",
+            "windows-latest",
+            "name: unix-${{ matrix.os }}",
+            "name: windows-v1",
+            "name: governance",
+            "name: fuzz-baseline",
+            "cargo clippy --workspace --all-targets --all-features",
+            "cargo nextest run --profile ci --workspace",
+            "cargo run -p xtask -- verify-v1-readiness",
+            "cargo-deny",
+            "cargo-public-api",
+            "cargo-semver-checks",
+            "release-plz",
+            "cargo-fuzz",
+            "protocol_frames",
+            "tmux_layout",
+            "zellij_surface",
+            "screen_delta",
+            "zellij --version",
+        ],
+    )?;
+
+    let unix_job = section_between(ci_workflow, "  unix-matrix:", "\n  windows-v1:")
+        .ok_or_else(|| "ci workflow is missing unix-matrix job section".to_string())?;
+    assert_contains_all(
+        unix_job,
+        "ci unix-matrix job",
+        &[
+            "tmux -V",
+            "zellij --version",
+            "build-local-package.mjs",
+            "verify-package.mjs",
+            "pack-local-package.mjs",
+            "npm_config_cache",
+            "test -f \"$TARBALL\"",
+            "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
+            "stage-capi-package",
+            "verify-capi-package",
+            "install-capi-package",
+            "verify-capi-install",
+        ],
+    )?;
+
+    let windows_job = section_between(ci_workflow, "  windows-v1:", "\n  governance:")
+        .ok_or_else(|| "ci workflow is missing windows-v1 job section".to_string())?;
+    assert_contains_all(
+        windows_job,
+        "ci windows-v1 job",
+        &[
+            "windows-latest",
+            "install_fzf.py",
+            "Get-Command $tool",
+            "cargo nextest run",
+            "--test-threads 1",
+            "-p terminal-backend-native",
+            "-p terminal-daemon",
+            "-p terminal-daemon-client",
+            "-p terminal-node",
+            "-p terminal-node-napi",
+            "-p terminal-protocol",
+            "-p terminal-testing",
+            "zellij --version",
+            "build-local-package.mjs",
+            "verify-package.mjs",
+            "pack-local-package.mjs",
+            "npm_config_cache",
+            "Test-Path -Path $tarball -PathType Leaf",
+            "npm install --ignore-scripts --no-audit --no-fund --no-package-lock",
+        ],
+    )?;
+    assert_value(
+        !windows_job.contains("tmux"),
+        "ci windows-v1 job must not include tmux lanes or tooling",
+    )?;
+
+    assert_contains_all(
+        release_readiness_workflow,
+        "release readiness workflow",
+        &[
+            "workflow_dispatch",
+            "timeout-minutes: 45",
+            "verify-v1-readiness --require-recorded-passes",
+            "cargo-public-api",
+            "cargo-semver-checks",
+            "release-plz",
+            "rustup toolchain install nightly --profile minimal",
+            "cargo +nightly public-api -p terminal-domain",
+            "cargo +nightly public-api -p terminal-protocol",
+            "cargo +nightly public-api -p terminal-node",
+            "cargo semver-checks --version",
+        ],
+    )?;
+    assert_contains_all(
+        release_plz_workflow,
+        "release-plz workflow",
+        &[
+            "contents: write",
+            "pull-requests: write",
+            "timeout-minutes: 30",
+            "release-plz release-pr --git-token",
+        ],
+    )?;
+
+    Ok(())
+}
+
+fn verify_v1_release_configs(release_plz_config: &str, deny_config: &str) -> Result<(), String> {
+    assert_contains_all(
+        release_plz_config,
+        "release-plz config",
+        &[
+            "[workspace]",
+            "allow_dirty = false",
+            "git_release_enable = false",
+            "pr_branch_prefix = \"release-plz-\"",
+            "semver_check = false",
+        ],
+    )?;
+    assert_contains_all(
+        deny_config,
+        "cargo-deny config",
+        &[
+            "[advisories]",
+            "yanked = \"deny\"",
+            "[licenses]",
+            "[sources]",
+            "unknown-registry = \"deny\"",
+            "unknown-git = \"deny\"",
+        ],
+    )?;
+
+    Ok(())
+}
+
+fn verify_windows_conpty_vendor_patch(
+    workspace_manifest: &str,
+    vendored_psuedocon: &str,
+) -> Result<(), String> {
+    assert_contains_all(
+        workspace_manifest,
+        "workspace manifest Windows ConPTY patch",
+        &["[patch.crates-io]", "portable-pty = { path = \"vendor/portable-pty\" }"],
+    )?;
+    assert_contains_all(
+        vendored_psuedocon,
+        "vendored portable-pty Windows ConPTY patch",
+        &[
+            "(CONPTY.CreatePseudoConsole)(",
+            "Terminal Platform v1 intentionally",
+            "flag 0 here",
+            "plain UTF-8/VT I/O without",
+        ],
+    )?;
+
+    let create_call =
+        section_between(vendored_psuedocon, "(CONPTY.CreatePseudoConsole)(", "&mut con,")
+            .ok_or_else(|| {
+                "vendored portable-pty Windows ConPTY patch is missing CreatePseudoConsole call"
+                    .to_string()
+            })?;
+
+    assert_value(
+        create_call.contains("0,"),
+        "vendored portable-pty Windows ConPTY patch must call CreatePseudoConsole with dwFlags = 0",
+    )?;
+    assert_value(
+        !create_call.contains("PSUEDOCONSOLE_INHERIT_CURSOR"),
+        "vendored portable-pty Windows ConPTY patch must not enable PSEUDOCONSOLE_INHERIT_CURSOR in CreatePseudoConsole",
+    )?;
+    assert_value(
+        !create_call.contains("PSEUDOCONSOLE_RESIZE_QUIRK"),
+        "vendored portable-pty Windows ConPTY patch must not enable PSEUDOCONSOLE_RESIZE_QUIRK in CreatePseudoConsole",
+    )?;
+    assert_value(
+        !create_call.contains("PSEUDOCONSOLE_WIN32_INPUT_MODE"),
+        "vendored portable-pty Windows ConPTY patch must not enable PSEUDOCONSOLE_WIN32_INPUT_MODE in CreatePseudoConsole",
+    )?;
+
+    Ok(())
+}
+
+fn verify_node_package_scripts(
+    stage_script: &str,
+    build_script: &str,
+    pack_script: &str,
+    verify_script: &str,
+) -> Result<(), String> {
+    assert_contains_all(
+        stage_script,
+        "Node package stage script guardrails",
+        &[
+            "assertSafeOutputDir(outDir)",
+            "Refusing to stage package into unsafe output directory",
+            "options.out = readFlagValue(argv, index, arg)",
+            "options.addon = readFlagValue(argv, index, arg)",
+            "Missing value for ${flag}",
+        ],
+    )?;
+    assert_contains_all(
+        build_script,
+        "Node package build script guardrails",
+        &["options.out = readFlagValue(argv, index, arg)", "Missing value for ${flag}"],
+    )?;
+    assert_contains_all(
+        pack_script,
+        "Node package pack script guardrails",
+        &[
+            "options.out = path.resolve(readFlagValue(argv, index, arg))",
+            "Missing value for ${flag}",
+            "npm_config_cache",
+            "nodePackageManager()",
+            "process.platform === \"win32\" ? \"npm.cmd\" : \"npm\"",
+            "shell: packageManagerShell()",
+            "process.platform === \"win32\" ? process.env.ComSpec ?? true : false",
+            "npm pack failed to launch -",
+            "signal ${packResult.signal ?? \"<none>\"}",
+        ],
+    )?;
+    assert_contains_all(
+        verify_script,
+        "Node package verify script guardrails",
+        &["options.packageDir = readFlagValue(argv, index, arg)", "Missing value for ${flag}"],
+    )?;
+
+    Ok(())
+}
+
+fn verify_manual_qa_scope(
+    electron_checklist: &str,
+    native_checklist: &str,
+    tmux_checklist: &str,
+    zellij_checklist: &str,
+    windows_native_zellij_checklist: &str,
+) -> Result<(), String> {
+    assert_contains_all(
+        electron_checklist,
+        "Electron manual checklist",
+        &["main-process bridge", "preload API", "resize churn"],
+    )?;
+    assert_contains_all(
+        native_checklist,
+        "native manual checklist",
+        &["`vim`", "`less`", "`fzf`", "resize churn"],
+    )?;
+    assert_contains_all(
+        tmux_checklist,
+        "tmux manual checklist",
+        &["Import a `tmux` session", "detach/reattach", "`vim`", "`less`", "`fzf`"],
+    )?;
+    assert_contains_all(
+        zellij_checklist,
+        "Zellij manual checklist",
+        &[
+            "import a live `Zellij` session",
+            "ordered mutation lane",
+            "viewport observation",
+            "detach/reattach",
+            "`vim`",
+            "`less`",
+            "`fzf`",
+        ],
+    )?;
+    assert_contains_all(
+        windows_native_zellij_checklist,
+        "Windows Native + Zellij manual checklist",
+        &[
+            "live `Zellij` import/control path through the package surface",
+            "topology snapshot",
+            "screen snapshot",
+            "screen delta",
+            "live viewport observation",
+            "`new_tab`",
+            "`rename_tab`",
+            "`focus_tab`",
+            "`close_tab`",
+            "`vim`",
+            "`less`",
+            "`fzf`",
+            "resize churn",
+            "Electron bridge lifecycle",
+            "`tmux` is absent",
+        ],
+    )?;
+
+    Ok(())
+}
+
+fn verify_windows_zellij_package_smoke(
+    node_smoke_test: &str,
+    package_smoke_test: &str,
+    package_install_smoke_test: &str,
+) -> Result<(), String> {
+    for (label, contents) in [
+        ("node addon smoke", node_smoke_test),
+        ("staged package smoke", package_smoke_test),
+        ("installed package smoke", package_install_smoke_test),
+    ] {
+        assert_contains_all(
+            contents,
+            label,
+            &[
+                "#[cfg(windows)]",
+                "windows_zellij_smoke_env",
+                "TERMINAL_NODE_RUN_ZELLIJ_SMOKE",
+                "TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION",
+            ],
+        )?;
+    }
 
     Ok(())
 }
@@ -571,7 +1214,8 @@ fn scaffold_manual_run(
     date: &str,
     options: ManualRunScaffoldOptions,
 ) -> Result<PathBuf, String> {
-    let ManualRunScaffoldOptions { output, os, rust, node, tmux, zellij, force } = options;
+    let ManualRunScaffoldOptions { output, os, rust, node, tmux, zellij, workflow, job, force } =
+        options;
     let workspace_root = workspace_root();
     let manual_drafts_dir = workspace_root.join(MANUAL_DRAFTS_DIR);
     let template_path = workspace_root.join(MANUAL_RUNS_DIR).join("_template.md");
@@ -631,6 +1275,25 @@ fn scaffold_manual_run(
         .replace("tmux: 3.x or n/a", &format!("tmux: {resolved_tmux}"))
         .replace("Zellij: 0.44.x or n/a", &format!("Zellij: {resolved_zellij}"))
         .replace("Result: pass", "Result: pending");
+    let payload = if matches!(kind, ManualRunKind::WindowsNativeZellij) {
+        let payload = payload.replacen(
+            "\n## Scope",
+            "\nWorkflow: fill from workflow log\nJob: fill from workflow log\n\n## Scope",
+            1,
+        );
+        let payload = if let Some(workflow) = workflow {
+            payload.replace("Workflow: fill from workflow log", &format!("Workflow: {workflow}"))
+        } else {
+            payload
+        };
+        if let Some(job) = job {
+            payload.replace("Job: fill from workflow log", &format!("Job: {job}"))
+        } else {
+            payload
+        }
+    } else {
+        payload
+    };
 
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)
@@ -670,6 +1333,25 @@ fn verify_recorded_pass(
         contents.contains("## Findings"),
         &format!("manual run artifact {} is missing ## Findings", path.display()),
     )?;
+    assert_value(
+        contents.contains("## Notes"),
+        &format!("manual run artifact {} is missing ## Notes", path.display()),
+    )?;
+    assert_value(
+        !contents.contains("Result: pending"),
+        &format!("manual run artifact {} still says Result: pending", path.display()),
+    )?;
+    assert_value(
+        !contents.contains("TODO") && !contents.contains("TBD"),
+        &format!("manual run artifact {} still contains TODO/TBD placeholders", path.display()),
+    )?;
+    assert_value(
+        !contains_unresolved_manual_placeholder(contents),
+        &format!(
+            "manual run artifact {} still contains unresolved placeholder text",
+            path.display()
+        ),
+    )?;
 
     for template_placeholder in [
         MANUAL_RUN_TEMPLATE_DATE_PLACEHOLDER,
@@ -684,6 +1366,13 @@ fn verify_recorded_pass(
                 "manual run artifact {} still contains template placeholder: {template_placeholder}",
                 path.display()
             ),
+        )?;
+    }
+
+    for section in ["## Scope", "## Findings", "## Notes"] {
+        assert_value(
+            !section_body(contents, section).trim().is_empty(),
+            &format!("manual run artifact {} has an empty {section} section", path.display()),
         )?;
     }
 
@@ -724,6 +1413,56 @@ fn verify_recorded_pass(
         )?;
     }
 
+    if expectation.file_prefix == "windows-native-zellij-" {
+        let workflow_value = require_line_value(contents, "Workflow: ", path)?;
+        let job_value = require_line_value(contents, "Job: ", path)?;
+        assert_value(
+            workflow_value.contains("https://github.com/")
+                && workflow_value.contains("/actions/runs/"),
+            &format!(
+                "manual run artifact {} must record the exact hosted workflow URL",
+                path.display()
+            ),
+        )?;
+        assert_value(
+            job_value.to_ascii_lowercase().contains("windows-v1"),
+            &format!(
+                "manual run artifact {} must record the exact hosted windows-v1 job",
+                path.display()
+            ),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn section_body<'a>(contents: &'a str, heading: &str) -> &'a str {
+    let Some((_, tail)) = contents.split_once(heading) else {
+        return "";
+    };
+    tail.split_once("\n## ").map_or(tail, |(body, _)| body)
+}
+
+fn section_between<'a>(contents: &'a str, start: &str, end: &str) -> Option<&'a str> {
+    let (_, tail) = contents.split_once(start)?;
+    let (section, _) = tail.split_once(end)?;
+    Some(section)
+}
+
+fn contains_unresolved_manual_placeholder(contents: &str) -> bool {
+    let lowered = contents.to_ascii_lowercase();
+    ["fill from", "fill after", "placeholder", "yyyy-mm-dd", "1.xx.x", "vxx.x.x"]
+        .iter()
+        .any(|marker| lowered.contains(marker))
+}
+
+fn assert_contains_all(contents: &str, label: &str, needles: &[&str]) -> Result<(), String> {
+    for needle in needles {
+        assert_value(
+            contents.contains(needle),
+            &format!("{label} is missing required marker: {needle}"),
+        )?;
+    }
     Ok(())
 }
 
@@ -1223,12 +1962,20 @@ fn assert_value(value: bool, message: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::verify_recorded_passes;
+    use super::{
+        ManualRunKind, ManualRunScaffoldOptions, scaffold_manual_run, verify_manual_qa_scope,
+        verify_node_package_scripts, verify_recorded_passes, verify_v1_release_configs,
+        verify_v1_workflows, verify_windows_conpty_vendor_patch,
+        verify_windows_zellij_package_smoke,
+    };
     use std::{
         fs,
         path::{Path, PathBuf},
+        sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     struct TestDir {
         path: PathBuf,
@@ -1240,8 +1987,11 @@ mod tests {
                 Ok(duration) => duration.as_nanos(),
                 Err(error) => panic!("failed to get test timestamp - {error}"),
             };
-            let path = std::env::temp_dir()
-                .join(format!("terminal-platform-xtask-test-{}-{timestamp}", std::process::id()));
+            let counter = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "terminal-platform-xtask-test-{}-{timestamp}-{counter}",
+                std::process::id()
+            ));
             if let Err(error) = fs::create_dir_all(&path) {
                 panic!("failed to create {} - {error}", path.display());
             }
@@ -1335,6 +2085,8 @@ Rust: rustc 1.88.0
 Node: v20.19.0
 tmux: n/a
 Zellij: 0.44.1
+Workflow: https://github.com/example/terminal-platform/actions/runs/123456789
+Job: windows-v1 (https://github.com/example/terminal-platform/actions/runs/123456789/job/987654321)
 
 ## Scope
 
@@ -1391,7 +2143,272 @@ none
             Ok(()) => panic!("expected placeholder artifact to fail"),
             Err(error) => error,
         };
-        assert!(error.contains("template placeholder"), "expected placeholder error, got: {error}");
+        assert!(error.contains("placeholder"), "expected placeholder error, got: {error}");
+    }
+
+    #[test]
+    fn verify_recorded_passes_rejects_fill_from_draft_text() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "windows-native-zellij-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: Windows GitHub-hosted runner image - fill from workflow log
+Checklist: crates/terminal-testing/manual/windows-native-zellij.md
+Result: pass
+
+Rust: fill from workflow log
+Node: v20.19.0
+tmux: n/a
+Zellij: fill from workflow log
+Workflow: fill from workflow log
+Job: fill from workflow log
+
+## Scope
+
+Windows Native + Zellij hosted acceptance.
+
+## Findings
+
+fill after hosted run completes
+
+## Notes
+
+none
+",
+        );
+
+        let error = match verify_recorded_passes(dir.path()) {
+            Ok(()) => panic!("expected unresolved draft text to fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("unresolved placeholder text"),
+            "expected unresolved placeholder error, got: {error}"
+        );
+    }
+
+    #[test]
+    fn verify_recorded_passes_rejects_windows_hosted_artifact_without_workflow_metadata() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "electron-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: macOS 15.4
+Checklist: crates/terminal-testing/manual/electron.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+Electron embed lifecycle and resize churn.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+        dir.write_file(
+            "unix-tmux-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: Ubuntu 24.04
+Checklist: crates/terminal-testing/manual/tmux.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: 3.5a
+Zellij: n/a
+
+## Scope
+
+tmux import and detach or reattach.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+        dir.write_file(
+            "windows-native-zellij-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: Windows 11 24H2
+Checklist: crates/terminal-testing/manual/windows-native-zellij.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: 0.44.1
+
+## Scope
+
+Native create or attach plus imported zellij mutation lane.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+
+        let error = match verify_recorded_passes(dir.path()) {
+            Ok(()) => panic!("expected missing workflow metadata to fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("Workflow: "),
+            "expected hosted workflow marker error, got: {error}"
+        );
+    }
+
+    #[test]
+    fn scaffold_manual_run_injects_windows_workflow_metadata() {
+        let dir = TestDir::new();
+        let output = dir.path().join("windows-native-zellij-2026-04-22.md");
+
+        let output_path = scaffold_manual_run(
+            ManualRunKind::WindowsNativeZellij,
+            "2026-04-22",
+            ManualRunScaffoldOptions {
+                output: Some(output.clone()),
+                os: Some("Windows GitHub-hosted runner image".to_string()),
+                rust: Some("rustc 1.90.0".to_string()),
+                node: Some("v20.19.0".to_string()),
+                tmux: Some("n/a".to_string()),
+                zellij: Some("0.44.2".to_string()),
+                workflow: Some(
+                    "https://github.com/example/terminal-platform/actions/runs/123456789"
+                        .to_string(),
+                ),
+                job: Some(
+                    "windows-v1 (https://github.com/example/terminal-platform/actions/runs/123456789/job/987654321)"
+                        .to_string(),
+                ),
+                force: false,
+            },
+        )
+        .expect("windows scaffold should write");
+
+        let contents =
+            fs::read_to_string(&output_path).expect("scaffolded manual run should read back");
+
+        assert_eq!(output_path, output);
+        assert!(contents.contains("Result: pending"), "contents: {contents}");
+        assert!(
+            contents.contains(
+                "Workflow: https://github.com/example/terminal-platform/actions/runs/123456789"
+            ),
+            "contents: {contents}"
+        );
+        assert!(
+            contents.contains(
+                "Job: windows-v1 (https://github.com/example/terminal-platform/actions/runs/123456789/job/987654321)"
+            ),
+            "contents: {contents}"
+        );
+    }
+
+    #[test]
+    fn verify_recorded_passes_rejects_unexpected_artifacts() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "scratch-notes-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: macOS 15.4
+Checklist: crates/terminal-testing/manual/electron.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+not a canonical v1 pass artifact.
+
+## Findings
+
+no issues found
+
+## Notes
+
+none
+",
+        );
+
+        let error = match verify_recorded_passes(dir.path()) {
+            Ok(()) => panic!("expected unexpected artifact to fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("unexpected manual run artifact"),
+            "expected unexpected artifact error, got: {error}"
+        );
+    }
+
+    #[test]
+    fn verify_recorded_passes_rejects_empty_required_sections() {
+        let dir = TestDir::new();
+        dir.write_file("README.md", "# Recorded Manual Passes\n");
+        dir.write_file("_template.md", "# Run Title\n");
+        dir.write_file(
+            "electron-2026-04-20.md",
+            "\
+Date: 2026-04-20
+OS: macOS 15.4
+Checklist: crates/terminal-testing/manual/electron.md
+Result: pass
+
+Rust: rustc 1.88.0
+Node: v20.19.0
+tmux: n/a
+Zellij: n/a
+
+## Scope
+
+Electron embed lifecycle.
+
+## Findings
+
+no issues found
+
+## Notes
+
+",
+        );
+
+        let error = match verify_recorded_passes(dir.path()) {
+            Ok(()) => panic!("expected empty notes section to fail"),
+            Err(error) => error,
+        };
+        assert!(error.contains("empty ## Notes"), "expected empty notes error, got: {error}");
     }
 
     #[test]
@@ -1505,6 +2522,8 @@ Rust: rustc 1.88.0
 Node: v20.19.0
 tmux: n/a
 Zellij: 0.44.1
+Workflow: https://github.com/example/terminal-platform/actions/runs/123456789
+Job: windows-v1 (https://github.com/example/terminal-platform/actions/runs/123456789/job/987654321)
 
 ## Scope
 
@@ -1529,4 +2548,438 @@ none
             "expected runtime value error, got: {error}"
         );
     }
+
+    #[test]
+    fn verify_v1_workflows_accepts_expected_support_matrix() {
+        if let Err(error) = verify_v1_workflows(
+            VALID_CI_WORKFLOW,
+            VALID_RELEASE_READINESS_WORKFLOW,
+            VALID_RELEASE_PLZ_WORKFLOW,
+        ) {
+            panic!("expected workflow readiness to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_v1_workflows_rejects_tmux_in_windows_job() {
+        let invalid_ci =
+            VALID_CI_WORKFLOW.replace("zellij --version\n", "zellij --version\ntmux -V\n");
+        let error = match verify_v1_workflows(
+            &invalid_ci,
+            VALID_RELEASE_READINESS_WORKFLOW,
+            VALID_RELEASE_PLZ_WORKFLOW,
+        ) {
+            Ok(()) => panic!("expected Windows tmux marker to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("windows-v1 job must not include tmux"), "got: {error}");
+    }
+
+    #[test]
+    fn verify_v1_workflows_rejects_missing_fuzz_target() {
+        let invalid_ci = VALID_CI_WORKFLOW.replace("zellij_surface", "zellij_missing");
+        let error = match verify_v1_workflows(
+            &invalid_ci,
+            VALID_RELEASE_READINESS_WORKFLOW,
+            VALID_RELEASE_PLZ_WORKFLOW,
+        ) {
+            Ok(()) => panic!("expected missing fuzz target to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("zellij_surface"), "got: {error}");
+    }
+
+    #[test]
+    fn verify_v1_release_configs_accepts_expected_governance() {
+        if let Err(error) = verify_v1_release_configs(VALID_RELEASE_PLZ_CONFIG, VALID_DENY_CONFIG) {
+            panic!("expected release configs to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_v1_release_configs_rejects_dirty_release_plz() {
+        let invalid_release_plz =
+            VALID_RELEASE_PLZ_CONFIG.replace("allow_dirty = false", "allow_dirty = true");
+        let error = match verify_v1_release_configs(&invalid_release_plz, VALID_DENY_CONFIG) {
+            Ok(()) => panic!("expected dirty release-plz config to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("allow_dirty = false"), "got: {error}");
+    }
+
+    #[test]
+    fn verify_v1_release_configs_rejects_weak_deny_sources() {
+        let invalid_deny =
+            VALID_DENY_CONFIG.replace("unknown-git = \"deny\"", "unknown-git = \"warn\"");
+        let error = match verify_v1_release_configs(VALID_RELEASE_PLZ_CONFIG, &invalid_deny) {
+            Ok(()) => panic!("expected weak cargo-deny config to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("unknown-git = \"deny\""), "got: {error}");
+    }
+
+    #[test]
+    fn verify_windows_conpty_vendor_patch_accepts_expected_contract() {
+        if let Err(error) = verify_windows_conpty_vendor_patch(
+            VALID_WORKSPACE_MANIFEST,
+            VALID_VENDORED_PORTABLE_PTY_PSEUDOCON,
+        ) {
+            panic!("expected Windows ConPTY vendor patch to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_windows_conpty_vendor_patch_rejects_missing_workspace_patch() {
+        let invalid_manifest = VALID_WORKSPACE_MANIFEST
+            .replace("[patch.crates-io]\nportable-pty = { path = \"vendor/portable-pty\" }\n", "");
+        let error = match verify_windows_conpty_vendor_patch(
+            &invalid_manifest,
+            VALID_VENDORED_PORTABLE_PTY_PSEUDOCON,
+        ) {
+            Ok(()) => panic!("expected missing workspace patch to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("[patch.crates-io]"), "got: {error}");
+    }
+
+    #[test]
+    fn verify_windows_conpty_vendor_patch_rejects_undocumented_flags() {
+        let invalid_psuedocon = VALID_VENDORED_PORTABLE_PTY_PSEUDOCON.replace(
+            "    0,\n",
+            "    PSUEDOCONSOLE_INHERIT_CURSOR | PSEUDOCONSOLE_RESIZE_QUIRK,\n",
+        );
+        let error = match verify_windows_conpty_vendor_patch(
+            VALID_WORKSPACE_MANIFEST,
+            &invalid_psuedocon,
+        ) {
+            Ok(()) => panic!("expected undocumented Windows ConPTY flags to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("dwFlags = 0"), "got: {error}");
+    }
+
+    #[test]
+    fn verify_node_package_scripts_accepts_expected_guardrails() {
+        if let Err(error) = verify_node_package_scripts(
+            VALID_NODE_PACKAGE_STAGE_SCRIPT,
+            VALID_NODE_PACKAGE_BUILD_SCRIPT,
+            VALID_NODE_PACKAGE_PACK_SCRIPT,
+            VALID_NODE_PACKAGE_VERIFY_SCRIPT,
+        ) {
+            panic!("expected Node package script guardrails to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_node_package_scripts_rejects_missing_stage_output_guard() {
+        let invalid_stage_script = VALID_NODE_PACKAGE_STAGE_SCRIPT
+            .replace("assertSafeOutputDir(outDir)", "/* unsafe output accepted */");
+        let error = match verify_node_package_scripts(
+            &invalid_stage_script,
+            VALID_NODE_PACKAGE_BUILD_SCRIPT,
+            VALID_NODE_PACKAGE_PACK_SCRIPT,
+            VALID_NODE_PACKAGE_VERIFY_SCRIPT,
+        ) {
+            Ok(()) => panic!("expected missing stage output guard to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("assertSafeOutputDir(outDir)"), "got: {error}");
+    }
+
+    #[test]
+    fn verify_manual_qa_scope_accepts_expected_markers() {
+        if let Err(error) = verify_manual_qa_scope(
+            VALID_ELECTRON_CHECKLIST,
+            VALID_NATIVE_CHECKLIST,
+            VALID_TMUX_CHECKLIST,
+            VALID_ZELLIJ_CHECKLIST,
+            VALID_WINDOWS_NATIVE_ZELLIJ_CHECKLIST,
+        ) {
+            panic!("expected manual QA scope to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_manual_qa_scope_rejects_missing_windows_resize_churn() {
+        let invalid_windows_checklist =
+            VALID_WINDOWS_NATIVE_ZELLIJ_CHECKLIST.replace("resize churn", "size changes");
+        let error = match verify_manual_qa_scope(
+            VALID_ELECTRON_CHECKLIST,
+            VALID_NATIVE_CHECKLIST,
+            VALID_TMUX_CHECKLIST,
+            VALID_ZELLIJ_CHECKLIST,
+            &invalid_windows_checklist,
+        ) {
+            Ok(()) => panic!("expected missing Windows resize churn marker to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("resize churn"), "got: {error}");
+    }
+
+    #[test]
+    fn verify_windows_zellij_package_smoke_accepts_expected_markers() {
+        if let Err(error) = verify_windows_zellij_package_smoke(
+            VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
+            VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
+            VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
+        ) {
+            panic!("expected Windows Zellij smoke markers to validate - {error}");
+        }
+    }
+
+    #[test]
+    fn verify_windows_zellij_package_smoke_rejects_missing_package_marker() {
+        let invalid_package_smoke = VALID_WINDOWS_ZELLIJ_SMOKE_TEST
+            .replace("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", "TERMINAL_NODE_ZELLIJ_DISABLED");
+        let error = match verify_windows_zellij_package_smoke(
+            VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
+            &invalid_package_smoke,
+            VALID_WINDOWS_ZELLIJ_SMOKE_TEST,
+        ) {
+            Ok(()) => panic!("expected missing staged package marker to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("staged package smoke"), "got: {error}");
+    }
+
+    const VALID_NODE_PACKAGE_STAGE_SCRIPT: &str = r#"
+assertSafeOutputDir(outDir);
+throw new Error(`Refusing to stage package into unsafe output directory: ${outDir}`);
+options.out = readFlagValue(argv, index, arg);
+options.addon = readFlagValue(argv, index, arg);
+throw new Error(`Missing value for ${flag}`);
+"#;
+
+    const VALID_WORKSPACE_MANIFEST: &str = r#"
+[workspace]
+members = []
+
+[patch.crates-io]
+portable-pty = { path = "vendor/portable-pty" }
+"#;
+
+    const VALID_VENDORED_PORTABLE_PTY_PSEUDOCON: &str = r#"
+(CONPTY.CreatePseudoConsole)(
+    size,
+    input.as_raw_handle() as _,
+    output.as_raw_handle() as _,
+    0,
+    &mut con,
+)
+// Terminal Platform v1 intentionally
+// flag 0 here
+// plain UTF-8/VT I/O without
+"#;
+
+    const VALID_NODE_PACKAGE_BUILD_SCRIPT: &str = r#"
+options.out = readFlagValue(argv, index, arg);
+throw new Error(`Missing value for ${flag}`);
+"#;
+
+    const VALID_NODE_PACKAGE_PACK_SCRIPT: &str = r#"
+options.out = path.resolve(readFlagValue(argv, index, arg));
+throw new Error(`Missing value for ${flag}`);
+npm_config_cache: process.env.npm_config_cache ?? path.join(options.out, ".npm-cache"),
+nodePackageManager()
+process.platform === "win32" ? "npm.cmd" : "npm"
+shell: packageManagerShell()
+process.platform === "win32" ? process.env.ComSpec ?? true : false
+npm pack failed to launch -
+signal ${packResult.signal ?? "<none>"}
+"#;
+
+    const VALID_NODE_PACKAGE_VERIFY_SCRIPT: &str = r#"
+options.packageDir = readFlagValue(argv, index, arg);
+throw new Error(`Missing value for ${flag}`);
+"#;
+
+    const VALID_ELECTRON_CHECKLIST: &str = r#"
+# Electron Embed Checklist
+
+- Create the main-process bridge and preload API against a live daemon.
+- Stress renderer resize churn while the bridge is streaming screen updates.
+"#;
+
+    const VALID_NATIVE_CHECKLIST: &str = r#"
+# Native Checklist
+
+- Exercise `vim`, `less`, and `fzf`.
+- Stress resize churn and confirm subscriptions stay healthy.
+"#;
+
+    const VALID_TMUX_CHECKLIST: &str = r#"
+# tmux Checklist
+
+- Import a `tmux` session and verify topology plus screen snapshot.
+- Exercise detach/reattach around an imported `tmux` session.
+- Run `vim`, `less`, and `fzf` inside imported panes and confirm viewport fidelity.
+"#;
+
+    const VALID_ZELLIJ_CHECKLIST: &str = r#"
+# Zellij Checklist
+
+- Discover and import a live `Zellij` session through the daemon.
+- For rich `0.44+`, verify topology, focused pane screen, subscriptions, and ordered mutation lane.
+- Exercise viewport observation while switching tabs rapidly.
+- Exercise detach/reattach around an imported `Zellij` session when the host environment supports it.
+- Run `vim`, `less`, and `fzf` in a terminal pane and confirm render stability.
+"#;
+
+    const VALID_WINDOWS_NATIVE_ZELLIJ_CHECKLIST: &str = r#"
+# Windows Native + Zellij Checklist
+
+- Verify staged and installed Node package flows on Windows, including the live `Zellij` import/control path through the package surface.
+- Verify topology snapshot, screen snapshot, screen delta, and live viewport observation.
+- Verify ordered mutation lane for `new_tab`, `rename_tab`, `focus_tab`, and `close_tab`.
+- Run `vim`, `less`, and `fzf` in Windows native and imported `Zellij` panes when available, and confirm viewport fidelity.
+- Stress resize churn while screen delta and live viewport observation remain active.
+- Exercise Electron bridge lifecycle on Windows.
+- Confirm `tmux` is absent from Windows acceptance and docs.
+"#;
+
+    const VALID_CI_WORKFLOW: &str = r#"
+jobs:
+  unix-matrix:
+    name: unix-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - run: tmux -V
+      - run: zellij --version
+      - run: cargo clippy --workspace --all-targets --all-features
+      - run: cargo nextest run --profile ci --workspace
+      - run: |
+          node crates/terminal-node-napi/package/scripts/build-local-package.mjs
+          node crates/terminal-node-napi/package/scripts/verify-package.mjs
+          export npm_config_cache="$RUNNER_TEMP/npm-cache"
+          node crates/terminal-node-napi/package/scripts/pack-local-package.mjs
+          test -f "$TARBALL"
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+      - run: |
+          cargo run -p xtask -- stage-capi-package
+          cargo run -p xtask -- verify-capi-package
+          cargo run -p xtask -- install-capi-package
+          cargo run -p xtask -- verify-capi-install
+  windows-v1:
+    name: windows-v1
+    runs-on: windows-latest
+    steps:
+      - run: python .github/scripts/install_fzf.py --out $env:RUNNER_TEMP\\fzf-bin
+      - run: |
+          foreach ($tool in @("vim", "less", "fzf")) {
+            if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+              throw "missing tool $tool"
+            }
+          }
+      - run: zellij --version
+      - run: cargo clippy --workspace --all-targets --all-features
+      - run: >
+          cargo nextest run
+          --profile ci
+          --test-threads 1
+          -p terminal-backend-native
+          -p terminal-daemon
+          -p terminal-daemon-client
+          -p terminal-node
+          -p terminal-node-napi
+          -p terminal-protocol
+          -p terminal-testing
+      - run: |
+          node crates/terminal-node-napi/package/scripts/build-local-package.mjs
+          node crates/terminal-node-napi/package/scripts/verify-package.mjs
+          $env:npm_config_cache = Join-Path $env:RUNNER_TEMP "npm-cache"
+          node crates/terminal-node-napi/package/scripts/pack-local-package.mjs
+          Test-Path -Path $tarball -PathType Leaf
+          npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+  governance:
+    name: governance
+    steps:
+      - run: cargo run -p xtask -- verify-v1-readiness
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-public-api,cargo-semver-checks,release-plz
+  fuzz-baseline:
+    name: fuzz-baseline
+    steps:
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - run: |
+          cargo fuzz run protocol_frames
+          cargo fuzz run tmux_layout
+          cargo fuzz run zellij_surface
+          cargo fuzz run screen_delta
+"#;
+
+    const VALID_RELEASE_READINESS_WORKFLOW: &str = r#"
+on:
+  workflow_dispatch:
+jobs:
+  release-readiness:
+    timeout-minutes: 45
+    steps:
+      - run: cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api,cargo-semver-checks,release-plz
+      - run: rustup toolchain install nightly --profile minimal
+      - run: |
+          cargo +nightly public-api -p terminal-domain
+          cargo +nightly public-api -p terminal-protocol
+          cargo +nightly public-api -p terminal-node
+      - run: cargo semver-checks --version
+"#;
+
+    const VALID_RELEASE_PLZ_WORKFLOW: &str = r#"
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  release-pr:
+    timeout-minutes: 30
+    steps:
+      - run: release-plz release-pr --git-token "$GITHUB_TOKEN"
+"#;
+
+    const VALID_RELEASE_PLZ_CONFIG: &str = r#"
+[workspace]
+allow_dirty = false
+git_release_enable = false
+pr_branch_prefix = "release-plz-"
+semver_check = false
+"#;
+
+    const VALID_DENY_CONFIG: &str = r#"
+[advisories]
+yanked = "deny"
+
+[licenses]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+"#;
+
+    const VALID_WINDOWS_ZELLIJ_SMOKE_TEST: &str = r#"
+#[cfg(windows)]
+let zellij_smoke = support::windows_zellij_smoke_env("package");
+
+#[cfg(windows)]
+command
+    .env("TERMINAL_NODE_RUN_ZELLIJ_SMOKE", "1")
+    .env("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", &zellij_smoke.session_name);
+"#;
 }

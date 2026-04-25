@@ -5,3 +5,4 @@
 **/node_modules/
 apps/terminal-demo/.generated/
 apps/terminal-demo/dist/
+apps/terminal-demo/.vite/

@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.resolve(scriptDir, "..");
-const crateManifestPath = path.resolve(packageDir, "..", "Cargo.toml");
-const workspaceBindingsDir = path.resolve(packageDir, "..", "..", "terminal-node", "bindings");
+const crateDir = path.resolve(packageDir, "..");
+const workspaceRoot = path.resolve(crateDir, "..", "..");
+const crateManifestPath = path.resolve(crateDir, "Cargo.toml");
+const workspaceBindingsDir = path.resolve(workspaceRoot, "crates", "terminal-node", "bindings");
 const staticFiles = ["README.md", "index.cjs", "index.mjs", "index.d.ts"];
 
 async function main() {
@@ -16,6 +18,7 @@ async function main() {
   const addonPath = path.resolve(options.addon);
   const packageVersion = await readCrateVersion();
 
+  assertSafeOutputDir(outDir);
   await assertFile(crateManifestPath, "crate manifest");
   await assertFile(addonPath, "addon");
   await assertDirectory(workspaceBindingsDir, "bindings directory");
@@ -84,13 +87,13 @@ function parseArgs(argv) {
     const arg = argv[index];
 
     if (arg === "--out") {
-      options.out = argv[index + 1];
+      options.out = readFlagValue(argv, index, arg);
       index += 1;
       continue;
     }
 
     if (arg === "--addon") {
-      options.addon = argv[index + 1];
+      options.addon = readFlagValue(argv, index, arg);
       index += 1;
       continue;
     }
@@ -107,6 +110,22 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function readFlagValue(argv, index, flag) {
+  const value = argv[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
+}
+
+function assertSafeOutputDir(outDir) {
+  const root = path.parse(outDir).root;
+  const blocked = new Set([root, workspaceRoot, crateDir, packageDir]);
+  if (blocked.has(outDir)) {
+    throw new Error(`Refusing to stage package into unsafe output directory: ${outDir}`);
+  }
 }
 
 async function assertFile(value, label) {

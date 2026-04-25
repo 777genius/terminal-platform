@@ -8,6 +8,24 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(windows)]
+use terminal_testing::{ZellijSessionGuard, unique_zellij_session_name};
+
+#[cfg(windows)]
+pub struct WindowsZellijSmokeEnv {
+    pub session_name: String,
+    _guard: ZellijSessionGuard,
+}
+
+#[cfg(windows)]
+pub fn windows_zellij_smoke_env(label: &str) -> WindowsZellijSmokeEnv {
+    let session_name = unique_zellij_session_name(label);
+    let guard = ZellijSessionGuard::spawn(&session_name)
+        .expect("windows zellij smoke session should start");
+
+    WindowsZellijSmokeEnv { session_name, _guard: guard }
+}
+
 pub fn locate_cdylib() -> std::io::Result<PathBuf> {
     let test_binary = std::env::current_exe()?;
     let deps_dir = test_binary
@@ -73,12 +91,36 @@ pub fn verify_node_package(package_dir: &Path) -> std::io::Result<()> {
         )));
     }
 
+    if !output.stdout.ends_with(b"\n") {
+        return Err(std::io::Error::other(format!(
+            "package verification stdout must end with newline\nstdout:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        )));
+    }
+
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| {
+        std::io::Error::other(format!("failed to parse package verification output - {error}"))
+    })?;
+    let expected_package_dir = package_dir.display().to_string();
+    if payload.get("packageDir").and_then(serde_json::Value::as_str)
+        != Some(expected_package_dir.as_str())
+    {
+        return Err(std::io::Error::other(format!(
+            "package verification output had unexpected packageDir\nstdout:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        )));
+    }
+
     Ok(())
 }
 
 pub fn pack_node_package(package_dir: &Path) -> std::io::Result<PathBuf> {
     let mut command = Command::new(node_package_manager());
-    command.arg("pack").arg("--json").current_dir(package_dir);
+    command
+        .arg("pack")
+        .arg("--json")
+        .env("npm_config_cache", unique_temp_dir("terminal-node-npm-cache"))
+        .current_dir(package_dir);
     let output = command_output(&mut command, "npm pack")?;
 
     if !output.status.success() {
@@ -119,6 +161,7 @@ pub fn install_node_package_tarball(tarball_path: &Path) -> std::io::Result<Path
     command
         .args(["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock"])
         .arg(tarball_path)
+        .env("npm_config_cache", unique_temp_dir("terminal-node-npm-cache"))
         .current_dir(&project_dir);
     let output = command_output(&mut command, "npm install")?;
 

@@ -264,6 +264,21 @@ mod tests {
     }
 
     #[test]
+    fn deserializes_session_requests_with_null_launch() {
+        let request = from_json::<terminal_node::NodeCreateSessionRequest>(
+            serde_json::json!({
+                "title": "shell",
+                "launch": null
+            }),
+            "invalid_create_session_request",
+        )
+        .expect("json decoding should succeed");
+
+        assert_eq!(request.title.as_deref(), Some("shell"));
+        assert!(request.launch.is_none());
+    }
+
+    #[test]
     fn prefixes_protocol_codes_into_napi_errors() {
         let error = code_error("invalid_session_id", "bad session id");
 

@@ -7,13 +7,19 @@ import json
 import os
 import pathlib
 import platform
+import re
 import shutil
 import stat
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 import zipfile
+
+REQUEST_TIMEOUT_SECONDS = 30
+REQUEST_ATTEMPTS = 3
 
 
 def request_headers(accept: str = "application/vnd.github+json") -> dict[str, str]:
@@ -29,7 +35,7 @@ def request_headers(accept: str = "application/vnd.github+json") -> dict[str, st
 
 def download_json(url: str) -> dict:
     request = urllib.request.Request(url, headers=request_headers())
-    with urllib.request.urlopen(request) as response:
+    with open_url_with_retries(request, url) as response:
         return json.load(response)
 
 
@@ -38,8 +44,25 @@ def download_file(url: str, destination: pathlib.Path) -> None:
         url,
         headers=request_headers(accept="application/octet-stream"),
     )
-    with urllib.request.urlopen(request) as response, destination.open("wb") as output:
+    with open_url_with_retries(request, url) as response, destination.open("wb") as output:
         shutil.copyfileobj(response, output)
+
+
+def open_url_with_retries(request: urllib.request.Request, url: str):
+    last_error: BaseException | None = None
+
+    for attempt in range(1, REQUEST_ATTEMPTS + 1):
+        try:
+            return urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS)
+        except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as error:
+            last_error = error
+            if attempt == REQUEST_ATTEMPTS:
+                break
+            time.sleep(attempt)
+
+    raise RuntimeError(
+        f"failed to download {url} after {REQUEST_ATTEMPTS} attempts: {last_error}"
+    ) from last_error
 
 
 def candidate_suffixes() -> tuple[str, ...]:
@@ -90,6 +113,22 @@ def select_asset(release: dict) -> dict:
     raise RuntimeError(f"failed to locate zellij asset for {suffixes}: {names}")
 
 
+def zellij_version_tuple(release: dict) -> tuple[int, int, int]:
+    version_text = str(release.get("tag_name") or release.get("name") or "")
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", version_text)
+    if not match:
+        raise RuntimeError(f"failed to parse zellij release version from: {version_text!r}")
+
+    return tuple(int(part) for part in match.groups())
+
+
+def assert_supported_zellij_release(release: dict) -> None:
+    version = zellij_version_tuple(release)
+    if version < (0, 44, 0):
+        formatted = ".".join(str(part) for part in version)
+        raise RuntimeError(f"zellij {formatted} is below the v1 minimum 0.44.0")
+
+
 def extract_binary(archive_path: pathlib.Path, out_dir: pathlib.Path) -> pathlib.Path:
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -101,13 +140,9 @@ def extract_binary(archive_path: pathlib.Path, out_dir: pathlib.Path) -> pathlib
                 filename = pathlib.Path(member).name
                 if filename not in {"zellij", "zellij.exe"}:
                     continue
-                archive.extract(member, out_dir)
-                extracted = out_dir / member
                 target = out_dir / filename
-                if extracted != target:
-                    if target.exists():
-                        target.unlink()
-                    shutil.move(str(extracted), str(target))
+                with archive.open(member) as source, target.open("wb") as output:
+                    shutil.copyfileobj(source, output)
                 return target
         raise RuntimeError("zellij executable not found in zip archive")
 
@@ -116,13 +151,12 @@ def extract_binary(archive_path: pathlib.Path, out_dir: pathlib.Path) -> pathlib
             filename = pathlib.Path(member.name).name
             if filename != "zellij":
                 continue
-            archive.extract(member, out_dir)
-            extracted = out_dir / member.name
             target = out_dir / filename
-            if extracted != target:
-                if target.exists():
-                    target.unlink()
-                shutil.move(str(extracted), str(target))
+            source = archive.extractfile(member)
+            if source is None:
+                continue
+            with source, target.open("wb") as output:
+                shutil.copyfileobj(source, output)
             target.chmod(target.stat().st_mode | stat.S_IEXEC)
             return target
 
@@ -135,6 +169,7 @@ def main() -> int:
     args = parser.parse_args()
 
     release = download_json("https://api.github.com/repos/zellij-org/zellij/releases/latest")
+    assert_supported_zellij_release(release)
     asset = select_asset(release)
 
     out_dir = pathlib.Path(args.out).resolve()
