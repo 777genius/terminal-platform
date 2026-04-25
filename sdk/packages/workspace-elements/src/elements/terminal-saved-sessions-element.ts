@@ -17,6 +17,7 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
     visibleSavedSessionCount: { state: true },
+    savedSessionFilterQuery: { state: true },
     pendingSavedSessionId: { state: true },
     pendingSavedSessionAction: { state: true },
     pendingBulkAction: { state: true },
@@ -49,6 +50,39 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
         border-radius: var(--tp-radius-md);
         padding: var(--tp-space-3);
         background: color-mix(in srgb, var(--tp-color-panel-raised) 58%, transparent);
+      }
+
+      .saved-tools {
+        display: grid;
+        gap: var(--tp-space-2);
+        grid-template-columns: minmax(0, 1fr) auto;
+        margin-bottom: var(--tp-space-3);
+      }
+
+      .search-control {
+        display: grid;
+        gap: 0.28rem;
+        min-width: 0;
+      }
+
+      .search-control span {
+        color: var(--tp-color-text-muted);
+        font-size: 0.78rem;
+      }
+
+      .search-control input {
+        border: 1px solid var(--tp-color-border);
+        border-radius: var(--tp-radius-sm);
+        background: color-mix(in srgb, var(--tp-color-panel-raised) 82%, transparent);
+        color: var(--tp-color-text);
+        font: inherit;
+        min-width: 0;
+        padding: 0.48rem 0.65rem;
+      }
+
+      .search-control input:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--tp-color-accent) 62%, transparent);
+        outline-offset: 2px;
       }
 
       .actions {
@@ -134,10 +168,17 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
         margin-bottom: var(--tp-space-3);
         padding: var(--tp-space-3);
       }
+
+      @media (max-width: 640px) {
+        .saved-tools {
+          grid-template-columns: 1fr;
+        }
+      }
     `,
   ];
 
   protected declare visibleSavedSessionCount: number;
+  protected declare savedSessionFilterQuery: string;
   protected declare pendingSavedSessionId: string | null;
   protected declare pendingSavedSessionAction: "restore" | "delete" | null;
   protected declare pendingBulkAction: "prune" | null;
@@ -151,6 +192,7 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   constructor() {
     super();
     this.visibleSavedSessionCount = DEFAULT_VISIBLE_SAVED_SESSIONS;
+    this.savedSessionFilterQuery = "";
     this.pendingSavedSessionId = null;
     this.pendingSavedSessionAction = null;
     this.pendingBulkAction = null;
@@ -174,18 +216,53 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
         part="saved"
         data-testid="tp-saved-sessions"
         data-saved-count=${String(controls.savedSessionCount)}
+        data-matched-count=${String(controls.matchedSessionCount)}
         data-visible-count=${String(controls.visibleCount)}
         data-hidden-count=${String(controls.hiddenCount)}
+        data-filtered=${String(controls.isFiltered)}
         data-pending=${String(controls.anyPending)}
       >
         <div class="panel-header">
           <div class="panel-eyebrow">Saved layouts</div>
-          <div class="panel-title">${controls.savedSessionCount || "No"} saved sessions</div>
+          <div class="panel-title">
+            ${controls.isFiltered
+              ? `${controls.matchedSessionCount || "No"} matching saved sessions`
+              : `${controls.savedSessionCount || "No"} saved sessions`}
+          </div>
           <div class="panel-copy">
             Restore a saved layout or clean up entries you no longer need. Large histories are paged to keep
             the workspace responsive.
           </div>
         </div>
+
+        ${controls.savedSessionCount > 0
+          ? html`
+              <div class="saved-tools" part="filter">
+                <label class="search-control">
+                  <span>Filter</span>
+                  <input
+                    data-testid="tp-saved-session-filter"
+                    id="tp-saved-session-filter"
+                    name="tp-saved-session-filter"
+                    type="search"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Title, ID, backend, status"
+                    .value=${this.savedSessionFilterQuery}
+                    @input=${(event: Event) => this.handleFilterInput(event)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  data-testid="tp-clear-saved-session-filter"
+                  ?disabled=${!controls.isFiltered}
+                  @click=${() => this.clearFilter()}
+                >
+                  Clear
+                </button>
+              </div>
+            `
+          : null}
 
         ${this.actionError
           ? html`
@@ -198,6 +275,12 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
 
         ${controls.savedSessionCount === 0
           ? html`<div class="empty-state" part="empty">Saved sessions will appear here after you save a layout.</div>`
+          : controls.isFiltered && controls.matchedSessionCount === 0
+            ? html`
+                <div class="empty-state" part="empty" data-testid="tp-saved-session-filter-empty">
+                  No saved layouts match this filter.
+                </div>
+              `
           : html`
               <ul part="list" data-testid="tp-saved-session-list">
                 ${controls.items.map(
@@ -266,7 +349,12 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
 
               <div class="list-footer" part="list-footer">
                 <div class="meta" part="list-summary">
-                  <span>Showing ${controls.visibleCount} of ${controls.savedSessionCount}</span>
+                  ${controls.isFiltered
+                    ? html`
+                        <span>Showing ${controls.visibleCount} of ${controls.matchedSessionCount} matches</span>
+                        <span>${controls.savedSessionCount} total</span>
+                      `
+                    : html`<span>Showing ${controls.visibleCount} of ${controls.savedSessionCount}</span>`}
                   ${controls.hiddenCount > 0 ? html`<span>${controls.hiddenCount} hidden</span>` : null}
                 </div>
 
@@ -285,7 +373,7 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
                         </button>
                       `
                     : null}
-                  ${controls.hiddenCount > 0
+                  ${!controls.isFiltered && controls.hiddenCount > 0
                     ? html`
                         <button
                           part="prune-hidden"
@@ -314,8 +402,9 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
 
   private showMoreSavedSessions(): void {
     this.clearPruneConfirmation();
+    const controls = this.resolveControls();
     this.visibleSavedSessionCount = Math.min(
-      this.snapshot.catalog.savedSessions.length,
+      controls.matchedSessionCount,
       this.visibleSavedSessionCount + SAVED_SESSION_PAGE_SIZE,
     );
   }
@@ -323,6 +412,21 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   private collapseSavedSessions(): void {
     this.clearPruneConfirmation();
     this.visibleSavedSessionCount = DEFAULT_VISIBLE_SAVED_SESSIONS;
+  }
+
+  private handleFilterInput(event: Event): void {
+    const input = event.currentTarget as HTMLInputElement;
+    this.clearDeleteConfirmation();
+    this.clearPruneConfirmation();
+    this.visibleSavedSessionCount = DEFAULT_VISIBLE_SAVED_SESSIONS;
+    this.savedSessionFilterQuery = input.value;
+  }
+
+  private clearFilter(): void {
+    this.clearDeleteConfirmation();
+    this.clearPruneConfirmation();
+    this.visibleSavedSessionCount = DEFAULT_VISIBLE_SAVED_SESSIONS;
+    this.savedSessionFilterQuery = "";
   }
 
   private async restoreSavedSession(sessionId: string): Promise<void> {
@@ -520,6 +624,7 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   private controlOptions() {
     return {
       visibleSavedSessionCount: this.visibleSavedSessionCount,
+      filterQuery: this.savedSessionFilterQuery,
       pendingSavedSessionId: this.pendingSavedSessionId,
       pendingSavedSessionAction: this.pendingSavedSessionAction,
       pendingBulkAction: this.pendingBulkAction,

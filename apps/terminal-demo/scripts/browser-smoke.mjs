@@ -140,8 +140,11 @@ async function main() {
       || result.afterQuickCommandDraft.kernelDraft !== "node -v"
       || result.afterCreate.savedSessionCount !== 0
       || result.afterCreate.savedPanelCount !== "0"
+      || result.afterCreate.savedMatchedCount !== "0"
       || result.afterCreate.savedVisibleCount !== "0"
       || result.afterCreate.savedHiddenCount !== "0"
+      || result.afterCreate.savedFiltered !== "false"
+      || result.afterCreate.hasSavedFilter
       || !result.afterCreate.screenFollowPressed
       || result.afterCreate.savedItemsRendered > 8
       || (result.afterCreate.savedSessionCount > 8 && !result.afterCreate.hasSavedPagination)
@@ -225,8 +228,11 @@ async function main() {
       !result.afterSaveLayout.clicked
       || result.afterSaveLayout.savedSessionCount < result.afterSaveLayout.beforeSavedSessionCount
       || result.afterSaveLayout.savedPanelCount !== String(result.afterSaveLayout.savedSessionCount)
+      || result.afterSaveLayout.savedMatchedCount !== String(result.afterSaveLayout.savedSessionCount)
       || result.afterSaveLayout.savedVisibleCount !== String(result.afterSaveLayout.savedItemsRendered)
       || result.afterSaveLayout.savedItemsRendered < 1
+      || result.afterSaveLayout.savedFiltered !== "false"
+      || !result.afterSaveLayout.hasSavedFilter
       || result.afterSaveLayout.firstSavedCanRestore !== "true"
       || result.afterSaveLayout.firstSavedRestoreStatus !== "available"
       || result.afterSaveLayout.firstSavedRestoreDisabled !== false
@@ -240,6 +246,22 @@ async function main() {
       || result.afterSaveLayout.saveEventDetail?.savedSessionCount !== result.afterSaveLayout.savedSessionCount
     ) {
       throw new Error(`Save layout workflow did not complete: ${JSON.stringify(result.afterSaveLayout)}`);
+    }
+
+    if (
+      !result.afterSavedSearch.searched
+      || result.afterSavedSearch.filtered !== "true"
+      || result.afterSavedSearch.savedPanelCount !== String(result.afterSaveLayout.savedSessionCount)
+      || result.afterSavedSearch.matchedCount < 1
+      || result.afterSavedSearch.itemsRendered < 1
+      || result.afterSavedSearch.visibleCount !== String(result.afterSavedSearch.itemsRendered)
+      || result.afterSavedSearch.hasPruneHiddenWhileFiltered
+      || !result.afterSavedSearch.firstTitle?.toLowerCase().includes("workspace")
+      || result.afterSavedSearch.afterClearFiltered !== "false"
+      || result.afterSavedSearch.afterClearValue !== ""
+      || result.afterSavedSearch.afterClearPanelCount !== String(result.afterSaveLayout.savedSessionCount)
+    ) {
+      throw new Error(`Saved layout filter did not settle correctly: ${JSON.stringify(result.afterSavedSearch)}`);
     }
 
     if (
@@ -510,10 +532,13 @@ async function runSmokeScenario(browserUrl) {
         activePaneId: debug?.selection?.activePaneId ?? debug?.attachedSession?.focused_screen?.pane_id ?? null,
         savedSessionCount: debug?.catalog?.savedSessions?.length ?? 0,
         savedPanelCount: savedPanel?.getAttribute('data-saved-count') ?? null,
+        savedMatchedCount: savedPanel?.getAttribute('data-matched-count') ?? null,
         savedVisibleCount: savedPanel?.getAttribute('data-visible-count') ?? null,
         savedHiddenCount: savedPanel?.getAttribute('data-hidden-count') ?? null,
+        savedFiltered: savedPanel?.getAttribute('data-filtered') ?? null,
         savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
         hasSavedPagination: Boolean(savedRoot?.querySelector('[part="show-more"]')),
+        hasSavedFilter: Boolean(savedRoot?.querySelector('[data-testid="tp-saved-session-filter"]')),
         healthPhase: debug?.attachedSession?.health?.phase ?? null,
         focusedSequence: debug?.attachedSession?.focused_screen?.sequence != null
           ? String(debug.attachedSession.focused_screen.sequence)
@@ -948,9 +973,12 @@ async function runSmokeScenario(browserUrl) {
         beforeSavedSessionCount,
         savedSessionCount,
         savedPanelCount: savedPanel?.getAttribute('data-saved-count') ?? null,
+        savedMatchedCount: savedPanel?.getAttribute('data-matched-count') ?? null,
         savedVisibleCount: savedPanel?.getAttribute('data-visible-count') ?? null,
         savedHiddenCount: savedPanel?.getAttribute('data-hidden-count') ?? null,
+        savedFiltered: savedPanel?.getAttribute('data-filtered') ?? null,
         savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
+        hasSavedFilter: Boolean(savedRoot?.querySelector('[data-testid="tp-saved-session-filter"]')),
         firstSavedTitle: state?.catalog?.savedSessions?.[0]?.title ?? null,
         firstSavedCanRestore: restoreButton?.getAttribute('data-can-restore') ?? null,
         firstSavedRestoreStatus: restoreButton?.getAttribute('data-restore-status') ?? null,
@@ -960,6 +988,53 @@ async function runSmokeScenario(browserUrl) {
         firstSavedSemanticsLabels: restoreSemantics.map((note) => note.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
         saveEventDetail,
         ...deletePromptResult,
+      };
+    })()`);
+
+    const afterSavedSearch = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
+      const savedPanel = savedRoot?.querySelector('[data-testid="tp-saved-sessions"]') ?? null;
+      const input = savedRoot?.querySelector('[data-testid="tp-saved-session-filter"]') ?? null;
+      const clearButton = savedRoot?.querySelector('[data-testid="tp-clear-saved-session-filter"]') ?? null;
+      if (!input || !clearButton || !savedPanel) {
+        return {
+          searched: false,
+          reason: !savedPanel ? 'saved panel missing' : !input ? 'filter input missing' : 'clear button missing',
+          savedPanelCount: savedPanel?.getAttribute('data-saved-count') ?? null,
+        };
+      }
+
+      input.value = 'Workspace';
+      input.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertText',
+        data: 'Workspace',
+      }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      const filteredState = {
+        searched: true,
+        filtered: savedPanel.getAttribute('data-filtered'),
+        savedPanelCount: savedPanel.getAttribute('data-saved-count'),
+        matchedCount: Number(savedPanel.getAttribute('data-matched-count') ?? '0'),
+        visibleCount: savedPanel.getAttribute('data-visible-count'),
+        hiddenCount: savedPanel.getAttribute('data-hidden-count'),
+        itemsRendered: savedRoot.querySelectorAll('[part="item"]').length,
+        firstTitle: savedRoot.querySelector('[part="item"] strong')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        hasEmptyState: Boolean(savedRoot.querySelector('[data-testid="tp-saved-session-filter-empty"]')),
+        hasPruneHiddenWhileFiltered: Boolean(savedRoot.querySelector('[data-testid="tp-prune-hidden-saved-sessions"]')),
+      };
+
+      clearButton.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      return {
+        ...filteredState,
+        afterClearFiltered: savedPanel.getAttribute('data-filtered'),
+        afterClearValue: input.value,
+        afterClearPanelCount: savedPanel.getAttribute('data-saved-count'),
+        afterClearMatchedCount: savedPanel.getAttribute('data-matched-count'),
       };
     })()`);
 
@@ -1649,6 +1724,7 @@ async function runSmokeScenario(browserUrl) {
       afterDisplaySwitch,
       afterTopologyActions,
       afterSaveLayout,
+      afterSavedSearch,
       afterAdvancedSavedLayouts,
       afterPruneHidden,
       afterCommand: {

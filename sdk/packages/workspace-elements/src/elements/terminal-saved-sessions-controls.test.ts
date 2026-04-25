@@ -45,6 +45,55 @@ describe("terminal saved sessions controls", () => {
     expect(controls.canPruneHidden).toBe(false);
   });
 
+  it("filters saved sessions by title, id, backend, and compatibility without changing total count", () => {
+    const snapshot = createWorkspaceSnapshot([
+      createSavedSession(1, { title: "SDK Workspace" }),
+      createSavedSession(2, { title: "shell", sessionId: "native-shell-session-2" }),
+      createSavedSession(3, {
+        title: "Old tmux layout",
+        backend: "tmux",
+        status: "protocol_minor_ahead",
+      }),
+    ]);
+
+    const byTitle = resolveTerminalSavedSessionsControlState(snapshot, createOptions({
+      filterQuery: "sdk",
+    }));
+    const byBackendAndStatus = resolveTerminalSavedSessionsControlState(snapshot, createOptions({
+      filterQuery: "tmux newer",
+    }));
+    const byCompactId = resolveTerminalSavedSessionsControlState(snapshot, createOptions({
+      filterQuery: "native-shell",
+    }));
+
+    expect(byTitle.savedSessionCount).toBe(3);
+    expect(byTitle.matchedSessionCount).toBe(1);
+    expect(byTitle.isFiltered).toBe(true);
+    expect(byTitle.items.map((item) => item.title)).toEqual(["SDK Workspace"]);
+    expect(byTitle.canPruneHidden).toBe(false);
+    expect(byBackendAndStatus.items.map((item) => item.session.session_id)).toEqual(["saved-3"]);
+    expect(byCompactId.items.map((item) => item.session.session_id)).toEqual(["native-shell-session-2"]);
+  });
+
+  it("reports empty filtered results while preserving saved-session totals", () => {
+    const snapshot = createWorkspaceSnapshot([
+      createSavedSession(1, { title: "SDK Workspace" }),
+      createSavedSession(2, { title: "shell" }),
+    ]);
+
+    const controls = resolveTerminalSavedSessionsControlState(snapshot, createOptions({
+      filterQuery: "missing-layout",
+    }));
+
+    expect(controls.savedSessionCount).toBe(2);
+    expect(controls.matchedSessionCount).toBe(0);
+    expect(controls.visibleCount).toBe(0);
+    expect(controls.hiddenCount).toBe(0);
+    expect(controls.canShowMore).toBe(false);
+    expect(controls.canPruneHidden).toBe(false);
+    expect(controls.items).toEqual([]);
+  });
+
   it("blocks restore for incompatible saved sessions with a clear status", () => {
     const snapshot = createWorkspaceSnapshot([
       createSavedSession(1, {
@@ -188,6 +237,7 @@ function createOptions(
 ): TerminalSavedSessionsControlOptions {
   return {
     visibleSavedSessionCount: 4,
+    filterQuery: "",
     pendingSavedSessionId: null,
     pendingSavedSessionAction: null,
     pendingBulkAction: null,
@@ -213,6 +263,7 @@ function createSavedSession(
   overrides: {
     canRestore?: boolean;
     status?: SavedSessionCompatibilityStatus;
+    backend?: SavedSessionSummary["route"]["backend"];
     restoreSemantics?: Partial<SavedSessionSummary["restore_semantics"]>;
     sessionId?: string;
     title?: string | null;
@@ -221,7 +272,7 @@ function createSavedSession(
   return {
     session_id: overrides.sessionId ?? `saved-${index}`,
     route: {
-      backend: "native",
+      backend: overrides.backend ?? "native",
       authority: "local_daemon",
       external: null,
     },

@@ -17,6 +17,7 @@ export interface TerminalSavedSessionRestoreSemanticsNote {
 
 export interface TerminalSavedSessionsControlOptions {
   visibleSavedSessionCount: number;
+  filterQuery?: string;
   pendingSavedSessionId: string | null;
   pendingSavedSessionAction: TerminalSavedSessionPendingAction | null;
   pendingBulkAction: TerminalSavedSessionsBulkAction | null;
@@ -41,6 +42,9 @@ export interface TerminalSavedSessionItemControlState {
 
 export interface TerminalSavedSessionsControlState {
   savedSessionCount: number;
+  matchedSessionCount: number;
+  filterQuery: string;
+  isFiltered: boolean;
   visibleCount: number;
   hiddenCount: number;
   anyPending: boolean;
@@ -60,24 +64,32 @@ export function resolveTerminalSavedSessionsControlState(
   options: TerminalSavedSessionsControlOptions,
 ): TerminalSavedSessionsControlState {
   const savedSessions = snapshot.catalog.savedSessions;
-  const visibleCount = clampVisibleSavedSessionCount(options.visibleSavedSessionCount, savedSessions.length);
-  const hiddenCount = savedSessions.length - visibleCount;
+  const filterQuery = normalizeSavedSessionFilterQuery(options.filterQuery ?? "");
+  const isFiltered = filterQuery.length > 0;
+  const matchingSessions = isFiltered
+    ? savedSessions.filter((session) => savedSessionMatchesFilter(session, filterQuery))
+    : savedSessions;
+  const visibleCount = clampVisibleSavedSessionCount(options.visibleSavedSessionCount, matchingSessions.length);
+  const hiddenCount = matchingSessions.length - visibleCount;
   const anyPending = Boolean(options.pendingSavedSessionId || options.pendingBulkAction);
   const isPruning = options.pendingBulkAction === "prune";
   const pruneKeepLatest = visibleCount;
 
   return {
     savedSessionCount: savedSessions.length,
+    matchedSessionCount: matchingSessions.length,
+    filterQuery,
+    isFiltered,
     visibleCount,
     hiddenCount,
     anyPending,
     isPruning,
     canShowMore: hiddenCount > 0,
     canCollapse: visibleCount > TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT,
-    canPruneHidden: hiddenCount > 0 && !anyPending,
+    canPruneHidden: hiddenCount > 0 && !anyPending && !isFiltered,
     pruneKeepLatest,
     pruneConfirmationArmed: options.pruneConfirmationArmed,
-    items: savedSessions.slice(0, visibleCount).map((session) => toSavedSessionItemControlState(session, options, anyPending)),
+    items: matchingSessions.slice(0, visibleCount).map((session) => toSavedSessionItemControlState(session, options, anyPending)),
   };
 }
 
@@ -134,6 +146,29 @@ function clampVisibleSavedSessionCount(visibleCount: number, savedSessionCount: 
   }
 
   return Math.min(savedSessionCount, Math.max(0, Math.trunc(visibleCount)));
+}
+
+function normalizeSavedSessionFilterQuery(query: string): string {
+  return query.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function savedSessionMatchesFilter(session: SavedSessionSummary, filterQuery: string): boolean {
+  const searchableText = [
+    session.title,
+    session.session_id,
+    compactTerminalId(session.session_id),
+    session.route.backend,
+    session.route.authority,
+    session.compatibility.status,
+    savedSessionCompatibilityLabel(session),
+    `${session.tab_count} tabs`,
+    `${session.pane_count} panes`,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLowerCase();
+
+  return filterQuery.split(" ").every((term) => searchableText.includes(term));
 }
 
 function resolveRestoreStatus(
