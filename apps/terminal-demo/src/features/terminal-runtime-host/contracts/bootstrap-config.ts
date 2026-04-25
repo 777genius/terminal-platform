@@ -1,5 +1,6 @@
 export interface TerminalRuntimeBootstrapConfig {
   controlPlaneUrl: string;
+  demoAutoStartSession?: boolean;
   sessionStreamUrl: string;
   runtimeSlug: string;
 }
@@ -14,6 +15,11 @@ export function buildTerminalRuntimeBrowserUrl(
   url.searchParams.set("controlPlaneUrl", config.controlPlaneUrl);
   url.searchParams.set("sessionStreamUrl", config.sessionStreamUrl);
   url.searchParams.set("runtimeSlug", config.runtimeSlug);
+  if (config.demoAutoStartSession) {
+    url.searchParams.set("demoAutoStartSession", "1");
+  } else {
+    url.searchParams.delete("demoAutoStartSession");
+  }
   return url.toString();
 }
 

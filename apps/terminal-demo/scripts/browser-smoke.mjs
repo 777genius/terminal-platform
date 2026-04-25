@@ -76,6 +76,15 @@ async function main() {
     }
 
     if (
+      !result.before.hasWorkspaceShell
+      || !result.before.hasStartDefaultShell
+      || result.before.sessionCount !== 0
+      || result.before.demoAutoStartSession !== null
+    ) {
+      throw new Error(`Browser smoke should start from an explicit-launch state: ${JSON.stringify(result.before)}`);
+    }
+
+    if (
       !result.afterCreate.hasReady
       || result.afterCreate.hasError
       || result.afterCreate.healthPhase !== "ready"
@@ -545,6 +554,9 @@ async function runSmokeScenario(browserUrl) {
     const before = await evaluate(send, `(() => ({
       bodyText: document.body.innerText,
       hasWorkspaceShell: Boolean(document.querySelector('[data-testid="terminal-demo-shell"]')),
+      hasStartDefaultShell: Boolean(document.querySelector('[data-testid="start-default-shell"]')),
+      sessionCount: window.terminalDemoDebug?.getState?.()?.catalog?.sessions?.length ?? 0,
+      demoAutoStartSession: new URLSearchParams(window.location.search).get('demoAutoStartSession'),
       buttons: [...document.querySelectorAll('button')].map((button) => button.textContent?.trim()).filter(Boolean),
     }))()`);
 
@@ -2176,6 +2188,7 @@ async function startBrowserHost(rendererUrlValue) {
       cwd: appRoot,
       env: {
         ...process.env,
+        TERMINAL_DEMO_AUTO_START_SESSION: "0",
         TERMINAL_DEMO_RENDERER_URL: rendererUrlValue,
         TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE: "dist-only",
         TERMINAL_DEMO_SESSION_STORE_PATH: sessionStorePath,

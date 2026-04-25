@@ -10,5 +10,6 @@ declare global {
       getState(): unknown;
       setInputDraft?(value: string): void;
     };
+    terminalDemoAutoStartSessions?: Record<string, "pending" | "done">;
   }
 }

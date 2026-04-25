@@ -14,6 +14,7 @@ const appRoot = path.resolve(scriptDir, "..");
 const rendererPort = process.env.TERMINAL_DEMO_RENDERER_PORT ?? "5173";
 const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const sessionStore = resolveBrowserSessionStore();
+const autoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION ?? "1";
 
 runSync("npm", ["run", "stage:sdk"], appRoot);
 runSync("npm", ["run", "build:host"], appRoot);
@@ -40,6 +41,7 @@ browserHost = spawn("node", ["./dist/host/browser/index.js"], {
   cwd: appRoot,
   env: {
     ...process.env,
+    TERMINAL_DEMO_AUTO_START_SESSION: autoStartSession,
     TERMINAL_DEMO_RENDERER_URL: rendererUrl,
     ...(sessionStore.path ? { TERMINAL_DEMO_SESSION_STORE_PATH: sessionStore.path } : {}),
   },
@@ -47,6 +49,7 @@ browserHost = spawn("node", ["./dist/host/browser/index.js"], {
 });
 
 console.log(`[terminal-demo-browser] session store ${sessionStore.label}`);
+console.log(`[terminal-demo-browser] auto start session ${autoStartSession === "1" ? "enabled" : "disabled"}`);
 
 browserHost.on("exit", (code) => {
   shutdown();

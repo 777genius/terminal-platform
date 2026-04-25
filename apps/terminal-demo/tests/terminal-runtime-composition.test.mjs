@@ -7,6 +7,7 @@ import {
   TerminalDemoWorkspaceScreen,
   createStaticWorkspaceKernel,
 } from "../dist/renderer/app/TerminalDemoWorkspaceApp.js";
+import { buildTerminalRuntimeBrowserUrl } from "../dist/features/terminal-runtime-host/contracts/index.js";
 
 test("renderer app mounts the sdk react workspace shell", () => {
   const snapshot = {
@@ -138,4 +139,16 @@ test("renderer app mounts the sdk react workspace shell", () => {
   assert.match(markup, /data-testid="terminal-workspace-host"/);
   assert.match(markup, /tp-terminal-workspace/);
   assert.match(markup, /SDK Workspace/);
+});
+
+test("browser bootstrap URL preserves demo auto-start opt-in", () => {
+  const url = new URL(buildTerminalRuntimeBrowserUrl("http://127.0.0.1:5173/", {
+    controlPlaneUrl: "ws://127.0.0.1:4100/terminal-gateway/control?token=abc",
+    demoAutoStartSession: true,
+    sessionStreamUrl: "ws://127.0.0.1:4100/terminal-gateway/stream?token=abc",
+    runtimeSlug: "terminal-demo",
+  }));
+
+  assert.equal(url.searchParams.get("runtimeSlug"), "terminal-demo");
+  assert.equal(url.searchParams.get("demoAutoStartSession"), "1");
 });

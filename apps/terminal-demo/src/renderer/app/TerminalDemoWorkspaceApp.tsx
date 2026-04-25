@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
 import { TerminalRuntimeBootstrapErrorView } from "@features/terminal-runtime-host/renderer";
@@ -112,6 +112,7 @@ export function TerminalDemoWorkspaceScreen(props: {
   const [advancedSavedSessionDeleteConfirmationId, setAdvancedSavedSessionDeleteConfirmationId] =
     useState<SessionId | null>(null);
   const autoAttachAttemptRef = useRef<SessionId | null>(null);
+  const autoCreateAttemptedRef = useRef(false);
 
   const activeSessionId = snapshot.selection.activeSessionId ?? snapshot.catalog.sessions[0]?.session_id ?? null;
   const attachedSessionId = snapshot.attachedSession?.session.session_id ?? null;
@@ -145,6 +146,7 @@ export function TerminalDemoWorkspaceScreen(props: {
 
   useEffect(() => {
     autoAttachAttemptRef.current = null;
+    autoCreateAttemptedRef.current = false;
     void props.kernel.bootstrap().catch(() => {
       // Transport failures are recorded in kernel diagnostics.
     });
@@ -193,6 +195,58 @@ export function TerminalDemoWorkspaceScreen(props: {
     snapshot.selection.activeSessionId,
   ]);
 
+  const createNativeSession = useCallback(async (form: NativeSessionFormState): Promise<boolean> => {
+    setActionError(null);
+    setCreatePending(true);
+    try {
+      await props.kernel.commands.createSession("native", buildNativeSessionRequest(form));
+      return true;
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+      return false;
+    } finally {
+      setCreatePending(false);
+    }
+  }, [props.kernel]);
+
+  useEffect(() => {
+    if (!props.config.demoAutoStartSession) {
+      autoCreateAttemptedRef.current = false;
+      return;
+    }
+
+    if (
+      snapshot.connection.state !== "ready"
+      || createPending
+      || snapshot.catalog.sessions.length > 0
+      || snapshot.attachedSession
+      || autoCreateAttemptedRef.current
+    ) {
+      return;
+    }
+
+    const claimKey = claimDemoAutoStartSession(props.config);
+    if (!claimKey) {
+      autoCreateAttemptedRef.current = true;
+      return;
+    }
+
+    autoCreateAttemptedRef.current = true;
+    void createNativeSession(initialNativeSessionFormState).then((created) => {
+      completeDemoAutoStartSession(claimKey, created);
+      if (!created) {
+        autoCreateAttemptedRef.current = false;
+      }
+    });
+  }, [
+    createNativeSession,
+    createPending,
+    props.config.demoAutoStartSession,
+    snapshot.attachedSession,
+    snapshot.catalog.sessions.length,
+    snapshot.connection.state,
+  ]);
+
   useEffect(() => {
     const debug = {
       controller: props.kernel,
@@ -208,15 +262,7 @@ export function TerminalDemoWorkspaceScreen(props: {
   }, [props.kernel]);
 
   async function handleCreateNativeSession() {
-    setActionError(null);
-    setCreatePending(true);
-    try {
-      await props.kernel.commands.createSession("native", buildNativeSessionRequest(createForm));
-    } catch (error) {
-      setActionError(getErrorMessage(error));
-    } finally {
-      setCreatePending(false);
-    }
+    await createNativeSession(createForm);
   }
 
   async function handleRefreshCatalog() {
@@ -851,6 +897,37 @@ function getErrorMessage(error: unknown): string {
   }
 
   return "Workspace command failed";
+}
+
+function claimDemoAutoStartSession(config: TerminalRuntimeBootstrapConfig): string | null {
+  const key = [
+    config.runtimeSlug,
+    config.controlPlaneUrl,
+    config.sessionStreamUrl,
+  ].join("|");
+  const claims = window.terminalDemoAutoStartSessions ?? {};
+  window.terminalDemoAutoStartSessions = claims;
+
+  if (claims[key]) {
+    return null;
+  }
+
+  claims[key] = "pending";
+  return key;
+}
+
+function completeDemoAutoStartSession(key: string, created: boolean): void {
+  const claims = window.terminalDemoAutoStartSessions;
+  if (!claims) {
+    return;
+  }
+
+  if (created) {
+    claims[key] = "done";
+    return;
+  }
+
+  delete claims[key];
 }
 
 function resolveDefaultShellProgram(): string {

@@ -9,6 +9,7 @@ import { createMainWindow } from "./createMainWindow.js";
 
 const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
 const sessionStorePath = process.env.TERMINAL_DEMO_SESSION_STORE_PATH ?? null;
+const demoAutoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION === "1";
 let hostHandle: TerminalRuntimeHostHandle | null = null;
 
 async function bootstrap(): Promise<void> {
@@ -21,6 +22,7 @@ async function bootstrap(): Promise<void> {
   });
   const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,
+    demoAutoStartSession,
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,
   };
@@ -31,6 +33,7 @@ async function bootstrap(): Promise<void> {
     if (app.isReady() && BrowserWindow.getAllWindows().length === 0 && hostHandle) {
       await createMainWindow({
         controlPlaneUrl: hostHandle.controlPlaneUrl,
+        demoAutoStartSession,
         sessionStreamUrl: hostHandle.sessionStreamUrl,
         runtimeSlug: hostHandle.runtimeSlug,
       });

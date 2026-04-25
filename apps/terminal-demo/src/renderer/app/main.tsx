@@ -99,7 +99,14 @@ function TerminalDemoBootstrapBoundary() {
   }, []);
 
   const appKey = useMemo(
-    () => (config ? `${config.runtimeSlug}|${config.controlPlaneUrl}|${config.sessionStreamUrl}` : "bootstrap"),
+    () => (config
+      ? [
+          config.runtimeSlug,
+          config.controlPlaneUrl,
+          config.sessionStreamUrl,
+          config.demoAutoStartSession ? "auto-start" : "manual-start",
+        ].join("|")
+      : "bootstrap"),
     [config],
   );
 
@@ -134,5 +141,6 @@ function sameBootstrapConfig(
     left.controlPlaneUrl === right.controlPlaneUrl
     && left.sessionStreamUrl === right.sessionStreamUrl
     && left.runtimeSlug === right.runtimeSlug
+    && Boolean(left.demoAutoStartSession) === Boolean(right.demoAutoStartSession)
   );
 }

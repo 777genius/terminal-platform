@@ -17,6 +17,7 @@ const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_R
 const rendererUrl = process.env.TERMINAL_DEMO_RENDERER_URL ?? "http://127.0.0.1:5173";
 const bootstrapScope = process.env.TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE ?? "public-and-dist";
 const sessionStorePath = process.env.TERMINAL_DEMO_SESSION_STORE_PATH ?? null;
+const demoAutoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION === "1";
 
 let hostHandle: TerminalRuntimeHostHandle | null = null;
 let shuttingDown = false;
@@ -30,6 +31,7 @@ async function bootstrap(): Promise<void> {
 
   const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,
+    demoAutoStartSession,
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,
   };
