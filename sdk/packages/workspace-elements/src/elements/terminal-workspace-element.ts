@@ -79,6 +79,13 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
       .terminal-column {
         grid-template-rows: auto auto;
         align-content: start;
+        gap: 0;
+        --tp-terminal-screen-panel-border-bottom-left-radius: 0;
+        --tp-terminal-screen-panel-border-bottom-right-radius: 0;
+        --tp-terminal-screen-panel-padding-bottom: 0;
+        --tp-terminal-screen-panel-shadow: none;
+        --tp-terminal-screen-viewport-border-bottom-left-radius: 0;
+        --tp-terminal-screen-viewport-border-bottom-right-radius: 0;
       }
 
       .inspector-column {
@@ -93,6 +100,10 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
 
       .command-region {
         min-width: 0;
+      }
+
+      .command-region tp-terminal-command-dock {
+        display: block;
       }
 
       tp-terminal-screen,
@@ -221,6 +232,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                     .kernel=${this.kernel}
                     .quickCommands=${this.quickCommands}
                     .autoFocusInput=${this.autoFocusCommandInput}
+                    placement="terminal"
                   ></tp-terminal-command-dock>
                 </div>
               </div>

@@ -17,11 +17,14 @@ type TerminalCommandInputFocusOptions = {
   focusInput?: boolean;
 };
 
+type TerminalCommandDockPlacement = "panel" | "terminal";
+
 export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
     quickCommands: { attribute: false },
     autoFocusInput: { attribute: "auto-focus-input", type: Boolean },
+    placement: { type: String },
     pending: { state: true },
     actionError: { state: true },
     historyClearConfirmationArmed: { state: true },
@@ -39,6 +42,18 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           var(--tp-color-panel);
       }
 
+      .dock[data-placement="terminal"] {
+        border-top-width: 0;
+        border-top-left-radius: 0;
+        border-top-right-radius: 0;
+        box-shadow: none;
+        gap: var(--tp-space-2);
+        background:
+          linear-gradient(180deg, color-mix(in srgb, #05070b 86%, transparent), #05070b),
+          #05070b;
+        padding: var(--tp-space-2) var(--tp-space-4) var(--tp-space-3);
+      }
+
       .dock .panel-header {
         margin-bottom: 0;
       }
@@ -50,11 +65,23 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         gap: var(--tp-space-3);
       }
 
+      .dock[data-placement="terminal"] .dock-header {
+        align-items: center;
+        justify-content: flex-start;
+        min-height: 1.75rem;
+      }
+
       .dock-footer {
         display: grid;
         grid-template-columns: minmax(12rem, 1fr) minmax(0, auto);
         align-items: flex-start;
         gap: var(--tp-space-3);
+      }
+
+      .dock[data-placement="terminal"] .dock-footer {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: var(--tp-space-2);
       }
 
       .dock-footer .actions {
@@ -70,6 +97,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         justify-content: flex-end;
       }
 
+      .dock[data-placement="terminal"] .dock-status {
+        justify-content: flex-start;
+      }
+
       .chip-row,
       .history-actions,
       .actions {
@@ -78,11 +109,22 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         gap: var(--tp-space-2);
       }
 
+      .dock[data-placement="terminal"] .chip-row,
+      .dock[data-placement="terminal"] .history-actions {
+        gap: 0.35rem;
+      }
+
       .chip {
         color: var(--tp-color-text-muted);
         font-family: var(--tp-font-family-mono);
         font-size: 0.82rem;
         padding: 0.35rem 0.55rem;
+      }
+
+      .dock[data-placement="terminal"] .chip {
+        border-radius: 0.45rem;
+        background: color-mix(in srgb, var(--tp-color-bg-inset) 72%, transparent);
+        padding: 0.3rem 0.5rem;
       }
 
       .history-row {
@@ -109,6 +151,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         padding: 0.34rem 0.55rem;
       }
 
+      .dock[data-placement="terminal"] .history-chip {
+        border-radius: 0.45rem;
+        background: color-mix(in srgb, var(--tp-color-bg-inset) 72%, transparent);
+        padding: 0.3rem 0.5rem;
+      }
+
       .history-command {
         display: block;
         min-width: 0;
@@ -128,11 +176,24 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         padding: var(--tp-space-2);
       }
 
+      .dock[data-placement="terminal"] .composer {
+        border-color: color-mix(in srgb, var(--tp-color-accent) 32%, var(--tp-color-border));
+        border-radius: 0.55rem;
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--tp-color-bg-inset) 86%, transparent), transparent),
+          color-mix(in srgb, #05070b 92%, var(--tp-color-bg-inset));
+        padding: 0.48rem 0.62rem;
+      }
+
       .prompt {
         color: var(--tp-color-accent);
         font-family: var(--tp-font-family-mono);
         font-weight: 700;
         padding-top: 0.55rem;
+      }
+
+      .dock[data-placement="terminal"] .prompt {
+        padding-top: 0.28rem;
       }
 
       textarea {
@@ -144,6 +205,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         background: transparent;
         color: var(--tp-color-text);
         font: 0.94rem/1.45 var(--tp-font-family-mono);
+      }
+
+      .dock[data-placement="terminal"] textarea {
+        min-height: 2rem;
+        resize: none;
       }
 
       textarea::placeholder {
@@ -160,6 +226,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         line-height: 1.45;
       }
 
+      .dock[data-placement="terminal"] .hint {
+        font-size: 0.78rem;
+        line-height: 1.35;
+      }
+
       .primary {
         border-color: color-mix(in srgb, var(--tp-color-accent) 52%, transparent);
         background: color-mix(in srgb, var(--tp-color-accent) 18%, var(--tp-color-panel-raised));
@@ -174,6 +245,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         color: var(--tp-color-text-muted);
         font-size: 0.78rem;
         padding: 0.22rem 0.55rem;
+      }
+
+      .dock[data-placement="terminal"] .badge {
+        border-radius: 0.45rem;
+        background: color-mix(in srgb, var(--tp-color-bg-inset) 72%, transparent);
+        padding: 0.2rem 0.48rem;
       }
 
       .badge[data-tone="ready"] {
@@ -197,6 +274,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       details {
         border-top: 1px solid var(--tp-color-border);
         padding-top: var(--tp-space-3);
+      }
+
+      .dock[data-placement="terminal"] details {
+        border-top-color: color-mix(in srgb, var(--tp-color-border) 58%, transparent);
+        padding-top: var(--tp-space-2);
       }
 
       summary {
@@ -223,11 +305,22 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           justify-content: flex-start;
         }
       }
+
+      @media (max-width: 720px) {
+        .dock[data-placement="terminal"] {
+          padding: var(--tp-space-2);
+        }
+
+        .dock[data-placement="terminal"] .dock-footer {
+          grid-template-columns: 1fr;
+        }
+      }
     `,
   ];
 
   declare quickCommands: readonly TerminalCommandQuickCommand[] | null | undefined;
   declare autoFocusInput: boolean;
+  declare placement: TerminalCommandDockPlacement;
   protected declare pending: boolean;
   protected declare actionError: string | null;
   protected declare historyClearConfirmationArmed: boolean;
@@ -241,6 +334,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     super();
     this.quickCommands = defaultTerminalCommandQuickCommands;
     this.autoFocusInput = false;
+    this.placement = "panel";
     this.pending = false;
     this.actionError = null;
     this.historyClearConfirmationArmed = false;
@@ -288,17 +382,22 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         class="panel dock"
         part="command-dock"
         data-testid="tp-command-dock"
+        data-placement=${this.placement}
         data-command-input=${String(controls.canWriteInput)}
         data-input-capability=${controls.inputCapabilityStatus}
         data-save-capability=${controls.saveCapabilityStatus}
         data-save-layout=${String(controls.canSaveLayout)}
       >
         <div class="dock-header">
-          <div class="panel-header">
-            <div class="panel-eyebrow">Command Input</div>
-            <div class="panel-title">Focused pane command lane</div>
-            <div class="panel-copy">Send shell input to the selected pane without leaving the workspace.</div>
-          </div>
+          ${this.placement === "terminal"
+            ? nothing
+            : html`
+                <div class="panel-header">
+                  <div class="panel-eyebrow">Command Input</div>
+                  <div class="panel-title">Focused pane command lane</div>
+                  <div class="panel-copy">Send shell input to the selected pane without leaving the workspace.</div>
+                </div>
+              `}
 
           <div class="dock-status" part="status">
             <span

@@ -158,6 +158,9 @@ async function main() {
       || !result.afterCreate.hasDisplayControls
       || result.afterCreate.commandDockCanWrite !== "true"
       || result.afterCreate.commandDockInputCapability !== "known"
+      || result.afterCreate.commandDockPlacement !== "terminal"
+      || Math.abs(result.afterCreate.terminalComposerGapPx ?? 99) > 1
+      || /Command Input|Focused pane command lane/.test(result.afterCreate.commandDockVisibleText ?? "")
       || result.afterCreate.commandInputStatus !== "Ready"
       || !result.afterCreate.commandInputFocused
       || !result.afterCreate.focusedPaneBadgeText?.includes("Focused pane")
@@ -225,6 +228,7 @@ async function main() {
       || result.afterCreateMobileLayout.demoMainWidth < 430
       || result.afterCreateMobileLayout.terminalScreenHeight > 760
       || result.afterCreateMobileLayout.commandRegionTop > 1250
+      || Math.abs(result.afterCreateMobileLayout.terminalComposerGapPx ?? 99) > 1
       || !result.afterCreateMobileLayout.commandRegionFollowsScreen
     ) {
       throw new Error(`Mobile active shell layout did not settle correctly: ${JSON.stringify(result.afterCreateMobileLayout)}`);
@@ -668,6 +672,8 @@ async function runSmokeScenario(browserUrl) {
       const activeTitle = document.querySelector('.workspace-summary__title')?.textContent?.trim() ?? null;
       const focusedPaneBadge = document.querySelector('[data-testid="workspace-focused-pane-badge"]') ?? null;
       const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const screenRect = screenHost?.getBoundingClientRect() ?? null;
+      const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
       return {
         hasReady: debug?.connection?.state === 'ready',
         hasError: debug?.connection?.state === 'error',
@@ -738,6 +744,11 @@ async function runSmokeScenario(browserUrl) {
         commandDockInputCapability: commandDockPanel?.getAttribute('data-input-capability') ?? null,
         commandDockCanSave: commandDockPanel?.getAttribute('data-save-layout') ?? null,
         commandDockSaveCapability: commandDockPanel?.getAttribute('data-save-capability') ?? null,
+        commandDockPlacement: commandDockPanel?.getAttribute('data-placement') ?? null,
+        terminalComposerGapPx: screenRect && commandRegionRect
+          ? Math.round(commandRegionRect.top - screenRect.bottom)
+          : null,
+        commandDockVisibleText: commandDockPanel?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         commandInputFocused: commandRoot?.activeElement === input,
         saveLayoutTitle: saveLayout?.getAttribute('title') ?? null,
         focusedPaneBadgeText: focusedPaneBadge?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
@@ -798,6 +809,8 @@ async function runSmokeScenario(browserUrl) {
       const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
       const terminalScreen = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const commandRegion = workspaceRoot?.querySelector('[data-testid="tp-workspace-command-region"]') ?? null;
+      const terminalScreenRect = terminalScreen?.getBoundingClientRect() ?? null;
+      const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
       return {
         checked: Boolean(demoShell && demoSidebar && demoMain && operationsDeck),
         demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
@@ -814,6 +827,9 @@ async function runSmokeScenario(browserUrl) {
         ),
         terminalScreenHeight: Math.round(terminalScreen?.getBoundingClientRect().height ?? 0),
         commandRegionTop: Math.round(commandRegion?.getBoundingClientRect().top ?? 0),
+        terminalComposerGapPx: terminalScreenRect && commandRegionRect
+          ? Math.round(commandRegionRect.top - terminalScreenRect.bottom)
+          : null,
         commandRegionFollowsScreen: Boolean(
           terminalScreen
           && commandRegion
@@ -1864,7 +1880,7 @@ async function runSmokeScenario(browserUrl) {
         query,
         countText,
         matchCount: Number.parseInt(countText, 10) || 0,
-        hasHighlights: Boolean(screenRoot?.querySelector('[part="search-match"]')),
+        hasHighlights: Boolean(screenRoot?.querySelector('[part~="search-match"]')),
         hasActiveHighlight: Boolean(screenRoot?.querySelector('[part~="active-search-match"]')),
         nextClicked,
       };

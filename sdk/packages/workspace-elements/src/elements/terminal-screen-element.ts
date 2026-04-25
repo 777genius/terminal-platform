@@ -43,7 +43,17 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       .screen {
         display: grid;
         gap: var(--tp-space-3);
-        padding: var(--tp-space-4);
+        padding: var(--tp-terminal-screen-panel-padding, var(--tp-space-4));
+        padding-bottom: var(--tp-terminal-screen-panel-padding-bottom, var(--tp-space-4));
+        border-bottom-left-radius: var(
+          --tp-terminal-screen-panel-border-bottom-left-radius,
+          var(--tp-radius-md)
+        );
+        border-bottom-right-radius: var(
+          --tp-terminal-screen-panel-border-bottom-right-radius,
+          var(--tp-radius-md)
+        );
+        box-shadow: var(--tp-terminal-screen-panel-shadow, var(--tp-shadow-panel));
         background:
           linear-gradient(180deg, color-mix(in srgb, var(--tp-color-bg-inset) 92%, transparent), var(--tp-color-bg)),
           var(--tp-color-bg);
@@ -136,6 +146,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         overflow: auto;
         border: 1px solid color-mix(in srgb, var(--tp-color-border) 70%, transparent);
         border-radius: var(--tp-radius-lg);
+        border-bottom-left-radius: var(
+          --tp-terminal-screen-viewport-border-bottom-left-radius,
+          var(--tp-radius-lg)
+        );
+        border-bottom-right-radius: var(
+          --tp-terminal-screen-viewport-border-bottom-right-radius,
+          var(--tp-radius-lg)
+        );
         background: #05070b;
         padding: var(--tp-space-3);
         font-family: var(--tp-font-family-mono);
