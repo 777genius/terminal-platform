@@ -355,12 +355,25 @@ async function main() {
       !result.afterCommand.connectionReady
       || !result.afterCommand.screenFollowPressed
       || !result.afterCommand.screenViewportAtBottom
+      || !result.afterCommand.commandInputFocused
+      || !result.afterCommand.commandInputEmpty
+      || !result.afterCommand.commandCursorAtEnd
       || result.afterCommand.commandHistoryCount < 1
       || !result.afterCommand.commandHistoryLatest?.includes("browser-smoke-ok")
       || !result.afterCommand.historyBadgeText?.includes("history")
       || (!result.afterCommand.sequenceAdvanced && !result.afterCommand.containsCommandOutput)
     ) {
       throw new Error(`Command lane did not advance the focused screen: ${JSON.stringify(result.afterCommand)}`);
+    }
+
+    if (
+      !result.afterCommandActionFocus.tested
+      || !result.afterCommandActionFocus.enterFocused
+      || !result.afterCommandActionFocus.enterCursorAtEnd
+      || !result.afterCommandActionFocus.interruptFocused
+      || !result.afterCommandActionFocus.interruptCursorAtEnd
+    ) {
+      throw new Error(`Command action buttons did not return focus to the command input: ${JSON.stringify(result.afterCommandActionFocus)}`);
     }
 
     if (
@@ -389,6 +402,8 @@ async function main() {
       !result.afterClipboardPaste.clicked
       || !result.afterClipboardPaste.connectionReady
       || result.afterClipboardPaste.submittedEvents !== 1
+      || !result.afterClipboardPaste.inputFocused
+      || !result.afterClipboardPaste.cursorAtEnd
       || !result.afterClipboardPaste.containsPasteOutput
       || result.afterClipboardPaste.commandHistoryCount !== result.afterCommand.commandHistoryCount
       || !result.afterClipboardPaste.commandHistoryLatest?.includes("browser-smoke-ok")
@@ -1421,6 +1436,7 @@ async function runSmokeScenario(browserUrl) {
       const workspaceHost = document.querySelector('tp-terminal-workspace');
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
       const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
@@ -1447,6 +1463,13 @@ async function runSmokeScenario(browserUrl) {
         commandHistoryCount: debug?.commandHistory?.entries?.length ?? 0,
         commandHistoryLatest: debug?.commandHistory?.entries?.at(-1) ?? null,
         commandHistoryLimit: debug?.commandHistory?.limit ?? null,
+        commandInputFocused: commandRoot?.activeElement === textarea,
+        commandInputEmpty: textarea?.value === '',
+        commandCursorAtEnd: Boolean(
+          textarea
+          && textarea.selectionStart === textarea.value.length
+          && textarea.selectionEnd === textarea.value.length,
+        ),
         historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
           ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         terminalScreenText,
@@ -1454,6 +1477,64 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
     const replayInitialSequence = afterCommand.focusedSequence;
+
+    const afterCommandActionFocus = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const enterButton = commandRoot?.querySelector('[data-testid="tp-send-enter"]') ?? null;
+      const interruptButton = commandRoot?.querySelector('[data-testid="tp-send-interrupt"]') ?? null;
+      const waitForFocusReturn = async () => {
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          if (commandRoot?.activeElement === textarea && !textarea?.disabled) {
+            return true;
+          }
+        }
+        return commandRoot?.activeElement === textarea;
+      };
+      const cursorAtEnd = () => Boolean(
+        textarea
+        && textarea.selectionStart === textarea.value.length
+        && textarea.selectionEnd === textarea.value.length,
+      );
+
+      if (!textarea || !enterButton || !interruptButton) {
+        return {
+          tested: false,
+          reason: !textarea ? 'textarea missing' : !enterButton ? 'enter button missing' : 'interrupt button missing',
+          enterFocused: false,
+          enterCursorAtEnd: false,
+          interruptFocused: false,
+          interruptCursorAtEnd: false,
+        };
+      }
+      if (enterButton.disabled || interruptButton.disabled) {
+        return {
+          tested: false,
+          reason: enterButton.disabled ? 'enter button disabled' : 'interrupt button disabled',
+          enterFocused: false,
+          enterCursorAtEnd: false,
+          interruptFocused: false,
+          interruptCursorAtEnd: false,
+        };
+      }
+
+      enterButton.click();
+      await waitForFocusReturn();
+      const enterFocused = commandRoot.activeElement === textarea;
+      const enterCursorAtEnd = cursorAtEnd();
+
+      interruptButton.click();
+      await waitForFocusReturn();
+      return {
+        tested: true,
+        enterFocused,
+        enterCursorAtEnd,
+        interruptFocused: commandRoot.activeElement === textarea,
+        interruptCursorAtEnd: cursorAtEnd(),
+      };
+    })()`);
 
     afterScreenCopy = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
@@ -1617,6 +1698,9 @@ async function runSmokeScenario(browserUrl) {
 
     const afterClipboardPaste = await evaluate(send, `(() => {
       const debug = window.terminalDemoDebug?.getState?.();
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : '';
@@ -1627,6 +1711,12 @@ async function runSmokeScenario(browserUrl) {
         connectionReady: debug?.connection?.state === 'ready',
         commandHistoryCount: debug?.commandHistory?.entries?.length ?? 0,
         commandHistoryLatest: debug?.commandHistory?.entries?.at(-1) ?? null,
+        inputFocused: commandRoot?.activeElement === textarea,
+        cursorAtEnd: Boolean(
+          textarea
+          && textarea.selectionStart === textarea.value.length
+          && textarea.selectionEnd === textarea.value.length,
+        ),
         terminalScreenText,
         containsPasteOutput: /browser-paste-ok/i.test(terminalScreenText),
       };
@@ -1997,6 +2087,7 @@ async function runSmokeScenario(browserUrl) {
           ? afterCommand.focusedSequence !== initialSequence
           : false,
       },
+      afterCommandActionFocus,
       afterScreenCopy,
       afterRecentCommandRecall,
       afterClipboardPaste,

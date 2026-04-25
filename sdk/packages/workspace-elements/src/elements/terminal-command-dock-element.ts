@@ -13,6 +13,10 @@ import {
 import { resolveTerminalCommandDockControlState } from "./terminal-command-dock-controls.js";
 import { resolveTerminalEntityIdLabel } from "./terminal-identity.js";
 
+type TerminalCommandInputFocusOptions = {
+  focusInput?: boolean;
+};
+
 export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
@@ -399,7 +403,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
               class="primary"
               data-testid="tp-send-command"
               ?disabled=${!controls.canSend}
-              @click=${() => this.sendDraft()}
+              @click=${() => this.sendDraft({ focusInput: true })}
             >
               Send command
             </button>
@@ -407,21 +411,21 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
               data-testid="tp-paste-clipboard"
               title=${pasteTitle}
               ?disabled=${!controls.canPasteClipboard}
-              @click=${() => this.pasteClipboard()}
+              @click=${() => this.pasteClipboard({ focusInput: true })}
             >
               Paste
             </button>
             <button
               data-testid="tp-send-interrupt"
               ?disabled=${!controls.canWriteInput}
-              @click=${() => this.sendShortcut("\u0003")}
+              @click=${() => this.sendShortcut("\u0003", { focusInput: true })}
             >
               Ctrl+C
             </button>
             <button
               data-testid="tp-send-enter"
               ?disabled=${!controls.canWriteInput}
-              @click=${() => this.sendShortcut("\r")}
+              @click=${() => this.sendShortcut("\r", { focusInput: true })}
             >
               Enter
             </button>
@@ -464,7 +468,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     `;
   }
 
-  private setDraft(value: string, options: { focusInput?: boolean } = {}): void {
+  private setDraft(value: string, options: TerminalCommandInputFocusOptions = {}): void {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
     if (!controls.activePaneId || !controls.canWriteInput) {
       return;
@@ -475,9 +479,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     this.resetHistoryNavigation();
     this.kernel?.commands.updateDraft(controls.activePaneId, value);
     if (options.focusInput) {
-      void this.updateComplete.then(() => {
-        this.focusCommandInput();
-      });
+      this.refocusCommandInputAfterUpdate();
     }
   }
 
@@ -505,7 +507,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
   }
 
-  private async sendDraft(): Promise<void> {
+  private async sendDraft(options: TerminalCommandInputFocusOptions = {}): Promise<void> {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
     if (!controls.activeSessionId || !controls.activePaneId || !controls.canSend) {
       return;
@@ -516,6 +518,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     this.clearHistoryClearConfirmation();
     this.resetHistoryNavigation();
     this.kernel?.commands.clearDraft(controls.activePaneId);
+    if (options.focusInput) {
+      this.refocusCommandInputAfterUpdate();
+    }
   }
 
   private navigateCommandHistory(direction: "previous" | "next", target: HTMLTextAreaElement): boolean {
@@ -621,7 +626,13 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     return true;
   }
 
-  private async pasteClipboard(): Promise<void> {
+  private refocusCommandInputAfterUpdate(): void {
+    void this.updateComplete.then(() => {
+      this.focusCommandInput();
+    });
+  }
+
+  private async pasteClipboard(options: TerminalCommandInputFocusOptions = {}): Promise<void> {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
     if (!controls.activeSessionId || !controls.activePaneId || !controls.canPasteClipboard) {
       return;
@@ -637,6 +648,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     } catch (error) {
       this.pending = false;
       this.actionError = getErrorMessage(error);
+      if (options.focusInput) {
+        this.refocusCommandInputAfterUpdate();
+      }
       this.dispatchEvent(
         new CustomEvent("tp-terminal-paste-failed", {
           bubbles: true,
@@ -653,13 +667,19 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
     if (pastedText.length === 0) {
       this.pending = false;
+      if (options.focusInput) {
+        this.refocusCommandInputAfterUpdate();
+      }
       return;
     }
 
     await this.dispatchPaste(controls.activeSessionId, controls.activePaneId, pastedText);
+    if (options.focusInput) {
+      this.refocusCommandInputAfterUpdate();
+    }
   }
 
-  private async sendShortcut(data: string): Promise<void> {
+  private async sendShortcut(data: string, options: TerminalCommandInputFocusOptions = {}): Promise<void> {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
     if (!controls.activeSessionId || !controls.activePaneId || !controls.canWriteInput) {
       return;
@@ -667,6 +687,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
     this.clearHistoryClearConfirmation();
     await this.dispatchInput(controls.activeSessionId, controls.activePaneId, data);
+    if (options.focusInput) {
+      this.refocusCommandInputAfterUpdate();
+    }
   }
 
   private async dispatchPaste(sessionId: string, paneId: string, data: string): Promise<void> {
