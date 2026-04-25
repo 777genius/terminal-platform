@@ -8,6 +8,7 @@ import {
   createStaticWorkspaceKernel,
 } from "../dist/renderer/app/TerminalDemoWorkspaceApp.js";
 import { buildTerminalRuntimeBrowserUrl } from "../dist/features/terminal-runtime-host/contracts/index.js";
+import { resolveDemoDefaultShellProgram } from "../dist/features/terminal-runtime-host/main/index.js";
 
 test("renderer app mounts the sdk react workspace shell", () => {
   const snapshot = {
@@ -141,14 +142,46 @@ test("renderer app mounts the sdk react workspace shell", () => {
   assert.match(markup, /SDK Workspace/);
 });
 
-test("browser bootstrap URL preserves demo auto-start opt-in", () => {
+test("browser bootstrap URL preserves host shell policy", () => {
   const url = new URL(buildTerminalRuntimeBrowserUrl("http://127.0.0.1:5173/", {
     controlPlaneUrl: "ws://127.0.0.1:4100/terminal-gateway/control?token=abc",
-    demoAutoStartSession: true,
+    demoDefaultShellProgram: "/bin/zsh",
     sessionStreamUrl: "ws://127.0.0.1:4100/terminal-gateway/stream?token=abc",
     runtimeSlug: "terminal-demo",
   }));
 
   assert.equal(url.searchParams.get("runtimeSlug"), "terminal-demo");
-  assert.equal(url.searchParams.get("demoAutoStartSession"), "1");
+  assert.equal(url.searchParams.get("demoAutoStartSession"), null);
+  assert.equal(url.searchParams.get("demoDefaultShellProgram"), "/bin/zsh");
+});
+
+test("demo default shell resolver prefers host policy and stable platform fallbacks", () => {
+  assert.equal(
+    resolveDemoDefaultShellProgram({
+      env: { TERMINAL_DEMO_DEFAULT_SHELL: "/opt/homebrew/bin/fish", SHELL: "/bin/zsh" },
+      platform: "darwin",
+    }),
+    "/opt/homebrew/bin/fish",
+  );
+  assert.equal(
+    resolveDemoDefaultShellProgram({
+      env: { SHELL: "/bin/zsh" },
+      platform: "darwin",
+    }),
+    "/bin/zsh",
+  );
+  assert.equal(
+    resolveDemoDefaultShellProgram({
+      env: {},
+      platform: "darwin",
+    }),
+    "zsh",
+  );
+  assert.equal(
+    resolveDemoDefaultShellProgram({
+      env: { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+      platform: "win32",
+    }),
+    "C:\\Windows\\System32\\cmd.exe",
+  );
 });

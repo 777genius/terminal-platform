@@ -9,6 +9,7 @@ import {
 } from "@features/terminal-runtime-host/contracts";
 import {
   DEFAULT_TERMINAL_RUNTIME_SLUG,
+  resolveDemoDefaultShellProgram,
   startTerminalRuntimeHost,
   type TerminalRuntimeHostHandle,
 } from "@features/terminal-runtime-host/main";
@@ -18,6 +19,7 @@ const rendererUrl = process.env.TERMINAL_DEMO_RENDERER_URL ?? "http://127.0.0.1:
 const bootstrapScope = process.env.TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE ?? "public-and-dist";
 const sessionStorePath = process.env.TERMINAL_DEMO_SESSION_STORE_PATH ?? null;
 const demoAutoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION === "1";
+const demoDefaultShellProgram = resolveDemoDefaultShellProgram();
 
 let hostHandle: TerminalRuntimeHostHandle | null = null;
 let shuttingDown = false;
@@ -26,12 +28,18 @@ async function bootstrap(): Promise<void> {
   hostHandle = await startTerminalRuntimeHost({
     runtimeSlug,
     forceRestartReadyDaemon: true,
+    initialNativeSession: demoAutoStartSession
+      ? {
+          title: "SDK Workspace",
+          program: demoDefaultShellProgram,
+        }
+      : null,
     sessionStorePath,
   });
 
   const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,
-    demoAutoStartSession,
+    demoDefaultShellProgram,
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,
   };

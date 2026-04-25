@@ -64,7 +64,7 @@ cd apps/terminal-demo
 npm run dev:browser
 ```
 
-The browser runner prints a `TERMINAL_DEMO_BROWSER_URL=...` line. Open that URL in Chrome or another browser. Browser mode uses a temporary session store and starts a default shell by default so repeated demos open cleanly into a usable terminal. Set `TERMINAL_DEMO_AUTO_START_SESSION=0` to keep explicit manual launch. Set `TERMINAL_DEMO_SESSION_STORE_PATH=/path/to/session-store.sqlite3` to inspect a specific store, or `TERMINAL_DEMO_BROWSER_PERSIST_SESSION_STORE=1` to use the default persistent daemon store.
+The browser runner prints a `TERMINAL_DEMO_BROWSER_URL=...` line. Open that URL in Chrome or another browser. Browser mode uses a temporary session store and lets the host create the initial NativeMux shell before the URL is published, so repeated demos open cleanly into one usable terminal. Set `TERMINAL_DEMO_DEFAULT_SHELL=/path/to/shell` to override the launch shell. Set `TERMINAL_DEMO_AUTO_START_SESSION=0` to keep explicit manual launch. Set `TERMINAL_DEMO_SESSION_STORE_PATH=/path/to/session-store.sqlite3` to inspect a specific store, or `TERMINAL_DEMO_BROWSER_PERSIST_SESSION_STORE=1` to use the default persistent daemon store.
 
 Production-style local run:
 

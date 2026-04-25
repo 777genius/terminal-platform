@@ -1,6 +1,6 @@
 export interface TerminalRuntimeBootstrapConfig {
   controlPlaneUrl: string;
-  demoAutoStartSession?: boolean;
+  demoDefaultShellProgram?: string;
   sessionStreamUrl: string;
   runtimeSlug: string;
 }
@@ -15,10 +15,10 @@ export function buildTerminalRuntimeBrowserUrl(
   url.searchParams.set("controlPlaneUrl", config.controlPlaneUrl);
   url.searchParams.set("sessionStreamUrl", config.sessionStreamUrl);
   url.searchParams.set("runtimeSlug", config.runtimeSlug);
-  if (config.demoAutoStartSession) {
-    url.searchParams.set("demoAutoStartSession", "1");
+  if (config.demoDefaultShellProgram) {
+    url.searchParams.set("demoDefaultShellProgram", config.demoDefaultShellProgram);
   } else {
-    url.searchParams.delete("demoAutoStartSession");
+    url.searchParams.delete("demoDefaultShellProgram");
   }
   return url.toString();
 }

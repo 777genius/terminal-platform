@@ -33,13 +33,6 @@ interface NativeSessionFormState {
   cwd: string;
 }
 
-const initialNativeSessionFormState: NativeSessionFormState = {
-  title: "SDK Workspace",
-  program: resolveDefaultShellProgram(),
-  args: "",
-  cwd: "",
-};
-
 const TERMINAL_DEMO_THEME_STORAGE_KEY = "terminal-platform-demo.theme";
 const TERMINAL_DEMO_FONT_SCALE_STORAGE_KEY = "terminal-platform-demo.terminal-font-scale";
 const TERMINAL_DEMO_LINE_WRAP_STORAGE_KEY = "terminal-platform-demo.terminal-line-wrap";
@@ -102,7 +95,7 @@ export function TerminalDemoWorkspaceScreen(props: {
   kernel: WorkspaceKernel;
 }): ReactElement {
   const snapshot = useWorkspaceSnapshot(props.kernel);
-  const [createForm, setCreateForm] = useState(initialNativeSessionFormState);
+  const [createForm, setCreateForm] = useState(() => createInitialNativeSessionFormState(props.config));
   const [createPending, setCreatePending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [advancedSavedSessionAction, setAdvancedSavedSessionAction] = useState<{
@@ -112,7 +105,6 @@ export function TerminalDemoWorkspaceScreen(props: {
   const [advancedSavedSessionDeleteConfirmationId, setAdvancedSavedSessionDeleteConfirmationId] =
     useState<SessionId | null>(null);
   const autoAttachAttemptRef = useRef<SessionId | null>(null);
-  const autoCreateAttemptedRef = useRef(false);
 
   const activeSessionId = snapshot.selection.activeSessionId ?? snapshot.catalog.sessions[0]?.session_id ?? null;
   const attachedSessionId = snapshot.attachedSession?.session.session_id ?? null;
@@ -146,7 +138,6 @@ export function TerminalDemoWorkspaceScreen(props: {
 
   useEffect(() => {
     autoAttachAttemptRef.current = null;
-    autoCreateAttemptedRef.current = false;
     void props.kernel.bootstrap().catch(() => {
       // Transport failures are recorded in kernel diagnostics.
     });
@@ -210,42 +201,14 @@ export function TerminalDemoWorkspaceScreen(props: {
   }, [props.kernel]);
 
   useEffect(() => {
-    if (!props.config.demoAutoStartSession) {
-      autoCreateAttemptedRef.current = false;
-      return;
-    }
-
-    if (
-      snapshot.connection.state !== "ready"
-      || createPending
-      || snapshot.catalog.sessions.length > 0
-      || snapshot.attachedSession
-      || autoCreateAttemptedRef.current
-    ) {
-      return;
-    }
-
-    const claimKey = claimDemoAutoStartSession(props.config);
-    if (!claimKey) {
-      autoCreateAttemptedRef.current = true;
-      return;
-    }
-
-    autoCreateAttemptedRef.current = true;
-    void createNativeSession(initialNativeSessionFormState).then((created) => {
-      completeDemoAutoStartSession(claimKey, created);
-      if (!created) {
-        autoCreateAttemptedRef.current = false;
+    setCreateForm((current) => {
+      if (current.program.trim()) {
+        return current;
       }
+
+      return createInitialNativeSessionFormState(props.config);
     });
-  }, [
-    createNativeSession,
-    createPending,
-    props.config.demoAutoStartSession,
-    snapshot.attachedSession,
-    snapshot.catalog.sessions.length,
-    snapshot.connection.state,
-  ]);
+  }, [props.config]);
 
   useEffect(() => {
     const debug = {
@@ -899,40 +862,27 @@ function getErrorMessage(error: unknown): string {
   return "Workspace command failed";
 }
 
-function claimDemoAutoStartSession(config: TerminalRuntimeBootstrapConfig): string | null {
-  const key = [
-    config.runtimeSlug,
-    config.controlPlaneUrl,
-    config.sessionStreamUrl,
-  ].join("|");
-  const claims = window.terminalDemoAutoStartSessions ?? {};
-  window.terminalDemoAutoStartSessions = claims;
-
-  if (claims[key]) {
-    return null;
-  }
-
-  claims[key] = "pending";
-  return key;
+function createInitialNativeSessionFormState(config: TerminalRuntimeBootstrapConfig): NativeSessionFormState {
+  return {
+    title: "SDK Workspace",
+    program: resolveDefaultShellProgram(config),
+    args: "",
+    cwd: "",
+  };
 }
 
-function completeDemoAutoStartSession(key: string, created: boolean): void {
-  const claims = window.terminalDemoAutoStartSessions;
-  if (!claims) {
-    return;
+function resolveDefaultShellProgram(config: TerminalRuntimeBootstrapConfig): string {
+  const configuredProgram = config.demoDefaultShellProgram?.trim();
+  if (configuredProgram) {
+    return configuredProgram;
   }
 
-  if (created) {
-    claims[key] = "done";
-    return;
-  }
-
-  delete claims[key];
-}
-
-function resolveDefaultShellProgram(): string {
   if (typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)) {
     return "pwsh.exe";
+  }
+
+  if (typeof navigator !== "undefined" && /macintosh|mac os x/i.test(navigator.userAgent)) {
+    return "zsh";
   }
 
   return "bash";

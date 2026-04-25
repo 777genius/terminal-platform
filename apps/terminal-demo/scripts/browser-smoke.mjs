@@ -18,6 +18,10 @@ const chromeBinary = resolveChromeBinary();
 const screenshotPath = path.join("/tmp", `terminal-demo-browser-smoke-${Date.now()}.png`);
 const chromeUserDataDir = path.join("/tmp", `terminal-demo-browser-smoke-profile-${process.pid}`);
 const sessionStorePath = path.join("/tmp", `terminal-demo-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`);
+const autoStartSessionStorePath = path.join(
+  "/tmp",
+  `terminal-demo-browser-smoke-auto-store-${process.pid}-${Date.now()}.sqlite3`,
+);
 const themeStorageKey = "terminal-platform-demo.theme";
 const fontScaleStorageKey = "terminal-platform-demo.terminal-font-scale";
 const lineWrapStorageKey = "terminal-platform-demo.terminal-line-wrap";
@@ -51,8 +55,6 @@ async function main() {
       label: "Renderer preview",
     });
 
-    const browserUrl = await startBrowserHost(rendererUrl);
-
     chromeProcess = spawn(chromeBinary, [
       "--headless=new",
       `--remote-debugging-port=${cdpPort}`,
@@ -69,6 +71,40 @@ async function main() {
       label: "Chrome CDP",
     });
 
+    const autoStartBrowserUrl = await startBrowserHost(rendererUrl, {
+      autoStartSession: "1",
+      sessionStorePath: autoStartSessionStorePath,
+    });
+    const autoStartDefaultShellProgram =
+      new URL(autoStartBrowserUrl).searchParams.get("demoDefaultShellProgram");
+    const autoStartResult = await runAutoStartSmokeScenario(autoStartBrowserUrl);
+    if (autoStartResult.issues.length > 0) {
+      throw new Error(`Browser auto-start reported runtime issues: ${JSON.stringify(autoStartResult.issues)}`);
+    }
+
+    if (
+      !autoStartResult.hasReady
+      || autoStartResult.hasError
+      || autoStartResult.sessionCount !== 1
+      || !autoStartResult.attached
+      || autoStartResult.demoAutoStartSession !== null
+      || !autoStartDefaultShellProgram
+      || autoStartResult.demoDefaultShellProgram !== autoStartDefaultShellProgram
+      || !autoStartResult.commandInputFocused
+      || autoStartResult.documentHorizontalOverflow > 1
+      || /default interactive shell is now zsh/i.test(autoStartResult.terminalScreenTextPreview ?? "")
+    ) {
+      throw new Error(`Host auto-start did not settle into one default shell: ${JSON.stringify(autoStartResult)}`);
+    }
+
+    await stopProcess(browserHostProcess);
+    browserHostProcess = null;
+    await removeSessionStore(autoStartSessionStorePath);
+
+    const browserUrl = await startBrowserHost(rendererUrl, {
+      autoStartSession: "0",
+      sessionStorePath,
+    });
     const result = await runSmokeScenario(browserUrl);
 
     if (result.issues.length > 0) {
@@ -174,6 +210,7 @@ async function main() {
       || (result.afterCreate.savedSessionCount > 8 && !result.afterCreate.hasSavedPagination)
       || !result.afterCreate.hasActiveTitle
       || !result.afterCreate.inputEnabled
+      || /default interactive shell is now zsh/i.test(result.afterCreate.terminalScreenTextPreview ?? "")
     ) {
       throw new Error(`Session creation did not settle correctly: ${JSON.stringify(result.afterCreate)}`);
     }
@@ -536,6 +573,7 @@ async function runSmokeScenario(browserUrl) {
 
   try {
     await send("Page.enable");
+    await send("Page.bringToFront").catch(() => undefined);
     await send("Runtime.enable");
     await send("Log.enable");
     await send("Browser.grantPermissions", {
@@ -737,6 +775,7 @@ async function runSmokeScenario(browserUrl) {
           && [...terminalColumn.children].indexOf(screenHost) < [...terminalColumn.children].indexOf(commandRegion)
         ),
         hasScreen: Boolean(terminalScreenText),
+        terminalScreenTextPreview: terminalScreenText?.slice(0, 240) ?? null,
         hasStatusBar: Boolean(statusRoot?.querySelector('[part="status-bar"]')),
         hasCommandDock: Boolean(commandRoot?.querySelector('[part="command-dock"]')),
         hasActiveTitle: Boolean(activeTitle && activeTitle !== 'Pick a session to inspect'),
@@ -2178,7 +2217,113 @@ async function runSmokeScenario(browserUrl) {
   }
 }
 
-async function startBrowserHost(rendererUrlValue) {
+async function runAutoStartSmokeScenario(browserUrl) {
+  const target = await fetch(`http://127.0.0.1:${cdpPort}/json/new?${encodeURIComponent(browserUrl)}`, {
+    method: "PUT",
+  }).then((response) => response.json());
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await onceSocketOpen(socket);
+
+  let id = 0;
+  const pending = new Map();
+  const issues = [];
+
+  socket.on("message", (data) => {
+    const message = JSON.parse(data.toString());
+    if (message.id && pending.has(message.id)) {
+      const request = pending.get(message.id);
+      pending.delete(message.id);
+      if (message.error) {
+        request.reject(new Error(message.error.message));
+      } else {
+        request.resolve(message.result);
+      }
+      return;
+    }
+
+    if (message.method === "Log.entryAdded") {
+      const entry = message.params.entry;
+      if (entry.level === "error") {
+        issues.push({ type: "log", source: entry.source, text: entry.text });
+      }
+      return;
+    }
+
+    if (message.method === "Runtime.exceptionThrown") {
+      issues.push({
+        type: "exception",
+        text: message.params.exceptionDetails?.text ?? "Runtime exception",
+      });
+    }
+  });
+
+  const send = (method, params = {}) => new Promise((resolve, reject) => {
+    const requestId = ++id;
+    pending.set(requestId, { resolve, reject });
+    socket.send(JSON.stringify({ id: requestId, method, params }));
+  });
+
+  try {
+    await send("Page.enable");
+    await send("Page.bringToFront").catch(() => undefined);
+    await send("Runtime.enable");
+    await send("Log.enable");
+    await send("Emulation.setDeviceMetricsOverride", {
+      width: 1440,
+      height: 1100,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+
+    const result = await evaluate(send, `(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        const state = window.terminalDemoDebug?.getState?.();
+        if (
+          state?.connection?.state === 'ready'
+          && state?.catalog?.sessions?.length === 1
+          && state?.attachedSession?.focused_screen
+        ) {
+          break;
+        }
+        await wait(200);
+      }
+
+      const state = window.terminalDemoDebug?.getState?.();
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const terminalScreenText = state?.attachedSession?.focused_screen?.surface?.lines
+        ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+        : null;
+
+      return {
+        hasReady: state?.connection?.state === 'ready',
+        hasError: state?.connection?.state === 'error',
+        sessionCount: state?.catalog?.sessions?.length ?? 0,
+        attached: Boolean(state?.attachedSession?.focused_screen),
+        demoAutoStartSession: new URLSearchParams(window.location.search).get('demoAutoStartSession'),
+        demoDefaultShellProgram: new URLSearchParams(window.location.search).get('demoDefaultShellProgram'),
+        commandInputFocused: commandRoot?.activeElement === input,
+        documentHorizontalOverflow: Math.max(
+          0,
+          document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+        terminalScreenTextPreview: terminalScreenText?.slice(0, 240) ?? null,
+      };
+    })()`);
+
+    return {
+      ...result,
+      issues,
+    };
+  } finally {
+    await closeWebSocket(socket);
+    await closePageTarget(target.id);
+  }
+}
+
+async function startBrowserHost(rendererUrlValue, options) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error("Timed out waiting for TERMINAL_DEMO_BROWSER_URL"));
@@ -2188,10 +2333,10 @@ async function startBrowserHost(rendererUrlValue) {
       cwd: appRoot,
       env: {
         ...process.env,
-        TERMINAL_DEMO_AUTO_START_SESSION: "0",
+        TERMINAL_DEMO_AUTO_START_SESSION: options.autoStartSession,
         TERMINAL_DEMO_RENDERER_URL: rendererUrlValue,
         TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE: "dist-only",
-        TERMINAL_DEMO_SESSION_STORE_PATH: sessionStorePath,
+        TERMINAL_DEMO_SESSION_STORE_PATH: options.sessionStorePath,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -2231,10 +2376,15 @@ async function shutdown() {
   await stopProcess(previewProcess);
   await stopProcess(chromeProcess);
   await fs.rm(chromeUserDataDir, { recursive: true, force: true });
+  await removeSessionStore(autoStartSessionStorePath);
+  await removeSessionStore(sessionStorePath);
+}
+
+async function removeSessionStore(storePath) {
   await Promise.all([
-    fs.rm(sessionStorePath, { force: true }),
-    fs.rm(`${sessionStorePath}-shm`, { force: true }),
-    fs.rm(`${sessionStorePath}-wal`, { force: true }),
+    fs.rm(storePath, { force: true }),
+    fs.rm(`${storePath}-shm`, { force: true }),
+    fs.rm(`${storePath}-wal`, { force: true }),
   ]);
 }
 
@@ -2254,11 +2404,25 @@ async function stopProcess(child) {
 }
 
 function evaluate(send, expression) {
-  return send("Runtime.evaluate", {
+  let timeoutId;
+  const evaluation = send("Runtime.evaluate", {
     expression,
     returnByValue: true,
     awaitPromise: true,
   }).then((result) => result.result.value);
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error("Timed out waiting for browser evaluation"));
+    }, 60_000);
+  });
+
+  return Promise.race([evaluation, timeout]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
+
+async function closePageTarget(targetId) {
+  await fetch(`http://127.0.0.1:${cdpPort}/json/close/${targetId}`).catch(() => undefined);
 }
 
 function pipeProcess(child, prefix) {

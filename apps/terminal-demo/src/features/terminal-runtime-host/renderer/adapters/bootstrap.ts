@@ -24,13 +24,13 @@ export async function resolveTerminalRuntimeBootstrapConfig(): Promise<Bootstrap
   const sessionStreamUrl = params.get("sessionStreamUrl")?.trim();
   const legacyGatewayUrl = params.get("gatewayUrl")?.trim();
   const runtimeSlug = params.get("runtimeSlug")?.trim();
-  const demoAutoStartSession = params.get("demoAutoStartSession")?.trim();
+  const demoDefaultShellProgram = params.get("demoDefaultShellProgram")?.trim();
 
   const queryConfig = normalizeBootstrapConfig(
     runtimeSlug
       ? {
           controlPlaneUrl,
-          demoAutoStartSession,
+          demoDefaultShellProgram,
           sessionStreamUrl,
           gatewayUrl: legacyGatewayUrl,
           runtimeSlug,
@@ -66,7 +66,7 @@ export async function loadLatestTerminalRuntimeBootstrapConfig(): Promise<Termin
   const params = new URLSearchParams(window.location.search);
   const queryConfig = normalizeBootstrapConfig({
     controlPlaneUrl: params.get("controlPlaneUrl")?.trim(),
-    demoAutoStartSession: params.get("demoAutoStartSession")?.trim(),
+    demoDefaultShellProgram: params.get("demoDefaultShellProgram")?.trim(),
     sessionStreamUrl: params.get("sessionStreamUrl")?.trim(),
     gatewayUrl: params.get("gatewayUrl")?.trim(),
     runtimeSlug: params.get("runtimeSlug")?.trim(),
@@ -123,7 +123,7 @@ function normalizeBootstrapConfig(
   raw:
     | {
         controlPlaneUrl?: string | null | undefined;
-        demoAutoStartSession?: boolean | string | null | undefined;
+        demoDefaultShellProgram?: string | null | undefined;
         sessionStreamUrl?: string | null | undefined;
         runtimeSlug?: string | null | undefined;
         gatewayUrl?: string | null | undefined;
@@ -149,9 +149,9 @@ function normalizeBootstrapConfig(
     sessionStreamUrl,
     runtimeSlug,
   };
-  const demoAutoStartSession = normalizeBootstrapBoolean(raw.demoAutoStartSession);
-  if (demoAutoStartSession !== null) {
-    config.demoAutoStartSession = demoAutoStartSession;
+  const demoDefaultShellProgram = normalizeBootstrapScalar(raw.demoDefaultShellProgram);
+  if (demoDefaultShellProgram) {
+    config.demoDefaultShellProgram = demoDefaultShellProgram;
   }
 
   return config;
@@ -168,17 +168,4 @@ function normalizeBootstrapScalar(value: string | null | undefined): string | nu
   }
 
   return normalized;
-}
-
-function normalizeBootstrapBoolean(value: boolean | string | null | undefined): boolean | null {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  const normalized = normalizeBootstrapScalar(value);
-  if (!normalized) {
-    return null;
-  }
-
-  return ["1", "true", "yes"].includes(normalized.toLowerCase());
 }
