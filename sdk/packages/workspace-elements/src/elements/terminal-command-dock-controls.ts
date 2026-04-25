@@ -12,7 +12,9 @@ export interface TerminalCommandDockControlState {
   recentCommands: string[];
   canSend: boolean;
   canUsePane: boolean;
+  canWriteInput: boolean;
   canPasteClipboard: boolean;
+  inputCapabilityStatus: TerminalCommandDockCapabilityStatus;
   pasteCapabilityStatus: TerminalCommandDockCapabilityStatus;
 }
 
@@ -26,7 +28,9 @@ export function resolveTerminalCommandDockControlState(
     snapshot.selection.activePaneId ?? snapshot.attachedSession?.focused_screen?.pane_id ?? null;
   const draft = activePaneId ? (snapshot.drafts[activePaneId] ?? "") : "";
   const canUsePane = Boolean(activeSessionId && activePaneId && !options.pending);
+  const inputCapability = resolveInputCapability(snapshot);
   const pasteCapability = resolvePasteCapability(snapshot);
+  const canWriteInput = Boolean(canUsePane && inputCapability.canWrite);
 
   return {
     activeSessionId,
@@ -34,10 +38,25 @@ export function resolveTerminalCommandDockControlState(
     draft,
     commandHistory: snapshot.commandHistory.entries,
     recentCommands: [...snapshot.commandHistory.entries].slice(-5).reverse(),
-    canSend: Boolean(canUsePane && draft.trim().length > 0),
+    canSend: Boolean(canWriteInput && draft.trim().length > 0),
     canUsePane,
+    canWriteInput,
     canPasteClipboard: Boolean(canUsePane && pasteCapability.canPaste),
+    inputCapabilityStatus: inputCapability.status,
     pasteCapabilityStatus: pasteCapability.status,
+  };
+}
+
+function resolveInputCapability(
+  snapshot: WorkspaceSnapshot,
+): { canWrite: boolean; status: TerminalCommandDockCapabilityStatus } {
+  const capability = resolveWorkspaceCapability(snapshot, "pane_input_write", {
+    missingBackend: false,
+    pendingCapabilities: true,
+  });
+  return {
+    canWrite: capability.enabled,
+    status: capability.status,
   };
 }
 

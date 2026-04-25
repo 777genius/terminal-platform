@@ -24,6 +24,8 @@ describe("terminal command dock controls", () => {
     expect(controls.draft).toBe("git status");
     expect(controls.canSend).toBe(true);
     expect(controls.canUsePane).toBe(true);
+    expect(controls.canWriteInput).toBe(true);
+    expect(controls.inputCapabilityStatus).toBe("known");
     expect(controls.canPasteClipboard).toBe(true);
     expect(controls.pasteCapabilityStatus).toBe("known");
     expect(controls.recentCommands).toEqual([
@@ -33,6 +35,27 @@ describe("terminal command dock controls", () => {
       "git status",
       "ls -la",
     ]);
+  });
+
+  it("disables command input when loaded backend capabilities reject pane input writes", () => {
+    const snapshot = createWorkspaceSnapshot({
+      catalog: {
+        ...createInitialWorkspaceSnapshot().catalog,
+        backendCapabilities: {
+          native: createCapabilities({ pane_input_write: false }),
+        },
+      },
+      drafts: {
+        "pane-1": "git status",
+      },
+    });
+
+    const controls = resolveTerminalCommandDockControlState(snapshot, { pending: false });
+
+    expect(controls.canUsePane).toBe(true);
+    expect(controls.canWriteInput).toBe(false);
+    expect(controls.canSend).toBe(false);
+    expect(controls.inputCapabilityStatus).toBe("known");
   });
 
   it("disables paste when loaded backend capabilities reject pane paste writes", () => {
@@ -50,6 +73,25 @@ describe("terminal command dock controls", () => {
     expect(controls.canUsePane).toBe(true);
     expect(controls.canPasteClipboard).toBe(false);
     expect(controls.pasteCapabilityStatus).toBe("known");
+  });
+
+  it("keeps command input enabled while capabilities are pending and a focused pane exists", () => {
+    const snapshot = createWorkspaceSnapshot({
+      catalog: {
+        ...createInitialWorkspaceSnapshot().catalog,
+        backendCapabilities: {},
+      },
+      drafts: {
+        "pane-1": "git status",
+      },
+    });
+
+    const controls = resolveTerminalCommandDockControlState(snapshot, { pending: false });
+
+    expect(controls.canUsePane).toBe(true);
+    expect(controls.canWriteInput).toBe(true);
+    expect(controls.canSend).toBe(true);
+    expect(controls.inputCapabilityStatus).toBe("unknown");
   });
 
   it("keeps paste enabled while capabilities are pending and a focused pane exists", () => {
@@ -72,6 +114,7 @@ describe("terminal command dock controls", () => {
 
     expect(controls.canSend).toBe(false);
     expect(controls.canUsePane).toBe(false);
+    expect(controls.canWriteInput).toBe(false);
     expect(controls.canPasteClipboard).toBe(false);
   });
 });

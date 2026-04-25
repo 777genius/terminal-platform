@@ -3,6 +3,7 @@ import { css, html, nothing } from "lit";
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import { readClipboardText } from "./terminal-clipboard.js";
+import { resolveTerminalCommandInputStatus } from "./terminal-command-input-status.js";
 import {
   defaultTerminalCommandQuickCommands,
   resolveTerminalCommandQuickCommands,
@@ -170,6 +171,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         color: var(--tp-color-success);
       }
 
+      .badge[data-tone="pending"] {
+        border-color: color-mix(in srgb, var(--tp-color-warning) 55%, transparent);
+        color: var(--tp-color-warning);
+      }
+
       .notice {
         border: 1px solid color-mix(in srgb, var(--tp-color-warning) 45%, transparent);
         border-radius: var(--tp-radius-md);
@@ -227,13 +233,19 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   override render() {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
     const quickCommands = resolveTerminalCommandQuickCommands(this.quickCommands);
-    const statusLabel = this.pending ? "Sending" : controls.activePaneId ? "Ready" : "Pick a pane";
+    const inputStatus = resolveTerminalCommandInputStatus(controls);
     const pasteTitle = controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
       ? "Paste is not supported by the active backend"
       : "Paste clipboard into the focused pane";
 
     return html`
-      <div class="panel dock" part="command-dock" data-testid="tp-command-dock">
+      <div
+        class="panel dock"
+        part="command-dock"
+        data-testid="tp-command-dock"
+        data-command-input=${String(controls.canWriteInput)}
+        data-input-capability=${controls.inputCapabilityStatus}
+      >
         <div class="dock-header">
           <div class="panel-header">
             <div class="panel-eyebrow">Command Input</div>
@@ -245,7 +257,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             <span class="badge" data-tone=${controls.activePaneId ? "ready" : "idle"}>
               ${controls.activePaneId ? `Pane ${controls.activePaneId}` : "No pane"}
             </span>
-            <span class="badge" data-tone=${controls.canSend ? "ready" : "idle"}>${statusLabel}</span>
+            <span
+              class="badge"
+              data-testid="tp-command-input-status"
+              data-tone=${inputStatus.tone}
+              title=${inputStatus.title}
+            >
+              ${inputStatus.label}
+            </span>
             <span class="badge" data-testid="tp-command-history-count">
               ${controls.commandHistory.length} history
             </span>
@@ -263,7 +282,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                       part="quick-command"
                       data-testid="tp-quick-command"
                       title=${command.description ?? `Insert ${command.label}`}
-                      ?disabled=${!controls.activePaneId || this.pending}
+                      ?disabled=${!controls.canWriteInput}
                       @click=${() => this.setDraft(command.value)}
                     >
                       ${command.label}
@@ -305,8 +324,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             data-testid="tp-command-input"
             name="tp-command-input"
             .value=${controls.draft}
-            ?disabled=${!controls.activePaneId || this.pending}
-            placeholder=${controls.activePaneId ? "Type shell input for the focused pane" : "Select a pane first"}
+            ?disabled=${!controls.canWriteInput}
+            placeholder=${inputStatus.placeholder}
             aria-label="Focused pane command input"
             @input=${(event: Event) => this.handleInput(event)}
             @keydown=${(event: KeyboardEvent) => this.handleKeydown(event)}
@@ -324,9 +343,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
         <div class="dock-footer">
           <div class="hint" part="hint">
-            ${controls.activePaneId
-              ? "Enter sends the command. Shift+Enter inserts a newline."
-              : "Start or select a session, then choose a pane to enable input."}
+            ${inputStatus.hint}
           </div>
 
           <div class="actions">
@@ -346,8 +363,20 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             >
               Paste
             </button>
-            <button ?disabled=${!controls.canUsePane} @click=${() => this.sendShortcut("\u0003")}>Ctrl+C</button>
-            <button ?disabled=${!controls.canUsePane} @click=${() => this.sendShortcut("\r")}>Enter</button>
+            <button
+              data-testid="tp-send-interrupt"
+              ?disabled=${!controls.canWriteInput}
+              @click=${() => this.sendShortcut("\u0003")}
+            >
+              Ctrl+C
+            </button>
+            <button
+              data-testid="tp-send-enter"
+              ?disabled=${!controls.canWriteInput}
+              @click=${() => this.sendShortcut("\r")}
+            >
+              Enter
+            </button>
           </div>
         </div>
 
@@ -417,18 +446,15 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private async sendDraft(): Promise<void> {
-    const sessionId = this.snapshot.selection.activeSessionId ?? this.snapshot.attachedSession?.session.session_id ?? null;
-    const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
-    const draft = paneId ? (this.snapshot.drafts[paneId] ?? "") : "";
-
-    if (!sessionId || !paneId || draft.trim().length === 0 || this.pending) {
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    if (!controls.activeSessionId || !controls.activePaneId || !controls.canSend) {
       return;
     }
 
-    await this.dispatchInput(sessionId, paneId, `${draft}\n`);
-    this.recordCommandHistory(draft);
+    await this.dispatchInput(controls.activeSessionId, controls.activePaneId, `${controls.draft}\n`);
+    this.recordCommandHistory(controls.draft);
     this.resetHistoryNavigation();
-    this.kernel?.commands.clearDraft(paneId);
+    this.kernel?.commands.clearDraft(controls.activePaneId);
   }
 
   private navigateCommandHistory(direction: "previous" | "next", target: HTMLTextAreaElement): boolean {
@@ -537,14 +563,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private async sendShortcut(data: string): Promise<void> {
-    const sessionId = this.snapshot.selection.activeSessionId ?? this.snapshot.attachedSession?.session.session_id ?? null;
-    const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
-
-    if (!sessionId || !paneId || this.pending) {
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    if (!controls.activeSessionId || !controls.activePaneId || !controls.canWriteInput) {
       return;
     }
 
-    await this.dispatchInput(sessionId, paneId, data);
+    await this.dispatchInput(controls.activeSessionId, controls.activePaneId, data);
   }
 
   private async dispatchPaste(sessionId: string, paneId: string, data: string): Promise<void> {

@@ -92,6 +92,9 @@ async function main() {
       || !result.afterCreate.hasSaveLayoutControl
       || !result.afterCreate.hasTopologyControls
       || !result.afterCreate.hasDisplayControls
+      || result.afterCreate.commandDockCanWrite !== "true"
+      || result.afterCreate.commandDockInputCapability !== "known"
+      || result.afterCreate.commandInputStatus !== "Ready"
       || !Array.isArray(result.afterCreate.quickCommandLabels)
       || result.afterCreate.quickCommandLabels.join("|") !== "pwd|ls -la|git status|node -v|hello"
       || !result.afterCreate.quickCommandTitles.includes("Print the active Node.js version")
@@ -407,6 +410,8 @@ async function runSmokeScenario(browserUrl) {
       const saveLayout = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
       const pasteClipboard = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
       const quickCommands = [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])];
+      const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
+      const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : (screenRoot?.querySelector('[part=\"screen-lines\"]')?.textContent?.trim() ?? null);
@@ -453,6 +458,10 @@ async function runSmokeScenario(browserUrl) {
           toolbarRoot?.querySelector('[data-testid="tp-font-scale-option"][data-font-scale="large"]')
           && toolbarRoot?.querySelector('[data-testid="tp-line-wrap-option"]')
         ),
+        commandDockCanWrite: commandDockPanel?.getAttribute('data-command-input') ?? null,
+        commandDockInputCapability: commandDockPanel?.getAttribute('data-input-capability') ?? null,
+        commandInputStatus: commandInputStatus?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        commandInputStatusTitle: commandInputStatus?.getAttribute('title') ?? null,
         quickCommandLabels: quickCommands.map((button) => button.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
         quickCommandTitles: quickCommands.map((button) => button.getAttribute('title')),
         screenFollowPressed: screenFollow?.getAttribute('aria-pressed') === 'true',
