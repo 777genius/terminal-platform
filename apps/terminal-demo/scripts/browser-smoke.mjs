@@ -102,6 +102,15 @@ async function main() {
       || result.afterCreate.commandDockCanWrite !== "true"
       || result.afterCreate.commandDockInputCapability !== "known"
       || result.afterCreate.commandInputStatus !== "Ready"
+      || !result.afterCreate.focusedPaneBadgeText?.includes("Focused pane")
+      || (
+        result.afterCreate.activePaneId?.length > 18
+        && (
+          result.afterCreate.focusedPaneBadgeTitle !== result.afterCreate.activePaneId
+          || result.afterCreate.focusedPaneBadgeText.includes(result.afterCreate.activePaneId)
+          || !result.afterCreate.focusedPaneBadgeText.includes("...")
+        )
+      )
       || !Array.isArray(result.afterCreate.quickCommandLabels)
       || result.afterCreate.quickCommandLabels.join("|") !== "pwd|ls -la|git status|node -v|hello"
       || !result.afterCreate.quickCommandTitles.includes("Print the active Node.js version")
@@ -465,11 +474,13 @@ async function runSmokeScenario(browserUrl) {
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : (screenRoot?.querySelector('[part=\"screen-lines\"]')?.textContent?.trim() ?? null);
       const activeTitle = document.querySelector('.workspace-summary__title')?.textContent?.trim() ?? null;
+      const focusedPaneBadge = document.querySelector('[data-testid="workspace-focused-pane-badge"]') ?? null;
       const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
       return {
         hasReady: debug?.connection?.state === 'ready',
         hasError: debug?.connection?.state === 'error',
         activeSessionId: debug?.selection?.activeSessionId ?? null,
+        activePaneId: debug?.selection?.activePaneId ?? debug?.attachedSession?.focused_screen?.pane_id ?? null,
         savedSessionCount: debug?.catalog?.savedSessions?.length ?? 0,
         savedPanelCount: savedPanel?.getAttribute('data-saved-count') ?? null,
         savedVisibleCount: savedPanel?.getAttribute('data-visible-count') ?? null,
@@ -521,6 +532,8 @@ async function runSmokeScenario(browserUrl) {
         commandDockCanSave: commandDockPanel?.getAttribute('data-save-layout') ?? null,
         commandDockSaveCapability: commandDockPanel?.getAttribute('data-save-capability') ?? null,
         saveLayoutTitle: saveLayout?.getAttribute('title') ?? null,
+        focusedPaneBadgeText: focusedPaneBadge?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        focusedPaneBadgeTitle: focusedPaneBadge?.getAttribute('title') ?? null,
         commandInputStatus: commandInputStatus?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         commandInputStatusTitle: commandInputStatus?.getAttribute('title') ?? null,
         quickCommandLabels: quickCommands.map((button) => button.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),

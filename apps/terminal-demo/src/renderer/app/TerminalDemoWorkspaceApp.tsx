@@ -16,6 +16,7 @@ import {
 } from "@terminal-platform/workspace-core";
 import {
   TerminalWorkspace,
+  compactTerminalId,
   findRestorableSavedSession,
   hasSavedSession,
   resolveTerminalSavedSessionsControlState,
@@ -121,6 +122,8 @@ export function TerminalDemoWorkspaceScreen(props: {
   const activePaneId = snapshot.selection.activePaneId ?? snapshot.attachedSession?.focused_screen?.pane_id ?? null;
   const hasDiagnostics = snapshot.diagnostics.length > 0;
   const activeTitle = activeSession?.title ?? snapshot.attachedSession?.session.title ?? "Pick a session to inspect";
+  const attachedSessionLabel = attachedSessionId ? compactTerminalId(attachedSessionId) : null;
+  const activePaneLabel = activePaneId ? compactTerminalId(activePaneId) : null;
   const connectionSummary = describeConnectionState(snapshot.connection.state);
   const activeHealth = snapshot.attachedSession?.health ?? null;
   const healthSummary = describeSessionHealth(activeHealth?.phase ?? null);
@@ -365,7 +368,9 @@ export function TerminalDemoWorkspaceScreen(props: {
               <strong>Current focus</strong>
               <div>
                 {activeTitle}
-                {activePaneId ? ` - pane ${activePaneId}` : ""}
+                {activePaneId ? (
+                  <span title={activePaneId}> - pane {activePaneLabel}</span>
+                ) : null}
               </div>
             </div>
           ) : (
@@ -502,7 +507,7 @@ export function TerminalDemoWorkspaceScreen(props: {
                   </div>
                   <div>
                     <dt>Attached session</dt>
-                    <dd>{attachedSessionId ?? "Not attached yet"}</dd>
+                    <dd title={attachedSessionId ?? undefined}>{attachedSessionLabel ?? "Not attached yet"}</dd>
                   </div>
                 </dl>
               </div>
@@ -599,7 +604,15 @@ export function TerminalDemoWorkspaceScreen(props: {
                 {connectionSummary.label}
               </span>
               <span className={`badge ${healthSummary.badgeClass}`}>{healthSummary.label}</span>
-              {activePaneId ? <span className="badge badge--neutral">Focused pane {activePaneId}</span> : null}
+              {activePaneId ? (
+                <span
+                  className="badge badge--neutral"
+                  data-testid="workspace-focused-pane-badge"
+                  title={activePaneId}
+                >
+                  Focused pane {activePaneLabel}
+                </span>
+              ) : null}
               {activeScreen ? (
                 <span className="badge badge--neutral">
                   {activeScreen.cols}x{activeScreen.rows}
