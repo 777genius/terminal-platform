@@ -144,6 +144,8 @@ async function main() {
       || !result.afterCreate.hasScreenSearchControls
       || !result.afterCreate.hasScreenCopyControl
       || !result.afterCreate.hasScreenDirectInput
+      || result.afterCreate.screenPlacement !== "terminal"
+      || /Focused pane output/.test(result.afterCreate.screenVisibleText ?? "")
       || result.afterCreate.screenInputStatus !== "Input ready"
       || result.afterCreate.screenInputTone !== "ready"
       || !result.afterCreate.hasPasteClipboardControl
@@ -717,6 +719,8 @@ async function runSmokeScenario(browserUrl) {
         screenInputStatus: screenInputStatus?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         screenInputTone: screenInputStatus?.getAttribute('data-input-tone') ?? null,
         screenInputTitle: screenInputStatus?.getAttribute('title') ?? null,
+        screenPlacement: screenPanel?.getAttribute('data-placement') ?? null,
+        screenVisibleText: screenPanel?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         hasPasteClipboardControl: Boolean(pasteClipboard && !pasteClipboard.disabled),
         hasSaveLayoutControl: Boolean(saveLayout && !saveLayout.disabled),
         hasTopologyControls: Boolean(

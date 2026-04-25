@@ -226,7 +226,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           <div class="content" part="content">
             <div class="operations-deck" part="operations-deck" data-testid="tp-workspace-operations-deck">
               <div class="terminal-column" part="terminal-column" data-testid="tp-workspace-terminal-column">
-                <tp-terminal-screen .kernel=${this.kernel}></tp-terminal-screen>
+                <tp-terminal-screen .kernel=${this.kernel} placement="terminal"></tp-terminal-screen>
                 <div class="command-region" part="command-region" data-testid="tp-workspace-command-region">
                   <tp-terminal-command-dock
                     .kernel=${this.kernel}

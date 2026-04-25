@@ -26,10 +26,12 @@ import { resolveTerminalScreenControlState } from "./terminal-screen-controls.js
 import { isTerminalScreenSearchShortcut } from "./terminal-screen-shortcuts.js";
 
 type ScreenCopyState = "idle" | "copied" | "failed";
+type TerminalScreenPlacement = "panel" | "terminal";
 
 export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
+    placement: { type: String },
     followOutput: { state: true },
     searchQuery: { state: true },
     activeSearchMatchIndex: { state: true },
@@ -60,6 +62,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         min-height: 18rem;
       }
 
+      .screen[data-placement="terminal"] {
+        gap: var(--tp-space-2);
+        background:
+          linear-gradient(180deg, color-mix(in srgb, #0b111a 92%, transparent), #05070b),
+          #05070b;
+      }
+
       .screen-header {
         display: flex;
         align-items: flex-start;
@@ -67,8 +76,24 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         gap: var(--tp-space-3);
       }
 
+      .screen[data-placement="terminal"] .screen-header {
+        align-items: center;
+      }
+
       .screen-header .panel-header {
         margin-bottom: 0;
+      }
+
+      .screen[data-placement="terminal"] .panel-header {
+        min-width: 0;
+      }
+
+      .screen[data-placement="terminal"] .panel-title {
+        overflow: hidden;
+        color: var(--tp-color-text);
+        font-size: 0.96rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .screen-actions {
@@ -78,8 +103,19 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         gap: var(--tp-space-2);
       }
 
+      .screen[data-placement="terminal"] .screen-actions {
+        gap: 0.35rem;
+      }
+
       .screen-actions button {
         white-space: nowrap;
+      }
+
+      .screen[data-placement="terminal"] .screen-actions button {
+        border-radius: 0.45rem;
+        background: color-mix(in srgb, var(--tp-color-bg-inset) 76%, transparent);
+        font-size: 0.82rem;
+        padding: 0.32rem 0.55rem;
       }
 
       .screen-actions button[aria-pressed="true"] {
@@ -92,6 +128,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         grid-template-columns: minmax(12rem, 1fr) auto;
         gap: var(--tp-space-2);
         align-items: center;
+      }
+
+      .screen[data-placement="terminal"] .screen-tools {
+        grid-template-columns: minmax(11rem, 0.64fr) auto;
+        gap: 0.35rem;
       }
 
       .search {
@@ -112,6 +153,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         padding: 0.48rem 0.65rem;
       }
 
+      .screen[data-placement="terminal"] .search input {
+        border-radius: 0.45rem;
+        background: color-mix(in srgb, var(--tp-color-bg-inset) 76%, transparent);
+        font-size: 0.84rem;
+        padding: 0.34rem 0.55rem;
+      }
+
       .search input:focus-visible {
         outline: 2px solid color-mix(in srgb, var(--tp-color-accent) 62%, transparent);
         outline-offset: 2px;
@@ -128,6 +176,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         white-space: nowrap;
       }
 
+      .screen[data-placement="terminal"] .search-count[data-search-active="false"] {
+        display: none;
+      }
+
       .search-actions {
         display: flex;
         flex-wrap: wrap;
@@ -135,8 +187,19 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         justify-content: flex-end;
       }
 
+      .screen[data-placement="terminal"] .search-actions {
+        gap: 0.35rem;
+      }
+
       .search-actions button {
         white-space: nowrap;
+      }
+
+      .screen[data-placement="terminal"] .search-actions button {
+        border-radius: 0.45rem;
+        background: color-mix(in srgb, var(--tp-color-bg-inset) 76%, transparent);
+        font-size: 0.82rem;
+        padding: 0.34rem 0.55rem;
       }
 
       .viewport {
@@ -160,6 +223,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         font-size: 0.9rem;
         line-height: 1.48;
         scrollbar-gutter: stable;
+      }
+
+      .screen[data-placement="terminal"] .viewport {
+        border-color: color-mix(in srgb, var(--tp-color-border) 62%, transparent);
+        border-radius: 0.6rem 0.6rem 0 0;
+        border-bottom-left-radius: var(--tp-terminal-screen-viewport-border-bottom-left-radius, 0);
+        border-bottom-right-radius: var(--tp-terminal-screen-viewport-border-bottom-right-radius, 0);
+        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--tp-color-accent) 16%, transparent);
       }
 
       .viewport:focus-visible {
@@ -231,6 +302,17 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         background: color-mix(in srgb, var(--tp-color-panel-raised) 60%, transparent);
       }
 
+      .screen[data-placement="terminal"] .screen-meta {
+        gap: 0.35rem;
+        font-size: 0.78rem;
+      }
+
+      .screen[data-placement="terminal"] .screen-meta span {
+        border-radius: 0.45rem;
+        background: color-mix(in srgb, var(--tp-color-bg-inset) 76%, transparent);
+        padding: 0.18rem 0.45rem;
+      }
+
       .screen-meta [data-input-tone="ready"] {
         border-color: color-mix(in srgb, var(--tp-color-success) 52%, transparent);
         color: var(--tp-color-success);
@@ -250,7 +332,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       @media (max-width: 720px) {
         .screen {
           gap: var(--tp-space-2);
-          padding: var(--tp-space-3);
+          padding: var(--tp-terminal-screen-mobile-panel-padding, var(--tp-space-3));
+          padding-bottom: var(--tp-terminal-screen-panel-padding-bottom, var(--tp-space-3));
         }
 
         .screen-header {
@@ -258,6 +341,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         }
 
         .screen-tools {
+          grid-template-columns: 1fr;
+        }
+
+        .screen[data-placement="terminal"] .screen-tools {
           grid-template-columns: 1fr;
         }
 
@@ -287,6 +374,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     `,
   ];
 
+  declare placement: TerminalScreenPlacement;
   protected declare followOutput: boolean;
   protected declare searchQuery: string;
   protected declare activeSearchMatchIndex: number | null;
@@ -301,6 +389,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   constructor() {
     super();
+    this.placement = "panel";
     this.followOutput = true;
     this.searchQuery = "";
     this.activeSearchMatchIndex = null;
@@ -350,12 +439,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     const inputStatus = resolveTerminalScreenInputStatus(controls, this.directInputActivity);
     const searchResult = this.createSearchResult();
     const terminalDisplay = this.snapshot.terminalDisplay;
+    const isTerminalPlacement = this.placement === "terminal";
 
     return html`
       <div
         class="panel screen"
         part="screen"
         data-testid="tp-terminal-screen"
+        data-placement=${this.placement}
         data-font-scale=${terminalDisplay.fontScale}
         data-line-wrap=${String(terminalDisplay.lineWrap)}
         data-direct-input=${String(controls.canUseDirectInput)}
@@ -364,9 +455,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       >
         <div class="screen-header">
           <div class="panel-header">
-            <div class="panel-eyebrow">Terminal</div>
+            ${isTerminalPlacement ? nothing : html`<div class="panel-eyebrow">Terminal</div>`}
             <div class="panel-title">${screen?.surface.title ?? "Live output"}</div>
-            <div class="panel-copy">Focused pane output.</div>
+            ${isTerminalPlacement ? nothing : html`<div class="panel-copy">Focused pane output.</div>`}
           </div>
           <div class="screen-actions" part="screen-actions">
             <button
@@ -431,7 +522,12 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                     @input=${(event: Event) => this.handleSearchInput(event)}
                     @keydown=${(event: KeyboardEvent) => this.handleSearchKeydown(event)}
                   />
-                  <span class="search-count" part="search-count" aria-live="polite">
+                  <span
+                    class="search-count"
+                    part="search-count"
+                    aria-live="polite"
+                    data-search-active=${String(Boolean(searchResult.query))}
+                  >
                     ${formatTerminalOutputSearchCount(
                       searchResult.query,
                       searchResult.matchCount,
