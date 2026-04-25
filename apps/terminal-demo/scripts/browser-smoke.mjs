@@ -505,6 +505,7 @@ async function main() {
 
     if (
       !result.afterHistoryReplay.recalledDraft?.includes("browser-smoke-ok")
+      || result.afterHistoryReplay.restoredDraft !== "draft-before-history-replay"
       || !result.afterHistoryReplay.replayClicked
       || !result.afterHistoryReplay.connectionReady
       || result.afterHistoryReplay.commandHistoryCount < 1
@@ -2077,8 +2078,14 @@ async function runSmokeScenario(browserUrl) {
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
       if (!textarea) {
-        return { ok: false, reason: 'textarea missing', recalledDraft: null };
+        return { ok: false, reason: 'textarea missing', recalledDraft: null, restoredDraft: null };
       }
+      const draftBeforeReplay = 'draft-before-history-replay';
+      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+      descriptor?.set?.call(textarea, draftBeforeReplay);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
       textarea.focus();
       textarea.dispatchEvent(new KeyboardEvent('keydown', {
         key: 'ArrowUp',
@@ -2087,15 +2094,34 @@ async function runSmokeScenario(browserUrl) {
       }));
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const recalledDraft = textarea.value;
+      textarea.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        bubbles: true,
+        cancelable: true,
+      }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const restoredDraft = textarea.value;
+      textarea.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowUp',
+        bubbles: true,
+        cancelable: true,
+      }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const replayDraft = textarea.value;
       const button = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
       if (!button) {
-        return { ok: false, reason: 'send button missing', recalledDraft };
+        return { ok: false, reason: 'send button missing', recalledDraft: replayDraft, restoredDraft };
       }
       if (button.disabled) {
-        return { ok: false, reason: 'send button disabled after history recall', recalledDraft };
+        return {
+          ok: false,
+          reason: 'send button disabled after history recall',
+          recalledDraft: replayDraft,
+          restoredDraft,
+        };
       }
       button.click();
-      return { ok: true, recalledDraft };
+      return { ok: true, recalledDraft: replayDraft, restoredDraft };
     })()`);
     if (!historyReplayResult.ok) {
       throw new Error(`Unable to replay command through command history: ${JSON.stringify(historyReplayResult)}`);
@@ -2111,6 +2137,7 @@ async function runSmokeScenario(browserUrl) {
       return {
         replayClicked: true,
         recalledDraft: ${JSON.stringify(historyReplayResult.recalledDraft)},
+        restoredDraft: ${JSON.stringify(historyReplayResult.restoredDraft)},
         connectionReady: debug?.connection?.state === 'ready',
         focusedSequence: debug?.attachedSession?.focused_screen?.sequence != null
           ? String(debug.attachedSession.focused_screen.sequence)

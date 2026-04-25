@@ -4,6 +4,12 @@ import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-cons
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import { readClipboardText } from "./terminal-clipboard.js";
 import { resolveTerminalCommandInputStatus } from "./terminal-command-input-status.js";
+import {
+  createTerminalCommandHistoryNavigationState,
+  resolveTerminalCommandHistoryNavigation,
+  type TerminalCommandHistoryNavigationDirection,
+  type TerminalCommandHistoryNavigationState,
+} from "./terminal-command-history-navigation.js";
 import { TERMINAL_DESTRUCTIVE_CONFIRMATION_RESET_MS } from "./terminal-destructive-action.js";
 import {
   defaultTerminalCommandQuickCommands,
@@ -381,8 +387,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   protected declare actionError: string | null;
   protected declare historyClearConfirmationArmed: boolean;
 
-  #historyCursor: number | null = null;
-  #historyDraftBeforeNavigation = "";
+  #historyNavigation: TerminalCommandHistoryNavigationState = createTerminalCommandHistoryNavigationState();
   #historyClearConfirmationResetTimer: ReturnType<typeof setTimeout> | null = null;
   #lastAutoFocusedPaneId: string | null = null;
 
@@ -726,57 +731,34 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
   }
 
-  private navigateCommandHistory(direction: "previous" | "next", target: HTMLTextAreaElement): boolean {
+  private navigateCommandHistory(
+    direction: TerminalCommandHistoryNavigationDirection,
+    target: HTMLTextAreaElement,
+  ): boolean {
     const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
     const commandHistory = this.snapshot.commandHistory.entries;
-    if (!paneId || commandHistory.length === 0 || !this.canNavigateHistory(direction, target)) {
+    if (!paneId) {
       return false;
     }
 
-    if (direction === "previous") {
-      if (this.#historyCursor === null) {
-        this.#historyDraftBeforeNavigation = target.value;
-      }
+    const result = resolveTerminalCommandHistoryNavigation(
+      direction,
+      {
+        value: target.value,
+        selectionStart: target.selectionStart ?? target.value.length,
+        selectionEnd: target.selectionEnd ?? target.value.length,
+      },
+      commandHistory,
+      this.#historyNavigation,
+    );
+    this.#historyNavigation = result.state;
 
-      this.#historyCursor = this.#historyCursor === null
-        ? commandHistory.length - 1
-        : Math.max(0, this.#historyCursor - 1);
-    } else {
-      if (this.#historyCursor === null) {
-        return false;
-      }
-
-      if (this.#historyCursor === commandHistory.length - 1) {
-        this.#historyCursor = null;
-        this.applyHistoryDraft(paneId, target, this.#historyDraftBeforeNavigation);
-        this.#historyDraftBeforeNavigation = "";
-        return true;
-      }
-
-      this.#historyCursor += 1;
-    }
-
-    const historyDraft = commandHistory[this.#historyCursor];
-    if (!historyDraft) {
+    if (!result.navigated) {
       return false;
     }
 
-    this.applyHistoryDraft(paneId, target, historyDraft);
+    this.applyHistoryDraft(paneId, target, result.value);
     return true;
-  }
-
-  private canNavigateHistory(direction: "previous" | "next", target: HTMLTextAreaElement): boolean {
-    const selectionStart = target.selectionStart ?? target.value.length;
-    const selectionEnd = target.selectionEnd ?? selectionStart;
-    if (selectionStart !== selectionEnd) {
-      return false;
-    }
-
-    if (direction === "previous") {
-      return !target.value.slice(0, selectionStart).includes("\n");
-    }
-
-    return !target.value.slice(selectionEnd).includes("\n");
   }
 
   private applyHistoryDraft(paneId: string, target: HTMLTextAreaElement, value: string): void {
@@ -791,8 +773,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private resetHistoryNavigation(): void {
-    this.#historyCursor = null;
-    this.#historyDraftBeforeNavigation = "";
+    this.#historyNavigation = createTerminalCommandHistoryNavigationState();
   }
 
   private maybeAutoFocusInput(): void {

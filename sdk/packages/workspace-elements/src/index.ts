@@ -16,6 +16,15 @@ export {
   resolveTerminalCommandQuickCommands,
   type TerminalCommandQuickCommand,
 } from "./elements/terminal-command-quick-commands.js";
+export {
+  canNavigateTerminalCommandHistory,
+  createTerminalCommandHistoryNavigationState,
+  resolveTerminalCommandHistoryNavigation,
+  type TerminalCommandHistoryInputState,
+  type TerminalCommandHistoryNavigationDirection,
+  type TerminalCommandHistoryNavigationResult,
+  type TerminalCommandHistoryNavigationState,
+} from "./elements/terminal-command-history-navigation.js";
 export { TerminalWorkspaceElement } from "./elements/terminal-workspace-element.js";
 export { TerminalSessionListElement } from "./elements/terminal-session-list-element.js";
 export { TerminalToolbarElement } from "./elements/terminal-toolbar-element.js";

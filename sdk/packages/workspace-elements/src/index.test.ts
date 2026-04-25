@@ -8,14 +8,17 @@ import {
   TERMINAL_PANE_MIN_ROWS,
   TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT,
   canRunTerminalTopologyCommand,
+  canNavigateTerminalCommandHistory,
   compactTerminalId,
   countPaneTreeLeaves,
+  createTerminalCommandHistoryNavigationState,
   defaultTerminalCommandQuickCommands,
   findRestorableSavedSession,
   hasSavedSession,
   resolveActiveBackendCapabilities,
   resolvePaneResizeCommand,
   resolveTerminalCommandDockControlState,
+  resolveTerminalCommandHistoryNavigation,
   resolveTerminalCommandInputStatus,
   resolveTerminalCommandQuickCommands,
   resolveTerminalEntityIdLabel,
@@ -30,6 +33,10 @@ import {
   resolveWorkspaceCapability,
   type TerminalCommandDockCapabilityStatus,
   type TerminalCommandDockControlState,
+  type TerminalCommandHistoryInputState,
+  type TerminalCommandHistoryNavigationDirection,
+  type TerminalCommandHistoryNavigationResult,
+  type TerminalCommandHistoryNavigationState,
   type TerminalCommandInputStatus,
   type TerminalCommandQuickCommand,
   type TerminalEntityIdLabel,
@@ -60,6 +67,10 @@ import {
 type PublicControlTypes =
   | TerminalCommandDockCapabilityStatus
   | TerminalCommandDockControlState
+  | TerminalCommandHistoryInputState
+  | TerminalCommandHistoryNavigationDirection
+  | TerminalCommandHistoryNavigationResult
+  | TerminalCommandHistoryNavigationState
   | TerminalCommandInputStatus
   | TerminalCommandQuickCommand
   | TerminalEntityIdLabel
@@ -94,6 +105,7 @@ describe("workspace elements public api", () => {
       resolveActiveBackendCapabilities,
       resolvePaneResizeCommand,
       resolveTerminalCommandDockControlState,
+      resolveTerminalCommandHistoryNavigation,
       resolveTerminalCommandInputStatus,
       resolveTerminalCommandQuickCommands,
       resolveTerminalEntityIdLabel,
@@ -107,8 +119,10 @@ describe("workspace elements public api", () => {
       resolveTerminalTopologyStatus,
       resolveWorkspaceCapability,
       canRunTerminalTopologyCommand,
+      canNavigateTerminalCommandHistory,
       compactTerminalId,
       countPaneTreeLeaves,
+      createTerminalCommandHistoryNavigationState,
     ];
 
     expect(resolvers.every((resolver) => typeof resolver === "function")).toBe(true);
