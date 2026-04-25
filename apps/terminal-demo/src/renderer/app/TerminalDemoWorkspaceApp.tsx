@@ -623,7 +623,11 @@ export function TerminalDemoWorkspaceScreen(props: {
 
           <div className="workspace-stack">
             <div data-testid="terminal-workspace-host">
-              <TerminalWorkspace kernel={props.kernel} quickCommands={terminalDemoQuickCommands} />
+              <TerminalWorkspace
+                autoFocusCommandInput={true}
+                kernel={props.kernel}
+                quickCommands={terminalDemoQuickCommands}
+              />
             </div>
           </div>
         </section>

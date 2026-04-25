@@ -114,6 +114,7 @@ async function main() {
       || result.afterCreate.commandDockCanWrite !== "true"
       || result.afterCreate.commandDockInputCapability !== "known"
       || result.afterCreate.commandInputStatus !== "Ready"
+      || !result.afterCreate.commandInputFocused
       || !result.afterCreate.focusedPaneBadgeText?.includes("Focused pane")
       || result.afterCreate.statusSessionTitle !== result.afterCreate.activeSessionId
       || !result.afterCreate.statusSessionText?.includes("Session")
@@ -641,6 +642,7 @@ async function runSmokeScenario(browserUrl) {
         commandDockInputCapability: commandDockPanel?.getAttribute('data-input-capability') ?? null,
         commandDockCanSave: commandDockPanel?.getAttribute('data-save-layout') ?? null,
         commandDockSaveCapability: commandDockPanel?.getAttribute('data-save-capability') ?? null,
+        commandInputFocused: commandRoot?.activeElement === input,
         saveLayoutTitle: saveLayout?.getAttribute('title') ?? null,
         focusedPaneBadgeText: focusedPaneBadge?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         focusedPaneBadgeTitle: focusedPaneBadge?.getAttribute('title') ?? null,

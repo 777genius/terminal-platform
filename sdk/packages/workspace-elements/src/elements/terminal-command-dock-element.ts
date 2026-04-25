@@ -1,4 +1,4 @@
-import { css, html, nothing } from "lit";
+import { css, html, nothing, type PropertyValues } from "lit";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
@@ -17,6 +17,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
     quickCommands: { attribute: false },
+    autoFocusInput: { attribute: "auto-focus-input", type: Boolean },
     pending: { state: true },
     actionError: { state: true },
     historyClearConfirmationArmed: { state: true },
@@ -222,6 +223,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   ];
 
   declare quickCommands: readonly TerminalCommandQuickCommand[] | null | undefined;
+  declare autoFocusInput: boolean;
   protected declare pending: boolean;
   protected declare actionError: string | null;
   protected declare historyClearConfirmationArmed: boolean;
@@ -229,10 +231,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   #historyCursor: number | null = null;
   #historyDraftBeforeNavigation = "";
   #historyClearConfirmationResetTimer: ReturnType<typeof setTimeout> | null = null;
+  #lastAutoFocusedPaneId: string | null = null;
 
   constructor() {
     super();
     this.quickCommands = defaultTerminalCommandQuickCommands;
+    this.autoFocusInput = false;
     this.pending = false;
     this.actionError = null;
     this.historyClearConfirmationArmed = false;
@@ -241,6 +245,16 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   override disconnectedCallback(): void {
     this.clearHistoryClearConfirmationResetTimer();
     super.disconnectedCallback();
+  }
+
+  protected override updated(changedProperties: PropertyValues): void {
+    if (
+      changedProperties.has("snapshot")
+      || changedProperties.has("pending")
+      || changedProperties.has("autoFocusInput")
+    ) {
+      this.maybeAutoFocusInput();
+    }
   }
 
   override render() {
@@ -566,6 +580,32 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   private resetHistoryNavigation(): void {
     this.#historyCursor = null;
     this.#historyDraftBeforeNavigation = "";
+  }
+
+  private maybeAutoFocusInput(): void {
+    if (!this.autoFocusInput) {
+      this.#lastAutoFocusedPaneId = null;
+      return;
+    }
+
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    if (!controls.activePaneId || !controls.canWriteInput) {
+      this.#lastAutoFocusedPaneId = null;
+      return;
+    }
+
+    if (this.#lastAutoFocusedPaneId === controls.activePaneId) {
+      return;
+    }
+
+    const textarea = this.shadowRoot?.querySelector<HTMLTextAreaElement>('[data-testid="tp-command-input"]');
+    if (!textarea || textarea.disabled) {
+      return;
+    }
+
+    textarea.focus({ preventScroll: true });
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    this.#lastAutoFocusedPaneId = controls.activePaneId;
   }
 
   private async pasteClipboard(): Promise<void> {

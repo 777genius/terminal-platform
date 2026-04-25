@@ -11,6 +11,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
     quickCommands: { attribute: false },
+    autoFocusCommandInput: { attribute: "auto-focus-command-input", type: Boolean },
   };
 
   static styles = [
@@ -188,10 +189,12 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
   ];
 
   declare quickCommands: readonly TerminalCommandQuickCommand[] | null | undefined;
+  declare autoFocusCommandInput: boolean;
 
   constructor() {
     super();
     this.quickCommands = defaultTerminalCommandQuickCommands;
+    this.autoFocusCommandInput = false;
   }
 
   override render() {
@@ -217,6 +220,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                   <tp-terminal-command-dock
                     .kernel=${this.kernel}
                     .quickCommands=${this.quickCommands}
+                    .autoFocusInput=${this.autoFocusCommandInput}
                   ></tp-terminal-command-dock>
                 </div>
               </div>
