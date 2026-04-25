@@ -108,6 +108,9 @@ async function main() {
       || result.afterQuickCommandDraft.draft !== "node -v"
       || result.afterQuickCommandDraft.kernelDraft !== "node -v"
       || result.afterCreate.savedSessionCount !== 0
+      || result.afterCreate.savedPanelCount !== "0"
+      || result.afterCreate.savedVisibleCount !== "0"
+      || result.afterCreate.savedHiddenCount !== "0"
       || !result.afterCreate.screenFollowPressed
       || result.afterCreate.savedItemsRendered > 8
       || (result.afterCreate.savedSessionCount > 8 && !result.afterCreate.hasSavedPagination)
@@ -190,7 +193,13 @@ async function main() {
     if (
       !result.afterSaveLayout.clicked
       || result.afterSaveLayout.savedSessionCount < result.afterSaveLayout.beforeSavedSessionCount
+      || result.afterSaveLayout.savedPanelCount !== String(result.afterSaveLayout.savedSessionCount)
+      || result.afterSaveLayout.savedVisibleCount !== String(result.afterSaveLayout.savedItemsRendered)
       || result.afterSaveLayout.savedItemsRendered < 1
+      || result.afterSaveLayout.firstSavedCanRestore !== "true"
+      || result.afterSaveLayout.firstSavedRestoreStatus !== "available"
+      || result.afterSaveLayout.firstSavedRestoreDisabled !== false
+      || !result.afterSaveLayout.firstSavedRestoreTitle?.includes("Restore saved layout")
       || !result.afterSaveLayout.deletePrompted
       || result.afterSaveLayout.savedSessionCountAfterDeletePrompt !== result.afterSaveLayout.savedSessionCount
       || result.afterSaveLayout.saveEventDetail?.savedSessionCount !== result.afterSaveLayout.savedSessionCount
@@ -400,6 +409,7 @@ async function runSmokeScenario(browserUrl) {
       const statusRoot = workspaceRoot?.querySelector('tp-terminal-status-bar')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
+      const savedPanel = savedRoot?.querySelector('[data-testid="tp-saved-sessions"]') ?? null;
       const toolbarRoot = workspaceRoot?.querySelector('tp-terminal-toolbar')?.shadowRoot ?? null;
       const paneTreeRoot = workspaceRoot?.querySelector('tp-terminal-pane-tree')?.shadowRoot ?? null;
       const contentRoot = workspaceRoot?.querySelector('[part="content"]') ?? null;
@@ -437,6 +447,9 @@ async function runSmokeScenario(browserUrl) {
         hasError: debug?.connection?.state === 'error',
         activeSessionId: debug?.selection?.activeSessionId ?? null,
         savedSessionCount: debug?.catalog?.savedSessions?.length ?? 0,
+        savedPanelCount: savedPanel?.getAttribute('data-saved-count') ?? null,
+        savedVisibleCount: savedPanel?.getAttribute('data-visible-count') ?? null,
+        savedHiddenCount: savedPanel?.getAttribute('data-hidden-count') ?? null,
         savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
         hasSavedPagination: Boolean(savedRoot?.querySelector('[part="show-more"]')),
         healthPhase: debug?.attachedSession?.health?.phase ?? null,
@@ -808,6 +821,7 @@ async function runSmokeScenario(browserUrl) {
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
+      const savedPanel = savedRoot?.querySelector('[data-testid="tp-saved-sessions"]') ?? null;
       const sessionTools = commandRoot?.querySelector('[data-testid="tp-session-tools"]') ?? null;
       const saveLayoutButton = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
       if (!sessionTools || !saveLayoutButton) {
@@ -839,6 +853,7 @@ async function runSmokeScenario(browserUrl) {
       await new Promise((resolve) => setTimeout(resolve, 850));
       const state = window.terminalDemoDebug?.getState?.();
       const deleteButton = savedRoot?.querySelector('[data-testid="tp-delete-saved-session"]') ?? null;
+      const restoreButton = savedRoot?.querySelector('[data-testid="tp-restore-saved-session"]') ?? null;
       const savedSessionCount = state?.catalog?.savedSessions?.length ?? 0;
       const deletePromptResult = {
         deletePrompted: false,
@@ -859,8 +874,15 @@ async function runSmokeScenario(browserUrl) {
         clicked: true,
         beforeSavedSessionCount,
         savedSessionCount,
+        savedPanelCount: savedPanel?.getAttribute('data-saved-count') ?? null,
+        savedVisibleCount: savedPanel?.getAttribute('data-visible-count') ?? null,
+        savedHiddenCount: savedPanel?.getAttribute('data-hidden-count') ?? null,
         savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
         firstSavedTitle: state?.catalog?.savedSessions?.[0]?.title ?? null,
+        firstSavedCanRestore: restoreButton?.getAttribute('data-can-restore') ?? null,
+        firstSavedRestoreStatus: restoreButton?.getAttribute('data-restore-status') ?? null,
+        firstSavedRestoreDisabled: restoreButton?.disabled ?? null,
+        firstSavedRestoreTitle: restoreButton?.getAttribute('title') ?? null,
         saveEventDetail,
         ...deletePromptResult,
       };

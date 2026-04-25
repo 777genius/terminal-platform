@@ -2,8 +2,14 @@ import { css, html } from "lit";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import {
+  findRestorableSavedSession,
+  hasSavedSession,
+  resolveTerminalSavedSessionsControlState,
+  TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT,
+} from "./terminal-saved-sessions-controls.js";
 
-const DEFAULT_VISIBLE_SAVED_SESSIONS = 4;
+const DEFAULT_VISIBLE_SAVED_SESSIONS = TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT;
 const SAVED_SESSION_PAGE_SIZE = 8;
 const SAVED_SESSION_CONFIRMATION_RESET_MS = 4000;
 
@@ -134,18 +140,21 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   }
 
   override render() {
-    const savedSessions = this.snapshot.catalog.savedSessions;
-    const visibleCount = Math.min(this.visibleSavedSessionCount, savedSessions.length);
-    const visibleSessions = savedSessions.slice(0, visibleCount);
-    const hiddenCount = savedSessions.length - visibleSessions.length;
-    const anyPending = Boolean(this.pendingSavedSessionId || this.pendingBulkAction);
-    const isPruning = this.pendingBulkAction === "prune";
+    const controls = this.resolveControls();
 
     return html`
-      <div class="panel saved" part="saved" data-testid="tp-saved-sessions">
+      <div
+        class="panel saved"
+        part="saved"
+        data-testid="tp-saved-sessions"
+        data-saved-count=${String(controls.savedSessionCount)}
+        data-visible-count=${String(controls.visibleCount)}
+        data-hidden-count=${String(controls.hiddenCount)}
+        data-pending=${String(controls.anyPending)}
+      >
         <div class="panel-header">
           <div class="panel-eyebrow">Saved layouts</div>
-          <div class="panel-title">${savedSessions.length || "No"} saved sessions</div>
+          <div class="panel-title">${controls.savedSessionCount || "No"} saved sessions</div>
           <div class="panel-copy">
             Restore a saved layout or clean up entries you no longer need. Large histories are paged to keep
             the workspace responsive.
@@ -161,53 +170,51 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
             `
           : null}
 
-        ${savedSessions.length === 0
+        ${controls.savedSessionCount === 0
           ? html`<div class="empty-state" part="empty">Saved sessions will appear here after you save a layout.</div>`
           : html`
               <ul part="list" data-testid="tp-saved-session-list">
-                ${visibleSessions.map(
-                  (session) => {
-                    const title = session.title ?? session.session_id;
-                    const isPending = this.pendingSavedSessionId === session.session_id;
-                    const isRestoring = isPending && this.pendingSavedSessionAction === "restore";
-                    const isDeleting = isPending && this.pendingSavedSessionAction === "delete";
-                    const isConfirmingDelete = this.deleteConfirmationSessionId === session.session_id;
-
+                ${controls.items.map(
+                  (item) => {
                     return html`
-                      <li part="item" data-testid="tp-saved-session-item" data-session-id=${session.session_id}>
+                      <li part="item" data-testid="tp-saved-session-item" data-session-id=${item.session.session_id}>
                         <div class="summary">
-                          <strong>${title}</strong>
+                          <strong>${item.title}</strong>
                           <div class="meta">
-                            <span>${session.compatibility.status}</span>
-                            <span>${session.tab_count} tabs</span>
-                            <span>${session.pane_count} panes</span>
-                            ${isConfirmingDelete ? html`<span>confirm delete</span>` : null}
+                            <span title=${item.compatibilityLabel}>${item.session.compatibility.status}</span>
+                            <span>${item.session.tab_count} tabs</span>
+                            <span>${item.session.pane_count} panes</span>
+                            ${item.isConfirmingDelete ? html`<span>confirm delete</span>` : null}
                           </div>
                         </div>
                         <div class="actions" part="actions">
                           <button
                             data-testid="tp-restore-saved-session"
-                            ?disabled=${anyPending || !session.compatibility.can_restore}
-                            aria-label=${`Restore saved layout ${title}`}
+                            data-can-restore=${String(item.canRestore)}
+                            data-restore-status=${item.restoreStatus}
+                            data-compatibility-status=${item.session.compatibility.status}
+                            title=${item.restoreTitle}
+                            ?disabled=${!item.canRestore}
+                            aria-label=${`Restore saved layout ${item.title}`}
                             @click=${() => {
-                              void this.restoreSavedSession(session.session_id);
+                              void this.restoreSavedSession(item.session.session_id);
                             }}
                           >
-                            ${isRestoring ? "Restoring" : "Restore"}
+                            ${item.isRestoring ? "Restoring" : "Restore"}
                           </button>
                           <button
                             data-testid="tp-delete-saved-session"
                             data-danger="true"
-                            data-confirming=${String(isConfirmingDelete)}
-                            ?disabled=${anyPending}
-                            aria-label=${isConfirmingDelete
-                              ? `Confirm delete saved layout ${title}`
-                              : `Delete saved layout ${title}`}
+                            data-confirming=${String(item.isConfirmingDelete)}
+                            ?disabled=${!item.canDelete}
+                            aria-label=${item.isConfirmingDelete
+                              ? `Confirm delete saved layout ${item.title}`
+                              : `Delete saved layout ${item.title}`}
                             @click=${() => {
-                              void this.handleDeleteClick(session.session_id);
+                              void this.handleDeleteClick(item.session.session_id);
                             }}
                           >
-                            ${isDeleting ? "Deleting" : isConfirmingDelete ? "Confirm delete" : "Delete"}
+                            ${item.isDeleting ? "Deleting" : item.isConfirmingDelete ? "Confirm delete" : "Delete"}
                           </button>
                         </div>
                       </li>
@@ -218,41 +225,41 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
 
               <div class="list-footer" part="list-footer">
                 <div class="meta" part="list-summary">
-                  <span>Showing ${visibleSessions.length} of ${savedSessions.length}</span>
-                  ${hiddenCount > 0 ? html`<span>${hiddenCount} hidden</span>` : null}
+                  <span>Showing ${controls.visibleCount} of ${controls.savedSessionCount}</span>
+                  ${controls.hiddenCount > 0 ? html`<span>${controls.hiddenCount} hidden</span>` : null}
                 </div>
 
                 <div class="list-controls">
-                  ${hiddenCount > 0
+                  ${controls.canShowMore
                     ? html`
                         <button part="show-more" @click=${() => this.showMoreSavedSessions()}>
-                          Show ${Math.min(SAVED_SESSION_PAGE_SIZE, hiddenCount)} more
+                          Show ${Math.min(SAVED_SESSION_PAGE_SIZE, controls.hiddenCount)} more
                         </button>
                       `
                     : null}
-                  ${visibleSessions.length > DEFAULT_VISIBLE_SAVED_SESSIONS
+                  ${controls.canCollapse
                     ? html`
                         <button part="collapse" @click=${() => this.collapseSavedSessions()}>
                           Collapse
                         </button>
                       `
                     : null}
-                  ${hiddenCount > 0
+                  ${controls.hiddenCount > 0
                     ? html`
                         <button
                           part="prune-hidden"
                           data-testid="tp-prune-hidden-saved-sessions"
                           data-danger="true"
-                          data-confirming=${String(this.pruneConfirmationArmed)}
-                          ?disabled=${anyPending}
+                          data-confirming=${String(controls.pruneConfirmationArmed)}
+                          ?disabled=${!controls.canPruneHidden}
                           @click=${() => {
                             void this.handlePruneHiddenClick();
                           }}
                         >
-                          ${isPruning
+                          ${controls.isPruning
                             ? "Pruning"
-                            : this.pruneConfirmationArmed
-                              ? `Confirm prune ${hiddenCount}`
+                            : controls.pruneConfirmationArmed
+                              ? `Confirm prune ${controls.hiddenCount}`
                               : "Prune hidden"}
                         </button>
                       `
@@ -278,7 +285,8 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   }
 
   private async restoreSavedSession(sessionId: string): Promise<void> {
-    if (this.pendingSavedSessionId || this.pendingBulkAction) {
+    const target = findRestorableSavedSession(this.snapshot, this.controlOptions(), sessionId);
+    if (!target) {
       return;
     }
 
@@ -310,7 +318,9 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   }
 
   private async handleDeleteClick(sessionId: string): Promise<void> {
-    if (this.pendingSavedSessionId || this.pendingBulkAction) {
+    const controls = this.resolveControls();
+    const target = controls.items.find((item) => item.session.session_id === sessionId);
+    if (!target?.canDelete || !hasSavedSession(this.snapshot, sessionId)) {
       return;
     }
 
@@ -324,14 +334,8 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
   }
 
   private async handlePruneHiddenClick(): Promise<void> {
-    if (this.pendingSavedSessionId || this.pendingBulkAction) {
-      return;
-    }
-
-    const savedSessionCount = this.snapshot.catalog.savedSessions.length;
-    const keepLatest = Math.min(this.visibleSavedSessionCount, savedSessionCount);
-    const hiddenCount = savedSessionCount - keepLatest;
-    if (hiddenCount <= 0) {
+    const controls = this.resolveControls();
+    if (!controls.canPruneHidden) {
       this.clearPruneConfirmation();
       return;
     }
@@ -342,7 +346,7 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
       return;
     }
 
-    await this.pruneHiddenSavedSessions(keepLatest);
+    await this.pruneHiddenSavedSessions(controls.pruneKeepLatest);
   }
 
   private async deleteSavedSession(sessionId: string): Promise<void> {
@@ -466,6 +470,21 @@ export class TerminalSavedSessionsElement extends WorkspaceKernelConsumerElement
       clearTimeout(this.#pruneConfirmationResetTimer);
       this.#pruneConfirmationResetTimer = null;
     }
+  }
+
+  private resolveControls() {
+    return resolveTerminalSavedSessionsControlState(this.snapshot, this.controlOptions());
+  }
+
+  private controlOptions() {
+    return {
+      visibleSavedSessionCount: this.visibleSavedSessionCount,
+      pendingSavedSessionId: this.pendingSavedSessionId,
+      pendingSavedSessionAction: this.pendingSavedSessionAction,
+      pendingBulkAction: this.pendingBulkAction,
+      deleteConfirmationSessionId: this.deleteConfirmationSessionId,
+      pruneConfirmationArmed: this.pruneConfirmationArmed,
+    };
   }
 }
 
