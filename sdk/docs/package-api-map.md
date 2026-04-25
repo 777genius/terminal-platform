@@ -170,6 +170,7 @@ Expected exports:
 
 - public element classes
 - `defineTerminalPlatformElements()`
+- `TerminalCommandQuickCommand` and quick command defaults/resolvers for command dock customization
 - documented style helpers only if necessary
 - command dock events and parts documented in feature model docs
 

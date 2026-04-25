@@ -92,6 +92,12 @@ async function main() {
       || !result.afterCreate.hasSaveLayoutControl
       || !result.afterCreate.hasTopologyControls
       || !result.afterCreate.hasDisplayControls
+      || !Array.isArray(result.afterCreate.quickCommandLabels)
+      || result.afterCreate.quickCommandLabels.join("|") !== "pwd|ls -la|git status|node -v|hello"
+      || !result.afterCreate.quickCommandTitles.includes("Print the active Node.js version")
+      || !result.afterQuickCommandDraft.clicked
+      || result.afterQuickCommandDraft.draft !== "node -v"
+      || result.afterQuickCommandDraft.kernelDraft !== "node -v"
       || result.afterCreate.savedSessionCount !== 0
       || !result.afterCreate.screenFollowPressed
       || result.afterCreate.savedItemsRendered > 8
@@ -400,6 +406,7 @@ async function runSmokeScenario(browserUrl) {
       const screenPanel = screenRoot?.querySelector('[data-testid="tp-terminal-screen"]') ?? null;
       const saveLayout = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
       const pasteClipboard = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
+      const quickCommands = [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])];
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : (screenRoot?.querySelector('[part=\"screen-lines\"]')?.textContent?.trim() ?? null);
@@ -446,6 +453,8 @@ async function runSmokeScenario(browserUrl) {
           toolbarRoot?.querySelector('[data-testid="tp-font-scale-option"][data-font-scale="large"]')
           && toolbarRoot?.querySelector('[data-testid="tp-line-wrap-option"]')
         ),
+        quickCommandLabels: quickCommands.map((button) => button.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
+        quickCommandTitles: quickCommands.map((button) => button.getAttribute('title')),
         screenFollowPressed: screenFollow?.getAttribute('aria-pressed') === 'true',
         screenViewportAtBottom: screenViewport
           ? screenViewport.scrollHeight - screenViewport.scrollTop - screenViewport.clientHeight <= 2
@@ -473,6 +482,31 @@ async function runSmokeScenario(browserUrl) {
     })()`);
 
     const initialSequence = afterCreate.focusedSequence;
+    const afterQuickCommandDraft = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const quickCommand = [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])]
+        .find((button) => button.textContent?.trim() === 'node -v') ?? null;
+      if (!textarea || !quickCommand) {
+        return {
+          clicked: false,
+          reason: !textarea ? 'textarea missing' : 'node quick command missing',
+          draft: textarea?.value ?? null,
+          kernelDraft: null,
+        };
+      }
+
+      quickCommand.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const debug = window.terminalDemoDebug?.getState?.();
+      const paneId = debug?.selection?.activePaneId ?? debug?.attachedSession?.focused_screen?.pane_id ?? null;
+      return {
+        clicked: true,
+        draft: textarea.value,
+        kernelDraft: paneId ? (debug?.drafts?.[paneId] ?? null) : null,
+      };
+    })()`);
     let afterScreenSearch = {
       searched: false,
       reason: "deferred until command output is present",
@@ -1434,6 +1468,7 @@ async function runSmokeScenario(browserUrl) {
     return {
       before,
       afterCreate,
+      afterQuickCommandDraft,
       afterScreenSearch,
       afterSavedPagination,
       afterThemeSwitch,

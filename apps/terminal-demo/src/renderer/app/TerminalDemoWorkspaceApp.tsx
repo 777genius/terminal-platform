@@ -14,7 +14,11 @@ import {
   type WorkspaceSelectors,
   type WorkspaceSnapshot,
 } from "@terminal-platform/workspace-core";
-import { TerminalWorkspace, useWorkspaceSnapshot } from "@terminal-platform/workspace-react";
+import {
+  TerminalWorkspace,
+  useWorkspaceSnapshot,
+  type TerminalCommandQuickCommand,
+} from "@terminal-platform/workspace-react";
 
 interface NativeSessionFormState {
   title: string;
@@ -34,6 +38,33 @@ const TERMINAL_DEMO_THEME_STORAGE_KEY = "terminal-platform-demo.theme";
 const TERMINAL_DEMO_FONT_SCALE_STORAGE_KEY = "terminal-platform-demo.terminal-font-scale";
 const TERMINAL_DEMO_LINE_WRAP_STORAGE_KEY = "terminal-platform-demo.terminal-line-wrap";
 const terminalDemoThemeIds = terminalPlatformThemeManifests.map((theme) => theme.id);
+const terminalDemoQuickCommands = [
+  {
+    label: "pwd",
+    value: "pwd",
+    description: "Show the current working directory",
+  },
+  {
+    label: "ls -la",
+    value: "ls -la",
+    description: "List files with metadata",
+  },
+  {
+    label: "git status",
+    value: "git status",
+    description: "Inspect the current git worktree",
+  },
+  {
+    label: "node -v",
+    value: "node -v",
+    description: "Print the active Node.js version",
+  },
+  {
+    label: "hello",
+    value: 'printf "hello from Terminal Platform\\n"',
+    description: "Print a Terminal Platform greeting",
+  },
+] satisfies TerminalCommandQuickCommand[];
 const defaultTerminalDisplay = {
   fontScale: "default",
   lineWrap: true,
@@ -484,7 +515,7 @@ export function TerminalDemoWorkspaceScreen(props: {
 
           <div className="workspace-stack">
             <div data-testid="terminal-workspace-host">
-              <TerminalWorkspace kernel={props.kernel} />
+              <TerminalWorkspace kernel={props.kernel} quickCommands={terminalDemoQuickCommands} />
             </div>
           </div>
         </section>

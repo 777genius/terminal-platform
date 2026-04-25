@@ -2,8 +2,17 @@ import { css, html } from "lit";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import {
+  defaultTerminalCommandQuickCommands,
+  type TerminalCommandQuickCommand,
+} from "./terminal-command-quick-commands.js";
 
 export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
+  static override properties = {
+    ...WorkspaceKernelConsumerElement.properties,
+    quickCommands: { attribute: false },
+  };
+
   static styles = [
     terminalElementStyles,
     css`
@@ -89,6 +98,13 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     `,
   ];
 
+  declare quickCommands: readonly TerminalCommandQuickCommand[] | null | undefined;
+
+  constructor() {
+    super();
+    this.quickCommands = defaultTerminalCommandQuickCommands;
+  }
+
   override render() {
     return html`
       <div class="workspace" part="workspace">
@@ -102,7 +118,10 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           <div class="content" part="content">
             <tp-terminal-screen .kernel=${this.kernel}></tp-terminal-screen>
             <tp-terminal-pane-tree .kernel=${this.kernel}></tp-terminal-pane-tree>
-            <tp-terminal-command-dock .kernel=${this.kernel}></tp-terminal-command-dock>
+            <tp-terminal-command-dock
+              .kernel=${this.kernel}
+              .quickCommands=${this.quickCommands}
+            ></tp-terminal-command-dock>
 
             <details class="secondary-toggle workspace-tools">
               <summary>Workspace tools</summary>

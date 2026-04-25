@@ -3,18 +3,17 @@ import { css, html, nothing } from "lit";
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import { readClipboardText } from "./terminal-clipboard.js";
+import {
+  defaultTerminalCommandQuickCommands,
+  resolveTerminalCommandQuickCommands,
+  type TerminalCommandQuickCommand,
+} from "./terminal-command-quick-commands.js";
 import { resolveTerminalCommandDockControlState } from "./terminal-command-dock-controls.js";
-
-const QUICK_COMMANDS: readonly { label: string; value: string }[] = [
-  { label: "pwd", value: "pwd" },
-  { label: "ls -la", value: "ls -la" },
-  { label: "git status", value: "git status" },
-  { label: "hello", value: 'printf "hello from Terminal Platform\\n"' },
-];
 
 export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
+    quickCommands: { attribute: false },
     pending: { state: true },
     actionError: { state: true },
   };
@@ -211,6 +210,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     `,
   ];
 
+  declare quickCommands: readonly TerminalCommandQuickCommand[] | null | undefined;
   protected declare pending: boolean;
   protected declare actionError: string | null;
 
@@ -219,12 +219,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
   constructor() {
     super();
+    this.quickCommands = defaultTerminalCommandQuickCommands;
     this.pending = false;
     this.actionError = null;
   }
 
   override render() {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    const quickCommands = resolveTerminalCommandQuickCommands(this.quickCommands);
     const statusLabel = this.pending ? "Sending" : controls.activePaneId ? "Ready" : "Pick a pane";
     const pasteTitle = controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
       ? "Paste is not supported by the active backend"
@@ -250,20 +252,27 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           </div>
         </div>
 
-        <div class="chip-row" part="quick-commands" aria-label="Quick commands">
-          ${QUICK_COMMANDS.map(
-            (command) => html`
-              <button
-                class="chip"
-                type="button"
-                ?disabled=${!controls.activePaneId || this.pending}
-                @click=${() => this.setDraft(command.value)}
-              >
-                ${command.label}
-              </button>
-            `,
-          )}
-        </div>
+        ${quickCommands.length > 0
+          ? html`
+              <div class="chip-row" part="quick-commands" aria-label="Quick commands">
+                ${quickCommands.map(
+                  (command) => html`
+                    <button
+                      class="chip"
+                      type="button"
+                      part="quick-command"
+                      data-testid="tp-quick-command"
+                      title=${command.description ?? `Insert ${command.label}`}
+                      ?disabled=${!controls.activePaneId || this.pending}
+                      @click=${() => this.setDraft(command.value)}
+                    >
+                      ${command.label}
+                    </button>
+                  `,
+                )}
+              </div>
+            `
+          : nothing}
 
         ${controls.recentCommands.length > 0
           ? html`
