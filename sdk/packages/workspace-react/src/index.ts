@@ -1,4 +1,5 @@
 export {
+  TerminalCommandComposer,
   TerminalCommandDock,
   TerminalPaneTree,
   TerminalSavedSessions,
@@ -10,6 +11,12 @@ export {
 } from "./components/terminal-workspace.js";
 export { useWorkspaceSnapshot } from "./hooks/use-workspace-snapshot.js";
 export {
+  TERMINAL_COMMAND_COMPOSER_ACTIONS,
+  TERMINAL_COMMAND_COMPOSER_ACTION_IDS,
+  TERMINAL_COMMAND_COMPOSER_DEFAULT_MAX_ROWS,
+  TERMINAL_COMMAND_COMPOSER_DEFAULT_MIN_ROWS,
+  TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE,
+  TERMINAL_COMMAND_COMPOSER_EVENTS,
   TERMINAL_COMMAND_QUICK_COMMAND_LIMIT,
   TERMINAL_PANE_MAX_COLS,
   TERMINAL_PANE_MAX_ROWS,
@@ -24,6 +31,9 @@ export {
   defaultTerminalCommandQuickCommands,
   resolveActiveBackendCapabilities,
   resolvePaneResizeCommand,
+  resolveTerminalCommandComposerActions,
+  resolveTerminalCommandComposerRowRange,
+  resolveTerminalCommandComposerRows,
   resolveTerminalCommandDockControlState,
   resolveTerminalEntityIdLabel,
   resolveTerminalCommandInputStatus,
@@ -37,6 +47,17 @@ export {
 } from "@terminal-platform/workspace-elements";
 
 export type {
+  TerminalCommandComposerActionId,
+  TerminalCommandComposerActionOptions,
+  TerminalCommandComposerActionPresentation,
+  TerminalCommandComposerDraftChangeDetail,
+  TerminalCommandComposerEventMap,
+  TerminalCommandComposerEventType,
+  TerminalCommandComposerHistoryNavigateDetail,
+  TerminalCommandComposerRowOptions,
+  TerminalCommandComposerRowRange,
+  TerminalCommandComposerShortcut,
+  TerminalCommandComposerShortcutDetail,
   TerminalCommandDockCapabilityStatus,
   TerminalCommandDockControlState,
   TerminalCommandInputStatus,

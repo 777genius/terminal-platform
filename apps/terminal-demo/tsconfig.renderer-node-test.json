@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM"],
+    "types": ["node", "vite/client"],
+    "jsx": "react-jsx",
+    "rootDir": "./src",
+    "outDir": "./dist/renderer-node-test",
+    "sourceMap": false
+  },
+  "include": [
+    "src/features/terminal-runtime-host/contracts/**/*.ts",
+    "src/features/terminal-runtime-host/renderer/window.d.ts",
+    "src/features/terminal-runtime-host/main/composition/shell-policy.ts",
+    "src/renderer/app/TerminalDemoWorkspaceApp.tsx",
+    "src/renderer/app/terminal-demo-static-workspace.ts"
+  ]
+}

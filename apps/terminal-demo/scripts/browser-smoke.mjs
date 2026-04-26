@@ -8,15 +8,21 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
+import {
+  launchChromeWithCdp,
+  pipeProcess,
+  resolveRuntimeEvaluationValue,
+  stopProcess,
+  waitForHttpServer,
+} from "./chrome-cdp-smoke.mjs";
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
 const viteCliPath = path.join(appRoot, "node_modules", "vite", "bin", "vite.js");
 const rendererPort = process.env.TERMINAL_DEMO_SMOKE_RENDERER_PORT ?? "4273";
 const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const cdpPort = process.env.TERMINAL_DEMO_SMOKE_CDP_PORT ?? "9226";
-const chromeBinary = resolveChromeBinary();
 const screenshotPath = path.join("/tmp", `terminal-demo-browser-smoke-${Date.now()}.png`);
-const chromeUserDataDir = path.join("/tmp", `terminal-demo-browser-smoke-profile-${process.pid}`);
 const sessionStorePath = path.join("/tmp", `terminal-demo-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`);
 const autoStartSessionStorePath = path.join(
   "/tmp",
@@ -29,6 +35,7 @@ const lineWrapStorageKey = "terminal-platform-demo.terminal-line-wrap";
 let previewProcess = null;
 let browserHostProcess = null;
 let chromeProcess = null;
+let chromeUserDataDir = null;
 
 await main();
 
@@ -50,26 +57,29 @@ async function main() {
       stdio: "pipe",
     });
     pipeProcess(previewProcess, "[browser-smoke:preview]");
-    await waitForServer(rendererUrl, {
+    await waitForHttpServer(rendererUrl, {
       child: previewProcess,
       label: "Renderer preview",
     });
 
-    chromeProcess = spawn(chromeBinary, [
-      "--headless=new",
-      `--remote-debugging-port=${cdpPort}`,
-      `--user-data-dir=${chromeUserDataDir}`,
-      "about:blank",
-    ], {
-      cwd: appRoot,
-      env: process.env,
-      stdio: "pipe",
+    const chromeLaunch = await launchChromeWithCdp({
+      appRoot,
+      binaryMissingMessage: "Chrome binary not found. Set TERMINAL_DEMO_CHROME_BIN to run browser smoke.",
+      cdpPort,
+      extraArgs: [
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--disable-software-rasterizer",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--no-sandbox",
+      ],
+      headlessModeEnv: "TERMINAL_DEMO_SMOKE_HEADLESS_MODE",
+      logPrefix: "browser-smoke:chrome",
+      profilePrefix: "terminal-demo-browser-smoke-profile",
     });
-    pipeProcess(chromeProcess, "[browser-smoke:chrome]");
-    await waitForServer(`http://127.0.0.1:${cdpPort}/json/version`, {
-      child: chromeProcess,
-      label: "Chrome CDP",
-    });
+    chromeProcess = chromeLaunch.child;
+    chromeUserDataDir = chromeLaunch.userDataDir;
 
     const autoStartBrowserUrl = await startBrowserHost(rendererUrl, {
       autoStartSession: "1",
@@ -173,6 +183,14 @@ async function main() {
       || result.afterCreate.terminalComposerPromptPart !== "prompt"
       || result.afterCreate.terminalComposerInputPart !== "input"
       || result.afterCreate.terminalComposerActionParts.join("|") !== "send-command|paste-clipboard|send-interrupt|send-enter"
+      || result.afterCreate.terminalComposerActionIds.join("|") !== "submit|paste|interrupt|enter"
+      || result.afterCreate.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
+      || result.afterCreate.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
+      || result.afterCreate.commandInputRows !== 1
+      || result.afterCreate.commandInputRowCount !== "1"
+      || result.afterCreate.commandInputMultiline !== "false"
+      || result.afterCreate.commandComposerMinRows !== 1
+      || result.afterCreate.commandComposerMaxRows !== 5
       || !result.afterCreate.terminalCommandActionsInsideComposer
       || result.afterCreate.terminalFooterActionCount !== 0
       || /Command Input|Focused pane command lane/.test(result.afterCreate.commandDockVisibleText ?? "")
@@ -216,6 +234,9 @@ async function main() {
       || result.afterQuickCommandDraft.kernelDraft !== "node -v"
       || !result.afterQuickCommandDraft.inputFocused
       || !result.afterQuickCommandDraft.cursorAtEnd
+      || result.afterQuickCommandDraft.rows !== 1
+      || result.afterQuickCommandDraft.rowCount !== "1"
+      || result.afterQuickCommandDraft.multiline !== "false"
       || result.afterCreate.savedSessionCount !== 0
       || result.afterCreate.savedPanelCount !== "0"
       || result.afterCreate.savedMatchedCount !== "0"
@@ -234,6 +255,20 @@ async function main() {
     }
 
     if (
+      !result.afterMultilineCommandDraft.applied
+      || result.afterMultilineCommandDraft.rows !== 5
+      || result.afterMultilineCommandDraft.rowCount !== "5"
+      || result.afterMultilineCommandDraft.multiline !== "true"
+      || result.afterMultilineCommandDraft.kernelDraft !== result.afterMultilineCommandDraft.draft
+      || !result.afterMultilineCommandDraft.inputFocused
+      || !result.afterMultilineCommandDraft.cursorAtEnd
+      || result.afterMultilineCommandDraft.height <= result.afterQuickCommandDraft.height
+      || result.afterMultilineCommandDraft.dockBottomOverflowPx !== 0
+    ) {
+      throw new Error(`Command composer multiline draft layout did not settle correctly: ${JSON.stringify(result.afterMultilineCommandDraft)}`);
+    }
+
+    if (
       !result.afterCreateMobileLayout.checked
       || result.afterCreateMobileLayout.demoShellActive !== "true"
       || result.afterCreateMobileLayout.demoShellColumnCount !== 1
@@ -249,6 +284,12 @@ async function main() {
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatusDom
       || !result.afterCreateMobileLayout.terminalComposerFirstInDockDom
       || result.afterCreateMobileLayout.terminalComposerTagName !== "TP-TERMINAL-COMMAND-COMPOSER"
+      || result.afterCreateMobileLayout.terminalComposerActionIds.join("|") !== "submit|paste|interrupt|enter"
+      || result.afterCreateMobileLayout.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
+      || result.afterCreateMobileLayout.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
+      || result.afterCreateMobileLayout.commandInputRows !== 1
+      || result.afterCreateMobileLayout.commandInputRowCount !== "1"
+      || result.afterCreateMobileLayout.commandInputMultiline !== "false"
       || !result.afterCreateMobileLayout.terminalCommandActionsInsideComposer
       || result.afterCreateMobileLayout.terminalFooterActionCount !== 0
       || !result.afterCreateMobileLayout.commandRegionFollowsScreen
@@ -809,6 +850,17 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerPromptPart: commandComposerPrompt?.getAttribute('part') ?? null,
         terminalComposerInputPart: commandComposerInput?.getAttribute('part') ?? null,
         terminalComposerActionParts: commandActionButtons.map((button) => button?.getAttribute('part') ?? null),
+        terminalComposerActionIds: commandActionButtons.map((button) => button?.getAttribute('data-action') ?? ''),
+        terminalComposerActionKeyHints: commandActionButtons.map((button) => button?.getAttribute('data-key-hint') ?? ''),
+        terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>
+          button?.getAttribute('aria-keyshortcuts') ?? '',
+        ),
+        commandInputRows: input?.rows ?? null,
+        commandInputRowCount: input?.getAttribute('data-row-count') ?? null,
+        commandInputMultiline: input?.getAttribute('data-multiline') ?? null,
+        commandInputHeight: Math.round(input?.getBoundingClientRect().height ?? 0),
+        commandComposerMinRows: commandComposer?.minRows ?? null,
+        commandComposerMaxRows: commandComposer?.maxRows ?? null,
         terminalCommandActionsInsideComposer: Boolean(
           commandComposer
           && commandActionButtons.every((button) => button && commandComposer.contains(button))
@@ -930,6 +982,14 @@ async function runSmokeScenario(browserUrl) {
         ),
         terminalComposerFirstInDockDom: commandDockPanel?.firstElementChild === commandComposer,
         terminalComposerTagName: commandComposer?.tagName ?? null,
+        terminalComposerActionIds: commandActionButtons.map((button) => button?.getAttribute('data-action') ?? ''),
+        terminalComposerActionKeyHints: commandActionButtons.map((button) => button?.getAttribute('data-key-hint') ?? ''),
+        terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>
+          button?.getAttribute('aria-keyshortcuts') ?? '',
+        ),
+        commandInputRows: commandRoot?.querySelector('[data-testid="tp-command-input"]')?.rows ?? null,
+        commandInputRowCount: commandRoot?.querySelector('[data-testid="tp-command-input"]')?.getAttribute('data-row-count') ?? null,
+        commandInputMultiline: commandRoot?.querySelector('[data-testid="tp-command-input"]')?.getAttribute('data-multiline') ?? null,
         terminalCommandActionsInsideComposer: Boolean(
           commandComposer
           && commandActionButtons.every((button) => button && commandComposer.contains(button))
@@ -983,6 +1043,55 @@ async function runSmokeScenario(browserUrl) {
         kernelDraft: paneId ? (debug?.drafts?.[paneId] ?? null) : null,
         inputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true,
         cursorAtEnd: textarea.selectionStart === textarea.value.length && textarea.selectionEnd === textarea.value.length,
+        rows: textarea.rows,
+        rowCount: textarea.getAttribute('data-row-count'),
+        multiline: textarea.getAttribute('data-multiline'),
+        height: Math.round(textarea.getBoundingClientRect().height),
+      };
+    })()`);
+    const multilineCommandDraft = "cat <<'EOF' > smoke.sh\nprintf one\nprintf two\nprintf three\nprintf four\nprintf five\nEOF";
+    const afterMultilineCommandDraft = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const draft = ${JSON.stringify(multilineCommandDraft)};
+      if (!textarea) {
+        return {
+          applied: false,
+          reason: 'textarea missing',
+          draft: null,
+          kernelDraft: null,
+          rows: null,
+          rowCount: null,
+          multiline: null,
+          inputFocused: false,
+          cursorAtEnd: false,
+          height: 0,
+          dockBottomOverflowPx: null,
+        };
+      }
+
+      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+      descriptor?.set?.call(textarea, draft);
+      textarea.setSelectionRange(draft.length, draft.length);
+      textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const debug = window.terminalDemoDebug?.getState?.();
+      const paneId = debug?.selection?.activePaneId ?? debug?.attachedSession?.focused_screen?.pane_id ?? null;
+      return {
+        applied: true,
+        draft: textarea.value,
+        kernelDraft: paneId ? (debug?.drafts?.[paneId] ?? null) : null,
+        rows: textarea.rows,
+        rowCount: textarea.getAttribute('data-row-count'),
+        multiline: textarea.getAttribute('data-multiline'),
+        inputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true,
+        cursorAtEnd: textarea.selectionStart === textarea.value.length && textarea.selectionEnd === textarea.value.length,
+        height: Math.round(textarea.getBoundingClientRect().height),
+        dockBottomOverflowPx: commandDockPanel
+          ? Math.max(0, Math.round(commandDockPanel.getBoundingClientRect().bottom - window.innerHeight))
+          : null,
       };
     })()`);
     let afterScreenSearch = {
@@ -2331,6 +2440,7 @@ async function runSmokeScenario(browserUrl) {
       afterCreate,
       afterCreateMobileLayout,
       afterQuickCommandDraft,
+      afterMultilineCommandDraft,
       afterScreenSearch,
       afterScreenSearchShortcut,
       afterSavedPagination,
@@ -2526,7 +2636,9 @@ async function shutdown() {
   await stopProcess(browserHostProcess);
   await stopProcess(previewProcess);
   await stopProcess(chromeProcess);
-  await fs.rm(chromeUserDataDir, { recursive: true, force: true });
+  if (chromeUserDataDir) {
+    await fs.rm(chromeUserDataDir, { recursive: true, force: true });
+  }
   await removeSessionStore(autoStartSessionStorePath);
   await removeSessionStore(sessionStorePath);
 }
@@ -2539,28 +2651,13 @@ async function removeSessionStore(storePath) {
   ]);
 }
 
-async function stopProcess(child) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-
-  const exited = new Promise((resolve) => {
-    child.once("exit", () => resolve());
-  });
-  child.kill("SIGTERM");
-  await Promise.race([exited, sleep(5_000)]);
-  if (child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGKILL");
-  }
-}
-
 function evaluate(send, expression) {
   let timeoutId;
   const evaluation = send("Runtime.evaluate", {
     expression,
     returnByValue: true,
     awaitPromise: true,
-  }).then((result) => result.result.value);
+  }).then(resolveRuntimeEvaluationValue);
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
       reject(new Error("Timed out waiting for browser evaluation"));
@@ -2589,15 +2686,6 @@ async function closePageTarget(targetId) {
   await fetch(`http://127.0.0.1:${cdpPort}/json/close/${targetId}`).catch(() => undefined);
 }
 
-function pipeProcess(child, prefix) {
-  child.stdout?.on("data", (chunk) => {
-    process.stdout.write(`${prefix} ${chunk}`);
-  });
-  child.stderr?.on("data", (chunk) => {
-    process.stderr.write(`${prefix} ${chunk}`);
-  });
-}
-
 function runSync(command, args, cwd) {
   const result = spawnSync(command, args, {
     cwd,
@@ -2608,46 +2696,6 @@ function runSync(command, args, cwd) {
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);
   }
-}
-
-async function waitForServer(url, options = {}) {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < 20_000) {
-    const exitState = processExitState(options.child);
-    if (exitState) {
-      throw new Error(`${options.label ?? "Server"} exited before ${url} became ready - ${exitState}`);
-    }
-
-    try {
-      const response = await fetch(url, { method: "GET" });
-      if (response.ok) {
-        return;
-      }
-    } catch {
-      // Server is still starting.
-    }
-
-    await sleep(200);
-  }
-
-  throw new Error(`Timed out waiting for ${url}`);
-}
-
-function processExitState(child) {
-  if (!child) {
-    return null;
-  }
-
-  if (child.exitCode !== null) {
-    return `exit code ${child.exitCode}`;
-  }
-
-  if (child.signalCode !== null) {
-    return `signal ${child.signalCode}`;
-  }
-
-  return null;
 }
 
 function onceSocketOpen(socket) {
@@ -2690,39 +2738,6 @@ function closeWebSocket(socket) {
       settle();
     }
   });
-}
-
-function resolveChromeBinary() {
-  const candidates = [
-    process.env.TERMINAL_DEMO_CHROME_BIN,
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    resolveBinaryFromShell("google-chrome"),
-    resolveBinaryFromShell("chromium"),
-    resolveBinaryFromShell("chromium-browser"),
-  ].filter(Boolean);
-
-  const binary = candidates[0];
-  if (!binary) {
-    throw new Error("Chrome binary not found. Set TERMINAL_DEMO_CHROME_BIN to run browser smoke.");
-  }
-
-  return binary;
-}
-
-function resolveBinaryFromShell(name) {
-  const result = spawnSync("bash", ["-lc", `command -v ${name}`], {
-    cwd: appRoot,
-    env: process.env,
-    encoding: "utf8",
-  });
-
-  if (result.status !== 0) {
-    return null;
-  }
-
-  const value = result.stdout.trim();
-  return value.length > 0 ? value : null;
 }
 
 function sleep(ms) {

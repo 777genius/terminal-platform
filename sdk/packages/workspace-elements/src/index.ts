@@ -1,6 +1,15 @@
 export { defineTerminalPlatformElements } from "./define.js";
 
 export {
+  TERMINAL_COMMAND_COMPOSER_ACTIONS,
+  TERMINAL_COMMAND_COMPOSER_ACTION_IDS,
+  TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE,
+  resolveTerminalCommandComposerActions,
+  type TerminalCommandComposerActionId,
+  type TerminalCommandComposerActionOptions,
+  type TerminalCommandComposerActionPresentation,
+} from "./elements/terminal-command-composer-actions.js";
+export {
   TERMINAL_COMMAND_COMPOSER_EVENTS,
   TerminalCommandComposerElement,
   type TerminalCommandComposerDraftChangeDetail,
@@ -10,6 +19,14 @@ export {
   type TerminalCommandComposerShortcut,
   type TerminalCommandComposerShortcutDetail,
 } from "./elements/terminal-command-composer-element.js";
+export {
+  TERMINAL_COMMAND_COMPOSER_DEFAULT_MAX_ROWS,
+  TERMINAL_COMMAND_COMPOSER_DEFAULT_MIN_ROWS,
+  resolveTerminalCommandComposerRowRange,
+  resolveTerminalCommandComposerRows,
+  type TerminalCommandComposerRowOptions,
+  type TerminalCommandComposerRowRange,
+} from "./elements/terminal-command-composer-layout.js";
 export { TerminalCommandDockElement } from "./elements/terminal-command-dock-element.js";
 export {
   resolveTerminalCommandDockControlState,

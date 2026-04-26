@@ -255,6 +255,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       textarea {
         min-width: 0;
         min-height: 3.15rem;
+        max-height: min(12rem, 34vh);
+        overflow-y: auto;
         resize: vertical;
         border: 0;
         outline: 0;
@@ -265,7 +267,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
       .dock[data-placement="terminal"] textarea {
         color: var(--tp-terminal-color-text);
-        min-height: 2rem;
+        min-height: 1.65rem;
+        max-height: min(9rem, 28vh);
         resize: none;
       }
 

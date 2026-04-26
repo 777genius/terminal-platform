@@ -6,8 +6,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  createSiblingStagingDirectory,
   replaceDirectoryAtomically,
+  withSiblingStagingDirectory,
 } from "../../../scripts/node/replace-directory-atomically.mjs";
 import { withFileLock } from "../../../scripts/node/with-file-lock.mjs";
 
@@ -20,6 +20,21 @@ const packageDir = path.resolve(repoRoot, "crates", "terminal-node-napi", "packa
 const outDir = path.resolve(appRoot, ".generated", "terminal-platform-node");
 const sdkScopeRoot = path.resolve(appRoot, "node_modules", "@terminal-platform");
 const lockFile = path.resolve(appRoot, ".generated", "locks", "stage-sdk.lock");
+const typescriptCliPath = path.resolve(sdkRoot, "node_modules", "typescript", "bin", "tsc");
+const workspaceSdkProjectRefs = [
+  "packages/foundation/tsconfig.json",
+  "packages/runtime-types/tsconfig.json",
+  "packages/design-tokens/tsconfig.json",
+  "packages/workspace-contracts/tsconfig.json",
+  "packages/workspace-core/tsconfig.json",
+  "packages/workspace-adapter-websocket/tsconfig.json",
+  "packages/workspace-adapter-preload/tsconfig.json",
+  "packages/workspace-adapter-memory/tsconfig.json",
+  "packages/workspace-elements/tsconfig.json",
+  "packages/workspace-react/tsconfig.json",
+  "packages/testing/tsconfig.json",
+];
+const workspaceOnly = process.argv.includes("--workspace-only");
 
 await main();
 
@@ -41,10 +56,14 @@ function run(command, args, cwd) {
 
 async function main() {
   await withFileLock(lockFile, async () => {
+    buildWorkspaceSdkPackages();
+    await linkSdkPackages();
+    if (workspaceOnly) {
+      return;
+    }
+
     run("node", ["./scripts/build-local-package.mjs", "--out", outDir], packageDir);
     run("cargo", ["build", "-p", "terminal-daemon"], repoRoot);
-    run("npm", ["run", "build"], sdkRoot);
-    await linkSdkPackages();
   }, {
     metadata: {
       app: "terminal-demo",
@@ -52,7 +71,11 @@ async function main() {
     },
   });
 
-  process.stdout.write(`${outDir}\n`);
+  process.stdout.write(`${workspaceOnly ? sdkScopeRoot : outDir}\n`);
+}
+
+function buildWorkspaceSdkPackages() {
+  run(process.execPath, [typescriptCliPath, "-b", ...workspaceSdkProjectRefs], sdkRoot);
 }
 
 async function linkSdkPackages() {
@@ -73,9 +96,10 @@ async function linkSdkPackages() {
 
     const packageBasename = packageJson.name.slice("@terminal-platform/".length);
     const linkPath = path.join(sdkScopeRoot, packageBasename);
-    const stagedDir = await createSiblingStagingDirectory(linkPath, "sdk-package");
-    await copyDirectoryStable(packageRoot, stagedDir);
-    await replaceDirectoryAtomically(linkPath, stagedDir);
+    await withSiblingStagingDirectory(linkPath, "sdk-package", async (stagedDir) => {
+      await copyDirectoryStable(packageRoot, stagedDir);
+      await replaceDirectoryAtomically(linkPath, stagedDir);
+    });
   }
 }
 

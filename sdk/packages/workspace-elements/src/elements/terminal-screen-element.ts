@@ -285,18 +285,31 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       .line {
         display: grid;
         grid-template-columns: 3.25rem minmax(0, 1fr);
-        gap: var(--tp-space-2);
+        gap: 0.72rem;
         min-height: 1.35rem;
       }
 
       .gutter {
+        border-right: 1px solid color-mix(in srgb, var(--tp-color-border) 42%, transparent);
         color: color-mix(in srgb, var(--tp-color-text-muted) 48%, transparent);
+        font-variant-numeric: tabular-nums;
+        padding-right: 0.55rem;
         text-align: right;
         user-select: none;
       }
 
       .screen[data-placement="terminal"] .gutter {
+        border-right-color: color-mix(in srgb, var(--tp-terminal-color-border) 46%, transparent);
         color: color-mix(in srgb, var(--tp-terminal-color-text-muted) 58%, transparent);
+      }
+
+      .screen[data-placement="terminal"] .line {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
+      }
+
+      .screen[data-placement="terminal"] .gutter {
+        display: none;
       }
 
       .text {
@@ -412,7 +425,16 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
         .line {
           grid-template-columns: 2.45rem minmax(0, 1fr);
-          gap: var(--tp-space-1);
+          gap: 0.55rem;
+        }
+
+        .screen[data-placement="terminal"] .line {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 0;
+        }
+
+        .gutter {
+          padding-right: 0.38rem;
         }
       }
     `,
@@ -917,7 +939,7 @@ function renderLine(
 ): TemplateResult {
   return html`
     <div class="line" part="screen-line">
-      <span class="gutter" part="line-number">${index}</span>
+      <span class="gutter" part="line-number" aria-hidden="true">${index}</span>
       <span class="text" part="line-text">${renderHighlightedSegments(segments)}</span>
     </div>
   `;

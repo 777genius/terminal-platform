@@ -8,6 +8,16 @@ export async function createSiblingStagingDirectory(targetDir, label) {
   return fs.mkdtemp(path.join(parentDir, `.${path.basename(absoluteTargetDir)}.${label}.`));
 }
 
+export async function withSiblingStagingDirectory(targetDir, label, work) {
+  const stagedDir = await createSiblingStagingDirectory(targetDir, label);
+
+  try {
+    return await work(stagedDir);
+  } finally {
+    await fs.rm(stagedDir, { recursive: true, force: true });
+  }
+}
+
 export async function replaceDirectoryAtomically(targetDir, stagedDir) {
   const absoluteTargetDir = path.resolve(targetDir);
   const absoluteStagedDir = path.resolve(stagedDir);

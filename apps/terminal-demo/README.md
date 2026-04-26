@@ -74,11 +74,46 @@ npm run build
 npm run preview
 ```
 
+Renderer-only UI preview for sandboxed or offline checks:
+
+```bash
+cd apps/terminal-demo
+npm run smoke:renderer-static
+open "file://$(pwd)/dist/renderer/index.html?demoStaticWorkspace=1"
+```
+
+This mode renders the full workspace shell from a static NativeMux preview snapshot and verifies that the renderer bundle still includes the static preview contract. It is useful for fast visual QA when the native runtime or localhost preview server is unavailable, but it does not replace `npm run smoke:browser`.
+
+Fast offline verification for sandboxed or dependency-constrained environments:
+
+```bash
+cd apps/terminal-demo
+npm run test:offline
+```
+
+This gate verifies architecture boundaries, renderer type safety, the React/static workspace composition contract, and the static renderer bundle without requiring Cargo network access, a native daemon build, or a localhost preview server.
+
+## Verification Matrix
+
+| Command | Scope | Requires |
+| --- | --- | --- |
+| `npm run test:offline` | fresh workspace SDK staging, architecture boundaries, renderer types, static workspace composition, renderer bundle, terminal layout contracts | Node dependencies |
+| `npm run smoke:renderer-static` | fresh workspace SDK staging, renderer bundle, static NativeMux preview contract | Node dependencies |
+| `npm run verify:renderer-static:browser` | static NativeMux preview in real headless Chrome, command input flow, attached terminal layout, screenshot artifact | Node dependencies, Chrome CDP |
+| `cd ../../sdk && npm run test:public-api` | workspace elements and React public exports, composer action IDs, keyboard hints, row layout helpers | Node dependencies |
+| `npm run smoke:browser` | full native host, WebSocket gateway, browser UI, terminal layout, command composer interaction | Cargo dependencies, local bind to `127.0.0.1`, Chrome |
+
+Use `npm run test:offline` as the fast sandbox gate and `cd ../../sdk && npm run test:public-api` before changing SDK exports. Use `npm run verify:renderer-static:browser` for real Chrome QA when native dependencies are unavailable. Use `npm run smoke:browser` before release or when the native runtime and localhost browser preview are available.
+
+Chrome-based smoke commands use `TERMINAL_DEMO_CHROME_BIN` when Chrome is not installed in a standard location. They try modern and legacy headless modes by default. Set `TERMINAL_DEMO_STATIC_SMOKE_HEADLESS_MODE=new`, `old`, or `new,old` for `verify:renderer-static:browser`; set `TERMINAL_DEMO_SMOKE_HEADLESS_MODE` the same way for `smoke:browser`.
+
 ## Notes
 
-- `postinstall` stages the local `terminal-platform-node` SDK into `.generated/`
-- the same staging step builds and links the local workspace SDK packages into `node_modules/@terminal-platform/`
+- `postinstall` first builds and links the local workspace SDK packages into `node_modules/@terminal-platform/`
+- `stage:workspace-sdk` performs only that JS SDK staging step for offline renderer checks
+- the same staging step then stages the local `terminal-platform-node` SDK into `.generated/`
 - the same staging step also builds the local `terminal-daemon` binary in `target/debug/`
+- if native Rust dependencies are unavailable, the staging step still leaves JS workspace packages linked for renderer-only UI checks while failing the native step explicitly
 - default runtime slug is `terminal-demo`, not `default`, so the demo does not attach to unrelated local daemons
 - the gateway normalizes `bigint` fields into decimal strings for JSON-safe WebSocket transport
 - if persistence store bootstrap fails, the daemon falls back to in-memory mode and logs the reason

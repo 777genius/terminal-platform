@@ -10,7 +10,12 @@ import {
   TerminalRuntimeBootstrapErrorView,
 } from "@features/terminal-runtime-host/renderer";
 import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
-import { TerminalDemoWorkspaceApp } from "./TerminalDemoWorkspaceApp.js";
+import {
+  TerminalDemoWorkspaceApp,
+  TerminalDemoWorkspaceScreen,
+  createDemoPreviewWorkspaceSnapshot,
+  createStaticWorkspaceKernel,
+} from "./TerminalDemoWorkspaceApp.js";
 
 declare global {
   interface Window {
@@ -34,6 +39,16 @@ root.render(
 );
 
 function TerminalDemoBootstrapBoundary() {
+  const staticPreview = useMemo(resolveStaticPreviewWorkspace, []);
+
+  if (staticPreview) {
+    return <TerminalDemoWorkspaceScreen config={staticPreview.config} kernel={staticPreview.kernel} />;
+  }
+
+  return <TerminalDemoRuntimeBootstrapBoundary />;
+}
+
+function TerminalDemoRuntimeBootstrapBoundary() {
   const [config, setConfig] = useState<TerminalRuntimeBootstrapConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resolvedOnce, setResolvedOnce] = useState(false);
@@ -127,6 +142,40 @@ function TerminalDemoBootstrapBoundary() {
   }
 
   return <TerminalDemoWorkspaceApp key={appKey} config={config} />;
+}
+
+function resolveStaticPreviewWorkspace(): {
+  config: TerminalRuntimeBootstrapConfig;
+  kernel: ReturnType<typeof createStaticWorkspaceKernel>;
+} | null {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("demoStaticWorkspace") !== "1") {
+    return null;
+  }
+
+  const config: TerminalRuntimeBootstrapConfig = {
+    controlPlaneUrl: "ws://127.0.0.1:0/terminal-gateway/control?token=static-preview",
+    demoDefaultShellProgram: resolveStaticPreviewShellProgram(),
+    sessionStreamUrl: "ws://127.0.0.1:0/terminal-gateway/stream?token=static-preview",
+    runtimeSlug: "terminal-demo-static-preview",
+  };
+
+  return {
+    config,
+    kernel: createStaticWorkspaceKernel(createDemoPreviewWorkspaceSnapshot(config)),
+  };
+}
+
+function resolveStaticPreviewShellProgram(): string {
+  if (typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)) {
+    return "pwsh.exe";
+  }
+
+  if (typeof navigator !== "undefined" && /macintosh|mac os x/i.test(navigator.userAgent)) {
+    return "zsh";
+  }
+
+  return "bash";
 }
 
 function sameBootstrapConfig(

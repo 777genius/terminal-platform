@@ -171,8 +171,9 @@ Expected exports:
 - public element classes
 - `defineTerminalPlatformElements()`
 - `TerminalCommandQuickCommand` and quick command defaults/resolvers for command dock customization
+- command composer events, action presentations with stable action IDs and keyboard hints, layout helpers, row defaults, and typed event details
 - documented style helpers only if necessary
-- command dock events and parts documented in feature model docs
+- command dock and command composer events and parts documented in feature model docs
 
 ### `@terminal-platform/workspace-react`
 
@@ -185,6 +186,8 @@ Expected exports:
 - React wrappers
 - hooks
 - event typings
+- thin `TerminalCommandComposer` wrapper with typed custom-event props
+- command composer action presentations and layout helpers re-exported from `@terminal-platform/workspace-elements`
 
 ### `@terminal-platform/testing`
 
@@ -229,3 +232,14 @@ Public element registration follows these rules:
 Packages publish bundled `.d.ts` and use `types` plus `exports`.
 
 Type declarations are generated from source and published with the package, not via DefinitelyTyped.
+
+## Public API Verification
+
+Run `npm run test:public-api` from `sdk/` before changing public SDK exports.
+
+The gate covers:
+
+- `@terminal-platform/workspace-elements` package entrypoint exports
+- command composer action presentation contract and stable action IDs
+- command composer row layout helpers and defaults
+- `@terminal-platform/workspace-react` wrapper types and re-exported composer helpers

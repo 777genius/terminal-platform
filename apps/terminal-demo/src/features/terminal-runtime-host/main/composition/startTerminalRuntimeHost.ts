@@ -7,11 +7,18 @@ import { TerminalPlatformControlRuntimeAdapter } from "../adapters/output/Termin
 import { TerminalPlatformSessionStateRuntimeAdapter } from "../adapters/output/TerminalPlatformSessionStateRuntimeAdapter.js";
 import { DaemonSupervisor } from "../infrastructure/DaemonSupervisor.js";
 import { TerminalPlatformClientProvider } from "../infrastructure/TerminalPlatformClientProvider.js";
+import {
+  DEFAULT_TERMINAL_RUNTIME_SLUG,
+  normalizeTerminalShellProgram,
+} from "./shell-policy.js";
 
-export const DEFAULT_TERMINAL_RUNTIME_SLUG = "terminal-demo";
-export const DEFAULT_TERMINAL_DEMO_UNIX_SHELL = "bash";
-export const DEFAULT_TERMINAL_DEMO_MACOS_SHELL = "zsh";
-export const DEFAULT_TERMINAL_DEMO_WINDOWS_SHELL = "pwsh.exe";
+export {
+  DEFAULT_TERMINAL_RUNTIME_SLUG,
+  DEFAULT_TERMINAL_DEMO_MACOS_SHELL,
+  DEFAULT_TERMINAL_DEMO_UNIX_SHELL,
+  DEFAULT_TERMINAL_DEMO_WINDOWS_SHELL,
+  resolveDemoDefaultShellProgram,
+} from "./shell-policy.js";
 
 export interface TerminalRuntimeHostHandle {
   controlPlaneUrl: string;
@@ -72,7 +79,7 @@ async function ensureInitialNativeSession(
   clientProvider: TerminalPlatformClientProvider,
   session: TerminalRuntimeInitialNativeSession,
 ): Promise<void> {
-  const program = normalizeShellProgram(session.program);
+  const program = normalizeTerminalShellProgram(session.program);
   if (!program) {
     return;
   }
@@ -91,32 +98,6 @@ async function ensureInitialNativeSession(
       cwd: normalizeOptionalString(session.cwd),
     },
   });
-}
-
-export function resolveDemoDefaultShellProgram(options: {
-  env?: Readonly<Record<string, string | undefined>>;
-  platform?: NodeJS.Platform;
-} = {}): string {
-  const env = options.env ?? process.env;
-  const platform = options.platform ?? process.platform;
-  const explicitProgram = normalizeShellProgram(env.TERMINAL_DEMO_DEFAULT_SHELL);
-  if (explicitProgram) {
-    return explicitProgram;
-  }
-
-  if (platform === "win32") {
-    return normalizeShellProgram(env.ComSpec)
-      ?? normalizeShellProgram(env.COMSPEC)
-      ?? DEFAULT_TERMINAL_DEMO_WINDOWS_SHELL;
-  }
-
-  return normalizeShellProgram(env.SHELL)
-    ?? (platform === "darwin" ? DEFAULT_TERMINAL_DEMO_MACOS_SHELL : DEFAULT_TERMINAL_DEMO_UNIX_SHELL);
-}
-
-function normalizeShellProgram(value: string | null | undefined): string | null {
-  const normalized = value?.trim();
-  return normalized || null;
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {

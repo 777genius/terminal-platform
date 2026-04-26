@@ -5,7 +5,7 @@ import { statSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSiblingStagingDirectory, replaceDirectoryAtomically } from "../../../../scripts/node/replace-directory-atomically.mjs";
+import { replaceDirectoryAtomically, withSiblingStagingDirectory } from "../../../../scripts/node/replace-directory-atomically.mjs";
 import { withFileLock } from "../../../../scripts/node/with-file-lock.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -25,13 +25,14 @@ function main() {
     run("cargo", cargoArgs, workspaceRoot);
 
     const addonPath = locateAddon(options.release ? "release" : "debug");
-    const stagedOutDir = await createSiblingStagingDirectory(options.out, "stage");
-    run("node", ["./scripts/stage-package.mjs", "--out", stagedOutDir, "--addon", addonPath], packageDir);
-    await fs.copyFile(
-      path.join(stagedOutDir, "index.d.ts"),
-      path.join(stagedOutDir, "index.d.mts"),
-    );
-    await replaceDirectoryAtomically(options.out, stagedOutDir);
+    await withSiblingStagingDirectory(options.out, "stage", async (stagedOutDir) => {
+      run("node", ["./scripts/stage-package.mjs", "--out", stagedOutDir, "--addon", addonPath], packageDir);
+      await fs.copyFile(
+        path.join(stagedOutDir, "index.d.ts"),
+        path.join(stagedOutDir, "index.d.mts"),
+      );
+      await replaceDirectoryAtomically(options.out, stagedOutDir);
+    });
 
     process.stdout.write(`${path.resolve(options.out)}\n`);
   }, {

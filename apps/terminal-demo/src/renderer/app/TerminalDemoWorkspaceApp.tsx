@@ -1,17 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
-import { TerminalRuntimeBootstrapErrorView } from "@features/terminal-runtime-host/renderer";
 import { terminalPlatformThemeManifests } from "@terminal-platform/design-tokens";
 import type { CreateSessionRequest, SessionId } from "@terminal-platform/runtime-types";
 import { createWorkspaceWebSocketTransport } from "@terminal-platform/workspace-adapter-websocket";
 import {
-  DEFAULT_COMMAND_HISTORY_LIMIT,
   createWorkspaceKernel,
-  type WorkspaceCommands,
-  type WorkspaceDiagnostics,
   type WorkspaceKernel,
-  type WorkspaceSelectors,
   type WorkspaceSnapshot,
 } from "@terminal-platform/workspace-core";
 import {
@@ -25,6 +20,18 @@ import {
   type TerminalSavedSessionPendingAction,
   type TerminalSavedSessionRestoreSemanticsTone,
 } from "@terminal-platform/workspace-react";
+import {
+  DEFAULT_TERMINAL_DEMO_DISPLAY,
+  createDemoPreviewBackendCapabilities,
+  createDemoPreviewWorkspaceSnapshot,
+  createStaticWorkspaceKernel,
+} from "./terminal-demo-static-workspace.js";
+
+export {
+  createDemoPreviewBackendCapabilities,
+  createDemoPreviewWorkspaceSnapshot,
+  createStaticWorkspaceKernel,
+} from "./terminal-demo-static-workspace.js";
 
 interface NativeSessionFormState {
   title: string;
@@ -65,11 +72,6 @@ const terminalDemoQuickCommands = [
     description: "Print a Terminal Platform greeting",
   },
 ] satisfies TerminalCommandQuickCommand[];
-const defaultTerminalDisplay = {
-  fontScale: "default",
-  lineWrap: true,
-} satisfies WorkspaceSnapshot["terminalDisplay"];
-
 export function TerminalDemoWorkspaceApp(props: {
   config: TerminalRuntimeBootstrapConfig;
 }): ReactElement {
@@ -121,7 +123,7 @@ export function TerminalDemoWorkspaceScreen(props: {
   const activeHealth = snapshot.attachedSession?.health ?? null;
   const healthSummary = describeSessionHealth(activeHealth?.phase ?? null);
   const activeScreen = snapshot.attachedSession?.focused_screen ?? null;
-  const terminalDisplay = snapshot.terminalDisplay ?? defaultTerminalDisplay;
+  const terminalDisplay = snapshot.terminalDisplay ?? DEFAULT_TERMINAL_DEMO_DISPLAY;
   const diagnosticsPreview = snapshot.diagnostics.slice(0, 3);
   const advancedNoticeCount = diagnosticsPreview.length + (actionError ? 1 : 0);
   const advancedSavedSessionsControl = useMemo(
@@ -886,82 +888,4 @@ function resolveDefaultShellProgram(config: TerminalRuntimeBootstrapConfig): str
   }
 
   return "bash";
-}
-
-export function createStaticWorkspaceKernel(snapshot: WorkspaceSnapshot): WorkspaceKernel {
-  const normalizedSnapshot = {
-    ...snapshot,
-    commandHistory: snapshot.commandHistory ?? {
-      entries: [],
-      limit: DEFAULT_COMMAND_HISTORY_LIMIT,
-    },
-    terminalDisplay: snapshot.terminalDisplay ?? defaultTerminalDisplay,
-  };
-  const noopAsync = async () => {};
-  const noopDiagnostics: WorkspaceDiagnostics = {
-    list: () => normalizedSnapshot.diagnostics,
-    clear: () => {},
-  };
-  const noopCommands: WorkspaceCommands = {
-    bootstrap: noopAsync,
-    refreshSessions: noopAsync,
-    refreshSavedSessions: noopAsync,
-    discoverSessions: noopAsync,
-    getBackendCapabilities: async () => {
-      throw new Error("not implemented in static kernel");
-    },
-    createSession: noopAsync,
-    importSession: noopAsync,
-    attachSession: noopAsync,
-    restoreSavedSession: noopAsync,
-    deleteSavedSession: noopAsync,
-    pruneSavedSessions: async (keepLatest: number) => ({
-      deleted_count: Math.max(0, normalizedSnapshot.catalog.savedSessions.length - keepLatest),
-      kept_count: Math.min(normalizedSnapshot.catalog.savedSessions.length, keepLatest),
-    }),
-    dispatchMuxCommand: async () => {
-      throw new Error("not implemented in static kernel");
-    },
-    openSubscription: async () => {
-      throw new Error("not implemented in static kernel");
-    },
-    setActiveSession: () => {},
-    setActivePane: () => {},
-    updateDraft: () => {},
-    clearDraft: () => {},
-    recordCommandHistory: () => {},
-    clearCommandHistory: () => {},
-    setTheme: () => {},
-    setTerminalFontScale: () => {},
-    setTerminalLineWrap: () => {},
-    clearDiagnostics: () => {},
-  };
-  const noopSelectors: WorkspaceSelectors = {
-    connection: () => normalizedSnapshot.connection,
-    sessions: () => normalizedSnapshot.catalog.sessions,
-    savedSessions: () => normalizedSnapshot.catalog.savedSessions,
-    activeSession: () => normalizedSnapshot.catalog.sessions.find(
-      (item) => item.session_id === normalizedSnapshot.selection.activeSessionId,
-    ) ?? null,
-    activePaneId: () => normalizedSnapshot.selection.activePaneId,
-    attachedSession: () => normalizedSnapshot.attachedSession,
-    diagnostics: () => normalizedSnapshot.diagnostics,
-    themeId: () => normalizedSnapshot.theme.themeId,
-    terminalDisplay: () => normalizedSnapshot.terminalDisplay,
-    commandHistory: () => normalizedSnapshot.commandHistory,
-  };
-
-  return {
-    getSnapshot: () => normalizedSnapshot,
-    subscribe: () => () => {},
-    bootstrap: noopAsync,
-    dispose: noopAsync,
-    commands: noopCommands,
-    selectors: noopSelectors,
-    diagnostics: noopDiagnostics,
-  };
-}
-
-export function renderWorkspaceFatalError(error: string): ReactElement {
-  return <TerminalRuntimeBootstrapErrorView error={error} />;
 }

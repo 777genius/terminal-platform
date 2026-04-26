@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSiblingStagingDirectory, replaceDirectoryAtomically } from "../../../../scripts/node/replace-directory-atomically.mjs";
+import { replaceDirectoryAtomically, withSiblingStagingDirectory } from "../../../../scripts/node/replace-directory-atomically.mjs";
 import { withFileLock } from "../../../../scripts/node/with-file-lock.mjs";
 
 function packageDirFromMeta(metaUrl) {
@@ -40,26 +40,26 @@ export function generateRuntimeTypes(metaUrl) {
   const { packageDir, repoRoot, rawDir } = resolveRuntimeTypesPaths(metaUrl);
 
   return withFileLock(path.join(packageDir, ".runtime-types-generate.lock"), async () => {
-    const stagedRawDir = await createSiblingStagingDirectory(rawDir, "generate");
+    await withSiblingStagingDirectory(rawDir, "generate", async (stagedRawDir) => {
+      execFileSync(
+        "cargo",
+        [
+          "run",
+          "-p",
+          "xtask",
+          "--",
+          "export-sdk-runtime-types",
+          "--out",
+          path.relative(repoRoot, stagedRawDir),
+        ],
+        {
+          cwd: repoRoot,
+          stdio: "inherit",
+        },
+      );
 
-    execFileSync(
-      "cargo",
-      [
-        "run",
-        "-p",
-        "xtask",
-        "--",
-        "export-sdk-runtime-types",
-        "--out",
-        path.relative(repoRoot, stagedRawDir),
-      ],
-      {
-        cwd: repoRoot,
-        stdio: "inherit",
-      },
-    );
-
-    await replaceDirectoryAtomically(rawDir, stagedRawDir);
+      await replaceDirectoryAtomically(rawDir, stagedRawDir);
+    });
   }, {
     metadata: {
       script: "runtime-types-generate",
