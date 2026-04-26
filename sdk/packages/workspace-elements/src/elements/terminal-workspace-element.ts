@@ -8,8 +8,11 @@ import {
 } from "./terminal-command-quick-commands.js";
 import {
   resolveTerminalWorkspaceInspectorState,
+  resolveTerminalWorkspaceNavigationState,
   TERMINAL_WORKSPACE_INSPECTOR_MODES,
+  TERMINAL_WORKSPACE_NAVIGATION_MODES,
   type TerminalWorkspaceInspectorMode,
+  type TerminalWorkspaceNavigationMode,
 } from "./terminal-workspace-layout.js";
 
 export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
@@ -18,6 +21,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     quickCommands: { attribute: false },
     autoFocusCommandInput: { attribute: "auto-focus-command-input", type: Boolean },
     inspectorMode: { attribute: "inspector-mode", type: String },
+    navigationMode: { attribute: "navigation-mode", type: String },
   };
 
   static styles = [
@@ -52,6 +56,12 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         height: 100%;
         min-height: 0;
         align-items: stretch;
+      }
+
+      .body[data-navigation-mode="collapsed"],
+      .body[data-navigation-mode="hidden"] {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) auto;
       }
 
       .sidebar,
@@ -127,20 +137,42 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         min-width: 0;
       }
 
-      .inspector-drawer summary {
+      .navigation-drawer {
+        min-width: 0;
+      }
+
+      .navigation-drawer__content {
+        display: grid;
+        gap: var(--tp-space-3);
+        max-height: min(28rem, 42vh);
+        min-width: 0;
+        overflow: auto;
+        padding: var(--tp-space-3);
+        scrollbar-gutter: stable;
+      }
+
+      .navigation-drawer__content .sidebar {
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+        position: static;
+      }
+
+      .inspector-drawer summary,
+      .navigation-drawer summary {
         align-items: center;
         display: flex;
         justify-content: space-between;
       }
 
-      .inspector-drawer summary::after {
+      .inspector-drawer summary::after,
+      .navigation-drawer summary::after {
         color: var(--tp-color-text-muted);
         content: "Open";
         font-size: 0.76rem;
         font-weight: 500;
       }
 
-      .inspector-drawer[open] summary::after {
+      .inspector-drawer[open] summary::after,
+      .navigation-drawer[open] summary::after {
         content: "Close";
       }
 
@@ -271,16 +303,19 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
   declare quickCommands: readonly TerminalCommandQuickCommand[] | null | undefined;
   declare autoFocusCommandInput: boolean;
   declare inspectorMode: TerminalWorkspaceInspectorMode;
+  declare navigationMode: TerminalWorkspaceNavigationMode;
 
   constructor() {
     super();
     this.quickCommands = defaultTerminalCommandQuickCommands;
     this.autoFocusCommandInput = false;
     this.inspectorMode = TERMINAL_WORKSPACE_INSPECTOR_MODES.inline;
+    this.navigationMode = TERMINAL_WORKSPACE_NAVIGATION_MODES.inline;
   }
 
   override render() {
     const inspectorState = resolveTerminalWorkspaceInspectorState(this.inspectorMode);
+    const navigationState = resolveTerminalWorkspaceNavigationState(this.navigationMode);
 
     return html`
       <div class="workspace" part="workspace">
@@ -291,11 +326,15 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           part="body"
           data-testid="tp-workspace-layout"
           data-layout="operations-deck"
+          data-navigation-mode=${navigationState.mode}
         >
-          <div class="sidebar" part="sidebar">
-            <tp-terminal-session-list .kernel=${this.kernel}></tp-terminal-session-list>
-            <tp-terminal-saved-sessions .kernel=${this.kernel}></tp-terminal-saved-sessions>
-          </div>
+          ${navigationState.renderInlineNavigation
+            ? html`
+                <div class="sidebar" part="sidebar" data-testid="tp-workspace-sidebar">
+                  ${this.renderNavigationContent()}
+                </div>
+              `
+            : null}
           <div class="content" part="content">
             <div
               class="operations-deck"
@@ -342,8 +381,32 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                 : null}
             </div>
           </div>
+
+          ${navigationState.renderCollapsedNavigation
+            ? html`
+                <details
+                  class="secondary-toggle navigation-drawer"
+                  part="navigation-drawer"
+                  data-testid="tp-workspace-navigation-drawer"
+                >
+                  <summary>${navigationState.summaryLabel}</summary>
+                  <div class="navigation-drawer__content">
+                    <div class="sidebar" part="sidebar" data-testid="tp-workspace-sidebar">
+                      ${this.renderNavigationContent()}
+                    </div>
+                  </div>
+                </details>
+              `
+            : null}
         </div>
       </div>
+    `;
+  }
+
+  private renderNavigationContent(): TemplateResult {
+    return html`
+      <tp-terminal-session-list .kernel=${this.kernel}></tp-terminal-session-list>
+      <tp-terminal-saved-sessions .kernel=${this.kernel}></tp-terminal-saved-sessions>
     `;
   }
 

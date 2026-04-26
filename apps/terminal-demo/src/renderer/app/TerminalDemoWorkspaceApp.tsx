@@ -645,6 +645,7 @@ export function TerminalDemoWorkspaceScreen(props: {
                 autoFocusCommandInput={true}
                 inspectorMode="collapsed"
                 kernel={props.kernel}
+                navigationMode="collapsed"
                 quickCommands={terminalDemoQuickCommands}
               />
             </div>

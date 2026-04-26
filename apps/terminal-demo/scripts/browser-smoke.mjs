@@ -153,7 +153,13 @@ async function main() {
       || result.afterCreate.workspacePanelShadow !== "none"
       || result.afterCreate.documentHorizontalOverflow > 1
       || result.afterCreate.workspaceLayout !== "operations-deck"
+      || result.afterCreate.workspaceNavigationMode !== "collapsed"
       || !result.afterCreate.hasOperationsDeck
+      || !result.afterCreate.hasNavigationDrawer
+      || result.afterCreate.navigationDrawerOpen !== false
+      || !result.afterCreate.navigationDrawerOpenedAfterClick
+      || !result.afterCreate.navigationDrawerClosedAfterToggle
+      || !result.afterCreate.navigationVisibleAfterDrawerOpen
       || result.afterCreate.workspaceInspectorMode !== "collapsed"
       || !result.afterCreate.hasInspectorDrawer
       || result.afterCreate.inspectorDrawerOpen !== false
@@ -297,7 +303,9 @@ async function main() {
       || result.afterCreateMobileLayout.demoShellMode !== "terminal"
       || result.afterCreateMobileLayout.demoShellColumnCount !== 1
       || result.afterCreateMobileLayout.operationsDeckColumnCount !== 1
+      || result.afterCreateMobileLayout.workspaceNavigationMode !== "collapsed"
       || result.afterCreateMobileLayout.workspaceInspectorMode !== "collapsed"
+      || !result.afterCreateMobileLayout.hasNavigationDrawer
       || !result.afterCreateMobileLayout.hasInspectorDrawer
       || result.afterCreateMobileLayout.inspectorDrawerOpen !== false
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
@@ -746,6 +754,7 @@ async function runSmokeScenario(browserUrl) {
       const toolbarRoot = workspaceRoot?.querySelector('tp-terminal-toolbar')?.shadowRoot ?? null;
       const paneTreeRoot = workspaceRoot?.querySelector('tp-terminal-pane-tree')?.shadowRoot ?? null;
       const layoutRoot = workspaceRoot?.querySelector('[data-testid="tp-workspace-layout"]') ?? null;
+      const navigationDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-navigation-drawer"]') ?? null;
       const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
       const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
       const inspectorColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-inspector-column"]') ?? null;
@@ -761,6 +770,8 @@ async function runSmokeScenario(browserUrl) {
       const terminalNewTab = tabStripRoot?.querySelector('[data-testid="tp-terminal-new-tab"]') ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const paneTreeHost = workspaceRoot?.querySelector('tp-terminal-pane-tree') ?? null;
+      const sessionListHost = workspaceRoot?.querySelector('tp-terminal-session-list') ?? null;
+      const savedSessionsHost = workspaceRoot?.querySelector('tp-terminal-saved-sessions') ?? null;
       const commandDockHost = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
       const screenRoot = screenHost?.shadowRoot ?? null;
       const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
@@ -820,6 +831,17 @@ async function runSmokeScenario(browserUrl) {
       );
       inspectorDrawerSummary?.click();
       const inspectorDrawerClosedAfterToggle = inspectorDrawer ? !inspectorDrawer.hasAttribute('open') : false;
+      const navigationDrawerSummary = navigationDrawer?.querySelector('summary') ?? null;
+      navigationDrawerSummary?.click();
+      const navigationDrawerOpenedAfterClick = navigationDrawer?.hasAttribute('open') ?? false;
+      const navigationVisibleAfterDrawerOpen = Boolean(
+        sessionListHost
+        && savedSessionsHost
+        && sessionListHost.getBoundingClientRect().height > 0
+        && savedSessionsHost.getBoundingClientRect().height > 0
+      );
+      navigationDrawerSummary?.click();
+      const navigationDrawerClosedAfterToggle = navigationDrawer ? !navigationDrawer.hasAttribute('open') : false;
       return {
         hasReady: debug?.connection?.state === 'ready',
         hasError: debug?.connection?.state === 'error',
@@ -971,7 +993,13 @@ async function runSmokeScenario(browserUrl) {
           ? screenViewport.scrollHeight - screenViewport.scrollTop - screenViewport.clientHeight <= 2
           : false,
         workspaceLayout: layoutRoot?.getAttribute('data-layout') ?? null,
+        workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         hasOperationsDeck: Boolean(layoutRoot && operationsDeck),
+        hasNavigationDrawer: Boolean(navigationDrawer),
+        navigationDrawerOpen: navigationDrawer?.hasAttribute('open') ?? null,
+        navigationDrawerOpenedAfterClick,
+        navigationDrawerClosedAfterToggle,
+        navigationVisibleAfterDrawerOpen,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
         hasInspectorDrawer: Boolean(inspectorDrawer),
         inspectorDrawerOpen: inspectorDrawer?.hasAttribute('open') ?? null,
@@ -1031,7 +1059,9 @@ async function runSmokeScenario(browserUrl) {
       const demoSidebar = demoShell?.querySelector('.shell__sidebar') ?? null;
       const demoMain = demoShell?.querySelector('.shell__main') ?? null;
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const layoutRoot = workspaceRoot?.querySelector('[data-testid="tp-workspace-layout"]') ?? null;
       const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
+      const navigationDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-navigation-drawer"]') ?? null;
       const inspectorDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-inspector-drawer"]') ?? null;
       const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
       const tabStripHost = workspaceRoot?.querySelector('tp-terminal-tab-strip') ?? null;
@@ -1067,7 +1097,9 @@ async function runSmokeScenario(browserUrl) {
         operationsDeckColumnCount: operationsDeck
           ? getComputedStyle(operationsDeck).gridTemplateColumns.split(' ').filter(Boolean).length
           : 0,
+        workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
+        hasNavigationDrawer: Boolean(navigationDrawer),
         hasInspectorDrawer: Boolean(inspectorDrawer),
         inspectorDrawerOpen: inspectorDrawer?.hasAttribute('open') ?? null,
         demoMainWidth: Math.round(demoMain?.getBoundingClientRect().width ?? 0),

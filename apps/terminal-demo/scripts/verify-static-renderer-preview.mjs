@@ -118,6 +118,10 @@ const terminalLayoutSourceContracts = [
         label: "demo collapses inspector behind terminal-first workspace",
         marker: 'inspectorMode="collapsed"',
       },
+      {
+        label: "demo collapses session navigation behind terminal-first workspace",
+        marker: 'navigationMode="collapsed"',
+      },
     ],
   },
   {

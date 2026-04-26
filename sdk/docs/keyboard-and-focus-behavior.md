@@ -23,6 +23,9 @@ Keyboard behavior is public API. Host apps can restyle elements, but they should
 - terminal tab strip renders above terminal output
 - command dock renders directly below terminal output
 - `auto-focus-command-input` delegates focus to the command dock after workspace updates
+- `navigation-mode="inline"` keeps session and saved-layout navigation beside the terminal
+- `navigation-mode="collapsed"` keeps session and saved-layout navigation available behind a drawer for terminal-first views
+- `navigation-mode="hidden"` lets host apps own session navigation elsewhere
 - `inspector-mode="inline"` keeps topology tools beside the terminal
 - `inspector-mode="collapsed"` keeps topology tools available behind a drawer for terminal-first views
 - `inspector-mode="hidden"` lets host apps own topology controls elsewhere
@@ -94,6 +97,6 @@ Current automated coverage:
 - unit tests for command composer action and layout contracts
 - public API tests for exported keyboard resolver types
 - static renderer contract checks for terminal layout and tab strip keyboard markers
-- browser smoke checks for tab strip pointer close and keyboard left/right navigation
+- browser smoke checks for collapsed navigation, collapsed inspector, tab strip pointer close, and keyboard left/right navigation
 
 Before release, this baseline should be extended with packed-package consumer smoke and a cross-browser keyboard matrix.

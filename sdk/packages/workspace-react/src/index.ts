@@ -23,6 +23,7 @@ export {
   TERMINAL_PANE_MIN_COLS,
   TERMINAL_PANE_MIN_ROWS,
   TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT,
+  TERMINAL_WORKSPACE_NAVIGATION_MODES,
   canRunTerminalTopologyCommand,
   compactTerminalId,
   countPaneTreeLeaves,
@@ -44,6 +45,7 @@ export {
   resolveTerminalTopologyControlState,
   resolveTerminalTopologyStatus,
   resolveTerminalWorkspaceInspectorState,
+  resolveTerminalWorkspaceNavigationState,
   resolveWorkspaceCapability,
   TERMINAL_WORKSPACE_INSPECTOR_MODES,
 } from "@terminal-platform/workspace-elements";
@@ -86,4 +88,6 @@ export type {
   TerminalWorkspaceCapabilityStatus,
   TerminalWorkspaceInspectorMode,
   TerminalWorkspaceInspectorState,
+  TerminalWorkspaceNavigationMode,
+  TerminalWorkspaceNavigationState,
 } from "@terminal-platform/workspace-elements";
