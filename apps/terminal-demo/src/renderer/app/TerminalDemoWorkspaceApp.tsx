@@ -318,6 +318,7 @@ export function TerminalDemoWorkspaceScreen(props: {
     <div
       className="shell"
       data-has-active-session={activeSessionId ? "true" : "false"}
+      data-workspace-theme={snapshot.theme.themeId}
       data-testid="terminal-demo-shell"
     >
       <aside className="shell__sidebar">

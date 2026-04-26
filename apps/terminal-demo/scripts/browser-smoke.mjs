@@ -330,10 +330,13 @@ async function main() {
       || result.afterThemeSwitch.activeThemeButton !== "terminal-platform-light"
       || result.afterThemeSwitch.themeButtonLabel !== "Light"
       || result.afterThemeSwitch.themeButtonTitle !== "Switch workspace theme to Light."
+      || result.afterThemeSwitch.demoShellTheme !== "terminal-platform-light"
+      || result.afterThemeSwitch.demoShellBgToken !== "#f6f8fb"
+      || !String(result.afterThemeSwitch.demoShellColorScheme ?? "").includes("light")
       || result.afterThemeSwitch.screenBgToken !== "#f6f8fb"
       || result.afterThemeSwitch.storedTheme !== "terminal-platform-light"
     ) {
-      throw new Error(`Theme switch did not apply to SDK elements: ${JSON.stringify(result.afterThemeSwitch)}`);
+      throw new Error(`Theme switch did not apply to SDK and demo shell elements: ${JSON.stringify(result.afterThemeSwitch)}`);
     }
 
     if (
@@ -1180,6 +1183,7 @@ async function runSmokeScenario(browserUrl) {
       const toolbarRoot = workspaceRoot?.querySelector('tp-terminal-toolbar')?.shadowRoot ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const commandDockHost = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
+      const demoShell = document.querySelector('[data-testid="terminal-demo-shell"]') ?? null;
       const themeButton = [...(toolbarRoot?.querySelectorAll('[part="theme-option"]') ?? [])]
         .find((button) => button.getAttribute('data-theme-id') === 'terminal-platform-light') ?? null;
       if (!themeButton) {
@@ -1197,10 +1201,14 @@ async function runSmokeScenario(browserUrl) {
 
       themeButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
 
       return {
         clicked: true,
         themeId: window.terminalDemoDebug?.getState?.()?.theme?.themeId ?? null,
+        demoShellTheme: demoShell?.getAttribute('data-workspace-theme') ?? null,
+        demoShellBgToken: demoShellStyle?.getPropertyValue('--bg').trim() ?? null,
+        demoShellColorScheme: demoShellStyle?.colorScheme ?? null,
         workspaceTheme: workspaceHost?.getAttribute('data-tp-theme') ?? null,
         screenTheme: screenHost?.getAttribute('data-tp-theme') ?? null,
         commandDockTheme: commandDockHost?.getAttribute('data-tp-theme') ?? null,

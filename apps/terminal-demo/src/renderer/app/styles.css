@@ -56,6 +56,58 @@ button {
   animation: shell-enter 220ms ease-out;
 }
 
+.shell[data-workspace-theme="terminal-platform-light"] {
+  color-scheme: light;
+  --bg: #f6f8fb;
+  --bg-elevated: rgba(255, 255, 255, 0.94);
+  --bg-hero: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(237, 244, 250, 0.96));
+  --border: rgba(92, 108, 128, 0.24);
+  --border-strong: rgba(15, 126, 168, 0.36);
+  --text: #172033;
+  --text-soft: #657086;
+  --brand: #0f7ea8;
+  --brand-soft: rgba(15, 126, 168, 0.12);
+  --success: #1f8f55;
+  --success-soft: rgba(31, 143, 85, 0.12);
+  --warning: #a15c06;
+  --warning-soft: rgba(161, 92, 6, 0.12);
+  --danger: #c23838;
+  --danger-soft: rgba(194, 56, 56, 0.12);
+  --shadow: 0 18px 48px rgba(23, 32, 51, 0.12);
+  background: linear-gradient(180deg, #f6f8fb 0%, #edf2f7 100%);
+}
+
+.shell[data-workspace-theme="terminal-platform-light"] .hero__stat,
+.shell[data-workspace-theme="terminal-platform-light"] .button,
+.shell[data-workspace-theme="terminal-platform-light"] .list-item,
+.shell[data-workspace-theme="terminal-platform-light"] .list-card,
+.shell[data-workspace-theme="terminal-platform-light"] .details-panel summary,
+.shell[data-workspace-theme="terminal-platform-light"] .banner--subtle {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.shell[data-workspace-theme="terminal-platform-light"] input,
+.shell[data-workspace-theme="terminal-platform-light"] textarea {
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text);
+}
+
+.shell[data-workspace-theme="terminal-platform-light"] .badge--brand {
+  color: #075c78;
+}
+
+.shell[data-workspace-theme="terminal-platform-light"] .badge--success {
+  color: #166b3f;
+}
+
+.shell[data-workspace-theme="terminal-platform-light"] .badge--warning {
+  color: #7a4304;
+}
+
+.shell[data-workspace-theme="terminal-platform-light"] .badge--danger {
+  color: #9a2828;
+}
+
 .shell[data-has-active-session="true"] {
   grid-template-columns: minmax(13.5rem, 16rem) minmax(0, 1fr);
   gap: 10px;
