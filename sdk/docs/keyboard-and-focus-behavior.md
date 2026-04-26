@@ -23,6 +23,9 @@ Keyboard behavior is public API. Host apps can restyle elements, but they should
 - terminal tab strip renders above terminal output
 - command dock renders directly below terminal output
 - `auto-focus-command-input` delegates focus to the command dock after workspace updates
+- `inspector-mode="inline"` keeps topology tools beside the terminal
+- `inspector-mode="collapsed"` keeps topology tools available behind a drawer for terminal-first views
+- `inspector-mode="hidden"` lets host apps own topology controls elsewhere
 
 The workspace element must not define canonical DTOs or backend-native references. It only composes SDK elements around `WorkspaceKernel`.
 

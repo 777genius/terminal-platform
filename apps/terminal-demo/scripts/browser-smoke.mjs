@@ -151,10 +151,14 @@ async function main() {
       || result.afterCreate.documentHorizontalOverflow > 1
       || result.afterCreate.workspaceLayout !== "operations-deck"
       || !result.afterCreate.hasOperationsDeck
-      || result.afterCreate.operationsDeckColumnCount < 2
+      || result.afterCreate.workspaceInspectorMode !== "collapsed"
+      || !result.afterCreate.hasInspectorDrawer
+      || result.afterCreate.inspectorDrawerOpen !== false
+      || result.afterCreate.operationsDeckColumnCount !== 1
       || !result.afterCreate.screenInTerminalColumn
       || !result.afterCreate.commandDockInCommandRegion
       || !result.afterCreate.topologyInInspectorColumn
+      || !result.afterCreate.topologyInInspectorDrawer
       || !result.afterCreate.terminalTabStripInTerminalColumn
       || !result.afterCreate.terminalTabStripBeforeScreen
       || result.afterCreate.terminalTabStripGapPx !== 0
@@ -286,6 +290,9 @@ async function main() {
       || result.afterCreateMobileLayout.demoShellActive !== "true"
       || result.afterCreateMobileLayout.demoShellColumnCount !== 1
       || result.afterCreateMobileLayout.operationsDeckColumnCount !== 1
+      || result.afterCreateMobileLayout.workspaceInspectorMode !== "collapsed"
+      || !result.afterCreateMobileLayout.hasInspectorDrawer
+      || result.afterCreateMobileLayout.inspectorDrawerOpen !== false
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
       || !result.afterCreateMobileLayout.mainPrecedesSidebar
       || result.afterCreateMobileLayout.demoMainWidth < 430
@@ -734,6 +741,7 @@ async function runSmokeScenario(browserUrl) {
       const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
       const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
       const inspectorColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-inspector-column"]') ?? null;
+      const inspectorDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-inspector-drawer"]') ?? null;
       const commandRegion = workspaceRoot?.querySelector('[data-testid="tp-workspace-command-region"]') ?? null;
       const workspaceContent = workspaceRoot?.querySelector('[part="content"]') ?? null;
       const tabStripHost = workspaceRoot?.querySelector('tp-terminal-tab-strip') ?? null;
@@ -939,6 +947,9 @@ async function runSmokeScenario(browserUrl) {
           : false,
         workspaceLayout: layoutRoot?.getAttribute('data-layout') ?? null,
         hasOperationsDeck: Boolean(layoutRoot && operationsDeck),
+        workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
+        hasInspectorDrawer: Boolean(inspectorDrawer),
+        inspectorDrawerOpen: inspectorDrawer?.hasAttribute('open') ?? null,
         operationsDeckColumnCount: operationsDeck
           ? getComputedStyle(operationsDeck).gridTemplateColumns.split(' ').filter(Boolean).length
           : 0,
@@ -946,6 +957,7 @@ async function runSmokeScenario(browserUrl) {
         screenInTerminalColumn: Boolean(terminalColumn && screenHost && terminalColumn.contains(screenHost)),
         commandDockInCommandRegion: Boolean(commandRegion && commandDockHost && commandRegion.contains(commandDockHost)),
         topologyInInspectorColumn: Boolean(inspectorColumn && paneTreeHost && inspectorColumn.contains(paneTreeHost)),
+        topologyInInspectorDrawer: Boolean(inspectorDrawer && paneTreeHost && inspectorDrawer.contains(paneTreeHost)),
         terminalTabStripInTerminalColumn: Boolean(terminalColumn && tabStripHost && terminalColumn.contains(tabStripHost)),
         terminalTabStripBeforeScreen: Boolean(
           terminalColumn
@@ -992,6 +1004,7 @@ async function runSmokeScenario(browserUrl) {
       const demoMain = demoShell?.querySelector('.shell__main') ?? null;
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
+      const inspectorDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-inspector-drawer"]') ?? null;
       const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
       const tabStripHost = workspaceRoot?.querySelector('tp-terminal-tab-strip') ?? null;
       const tabStripRoot = tabStripHost?.shadowRoot ?? null;
@@ -1025,6 +1038,9 @@ async function runSmokeScenario(browserUrl) {
         operationsDeckColumnCount: operationsDeck
           ? getComputedStyle(operationsDeck).gridTemplateColumns.split(' ').filter(Boolean).length
           : 0,
+        workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
+        hasInspectorDrawer: Boolean(inspectorDrawer),
+        inspectorDrawerOpen: inspectorDrawer?.hasAttribute('open') ?? null,
         demoMainWidth: Math.round(demoMain?.getBoundingClientRect().width ?? 0),
         documentHorizontalOverflow: Math.max(
           0,

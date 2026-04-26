@@ -10,6 +10,7 @@ import {
   TERMINAL_PANE_MIN_COLS,
   TERMINAL_PANE_MIN_ROWS,
   TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT,
+  TERMINAL_WORKSPACE_INSPECTOR_MODES,
   canRunTerminalTopologyCommand,
   canNavigateTerminalCommandHistory,
   compactTerminalId,
@@ -37,6 +38,7 @@ import {
   resolveTerminalToolbarThemeOption,
   resolveTerminalTopologyControlState,
   resolveTerminalTopologyStatus,
+  resolveTerminalWorkspaceInspectorState,
   resolveWorkspaceCapability,
   TerminalCommandComposerElement,
   type TerminalCommandComposerActionId,
@@ -84,6 +86,8 @@ import {
   type TerminalTopologyStatus,
   type TerminalWorkspaceCapabilityState,
   type TerminalWorkspaceCapabilityStatus,
+  type TerminalWorkspaceInspectorMode,
+  type TerminalWorkspaceInspectorState,
 } from "./index.js";
 
 type PublicControlTypes =
@@ -131,7 +135,9 @@ type PublicControlTypes =
   | TerminalTopologyControlState
   | TerminalTopologyStatus
   | TerminalWorkspaceCapabilityState
-  | TerminalWorkspaceCapabilityStatus;
+  | TerminalWorkspaceCapabilityStatus
+  | TerminalWorkspaceInspectorMode
+  | TerminalWorkspaceInspectorState;
 
 describe("workspace elements public api", () => {
   it("exports reusable control resolvers for custom UI surfaces", () => {
@@ -158,6 +164,7 @@ describe("workspace elements public api", () => {
       resolveTerminalToolbarThemeOption,
       resolveTerminalTopologyControlState,
       resolveTerminalTopologyStatus,
+      resolveTerminalWorkspaceInspectorState,
       resolveWorkspaceCapability,
       canRunTerminalTopologyCommand,
       canNavigateTerminalCommandHistory,
@@ -177,6 +184,7 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_PANE_MIN_ROWS).toBeLessThan(TERMINAL_PANE_MAX_ROWS);
     expect(TERMINAL_PANE_MIN_COLS).toBeLessThan(TERMINAL_PANE_MAX_COLS);
     expect(defaultTerminalCommandQuickCommands.length).toBeGreaterThan(0);
+    expect(TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed).toBe("collapsed");
   });
 });
 

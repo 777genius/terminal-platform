@@ -132,3 +132,9 @@ export {
   type TerminalWorkspaceCapabilityState,
   type TerminalWorkspaceCapabilityStatus,
 } from "./elements/terminal-workspace-capabilities.js";
+export {
+  TERMINAL_WORKSPACE_INSPECTOR_MODES,
+  resolveTerminalWorkspaceInspectorState,
+  type TerminalWorkspaceInspectorMode,
+  type TerminalWorkspaceInspectorState,
+} from "./elements/terminal-workspace-layout.js";

@@ -43,7 +43,9 @@ export {
   resolveTerminalScreenInputStatus,
   resolveTerminalTopologyControlState,
   resolveTerminalTopologyStatus,
+  resolveTerminalWorkspaceInspectorState,
   resolveWorkspaceCapability,
+  TERMINAL_WORKSPACE_INSPECTOR_MODES,
 } from "@terminal-platform/workspace-elements";
 
 export type {
@@ -82,4 +84,6 @@ export type {
   TerminalTopologyStatus,
   TerminalWorkspaceCapabilityState,
   TerminalWorkspaceCapabilityStatus,
+  TerminalWorkspaceInspectorMode,
+  TerminalWorkspaceInspectorState,
 } from "@terminal-platform/workspace-elements";

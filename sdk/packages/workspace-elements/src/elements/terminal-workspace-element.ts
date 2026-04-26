@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, type TemplateResult } from "lit";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
@@ -6,12 +6,18 @@ import {
   defaultTerminalCommandQuickCommands,
   type TerminalCommandQuickCommand,
 } from "./terminal-command-quick-commands.js";
+import {
+  resolveTerminalWorkspaceInspectorState,
+  TERMINAL_WORKSPACE_INSPECTOR_MODES,
+  type TerminalWorkspaceInspectorMode,
+} from "./terminal-workspace-layout.js";
 
 export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
     quickCommands: { attribute: false },
     autoFocusCommandInput: { attribute: "auto-focus-command-input", type: Boolean },
+    inspectorMode: { attribute: "inspector-mode", type: String },
   };
 
   static styles = [
@@ -76,6 +82,12 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         min-height: 0;
       }
 
+      .operations-deck[data-inspector-mode="collapsed"],
+      .operations-deck[data-inspector-mode="hidden"] {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) auto;
+      }
+
       .terminal-column,
       .inspector-column {
         display: grid;
@@ -109,6 +121,44 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         overflow: auto;
         padding-right: 0.15rem;
         scrollbar-gutter: stable;
+      }
+
+      .inspector-drawer {
+        min-width: 0;
+      }
+
+      .inspector-drawer summary {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+      }
+
+      .inspector-drawer summary::after {
+        color: var(--tp-color-text-muted);
+        content: "Open";
+        font-size: 0.76rem;
+        font-weight: 500;
+      }
+
+      .inspector-drawer[open] summary::after {
+        content: "Close";
+      }
+
+      .inspector-drawer__content {
+        display: grid;
+        gap: var(--tp-space-3);
+        max-height: min(34rem, 46vh);
+        min-width: 0;
+        overflow: auto;
+        padding: var(--tp-space-3);
+        scrollbar-gutter: stable;
+      }
+
+      .inspector-drawer__content .inspector-column {
+        position: static;
+        max-height: none;
+        overflow: visible;
+        padding-right: 0;
       }
 
       .command-region {
@@ -220,14 +270,18 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
 
   declare quickCommands: readonly TerminalCommandQuickCommand[] | null | undefined;
   declare autoFocusCommandInput: boolean;
+  declare inspectorMode: TerminalWorkspaceInspectorMode;
 
   constructor() {
     super();
     this.quickCommands = defaultTerminalCommandQuickCommands;
     this.autoFocusCommandInput = false;
+    this.inspectorMode = TERMINAL_WORKSPACE_INSPECTOR_MODES.inline;
   }
 
   override render() {
+    const inspectorState = resolveTerminalWorkspaceInspectorState(this.inspectorMode);
+
     return html`
       <div class="workspace" part="workspace">
         <tp-terminal-status-bar .kernel=${this.kernel}></tp-terminal-status-bar>
@@ -243,7 +297,12 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
             <tp-terminal-saved-sessions .kernel=${this.kernel}></tp-terminal-saved-sessions>
           </div>
           <div class="content" part="content">
-            <div class="operations-deck" part="operations-deck" data-testid="tp-workspace-operations-deck">
+            <div
+              class="operations-deck"
+              part="operations-deck"
+              data-testid="tp-workspace-operations-deck"
+              data-inspector-mode=${inspectorState.mode}
+            >
               <div class="terminal-column" part="terminal-column" data-testid="tp-workspace-terminal-column">
                 <tp-terminal-tab-strip .kernel=${this.kernel}></tp-terminal-tab-strip>
                 <tp-terminal-screen .kernel=${this.kernel} placement="terminal"></tp-terminal-screen>
@@ -257,47 +316,78 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                 </div>
               </div>
 
-              <div class="inspector-column" part="inspector-column" data-testid="tp-workspace-inspector-column">
-                <tp-terminal-pane-tree .kernel=${this.kernel}></tp-terminal-pane-tree>
+              ${inspectorState.renderInlineInspector
+                ? html`
+                    <div class="inspector-column" part="inspector-column" data-testid="tp-workspace-inspector-column">
+                      ${this.renderInspectorContent()}
+                    </div>
+                  `
+                : null}
 
-                <details class="secondary-toggle workspace-tools">
-                  <summary>Workspace tools</summary>
-                  <div class="advanced-stack">
-                    <tp-terminal-toolbar .kernel=${this.kernel}></tp-terminal-toolbar>
-                  </div>
-                </details>
-
-                <div class="advanced-stack" part="diagnostics-stack">
-                  ${this.snapshot.diagnostics.length > 0
-                    ? html`
-                        <details class="secondary-toggle" open>
-                          <summary>Workspace notices - ${this.snapshot.diagnostics.length}</summary>
-                          <div class="panel diagnostics" part="diagnostics">
-                            <div class="panel-header">
-                              <div class="panel-eyebrow">Alerts</div>
-                              <div class="panel-title">Workspace diagnostics</div>
-                              <div class="panel-copy">These notices come from the transport or runtime layer.</div>
-                            </div>
-                            <ul>
-                              ${this.snapshot.diagnostics.map(
-                                (item) => html`
-                                  <li>
-                                    <strong>${item.code}</strong>
-                                    <span class="muted"> ${item.message}</span>
-                                  </li>
-                                `,
-                              )}
-                            </ul>
-                          </div>
-                        </details>
-                      `
-                    : null}
-                </div>
-              </div>
+              ${inspectorState.renderCollapsedInspector
+                ? html`
+                    <details
+                      class="secondary-toggle inspector-drawer"
+                      part="inspector-drawer"
+                      data-testid="tp-workspace-inspector-drawer"
+                    >
+                      <summary>${inspectorState.summaryLabel}</summary>
+                      <div class="inspector-drawer__content">
+                        <div class="inspector-column" part="inspector-column" data-testid="tp-workspace-inspector-column">
+                          ${this.renderInspectorContent()}
+                        </div>
+                      </div>
+                    </details>
+                  `
+                : null}
             </div>
           </div>
         </div>
       </div>
     `;
+  }
+
+  private renderInspectorContent(): TemplateResult {
+    return html`
+      <tp-terminal-pane-tree .kernel=${this.kernel}></tp-terminal-pane-tree>
+
+      <details class="secondary-toggle workspace-tools">
+        <summary>Workspace tools</summary>
+        <div class="advanced-stack">
+          <tp-terminal-toolbar .kernel=${this.kernel}></tp-terminal-toolbar>
+        </div>
+      </details>
+
+      <div class="advanced-stack" part="diagnostics-stack">
+        ${this.renderDiagnostics()}
+      </div>
+    `;
+  }
+
+  private renderDiagnostics(): TemplateResult | null {
+    return this.snapshot.diagnostics.length > 0
+      ? html`
+          <details class="secondary-toggle" open>
+            <summary>Workspace notices - ${this.snapshot.diagnostics.length}</summary>
+            <div class="panel diagnostics" part="diagnostics">
+              <div class="panel-header">
+                <div class="panel-eyebrow">Alerts</div>
+                <div class="panel-title">Workspace diagnostics</div>
+                <div class="panel-copy">These notices come from the transport or runtime layer.</div>
+              </div>
+              <ul>
+                ${this.snapshot.diagnostics.map(
+                  (item) => html`
+                    <li>
+                      <strong>${item.code}</strong>
+                      <span class="muted"> ${item.message}</span>
+                    </li>
+                  `,
+                )}
+              </ul>
+            </div>
+          </details>
+        `
+      : null;
   }
 }

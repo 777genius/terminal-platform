@@ -10,6 +10,8 @@ import type {
   TerminalCommandComposerDraftChangeDetail,
   TerminalCommandComposerHistoryNavigateDetail,
   TerminalCommandComposerShortcutDetail,
+  TerminalWorkspaceInspectorMode,
+  TerminalWorkspaceInspectorState,
 } from "./index.js";
 import type { TerminalCommandComposerElement } from "@terminal-platform/workspace-elements";
 
@@ -44,11 +46,17 @@ type _ComposerShortcutEvent = Assert<
 >;
 type _ComposerPasteEvent = Assert<Equal<EventParameter<ComposerProps["onCommandPaste"]>, CustomEvent<void>>>;
 type _ComposerSubmitEvent = Assert<Equal<EventParameter<ComposerProps["onCommandSubmit"]>, CustomEvent<void>>>;
-type _WorkspacePropsRemainImportable = React.ComponentProps<typeof TerminalWorkspace>;
+type WorkspaceProps = React.ComponentProps<typeof TerminalWorkspace>;
+type _WorkspacePropsRemainImportable = WorkspaceProps;
+type _WorkspaceInspectorModeProp = Assert<
+  Equal<WorkspaceProps["inspectorMode"], TerminalWorkspaceInspectorMode | undefined>
+>;
 type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandComposerActionId
   | TerminalCommandComposerActionOptions
-  | TerminalCommandComposerActionPresentation;
+  | TerminalCommandComposerActionPresentation
+  | TerminalWorkspaceInspectorMode
+  | TerminalWorkspaceInspectorState;
 
 describe("workspace react public api", () => {
   it("exports the command composer wrapper and composer utilities", async () => {
@@ -64,6 +72,8 @@ describe("workspace react public api", () => {
     expect(workspaceReact.resolveTerminalCommandComposerActions()[0]?.keyHint).toBe("Enter");
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
     expect(workspaceReact.resolveTerminalCommandComposerRows("echo one\necho two")).toBe(2);
+    expect(workspaceReact.TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed).toBe("collapsed");
+    expect(workspaceReact.resolveTerminalWorkspaceInspectorState("hidden").renderInspector).toBe(false);
   });
 });
 

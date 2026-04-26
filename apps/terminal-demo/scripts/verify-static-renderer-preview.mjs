@@ -75,6 +75,14 @@ const terminalLayoutSourceContracts = [
         marker: 'data-testid="tp-workspace-terminal-column"',
       },
       {
+        label: "workspace supports a terminal-first collapsed inspector",
+        marker: 'data-inspector-mode=${inspectorState.mode}',
+      },
+      {
+        label: "workspace exposes collapsed inspector drawer",
+        marker: 'data-testid="tp-workspace-inspector-drawer"',
+      },
+      {
         label: "terminal screen opts into terminal placement",
         marker: '<tp-terminal-screen .kernel=${this.kernel} placement="terminal"></tp-terminal-screen>',
       },
@@ -92,6 +100,23 @@ const terminalLayoutSourceContracts = [
           '<tp-terminal-screen .kernel=${this.kernel} placement="terminal"></tp-terminal-screen>',
           "<tp-terminal-command-dock",
         ],
+      },
+    ],
+  },
+  {
+    name: "static demo opts into terminal-first workspace layout",
+    relativePath: path.join(
+      "apps",
+      "terminal-demo",
+      "src",
+      "renderer",
+      "app",
+      "TerminalDemoWorkspaceApp.tsx",
+    ),
+    includes: [
+      {
+        label: "demo collapses inspector behind terminal-first workspace",
+        marker: 'inspectorMode="collapsed"',
       },
     ],
   },
