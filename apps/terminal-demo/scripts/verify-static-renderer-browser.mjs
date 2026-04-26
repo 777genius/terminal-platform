@@ -74,6 +74,8 @@ async function main() {
       || !result.hasAcceptedPreviewLine
       || result.hasCommandFailure
       || result.documentHorizontalOverflow > 1
+      || result.workspaceHostHeaderDisplay !== "none"
+      || result.workspaceHostTopOffset > 20
       || result.terminalColumnHeight < 560
       || result.screenViewportHeight < 340
       || result.workspacePanelShadow !== "none"
@@ -268,6 +270,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       });
 
       const workspace = document.querySelector('tp-terminal-workspace');
+      const demoMain = document.querySelector('.shell__main') ?? null;
+      const workspaceHostSlot = document.querySelector('[data-testid="terminal-workspace-host"]') ?? null;
+      const workspaceHostHeader = document.querySelector('.panel__header--workspace') ?? null;
       const workspaceRoot = workspace?.shadowRoot ?? null;
       const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
       const commandDockElement = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
@@ -340,6 +345,10 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         hasCommandFailure: Boolean(commandRoot?.textContent?.includes('Command failed')),
         commandHistoryLatest: state?.commandHistory?.entries?.at?.(-1) ?? null,
         documentHorizontalOverflow: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
+        workspaceHostTopOffset: demoMain && workspaceHostSlot
+          ? Math.round(workspaceHostSlot.getBoundingClientRect().top - demoMain.getBoundingClientRect().top)
+          : null,
+        workspaceHostHeaderDisplay: workspaceHostHeader ? getComputedStyle(workspaceHostHeader).display : null,
         terminalColumnHeight: Math.round(terminalColumnRect?.height ?? 0),
         screenViewportHeight: Math.round(viewportRect?.height ?? 0),
         workspacePanelShadow: workspaceFrame

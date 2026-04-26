@@ -253,13 +253,14 @@ button {
 
 .shell[data-has-active-session="true"] .panel--workspace {
   gap: 0;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
   padding: 0;
 }
 
 .shell[data-has-active-session="true"] .panel__header--workspace {
+  display: none;
   align-items: center;
   border-bottom: 1px solid var(--border);
   background: rgba(7, 9, 12, 0.48);

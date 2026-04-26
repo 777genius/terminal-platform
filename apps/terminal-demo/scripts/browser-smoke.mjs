@@ -142,8 +142,9 @@ async function main() {
       || result.afterCreate.demoMainWidth <= result.afterCreate.demoSidebarWidth * 3
       || result.afterCreate.workspaceHostWidth < 1000
       || result.afterCreate.workspaceHostTopOffset == null
-      || result.afterCreate.workspaceHostTopOffset > 90
+      || result.afterCreate.workspaceHostTopOffset > 20
       || result.afterCreate.workspaceContentWidth < 800
+      || result.afterCreate.workspaceHostHeaderDisplay !== "none"
       || result.afterCreate.terminalColumnHeight < 560
       || result.afterCreate.screenViewportHeight < 360
       || result.afterCreate.workspacePanelShadow !== "none"
@@ -690,6 +691,7 @@ async function runSmokeScenario(browserUrl) {
       const demoShell = document.querySelector('[data-testid="terminal-demo-shell"]') ?? null;
       const demoSidebar = demoShell?.querySelector('.shell__sidebar') ?? null;
       const demoMain = demoShell?.querySelector('.shell__main') ?? null;
+      const workspaceHostHeader = document.querySelector('.panel__header--workspace') ?? null;
       const workspaceHostSlot = document.querySelector('[data-testid="terminal-workspace-host"]') ?? null;
       const workspaceHost = document.querySelector('tp-terminal-workspace');
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
@@ -782,6 +784,7 @@ async function runSmokeScenario(browserUrl) {
         workspaceHostTopOffset: demoMain && workspaceHostSlot
           ? Math.round(workspaceHostSlot.getBoundingClientRect().top - demoMain.getBoundingClientRect().top)
           : null,
+        workspaceHostHeaderDisplay: workspaceHostHeader ? getComputedStyle(workspaceHostHeader).display : null,
         workspaceContentWidth: Math.round(workspaceContent?.getBoundingClientRect().width ?? 0),
         terminalColumnHeight: Math.round(terminalColumn?.getBoundingClientRect().height ?? 0),
         screenViewportHeight: Math.round(screenViewport?.getBoundingClientRect().height ?? 0),
