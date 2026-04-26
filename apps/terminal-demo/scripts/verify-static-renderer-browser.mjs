@@ -74,6 +74,9 @@ async function main() {
       || !result.hasAcceptedPreviewLine
       || result.hasCommandFailure
       || result.documentHorizontalOverflow > 1
+      || result.terminalColumnHeight < 560
+      || result.screenViewportHeight < 340
+      || result.workspacePanelShadow !== "none"
       || Math.abs(result.terminalComposerGapPx ?? 99) > 1
       || result.commandHistoryLatest !== "printf \"static-browser-ok\\n\""
     ) {
@@ -269,6 +272,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
       const commandDockElement = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
       const screenElement = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const workspaceFrame = workspaceRoot?.querySelector('[part="workspace"]') ?? null;
       const commandRoot = commandDockElement?.shadowRoot ?? null;
       const screenRoot = screenElement?.shadowRoot ?? null;
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
@@ -310,6 +314,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const terminalText = state?.attachedSession?.focused_screen?.surface?.lines
         ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n')
         : '';
+      const terminalColumnRect = terminalColumn?.getBoundingClientRect();
       const viewportRect = viewport?.getBoundingClientRect();
       const composerRect = composer?.getBoundingClientRect();
 
@@ -335,6 +340,11 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         hasCommandFailure: Boolean(commandRoot?.textContent?.includes('Command failed')),
         commandHistoryLatest: state?.commandHistory?.entries?.at?.(-1) ?? null,
         documentHorizontalOverflow: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
+        terminalColumnHeight: Math.round(terminalColumnRect?.height ?? 0),
+        screenViewportHeight: Math.round(viewportRect?.height ?? 0),
+        workspacePanelShadow: workspaceFrame
+          ? getComputedStyle(workspaceFrame).getPropertyValue('--tp-shadow-panel').trim()
+          : null,
         terminalComposerGapPx: viewportRect && composerRect ? composerRect.top - viewportRect.bottom : null,
       };
     })()`);

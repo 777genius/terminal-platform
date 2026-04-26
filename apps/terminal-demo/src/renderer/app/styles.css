@@ -80,7 +80,7 @@ button {
 .panel {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
 }
@@ -290,10 +290,11 @@ button {
   height: 100%;
   --tp-workspace-sidebar-target-width: clamp(10.5rem, 13vw, 12rem);
   --tp-workspace-inspector-target-width: clamp(13rem, 17vw, 17rem);
+  --tp-workspace-terminal-column-min-height: clamp(30rem, calc(100vh - 8rem), 52rem);
   --tp-terminal-screen-viewport-min-height: 16rem;
   --tp-terminal-screen-viewport-max-height: none;
-  --tp-terminal-screen-mobile-viewport-min-height: clamp(13rem, 34vh, 18rem);
-  --tp-terminal-screen-mobile-viewport-max-height: min(42vh, 22rem);
+  --tp-terminal-screen-mobile-viewport-min-height: clamp(18rem, 54vh, 34rem);
+  --tp-terminal-screen-mobile-viewport-max-height: none;
 }
 
 .panel--workspace {
@@ -797,6 +798,16 @@ textarea:focus-visible {
     padding: 18px;
   }
 
+  .shell[data-has-active-session="true"] {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .shell[data-has-active-session="true"] tp-terminal-workspace {
+    --tp-workspace-terminal-column-min-height: clamp(28rem, 68vh, 42rem);
+    --tp-terminal-screen-mobile-viewport-min-height: clamp(18rem, 46vh, 29rem);
+  }
+
   .shell__sidebar,
   .shell__main,
   .list-stack--scroll {
@@ -818,6 +829,12 @@ textarea:focus-visible {
 }
 
 @media (max-width: 720px) {
+  .shell[data-has-active-session="true"] tp-terminal-workspace {
+    --tp-workspace-terminal-column-min-height: clamp(24rem, 58vh, 34rem);
+    --tp-terminal-screen-mobile-viewport-min-height: clamp(16rem, 36vh, 18.5rem);
+    --tp-terminal-screen-mobile-viewport-max-height: min(40vh, 18.5rem);
+  }
+
   .list-card {
     align-items: stretch;
     flex-direction: column;

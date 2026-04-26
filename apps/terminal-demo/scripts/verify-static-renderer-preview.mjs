@@ -107,7 +107,7 @@ const terminalLayoutSourceContracts = [
       },
       {
         label: "dock keeps only bottom terminal radius",
-        marker: "border-radius: 0 0 0.6rem 0.6rem;",
+        marker: "border-radius: 0 0 var(--tp-radius-md) var(--tp-radius-md);",
       },
       {
         label: "dock remains addressable for e2e checks",
@@ -137,6 +137,10 @@ const terminalLayoutSourceContracts = [
       "terminal-screen-element.ts",
     ),
     includes: [
+      {
+        label: "screen reserves an explicit row for tools before output",
+        marker: "grid-template-rows: auto auto auto minmax(0, 1fr);",
+      },
       {
         label: "terminal placement has its own line layout",
         marker: ".screen[data-placement=\"terminal\"] .line",

@@ -144,6 +144,9 @@ async function main() {
       || result.afterCreate.workspaceHostTopOffset == null
       || result.afterCreate.workspaceHostTopOffset > 90
       || result.afterCreate.workspaceContentWidth < 800
+      || result.afterCreate.terminalColumnHeight < 560
+      || result.afterCreate.screenViewportHeight < 360
+      || result.afterCreate.workspacePanelShadow !== "none"
       || result.afterCreate.documentHorizontalOverflow > 1
       || result.afterCreate.workspaceLayout !== "operations-deck"
       || !result.afterCreate.hasOperationsDeck
@@ -276,6 +279,7 @@ async function main() {
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
       || !result.afterCreateMobileLayout.mainPrecedesSidebar
       || result.afterCreateMobileLayout.demoMainWidth < 430
+      || result.afterCreateMobileLayout.screenViewportHeight < 260
       || result.afterCreateMobileLayout.terminalScreenHeight > 650
       || result.afterCreateMobileLayout.commandRegionTop > 900
       || Math.abs(result.afterCreateMobileLayout.terminalComposerGapPx ?? 99) > 1
@@ -689,6 +693,7 @@ async function runSmokeScenario(browserUrl) {
       const workspaceHostSlot = document.querySelector('[data-testid="terminal-workspace-host"]') ?? null;
       const workspaceHost = document.querySelector('tp-terminal-workspace');
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
+      const workspaceFrame = workspaceRoot?.querySelector('[part="workspace"]') ?? null;
       const statusRoot = workspaceRoot?.querySelector('tp-terminal-status-bar')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const sessionListRoot = workspaceRoot?.querySelector('tp-terminal-session-list')?.shadowRoot ?? null;
@@ -778,6 +783,11 @@ async function runSmokeScenario(browserUrl) {
           ? Math.round(workspaceHostSlot.getBoundingClientRect().top - demoMain.getBoundingClientRect().top)
           : null,
         workspaceContentWidth: Math.round(workspaceContent?.getBoundingClientRect().width ?? 0),
+        terminalColumnHeight: Math.round(terminalColumn?.getBoundingClientRect().height ?? 0),
+        screenViewportHeight: Math.round(screenViewport?.getBoundingClientRect().height ?? 0),
+        workspacePanelShadow: workspaceFrame
+          ? getComputedStyle(workspaceFrame).getPropertyValue('--tp-shadow-panel').trim()
+          : null,
         documentHorizontalOverflow: Math.max(
           0,
           document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -962,6 +972,7 @@ async function runSmokeScenario(browserUrl) {
           document.documentElement.scrollWidth - document.documentElement.clientWidth,
         ),
         terminalScreenHeight: Math.round(terminalScreen?.getBoundingClientRect().height ?? 0),
+        screenViewportHeight: Math.round(screenViewport?.getBoundingClientRect().height ?? 0),
         commandRegionTop: Math.round(commandRegion?.getBoundingClientRect().top ?? 0),
         terminalComposerGapPx: terminalScreenRect && commandRegionRect
           ? Math.round(commandRegionRect.top - terminalScreenRect.bottom)

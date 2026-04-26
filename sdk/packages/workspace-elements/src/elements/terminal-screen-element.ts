@@ -44,7 +44,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     css`
       .screen {
         display: grid;
-        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-rows: auto auto auto minmax(0, 1fr);
         gap: var(--tp-space-3);
         padding: var(--tp-terminal-screen-panel-padding, var(--tp-space-4));
         padding-bottom: var(--tp-terminal-screen-panel-padding-bottom, var(--tp-space-4));
@@ -252,7 +252,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         min-height: 0;
         max-height: none;
         border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
-        border-radius: 0.6rem 0.6rem 0 0;
+        border-radius: var(--tp-radius-md) var(--tp-radius-md) 0 0;
         border-bottom-left-radius: var(--tp-terminal-screen-viewport-border-bottom-left-radius, 0);
         border-bottom-right-radius: var(--tp-terminal-screen-viewport-border-bottom-right-radius, 0);
         box-shadow: inset 0 1px 0 color-mix(in srgb, var(--tp-terminal-color-accent) 18%, transparent);

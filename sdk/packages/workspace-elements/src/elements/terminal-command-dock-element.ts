@@ -207,7 +207,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           var(--tp-terminal-color-border)
         );
         border-top-width: 0;
-        border-radius: 0 0 0.6rem 0.6rem;
+        border-radius: 0 0 var(--tp-radius-md) var(--tp-radius-md);
         background:
           linear-gradient(
             180deg,
@@ -379,6 +379,20 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
         .dock-status {
           justify-content: flex-start;
+        }
+      }
+
+      @media (max-width: 1180px) {
+        .dock[data-placement="terminal"] .dock-status,
+        .dock[data-placement="terminal"] .chip-row {
+          flex-wrap: nowrap;
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+
+        .dock[data-placement="terminal"] .history-row,
+        .dock[data-placement="terminal"] details {
+          display: none;
         }
       }
 

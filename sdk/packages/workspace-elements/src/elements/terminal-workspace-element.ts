@@ -20,6 +20,9 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
       .workspace {
         --tp-workspace-sidebar-default-width: clamp(14rem, 21vw, 19rem);
         --tp-workspace-inspector-default-width: clamp(16rem, 24vw, 24rem);
+        --tp-workspace-gap: var(--tp-space-3);
+        --tp-workspace-terminal-column-min-height: clamp(30rem, 68vh, 48rem);
+        --tp-shadow-panel: var(--tp-workspace-panel-shadow, none);
         --tp-workspace-sidebar-width: var(
           --tp-workspace-sidebar-target-width,
           var(--tp-workspace-sidebar-default-width)
@@ -31,7 +34,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
 
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
-        gap: var(--tp-space-4);
+        gap: var(--tp-workspace-gap);
         height: 100%;
         min-height: 0;
       }
@@ -39,7 +42,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
       .body {
         display: grid;
         grid-template-columns: minmax(14rem, var(--tp-workspace-sidebar-width)) minmax(0, 1fr);
-        gap: var(--tp-space-4);
+        gap: var(--tp-workspace-gap);
         height: 100%;
         min-height: 0;
         align-items: stretch;
@@ -86,6 +89,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         grid-template-rows: minmax(0, 1fr) auto;
         align-content: stretch;
         gap: 0;
+        min-height: var(--tp-workspace-terminal-column-min-height);
         overflow: hidden;
         --tp-terminal-screen-panel-border-bottom-left-radius: 0;
         --tp-terminal-screen-panel-border-bottom-right-radius: 0;
