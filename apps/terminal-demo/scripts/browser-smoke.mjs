@@ -161,6 +161,8 @@ async function main() {
       || result.afterCreate.terminalTabStripTabCount !== "1"
       || result.afterCreate.terminalTabStripRenderedTabs !== 1
       || result.afterCreate.terminalTabStripActiveTabs !== 1
+      || result.afterCreate.terminalTabStripCloseButtons !== 1
+      || result.afterCreate.terminalTabStripEnabledCloseButtons !== 0
       || !result.afterCreate.terminalTabStripNewTabEnabled
       || !result.afterCreate.screenPrecedesCommandDock
       || !result.afterCreate.hasScreenFollowControls
@@ -396,10 +398,14 @@ async function main() {
       || result.afterTopologyActions.terminalTabStripTabCountAfterNewTab !== String(result.afterTopologyActions.tabCountAfterNewTab)
       || result.afterTopologyActions.terminalTabStripRenderedAfterNewTab !== result.afterTopologyActions.tabCountAfterNewTab
       || result.afterTopologyActions.terminalTabStripActiveAfterNewTab !== 1
+      || result.afterTopologyActions.terminalTabStripCloseButtonsAfterNewTab !== result.afterTopologyActions.tabCountAfterNewTab
+      || result.afterTopologyActions.terminalTabStripEnabledCloseButtonsAfterNewTab < 1
       || result.afterTopologyActions.tabCountAfterCloseTabPrompt !== result.afterTopologyActions.tabCountAfterNewTab
       || result.afterTopologyActions.tabCountAfterCloseTab !== result.afterTopologyActions.tabCountBefore
       || result.afterTopologyActions.terminalTabStripTabCountAfterCloseTab !== String(result.afterTopologyActions.tabCountAfterCloseTab)
       || result.afterTopologyActions.terminalTabStripRenderedAfterCloseTab !== result.afterTopologyActions.tabCountAfterCloseTab
+      || result.afterTopologyActions.terminalTabStripCloseButtonsAfterCloseTab !== result.afterTopologyActions.tabCountAfterCloseTab
+      || result.afterTopologyActions.terminalTabStripEnabledCloseButtonsAfterCloseTab !== 0
       || result.afterTopologyActions.focusedTabAfterFocus !== result.afterTopologyActions.originalTabId
     ) {
       throw new Error(`Topology controls did not mutate and restore focus correctly: ${JSON.stringify(result.afterTopologyActions)}`);
@@ -732,6 +738,8 @@ async function runSmokeScenario(browserUrl) {
       const tabStripRoot = tabStripHost?.shadowRoot ?? null;
       const tabStripPanel = tabStripRoot?.querySelector('[data-testid="tp-terminal-tab-strip"]') ?? null;
       const terminalTabs = [...(tabStripRoot?.querySelectorAll('[data-testid="tp-terminal-tab"]') ?? [])];
+      const terminalTabCloseButtons =
+        [...(tabStripRoot?.querySelectorAll('[data-testid="tp-terminal-tab-close"]') ?? [])];
       const terminalNewTab = tabStripRoot?.querySelector('[data-testid="tp-terminal-new-tab"]') ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const paneTreeHost = workspaceRoot?.querySelector('tp-terminal-pane-tree') ?? null;
@@ -950,6 +958,8 @@ async function runSmokeScenario(browserUrl) {
         terminalTabStripTabCount: tabStripPanel?.getAttribute('data-tab-count') ?? null,
         terminalTabStripRenderedTabs: terminalTabs.length,
         terminalTabStripActiveTabs: terminalTabs.filter((tab) => tab.getAttribute('aria-pressed') === 'true').length,
+        terminalTabStripCloseButtons: terminalTabCloseButtons.length,
+        terminalTabStripEnabledCloseButtons: terminalTabCloseButtons.filter((button) => !button.disabled).length,
         terminalTabStripNewTabEnabled: Boolean(terminalNewTab && !terminalNewTab.disabled),
         screenPrecedesCommandDock: Boolean(
           terminalColumn
@@ -1340,10 +1350,22 @@ async function runSmokeScenario(browserUrl) {
         const tabStripRoot = workspaceHost?.shadowRoot?.querySelector('tp-terminal-tab-strip')?.shadowRoot ?? null;
         const tabStripPanel = tabStripRoot?.querySelector('[data-testid="tp-terminal-tab-strip"]') ?? null;
         const tabStripTabs = [...(tabStripRoot?.querySelectorAll('[data-testid="tp-terminal-tab"]') ?? [])];
+        const tabStripCloseButtons =
+          [...(tabStripRoot?.querySelectorAll('[data-testid="tp-terminal-tab-close"]') ?? [])];
         return {
           tabCount: tabStripPanel?.getAttribute('data-tab-count') ?? null,
           rendered: tabStripTabs.length,
           active: tabStripTabs.filter((tab) => tab.getAttribute('aria-pressed') === 'true').length,
+          closeButtons: tabStripCloseButtons.length,
+          enabledCloseButtons: tabStripCloseButtons.filter((button) => !button.disabled).length,
+          activeCloseButton:
+            tabStripCloseButtons.find((button) => {
+              const tabId = button.getAttribute('data-tab-id');
+              return tabStripTabs.some((tab) =>
+                tab.getAttribute('data-tab-id') === tabId
+                && tab.getAttribute('aria-pressed') === 'true'
+              );
+            }) ?? null,
         };
       };
       const stateBefore = window.terminalDemoDebug?.getState?.();
@@ -1371,6 +1393,7 @@ async function runSmokeScenario(browserUrl) {
         completedEvents += 1;
       };
       workspaceHost?.addEventListener('tp-terminal-topology-action-completed', handleCompleted);
+      workspaceHost?.addEventListener('tp-terminal-tab-strip-action-completed', handleCompleted);
 
       const paneCountBefore = countPanes(focusedTabBefore.root);
       const focusedPaneBefore = focusedTabBefore.focused_pane;
@@ -1430,13 +1453,19 @@ async function runSmokeScenario(browserUrl) {
       const stateAfterNewTab = window.terminalDemoDebug?.getState?.();
       const topologyAfterNewTab = stateAfterNewTab?.attachedSession?.topology ?? null;
       const terminalTabStripAfterNewTab = readTerminalTabStripState();
-      const closeTabButtonAfterNewTab = paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]') ?? null;
+      const closeTabButtonAfterNewTab =
+        terminalTabStripAfterNewTab.activeCloseButton
+        ?? paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]')
+        ?? null;
       closeTabButtonAfterNewTab?.click();
       await settleFrame();
-      const armedCloseTabButton = paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]') ?? null;
+      const armedCloseTabButton =
+        readTerminalTabStripState().activeCloseButton
+        ?? paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]')
+        ?? null;
       const closeTabPrompted = Boolean(
         armedCloseTabButton?.getAttribute('data-confirming') === 'true'
-        && /confirm close tab/i.test(armedCloseTabButton.textContent ?? ''),
+        && /confirm/i.test(armedCloseTabButton.getAttribute('title') ?? armedCloseTabButton.textContent ?? ''),
       );
       const closeTabDanger = armedCloseTabButton?.getAttribute('data-danger') ?? null;
       const closeTabTitle = armedCloseTabButton?.getAttribute('title') ?? null;
@@ -1454,6 +1483,7 @@ async function runSmokeScenario(browserUrl) {
       }
       const topologyAfterFocus = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology ?? null;
       workspaceHost?.removeEventListener('tp-terminal-topology-action-completed', handleCompleted);
+      workspaceHost?.removeEventListener('tp-terminal-tab-strip-action-completed', handleCompleted);
 
       return {
         ok: true,
@@ -1476,10 +1506,14 @@ async function runSmokeScenario(browserUrl) {
         terminalTabStripTabCountAfterNewTab: terminalTabStripAfterNewTab.tabCount,
         terminalTabStripRenderedAfterNewTab: terminalTabStripAfterNewTab.rendered,
         terminalTabStripActiveAfterNewTab: terminalTabStripAfterNewTab.active,
+        terminalTabStripCloseButtonsAfterNewTab: terminalTabStripAfterNewTab.closeButtons,
+        terminalTabStripEnabledCloseButtonsAfterNewTab: terminalTabStripAfterNewTab.enabledCloseButtons,
         tabCountAfterCloseTabPrompt,
         tabCountAfterCloseTab: topologyAfterCloseTab?.tabs?.length ?? 0,
         terminalTabStripTabCountAfterCloseTab: terminalTabStripAfterCloseTab.tabCount,
         terminalTabStripRenderedAfterCloseTab: terminalTabStripAfterCloseTab.rendered,
+        terminalTabStripCloseButtonsAfterCloseTab: terminalTabStripAfterCloseTab.closeButtons,
+        terminalTabStripEnabledCloseButtonsAfterCloseTab: terminalTabStripAfterCloseTab.enabledCloseButtons,
         paneCountBefore,
         paneCountAfterSplit,
         paneCountAfterClosePrompt: promptedTab ? countPanes(promptedTab.root) : 0,

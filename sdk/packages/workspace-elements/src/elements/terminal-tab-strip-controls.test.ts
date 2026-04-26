@@ -11,13 +11,20 @@ describe("terminal tab strip controls", () => {
 
     expect(controls.activeSessionId).toBe("session-1");
     expect(controls.capabilityStatus).toBe("known");
+    expect(controls.canCloseTab).toBe(true);
     expect(controls.canCreateTab).toBe(true);
     expect(controls.canFocusTab).toBe(true);
     expect(controls.tabCount).toBe(3);
     expect(controls.tabs).toEqual([
       {
         active: false,
+        canClose: true,
         canFocus: true,
+        closeArmed: false,
+        closeLabel: "Close tab",
+        closeTitle: "Close tab shell",
+        index: 0,
+        itemKey: "tab-1:0",
         label: "shell",
         metaLabel: "tab-1",
         tabId: "tab-1",
@@ -25,7 +32,13 @@ describe("terminal tab strip controls", () => {
       },
       {
         active: true,
+        canClose: true,
         canFocus: true,
+        closeArmed: false,
+        closeLabel: "Close tab",
+        closeTitle: "Close tab deploy",
+        index: 1,
+        itemKey: "tab-2:1",
         label: "deploy",
         metaLabel: "tab-2",
         tabId: "tab-2",
@@ -33,7 +46,13 @@ describe("terminal tab strip controls", () => {
       },
       {
         active: false,
+        canClose: true,
         canFocus: true,
+        closeArmed: false,
+        closeLabel: "Close tab",
+        closeTitle: "Close tab terminal...tifier",
+        index: 2,
+        itemKey: "terminal-tab-with-a-very-long-identifier:2",
         label: "terminal...tifier",
         metaLabel: "terminal...tifier",
         tabId: "terminal-tab-with-a-very-long-identifier",
@@ -46,8 +65,47 @@ describe("terminal tab strip controls", () => {
     const controls = resolveTerminalTabStripControlState(createWorkspaceSnapshot(), { pending: true });
 
     expect(controls.canCreateTab).toBe(false);
+    expect(controls.canCloseTab).toBe(false);
     expect(controls.canFocusTab).toBe(false);
     expect(controls.tabs.every((tab) => !tab.canFocus)).toBe(true);
+    expect(controls.tabs.every((tab) => !tab.canClose)).toBe(true);
+  });
+
+  it("exposes armed close state without mutating topology state", () => {
+    const controls = resolveTerminalTabStripControlState(createWorkspaceSnapshot(), {
+      armedCloseTabKey: "tab-2:1",
+      pending: false,
+    });
+
+    expect(controls.tabs.map((tab) => ({
+      closeArmed: tab.closeArmed,
+      closeLabel: tab.closeLabel,
+      closeTitle: tab.closeTitle,
+      itemKey: tab.itemKey,
+      tabId: tab.tabId,
+    }))).toEqual([
+      {
+        closeArmed: false,
+        closeLabel: "Close tab",
+        closeTitle: "Close tab shell",
+        itemKey: "tab-1:0",
+        tabId: "tab-1",
+      },
+      {
+        closeArmed: true,
+        closeLabel: "Confirm close tab",
+        closeTitle: "Confirm closing tab deploy",
+        itemKey: "tab-2:1",
+        tabId: "tab-2",
+      },
+      {
+        closeArmed: false,
+        closeLabel: "Close tab",
+        closeTitle: "Close tab terminal...tifier",
+        itemKey: "terminal-tab-with-a-very-long-identifier:2",
+        tabId: "terminal-tab-with-a-very-long-identifier",
+      },
+    ]);
   });
 
   it("does not expose tab actions before an attached topology exists", () => {
@@ -57,8 +115,33 @@ describe("terminal tab strip controls", () => {
 
     expect(controls.tabCount).toBe(0);
     expect(controls.tabs).toEqual([]);
+    expect(controls.canCloseTab).toBe(false);
     expect(controls.canCreateTab).toBe(false);
     expect(controls.canFocusTab).toBe(false);
+  });
+
+  it("disables close affordances when only one tab remains", () => {
+    const controls = resolveTerminalTabStripControlState(createWorkspaceSnapshot({
+      attachedSession: {
+        ...createWorkspaceSnapshot().attachedSession!,
+        topology: {
+          session_id: "session-1",
+          backend_kind: "native",
+          focused_tab: "tab-1",
+          tabs: [
+            {
+              tab_id: "tab-1",
+              title: "shell",
+              focused_pane: "pane-1",
+              root: { kind: "leaf", pane_id: "pane-1" },
+            },
+          ],
+        },
+      },
+    }), { pending: false });
+
+    expect(controls.canCloseTab).toBe(false);
+    expect(controls.tabs[0]?.canClose).toBe(false);
   });
 
   it("falls back to compact terminal ids when a backend reports blank titles", () => {
@@ -111,6 +194,38 @@ describe("terminal tab strip controls", () => {
     }), { pending: false });
 
     expect(controls.tabs.map((tab) => tab.active)).toEqual([true, false]);
+  });
+
+  it("arms only one close affordance when a degraded backend duplicates tab ids", () => {
+    const controls = resolveTerminalTabStripControlState(createWorkspaceSnapshot({
+      attachedSession: {
+        ...createWorkspaceSnapshot().attachedSession!,
+        topology: {
+          session_id: "session-1",
+          backend_kind: "native",
+          focused_tab: "tab-dup",
+          tabs: [
+            {
+              tab_id: "tab-dup",
+              title: "first",
+              focused_pane: "pane-1",
+              root: { kind: "leaf", pane_id: "pane-1" },
+            },
+            {
+              tab_id: "tab-dup",
+              title: "second",
+              focused_pane: "pane-2",
+              root: { kind: "leaf", pane_id: "pane-2" },
+            },
+          ],
+        },
+      },
+    }), {
+      armedCloseTabKey: "tab-dup:1",
+      pending: false,
+    });
+
+    expect(controls.tabs.map((tab) => tab.closeArmed)).toEqual([false, true]);
   });
 });
 

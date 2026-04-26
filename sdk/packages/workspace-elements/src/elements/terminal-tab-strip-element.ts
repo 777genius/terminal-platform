@@ -5,17 +5,22 @@ import type { MuxCommand } from "@terminal-platform/runtime-types";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
+import { TERMINAL_DESTRUCTIVE_CONFIRMATION_RESET_MS } from "./terminal-destructive-action.js";
 import {
   canRunTerminalTopologyCommand,
   resolveTerminalTopologyControlState,
 } from "./terminal-topology-controls.js";
-import { resolveTerminalTabStripControlState } from "./terminal-tab-strip-controls.js";
+import {
+  resolveTerminalTabStripControlState,
+  type TerminalTabStripItemControlState,
+} from "./terminal-tab-strip-controls.js";
 
 export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
     pendingAction: { state: true },
     actionError: { state: true },
+    armedCloseTabKey: { state: true },
   };
 
   static styles = [
@@ -54,6 +59,8 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
       }
 
       .tab,
+      .tab__main,
+      .tab__close,
       .new-tab {
         min-height: 1.58rem;
         border-color: color-mix(in srgb, var(--tp-terminal-color-border) 76%, transparent);
@@ -67,14 +74,16 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
       }
 
       .tab {
-        display: inline-flex;
+        display: inline-grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
-        gap: 0.4rem;
         max-width: min(15rem, 42vw);
-        padding: 0.2rem 0.62rem;
+        border: 1px solid color-mix(in srgb, var(--tp-terminal-color-border) 76%, transparent);
+        padding: 0;
+        overflow: hidden;
       }
 
-      .tab[aria-pressed="true"] {
+      .tab[data-active="true"] {
         border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 54%, transparent);
         background:
           linear-gradient(
@@ -83,6 +92,46 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
             color-mix(in srgb, var(--tp-terminal-color-bg-raised) 84%, transparent)
           );
         color: var(--tp-terminal-color-text);
+      }
+
+      .tab:focus-within {
+        outline: 2px solid color-mix(in srgb, var(--tp-terminal-color-accent) 64%, transparent);
+        outline-offset: -2px;
+      }
+
+      .tab__main,
+      .tab__close {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        min-width: 0;
+      }
+
+      .tab__main {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.2rem 0.34rem 0.2rem 0.62rem;
+        color: inherit;
+      }
+
+      .tab__close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.45rem;
+        padding: 0.2rem 0.36rem;
+        color: var(--tp-terminal-color-text-muted);
+      }
+
+      .tab__close:hover:not(:disabled),
+      .tab__close[data-confirming="true"] {
+        color: var(--tp-color-danger);
+        background: color-mix(in srgb, var(--tp-color-danger) 14%, transparent);
+      }
+
+      .tab__close:disabled {
+        opacity: 0.38;
       }
 
       .tab__title {
@@ -129,8 +178,15 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
         }
 
         .tab,
+        .tab__main,
+        .tab__close,
         .new-tab {
           min-height: 1.5rem;
+        }
+
+        .tab__main,
+        .tab__close,
+        .new-tab {
           padding-block: 0.18rem;
         }
       }
@@ -139,15 +195,26 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
 
   protected declare pendingAction: string | null;
   protected declare actionError: string | null;
+  protected declare armedCloseTabKey: string | null;
+
+  #closeConfirmationResetTimer: ReturnType<typeof setTimeout> | null = null;
+  #closeConfirmationGeneration = 0;
 
   constructor() {
     super();
     this.pendingAction = null;
     this.actionError = null;
+    this.armedCloseTabKey = null;
+  }
+
+  override disconnectedCallback(): void {
+    this.clearCloseConfirmationResetTimer();
+    super.disconnectedCallback();
   }
 
   override render() {
     const controls = resolveTerminalTabStripControlState(this.snapshot, {
+      armedCloseTabKey: this.armedCloseTabKey,
       pending: this.pendingAction !== null,
     });
 
@@ -170,25 +237,49 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
 
         ${controls.tabs.length > 0
           ? html`
-              <div class="tabs" part="tabs" aria-label="Terminal tabs">
+              <div class="tabs" part="tabs" role="tablist" aria-label="Terminal tabs">
                 ${repeat(
                   controls.tabs,
-                  (tab, index) => `${tab.tabId}:${index}`,
+                  (tab) => tab.itemKey,
                   (tab) => html`
-                    <button
+                    <div
                       class="tab"
-                      type="button"
                       part="tab"
-                      data-testid="tp-terminal-tab"
-                      data-tab-id=${tab.tabId}
-                      title=${tab.title}
-                      aria-pressed=${String(tab.active)}
-                      ?disabled=${!tab.canFocus}
-                      @click=${() => this.focusTab(tab.tabId)}
+                      data-active=${String(tab.active)}
+                      data-confirming=${String(tab.closeArmed)}
                     >
-                      <span class="tab__title">${tab.label}</span>
-                      <span class="tab__meta">${tab.metaLabel}</span>
-                    </button>
+                      <button
+                        class="tab__main"
+                        type="button"
+                        part="tab-main"
+                        role="tab"
+                        data-testid="tp-terminal-tab"
+                        data-tab-id=${tab.tabId}
+                        title=${tab.title}
+                        aria-pressed=${String(tab.active)}
+                        aria-selected=${String(tab.active)}
+                        ?disabled=${!tab.canFocus}
+                        @click=${() => this.focusTab(tab.tabId)}
+                      >
+                        <span class="tab__title">${tab.label}</span>
+                        <span class="tab__meta">${tab.metaLabel}</span>
+                      </button>
+                      <button
+                        class="tab__close"
+                        type="button"
+                        part="tab-close"
+                        data-testid="tp-terminal-tab-close"
+                        data-tab-id=${tab.tabId}
+                        data-danger="true"
+                        data-confirming=${String(tab.closeArmed)}
+                        title=${tab.closeTitle}
+                        aria-label=${tab.closeTitle}
+                        ?disabled=${!tab.canClose}
+                        @click=${(event: Event) => this.closeTab(tab, event)}
+                      >
+                        x
+                      </button>
+                    </div>
                   `,
                 )}
               </div>
@@ -217,6 +308,7 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
+    this.clearCloseConfirmation();
     this.runTopologyCommand("focus_tab", { kind: "focus_tab", tab_id: tabId });
   }
 
@@ -226,10 +318,57 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
+    this.clearCloseConfirmation();
     this.runTopologyCommand("new_tab", {
       kind: "new_tab",
       title: `Tab ${controls.tabCount + 1}`,
     });
+  }
+
+  private closeTab(tab: TerminalTabStripItemControlState, event: Event): void {
+    event.stopPropagation();
+    const controls = resolveTerminalTabStripControlState(this.snapshot, {
+      armedCloseTabKey: this.armedCloseTabKey,
+      pending: this.pendingAction !== null,
+    });
+    const currentTab = controls.tabs.find((item) => item.itemKey === tab.itemKey);
+    if (!currentTab?.canClose) {
+      return;
+    }
+
+    if (!currentTab.closeArmed) {
+      this.setCloseConfirmation(tab.itemKey);
+      return;
+    }
+
+    this.clearCloseConfirmation();
+    this.runTopologyCommand("close_tab", { kind: "close_tab", tab_id: currentTab.tabId });
+  }
+
+  private setCloseConfirmation(tabKey: string): void {
+    this.actionError = null;
+    this.armedCloseTabKey = tabKey;
+    this.clearCloseConfirmationResetTimer();
+    const generation = ++this.#closeConfirmationGeneration;
+    this.#closeConfirmationResetTimer = setTimeout(() => {
+      if (generation === this.#closeConfirmationGeneration && this.armedCloseTabKey === tabKey) {
+        this.armedCloseTabKey = null;
+      }
+      this.#closeConfirmationResetTimer = null;
+    }, TERMINAL_DESTRUCTIVE_CONFIRMATION_RESET_MS);
+  }
+
+  private clearCloseConfirmation(): void {
+    this.#closeConfirmationGeneration += 1;
+    this.armedCloseTabKey = null;
+    this.clearCloseConfirmationResetTimer();
+  }
+
+  private clearCloseConfirmationResetTimer(): void {
+    if (this.#closeConfirmationResetTimer) {
+      clearTimeout(this.#closeConfirmationResetTimer);
+      this.#closeConfirmationResetTimer = null;
+    }
   }
 
   private runTopologyCommand(action: string, command: MuxCommand): void {
