@@ -1,4 +1,4 @@
-import { css, html, nothing } from "lit";
+import { css, html, nothing, type PropertyValues } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 
 import type { MuxCommand } from "@terminal-platform/runtime-types";
@@ -14,6 +14,7 @@ import {
   resolveTerminalTabStripControlState,
   type TerminalTabStripItemControlState,
 } from "./terminal-tab-strip-controls.js";
+import { resolveTerminalTabStripKeyboardIntent } from "./terminal-tab-strip-keyboard-navigation.js";
 
 export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -199,6 +200,7 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
 
   #closeConfirmationResetTimer: ReturnType<typeof setTimeout> | null = null;
   #closeConfirmationGeneration = 0;
+  #pendingFocusTabKey: string | null = null;
 
   constructor() {
     super();
@@ -210,6 +212,12 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
   override disconnectedCallback(): void {
     this.clearCloseConfirmationResetTimer();
     super.disconnectedCallback();
+  }
+
+  protected override updated(changedProperties: PropertyValues): void {
+    if (changedProperties.has("snapshot") || changedProperties.has("pendingAction")) {
+      this.focusPendingTabButton();
+    }
   }
 
   override render() {
@@ -254,12 +262,15 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
                         part="tab-main"
                         role="tab"
                         data-testid="tp-terminal-tab"
+                        data-tab-key=${tab.itemKey}
                         data-tab-id=${tab.tabId}
                         title=${tab.title}
+                        tabindex=${String(tab.tabIndex)}
                         aria-pressed=${String(tab.active)}
                         aria-selected=${String(tab.active)}
                         ?disabled=${!tab.canFocus}
                         @click=${() => this.focusTab(tab.tabId)}
+                        @keydown=${(event: KeyboardEvent) => this.handleTabKeydown(event, tab)}
                       >
                         <span class="tab__title">${tab.label}</span>
                         <span class="tab__meta">${tab.metaLabel}</span>
@@ -269,13 +280,16 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
                         type="button"
                         part="tab-close"
                         data-testid="tp-terminal-tab-close"
+                        data-tab-key=${tab.itemKey}
                         data-tab-id=${tab.tabId}
                         data-danger="true"
                         data-confirming=${String(tab.closeArmed)}
+                        tabindex=${String(tab.closeTabIndex)}
                         title=${tab.closeTitle}
                         aria-label=${tab.closeTitle}
                         ?disabled=${!tab.canClose}
                         @click=${(event: Event) => this.closeTab(tab, event)}
+                        @keydown=${(event: KeyboardEvent) => this.handleTabKeydown(event, tab)}
                       >
                         x
                       </button>
@@ -302,13 +316,24 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
     `;
   }
 
-  private focusTab(tabId: string): void {
+  private focusTab(tabId: string, options: { focusItemKey?: string } = {}): void {
     const controls = resolveTerminalTopologyControlState(this.snapshot);
-    if (!controls.canFocusTab || this.snapshot.attachedSession?.topology?.focused_tab === tabId) {
+    if (!controls.canFocusTab) {
       return;
     }
 
     this.clearCloseConfirmation();
+    if (options.focusItemKey) {
+      this.#pendingFocusTabKey = options.focusItemKey;
+    }
+
+    if (this.snapshot.attachedSession?.topology?.focused_tab === tabId) {
+      if (options.focusItemKey) {
+        this.focusTabButtonByKey(options.focusItemKey);
+      }
+      return;
+    }
+
     this.runTopologyCommand("focus_tab", { kind: "focus_tab", tab_id: tabId });
   }
 
@@ -327,17 +352,49 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
 
   private closeTab(tab: TerminalTabStripItemControlState, event: Event): void {
     event.stopPropagation();
+    this.closeTabByKey(tab.itemKey);
+  }
+
+  private handleTabKeydown(event: KeyboardEvent, tab: TerminalTabStripItemControlState): void {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
+      return;
+    }
+
     const controls = resolveTerminalTabStripControlState(this.snapshot, {
       armedCloseTabKey: this.armedCloseTabKey,
       pending: this.pendingAction !== null,
     });
-    const currentTab = controls.tabs.find((item) => item.itemKey === tab.itemKey);
+    const intent = resolveTerminalTabStripKeyboardIntent(controls.tabs, {
+      currentItemKey: tab.itemKey,
+      key: event.key,
+    });
+    if (intent.kind === "none") {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (intent.kind === "focus-tab") {
+      this.focusTab(intent.tabId, { focusItemKey: intent.itemKey });
+      return;
+    }
+
+    this.closeTabByKey(intent.itemKey);
+  }
+
+  private closeTabByKey(itemKey: string): void {
+    const controls = resolveTerminalTabStripControlState(this.snapshot, {
+      armedCloseTabKey: this.armedCloseTabKey,
+      pending: this.pendingAction !== null,
+    });
+    const currentTab = controls.tabs.find((item) => item.itemKey === itemKey);
     if (!currentTab?.canClose) {
       return;
     }
 
     if (!currentTab.closeArmed) {
-      this.setCloseConfirmation(tab.itemKey);
+      this.setCloseConfirmation(currentTab.itemKey);
       return;
     }
 
@@ -369,6 +426,30 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
       clearTimeout(this.#closeConfirmationResetTimer);
       this.#closeConfirmationResetTimer = null;
     }
+  }
+
+  private focusPendingTabButton(): void {
+    if (!this.#pendingFocusTabKey) {
+      return;
+    }
+
+    if (this.focusTabButtonByKey(this.#pendingFocusTabKey)) {
+      this.#pendingFocusTabKey = null;
+    }
+  }
+
+  private focusTabButtonByKey(itemKey: string): boolean {
+    const buttons = Array.from(
+      this.renderRoot.querySelectorAll<HTMLButtonElement>('[data-testid="tp-terminal-tab"]'),
+    );
+    const button = buttons.find((item) => item.getAttribute("data-tab-key") === itemKey);
+    if (!button || button.disabled) {
+      return false;
+    }
+
+    button.focus({ preventScroll: true });
+    button.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return true;
   }
 
   private runTopologyCommand(action: string, command: MuxCommand): void {

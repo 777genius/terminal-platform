@@ -16,6 +16,7 @@ export interface TerminalTabStripItemControlState {
   active: boolean;
   canClose: boolean;
   canFocus: boolean;
+  closeTabIndex: number;
   closeArmed: boolean;
   closeLabel: string;
   closeTitle: string;
@@ -24,6 +25,7 @@ export interface TerminalTabStripItemControlState {
   label: string;
   metaLabel: string;
   tabId: string;
+  tabIndex: number;
   title: string;
 }
 
@@ -64,6 +66,7 @@ export function resolveTerminalTabStripControlState(
         active: index === activeTabIndex,
         canClose: canCloseTab,
         canFocus: canFocusTab,
+        closeTabIndex: index === activeTabIndex && canCloseTab ? 0 : -1,
         closeArmed,
         closeLabel: closeArmed ? "Confirm close tab" : "Close tab",
         closeTitle: `${closeArmed ? "Confirm closing" : "Close"} tab ${label}`,
@@ -72,6 +75,7 @@ export function resolveTerminalTabStripControlState(
         label,
         metaLabel,
         tabId: tab.tab_id,
+        tabIndex: index === activeTabIndex && canFocusTab ? 0 : -1,
         title: tab.tab_id,
       };
     }) ?? [],

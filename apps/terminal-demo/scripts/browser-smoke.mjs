@@ -400,6 +400,8 @@ async function main() {
       || result.afterTopologyActions.terminalTabStripActiveAfterNewTab !== 1
       || result.afterTopologyActions.terminalTabStripCloseButtonsAfterNewTab !== result.afterTopologyActions.tabCountAfterNewTab
       || result.afterTopologyActions.terminalTabStripEnabledCloseButtonsAfterNewTab < 1
+      || !result.afterTopologyActions.terminalTabStripKeyboardLeftFocusedOriginal
+      || !result.afterTopologyActions.terminalTabStripKeyboardRightFocusedNew
       || result.afterTopologyActions.tabCountAfterCloseTabPrompt !== result.afterTopologyActions.tabCountAfterNewTab
       || result.afterTopologyActions.tabCountAfterCloseTab !== result.afterTopologyActions.tabCountBefore
       || result.afterTopologyActions.terminalTabStripTabCountAfterCloseTab !== String(result.afterTopologyActions.tabCountAfterCloseTab)
@@ -1356,6 +1358,7 @@ async function runSmokeScenario(browserUrl) {
           tabCount: tabStripPanel?.getAttribute('data-tab-count') ?? null,
           rendered: tabStripTabs.length,
           active: tabStripTabs.filter((tab) => tab.getAttribute('aria-pressed') === 'true').length,
+          activeTabButton: tabStripTabs.find((tab) => tab.getAttribute('aria-pressed') === 'true') ?? null,
           closeButtons: tabStripCloseButtons.length,
           enabledCloseButtons: tabStripCloseButtons.filter((button) => !button.disabled).length,
           activeCloseButton:
@@ -1453,8 +1456,26 @@ async function runSmokeScenario(browserUrl) {
       const stateAfterNewTab = window.terminalDemoDebug?.getState?.();
       const topologyAfterNewTab = stateAfterNewTab?.attachedSession?.topology ?? null;
       const terminalTabStripAfterNewTab = readTerminalTabStripState();
+      const newTabId = topologyAfterNewTab?.focused_tab ?? null;
+      terminalTabStripAfterNewTab.activeTabButton?.focus();
+      terminalTabStripAfterNewTab.activeTabButton?.dispatchEvent(new KeyboardEvent('keydown', {
+        bubbles: true,
+        composed: true,
+        key: 'ArrowLeft',
+      }));
+      await settle();
+      const topologyAfterKeyboardLeft = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology ?? null;
+      const terminalTabStripAfterKeyboardLeft = readTerminalTabStripState();
+      terminalTabStripAfterKeyboardLeft.activeTabButton?.dispatchEvent(new KeyboardEvent('keydown', {
+        bubbles: true,
+        composed: true,
+        key: 'ArrowRight',
+      }));
+      await settle();
+      const topologyAfterKeyboardRight = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology ?? null;
+      const terminalTabStripAfterKeyboardRight = readTerminalTabStripState();
       const closeTabButtonAfterNewTab =
-        terminalTabStripAfterNewTab.activeCloseButton
+        terminalTabStripAfterKeyboardRight.activeCloseButton
         ?? paneTreeRoot?.querySelector('[data-testid="tp-close-tab"]')
         ?? null;
       closeTabButtonAfterNewTab?.click();
@@ -1508,6 +1529,8 @@ async function runSmokeScenario(browserUrl) {
         terminalTabStripActiveAfterNewTab: terminalTabStripAfterNewTab.active,
         terminalTabStripCloseButtonsAfterNewTab: terminalTabStripAfterNewTab.closeButtons,
         terminalTabStripEnabledCloseButtonsAfterNewTab: terminalTabStripAfterNewTab.enabledCloseButtons,
+        terminalTabStripKeyboardLeftFocusedOriginal: topologyAfterKeyboardLeft?.focused_tab === focusedTabBefore.tab_id,
+        terminalTabStripKeyboardRightFocusedNew: Boolean(newTabId && topologyAfterKeyboardRight?.focused_tab === newTabId),
         tabCountAfterCloseTabPrompt,
         tabCountAfterCloseTab: topologyAfterCloseTab?.tabs?.length ?? 0,
         terminalTabStripTabCountAfterCloseTab: terminalTabStripAfterCloseTab.tabCount,

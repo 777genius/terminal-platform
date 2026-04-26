@@ -61,6 +61,11 @@ export {
   type TerminalTabStripControlState,
   type TerminalTabStripItemControlState,
 } from "./elements/terminal-tab-strip-controls.js";
+export {
+  resolveTerminalTabStripKeyboardIntent,
+  type TerminalTabStripKeyboardInput,
+  type TerminalTabStripKeyboardIntent,
+} from "./elements/terminal-tab-strip-keyboard-navigation.js";
 export { TerminalToolbarElement } from "./elements/terminal-toolbar-element.js";
 export {
   resolveTerminalToolbarFontScaleOption,

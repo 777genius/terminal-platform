@@ -30,6 +30,7 @@ import {
   resolveTerminalScreenControlState,
   resolveTerminalScreenInputStatus,
   resolveTerminalTabStripControlState,
+  resolveTerminalTabStripKeyboardIntent,
   TerminalTabStripElement,
   resolveTerminalToolbarFontScaleOption,
   resolveTerminalToolbarLineWrapOption,
@@ -74,6 +75,8 @@ import {
   type TerminalTabStripControlOptions,
   type TerminalTabStripControlState,
   type TerminalTabStripItemControlState,
+  type TerminalTabStripKeyboardInput,
+  type TerminalTabStripKeyboardIntent,
   type TerminalToolbarFontScaleOptionPresentation,
   type TerminalToolbarLineWrapOptionPresentation,
   type TerminalToolbarThemeOptionPresentation,
@@ -120,6 +123,8 @@ type PublicControlTypes =
   | TerminalTabStripControlOptions
   | TerminalTabStripControlState
   | TerminalTabStripItemControlState
+  | TerminalTabStripKeyboardInput
+  | TerminalTabStripKeyboardIntent
   | TerminalToolbarFontScaleOptionPresentation
   | TerminalToolbarLineWrapOptionPresentation
   | TerminalToolbarThemeOptionPresentation
@@ -147,6 +152,7 @@ describe("workspace elements public api", () => {
       resolveTerminalScreenControlState,
       resolveTerminalScreenInputStatus,
       resolveTerminalTabStripControlState,
+      resolveTerminalTabStripKeyboardIntent,
       resolveTerminalToolbarFontScaleOption,
       resolveTerminalToolbarLineWrapOption,
       resolveTerminalToolbarThemeOption,
