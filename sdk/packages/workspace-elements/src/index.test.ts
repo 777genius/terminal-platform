@@ -29,6 +29,7 @@ import {
   resolveTerminalSavedSessionsControlState,
   resolveTerminalScreenControlState,
   resolveTerminalScreenInputStatus,
+  resolveTerminalTabStripControlState,
   TerminalTabStripElement,
   resolveTerminalToolbarFontScaleOption,
   resolveTerminalToolbarLineWrapOption,
@@ -70,6 +71,9 @@ import {
   type TerminalScreenInputActivity,
   type TerminalScreenInputStatus,
   type TerminalScreenInputTone,
+  type TerminalTabStripControlOptions,
+  type TerminalTabStripControlState,
+  type TerminalTabStripItemControlState,
   type TerminalToolbarFontScaleOptionPresentation,
   type TerminalToolbarLineWrapOptionPresentation,
   type TerminalToolbarThemeOptionPresentation,
@@ -113,6 +117,9 @@ type PublicControlTypes =
   | TerminalScreenInputActivity
   | TerminalScreenInputStatus
   | TerminalScreenInputTone
+  | TerminalTabStripControlOptions
+  | TerminalTabStripControlState
+  | TerminalTabStripItemControlState
   | TerminalToolbarFontScaleOptionPresentation
   | TerminalToolbarLineWrapOptionPresentation
   | TerminalToolbarThemeOptionPresentation
@@ -139,6 +146,7 @@ describe("workspace elements public api", () => {
       resolveTerminalSavedSessionsControlState,
       resolveTerminalScreenControlState,
       resolveTerminalScreenInputStatus,
+      resolveTerminalTabStripControlState,
       resolveTerminalToolbarFontScaleOption,
       resolveTerminalToolbarLineWrapOption,
       resolveTerminalToolbarThemeOption,

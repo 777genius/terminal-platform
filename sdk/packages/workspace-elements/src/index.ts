@@ -55,6 +55,12 @@ export {
 export { TerminalWorkspaceElement } from "./elements/terminal-workspace-element.js";
 export { TerminalSessionListElement } from "./elements/terminal-session-list-element.js";
 export { TerminalTabStripElement } from "./elements/terminal-tab-strip-element.js";
+export {
+  resolveTerminalTabStripControlState,
+  type TerminalTabStripControlOptions,
+  type TerminalTabStripControlState,
+  type TerminalTabStripItemControlState,
+} from "./elements/terminal-tab-strip-controls.js";
 export { TerminalToolbarElement } from "./elements/terminal-toolbar-element.js";
 export {
   resolveTerminalToolbarFontScaleOption,

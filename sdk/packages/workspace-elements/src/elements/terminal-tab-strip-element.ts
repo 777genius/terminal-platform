@@ -7,9 +7,9 @@ import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-cons
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import {
   canRunTerminalTopologyCommand,
-  compactTerminalId,
   resolveTerminalTopologyControlState,
 } from "./terminal-topology-controls.js";
+import { resolveTerminalTabStripControlState } from "./terminal-tab-strip-controls.js";
 
 export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -147,18 +147,16 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
   }
 
   override render() {
-    const topology = this.snapshot.attachedSession?.topology ?? null;
-    const controls = resolveTerminalTopologyControlState(this.snapshot);
-    const isPending = this.pendingAction !== null;
-    const activeTabIndex = topology?.tabs.findIndex((tab) => tab.tab_id === controls.activeTab?.tab_id) ?? -1;
-    const tabCount = topology?.tabs.length ?? 0;
+    const controls = resolveTerminalTabStripControlState(this.snapshot, {
+      pending: this.pendingAction !== null,
+    });
 
     return html`
       <div
         class="panel tab-strip"
         part="tab-strip"
         data-testid="tp-terminal-tab-strip"
-        data-tab-count=${String(tabCount)}
+        data-tab-count=${String(controls.tabCount)}
         data-capability-status=${controls.capabilityStatus}
       >
         ${this.actionError
@@ -170,26 +168,26 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
             `
           : nothing}
 
-        ${topology && topology.tabs.length > 0
+        ${controls.tabs.length > 0
           ? html`
               <div class="tabs" part="tabs" aria-label="Terminal tabs">
                 ${repeat(
-                  topology.tabs,
-                  (tab, index) => `${tab.tab_id}:${index}`,
-                  (tab, index) => html`
+                  controls.tabs,
+                  (tab, index) => `${tab.tabId}:${index}`,
+                  (tab) => html`
                     <button
                       class="tab"
                       type="button"
                       part="tab"
                       data-testid="tp-terminal-tab"
-                      data-tab-id=${tab.tab_id}
-                      title=${tab.tab_id}
-                      aria-pressed=${String(index === activeTabIndex)}
-                      ?disabled=${isPending || !controls.canFocusTab}
-                      @click=${() => this.focusTab(tab.tab_id)}
+                      data-tab-id=${tab.tabId}
+                      title=${tab.title}
+                      aria-pressed=${String(tab.active)}
+                      ?disabled=${!tab.canFocus}
+                      @click=${() => this.focusTab(tab.tabId)}
                     >
-                      <span class="tab__title">${tab.title ?? compactTerminalId(tab.tab_id)}</span>
-                      <span class="tab__meta">${compactTerminalId(tab.tab_id)}</span>
+                      <span class="tab__title">${tab.label}</span>
+                      <span class="tab__meta">${tab.metaLabel}</span>
                     </button>
                   `,
                 )}
@@ -204,7 +202,7 @@ export class TerminalTabStripElement extends WorkspaceKernelConsumerElement {
           data-testid="tp-terminal-new-tab"
           title="Create terminal tab"
           aria-label="Create terminal tab"
-          ?disabled=${isPending || !controls.canCreateTab}
+          ?disabled=${!controls.canCreateTab}
           @click=${() => this.newTab()}
         >
           +
