@@ -154,6 +154,9 @@ async function main() {
       || result.afterCreate.workspaceInspectorMode !== "collapsed"
       || !result.afterCreate.hasInspectorDrawer
       || result.afterCreate.inspectorDrawerOpen !== false
+      || !result.afterCreate.inspectorDrawerOpenedAfterClick
+      || !result.afterCreate.inspectorDrawerClosedAfterToggle
+      || !result.afterCreate.paneTreeVisibleAfterDrawerOpen
       || result.afterCreate.operationsDeckColumnCount !== 1
       || !result.afterCreate.screenInTerminalColumn
       || !result.afterCreate.commandDockInCommandRegion
@@ -802,6 +805,16 @@ async function runSmokeScenario(browserUrl) {
       const commandComposerRect = commandComposer?.getBoundingClientRect() ?? null;
       const commandDockPanelRect = commandDockPanel?.getBoundingClientRect() ?? null;
       const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
+      const inspectorDrawerSummary = inspectorDrawer?.querySelector('summary') ?? null;
+      inspectorDrawerSummary?.click();
+      const inspectorDrawerOpenedAfterClick = inspectorDrawer?.hasAttribute('open') ?? false;
+      const paneTreeVisibleAfterDrawerOpen = Boolean(
+        paneTreeHost
+        && paneTreeHost.getBoundingClientRect().height > 0
+        && paneTreeHost.getBoundingClientRect().width > 0
+      );
+      inspectorDrawerSummary?.click();
+      const inspectorDrawerClosedAfterToggle = inspectorDrawer ? !inspectorDrawer.hasAttribute('open') : false;
       return {
         hasReady: debug?.connection?.state === 'ready',
         hasError: debug?.connection?.state === 'error',
@@ -950,6 +963,9 @@ async function runSmokeScenario(browserUrl) {
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
         hasInspectorDrawer: Boolean(inspectorDrawer),
         inspectorDrawerOpen: inspectorDrawer?.hasAttribute('open') ?? null,
+        inspectorDrawerOpenedAfterClick,
+        inspectorDrawerClosedAfterToggle,
+        paneTreeVisibleAfterDrawerOpen,
         operationsDeckColumnCount: operationsDeck
           ? getComputedStyle(operationsDeck).gridTemplateColumns.split(' ').filter(Boolean).length
           : 0,
