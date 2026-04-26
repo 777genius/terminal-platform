@@ -3,10 +3,17 @@ import { css, html, nothing, type PropertyValues } from "lit";
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import { readClipboardText } from "./terminal-clipboard.js";
+import {
+  type TerminalCommandComposerDraftChangeDetail,
+  type TerminalCommandComposerElement,
+  type TerminalCommandComposerHistoryNavigateDetail,
+  type TerminalCommandComposerShortcutDetail,
+} from "./terminal-command-composer-element.js";
 import { resolveTerminalCommandInputStatus } from "./terminal-command-input-status.js";
 import {
   createTerminalCommandHistoryNavigationState,
   resolveTerminalCommandHistoryNavigation,
+  type TerminalCommandHistoryInputState,
   type TerminalCommandHistoryNavigationDirection,
   type TerminalCommandHistoryNavigationState,
 } from "./terminal-command-history-navigation.js";
@@ -523,67 +530,24 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       : nothing;
 
     const composerTemplate = html`
-      <div class="composer" part="composer">
-        <span class="prompt" aria-hidden="true">&gt;_</span>
-        <textarea
-          data-testid="tp-command-input"
-          name="tp-command-input"
-          .value=${controls.draft}
-          ?disabled=${!controls.canWriteInput}
-          placeholder=${inputStatus.placeholder}
-          aria-label="Focused pane command input"
-          @input=${(event: Event) => this.handleInput(event)}
-          @keydown=${(event: KeyboardEvent) => this.handleKeydown(event)}
-        ></textarea>
-        <div
-          class="composer-actions"
-          part="composer-actions"
-          data-testid="tp-command-composer-actions"
-          aria-label="Command actions"
-        >
-          <button
-            class="primary"
-            type="button"
-            data-testid="tp-send-command"
-            title="Send command to the focused pane"
-            aria-label="Send command to the focused pane"
-            ?disabled=${!controls.canSend}
-            @click=${() => this.sendDraft({ focusInput: true })}
-          >
-            Run
-          </button>
-          <button
-            type="button"
-            data-testid="tp-paste-clipboard"
-            title=${pasteTitle}
-            aria-label="Paste clipboard into the focused pane"
-            ?disabled=${!controls.canPasteClipboard}
-            @click=${() => this.pasteClipboard({ focusInput: true })}
-          >
-            Paste
-          </button>
-          <button
-            type="button"
-            data-testid="tp-send-interrupt"
-            title="Send Ctrl+C to the focused pane"
-            aria-label="Send Ctrl+C to the focused pane"
-            ?disabled=${!controls.canWriteInput}
-            @click=${() => this.sendShortcut("\u0003", { focusInput: true })}
-          >
-            ^C
-          </button>
-          <button
-            type="button"
-            data-testid="tp-send-enter"
-            title="Send Enter to the focused pane"
-            aria-label="Send Enter to the focused pane"
-            ?disabled=${!controls.canWriteInput}
-            @click=${() => this.sendShortcut("\r", { focusInput: true })}
-          >
-            Enter
-          </button>
-        </div>
-      </div>
+      <tp-terminal-command-composer
+        class="composer"
+        part="composer"
+        .draft=${controls.draft}
+        .canWriteInput=${controls.canWriteInput}
+        .canSend=${controls.canSend}
+        .canPasteClipboard=${controls.canPasteClipboard}
+        .placeholder=${inputStatus.placeholder}
+        .pasteTitle=${pasteTitle}
+        @tp-terminal-command-draft-change=${(event: CustomEvent<TerminalCommandComposerDraftChangeDetail>) =>
+          this.handleComposerDraftChange(event)}
+        @tp-terminal-command-history-navigate=${(event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>) =>
+          this.handleComposerHistoryNavigate(event)}
+        @tp-terminal-command-submit=${() => this.sendDraft({ focusInput: true })}
+        @tp-terminal-command-paste=${() => this.pasteClipboard({ focusInput: true })}
+        @tp-terminal-command-shortcut=${(event: CustomEvent<TerminalCommandComposerShortcutDetail>) =>
+          this.handleComposerShortcut(event)}
+      ></tp-terminal-command-composer>
     `;
 
     const errorTemplate = this.actionError
@@ -691,28 +655,19 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
   }
 
-  private handleInput(event: Event): void {
-    const target = event.currentTarget as HTMLTextAreaElement;
-    this.setDraft(target.value);
+  private handleComposerDraftChange(event: CustomEvent<TerminalCommandComposerDraftChangeDetail>): void {
+    this.setDraft(event.detail.value);
   }
 
-  private handleKeydown(event: KeyboardEvent): void {
-    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
-      return;
-    }
-
-    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-      const target = event.currentTarget as HTMLTextAreaElement;
-      if (this.navigateCommandHistory(event.key === "ArrowUp" ? "previous" : "next", target)) {
-        event.preventDefault();
-      }
-      return;
-    }
-
-    if (event.key === "Enter" && !event.shiftKey) {
+  private handleComposerHistoryNavigate(event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>): void {
+    const composer = event.currentTarget as TerminalCommandComposerElement;
+    if (this.navigateCommandHistory(event.detail.direction, event.detail.input, composer)) {
       event.preventDefault();
-      void this.sendDraft();
     }
+  }
+
+  private handleComposerShortcut(event: CustomEvent<TerminalCommandComposerShortcutDetail>): void {
+    void this.sendShortcut(event.detail.data, { focusInput: true });
   }
 
   private async sendDraft(options: TerminalCommandInputFocusOptions = {}): Promise<void> {
@@ -733,7 +688,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
   private navigateCommandHistory(
     direction: TerminalCommandHistoryNavigationDirection,
-    target: HTMLTextAreaElement,
+    input: TerminalCommandHistoryInputState,
+    composer: TerminalCommandComposerElement,
   ): boolean {
     const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
     const commandHistory = this.snapshot.commandHistory.entries;
@@ -743,11 +699,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
     const result = resolveTerminalCommandHistoryNavigation(
       direction,
-      {
-        value: target.value,
-        selectionStart: target.selectionStart ?? target.value.length,
-        selectionEnd: target.selectionEnd ?? target.value.length,
-      },
+      input,
       commandHistory,
       this.#historyNavigation,
     );
@@ -757,14 +709,13 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       return false;
     }
 
-    this.applyHistoryDraft(paneId, target, result.value);
+    this.applyHistoryDraft(paneId, composer, result.value);
     return true;
   }
 
-  private applyHistoryDraft(paneId: string, target: HTMLTextAreaElement, value: string): void {
+  private applyHistoryDraft(paneId: string, composer: TerminalCommandComposerElement, value: string): void {
     this.clearHistoryClearConfirmation();
-    target.value = value;
-    target.setSelectionRange(value.length, value.length);
+    composer.applyDraft(value);
     this.kernel?.commands.updateDraft(paneId, value);
   }
 
@@ -792,22 +743,15 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
-    const textarea = this.shadowRoot?.querySelector<HTMLTextAreaElement>('[data-testid="tp-command-input"]');
-    if (this.focusCommandInput(textarea)) {
+    if (this.focusCommandInput()) {
       this.#lastAutoFocusedPaneId = controls.activePaneId;
     }
   }
 
   private focusCommandInput(
-    textarea = this.shadowRoot?.querySelector<HTMLTextAreaElement>('[data-testid="tp-command-input"]'),
+    composer = this.shadowRoot?.querySelector<TerminalCommandComposerElement>("tp-terminal-command-composer"),
   ): boolean {
-    if (!textarea || textarea.disabled) {
-      return false;
-    }
-
-    textarea.focus({ preventScroll: true });
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-    return true;
+    return composer?.focusInput() ?? false;
   }
 
   private refocusCommandInputAfterUpdate(): void {

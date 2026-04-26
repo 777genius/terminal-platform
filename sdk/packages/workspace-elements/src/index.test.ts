@@ -31,8 +31,13 @@ import {
   resolveTerminalTopologyControlState,
   resolveTerminalTopologyStatus,
   resolveWorkspaceCapability,
+  TerminalCommandComposerElement,
   type TerminalCommandDockCapabilityStatus,
   type TerminalCommandDockControlState,
+  type TerminalCommandComposerDraftChangeDetail,
+  type TerminalCommandComposerHistoryNavigateDetail,
+  type TerminalCommandComposerShortcut,
+  type TerminalCommandComposerShortcutDetail,
   type TerminalCommandHistoryInputState,
   type TerminalCommandHistoryNavigationDirection,
   type TerminalCommandHistoryNavigationResult,
@@ -67,6 +72,10 @@ import {
 type PublicControlTypes =
   | TerminalCommandDockCapabilityStatus
   | TerminalCommandDockControlState
+  | TerminalCommandComposerDraftChangeDetail
+  | TerminalCommandComposerHistoryNavigateDetail
+  | TerminalCommandComposerShortcut
+  | TerminalCommandComposerShortcutDetail
   | TerminalCommandHistoryInputState
   | TerminalCommandHistoryNavigationDirection
   | TerminalCommandHistoryNavigationResult
@@ -100,6 +109,7 @@ type PublicControlTypes =
 describe("workspace elements public api", () => {
   it("exports reusable control resolvers for custom UI surfaces", () => {
     const resolvers = [
+      TerminalCommandComposerElement,
       findRestorableSavedSession,
       hasSavedSession,
       resolveActiveBackendCapabilities,

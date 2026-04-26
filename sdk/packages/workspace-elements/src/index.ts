@@ -1,5 +1,12 @@
 export { defineTerminalPlatformElements } from "./define.js";
 
+export {
+  TerminalCommandComposerElement,
+  type TerminalCommandComposerDraftChangeDetail,
+  type TerminalCommandComposerHistoryNavigateDetail,
+  type TerminalCommandComposerShortcut,
+  type TerminalCommandComposerShortcutDetail,
+} from "./elements/terminal-command-composer-element.js";
 export { TerminalCommandDockElement } from "./elements/terminal-command-dock-element.js";
 export {
   resolveTerminalCommandDockControlState,

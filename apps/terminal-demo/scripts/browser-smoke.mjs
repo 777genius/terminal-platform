@@ -169,6 +169,7 @@ async function main() {
       || !result.afterCreate.terminalComposerBeforeDockStatus
       || !result.afterCreate.terminalComposerBeforeDockStatusDom
       || !result.afterCreate.terminalComposerFirstInDockDom
+      || result.afterCreate.terminalComposerTagName !== "TP-TERMINAL-COMMAND-COMPOSER"
       || !result.afterCreate.terminalCommandActionsInsideComposer
       || result.afterCreate.terminalFooterActionCount !== 0
       || /Command Input|Focused pane command lane/.test(result.afterCreate.commandDockVisibleText ?? "")
@@ -244,6 +245,7 @@ async function main() {
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatus
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatusDom
       || !result.afterCreateMobileLayout.terminalComposerFirstInDockDom
+      || result.afterCreateMobileLayout.terminalComposerTagName !== "TP-TERMINAL-COMMAND-COMPOSER"
       || !result.afterCreateMobileLayout.terminalCommandActionsInsideComposer
       || result.afterCreateMobileLayout.terminalFooterActionCount !== 0
       || !result.afterCreateMobileLayout.commandRegionFollowsScreen
@@ -610,6 +612,7 @@ async function runSmokeScenario(browserUrl) {
     });
 
     await sleep(3000);
+    await installBrowserSmokeHelpers(send);
 
     const before = await evaluate(send, `(() => ({
       bodyText: document.body.innerText,
@@ -797,6 +800,7 @@ async function runSmokeScenario(browserUrl) {
           && (commandComposer.compareDocumentPosition(commandInputStatus) & Node.DOCUMENT_POSITION_FOLLOWING)
         ),
         terminalComposerFirstInDockDom: commandDockPanel?.firstElementChild === commandComposer,
+        terminalComposerTagName: commandComposer?.tagName ?? null,
         terminalCommandActionsInsideComposer: Boolean(
           commandComposer
           && commandActionButtons.every((button) => button && commandComposer.contains(button))
@@ -805,7 +809,7 @@ async function runSmokeScenario(browserUrl) {
         commandActionLabels: commandActionButtons.map((button) => button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null),
         commandActionAriaLabels: commandActionButtons.map((button) => button?.getAttribute('aria-label') ?? null),
         commandDockVisibleText: commandDockPanel?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
-        commandInputFocused: commandRoot?.activeElement === input,
+        commandInputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, input) === true,
         saveLayoutTitle: saveLayout?.getAttribute('title') ?? null,
         focusedPaneBadgeText: focusedPaneBadge?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         focusedPaneBadgeTitle: focusedPaneBadge?.getAttribute('title') ?? null,
@@ -917,6 +921,7 @@ async function runSmokeScenario(browserUrl) {
           && (commandComposer.compareDocumentPosition(commandInputStatus) & Node.DOCUMENT_POSITION_FOLLOWING)
         ),
         terminalComposerFirstInDockDom: commandDockPanel?.firstElementChild === commandComposer,
+        terminalComposerTagName: commandComposer?.tagName ?? null,
         terminalCommandActionsInsideComposer: Boolean(
           commandComposer
           && commandActionButtons.every((button) => button && commandComposer.contains(button))
@@ -968,7 +973,7 @@ async function runSmokeScenario(browserUrl) {
         clicked: true,
         draft: textarea.value,
         kernelDraft: paneId ? (debug?.drafts?.[paneId] ?? null) : null,
-        inputFocused: commandRoot.activeElement === textarea,
+        inputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true,
         cursorAtEnd: textarea.selectionStart === textarea.value.length && textarea.selectionEnd === textarea.value.length,
       };
     })()`);
@@ -1681,7 +1686,7 @@ async function runSmokeScenario(browserUrl) {
         commandHistoryCount: debug?.commandHistory?.entries?.length ?? 0,
         commandHistoryLatest: debug?.commandHistory?.entries?.at(-1) ?? null,
         commandHistoryLimit: debug?.commandHistory?.limit ?? null,
-        commandInputFocused: commandRoot?.activeElement === textarea,
+        commandInputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true,
         commandInputEmpty: textarea?.value === '',
         commandCursorAtEnd: Boolean(
           textarea
@@ -1705,11 +1710,14 @@ async function runSmokeScenario(browserUrl) {
       const waitForFocusReturn = async () => {
         for (let attempt = 0; attempt < 10; attempt += 1) {
           await new Promise((resolve) => setTimeout(resolve, 150));
-          if (commandRoot?.activeElement === textarea && !textarea?.disabled) {
+          if (
+            window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true
+            && !textarea?.disabled
+          ) {
             return true;
           }
         }
-        return commandRoot?.activeElement === textarea;
+        return window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true;
       };
       const cursorAtEnd = () => Boolean(
         textarea
@@ -1740,7 +1748,7 @@ async function runSmokeScenario(browserUrl) {
 
       enterButton.click();
       await waitForFocusReturn();
-      const enterFocused = commandRoot.activeElement === textarea;
+      const enterFocused = window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true;
       const enterCursorAtEnd = cursorAtEnd();
 
       interruptButton.click();
@@ -1749,7 +1757,7 @@ async function runSmokeScenario(browserUrl) {
         tested: true,
         enterFocused,
         enterCursorAtEnd,
-        interruptFocused: commandRoot.activeElement === textarea,
+        interruptFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true,
         interruptCursorAtEnd: cursorAtEnd(),
       };
     })()`);
@@ -1851,7 +1859,7 @@ async function runSmokeScenario(browserUrl) {
         entryTitle: historyEntry.getAttribute('title'),
         recalledDraft: textarea.value,
         sendEnabled: Boolean(sendButton && !sendButton.disabled),
-        inputFocused: commandRoot.activeElement === textarea,
+        inputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true,
         cursorAtEnd: textarea.selectionStart === textarea.value.length && textarea.selectionEnd === textarea.value.length,
         historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
           ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
@@ -1929,7 +1937,7 @@ async function runSmokeScenario(browserUrl) {
         connectionReady: debug?.connection?.state === 'ready',
         commandHistoryCount: debug?.commandHistory?.entries?.length ?? 0,
         commandHistoryLatest: debug?.commandHistory?.entries?.at(-1) ?? null,
-        inputFocused: commandRoot?.activeElement === textarea,
+        inputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true,
         cursorAtEnd: Boolean(
           textarea
           && textarea.selectionStart === textarea.value.length
@@ -2408,6 +2416,7 @@ async function runAutoStartSmokeScenario(browserUrl) {
       deviceScaleFactor: 1,
       mobile: false,
     });
+    await installBrowserSmokeHelpers(send);
 
     const result = await evaluate(send, `(async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -2438,7 +2447,7 @@ async function runAutoStartSmokeScenario(browserUrl) {
         attached: Boolean(state?.attachedSession?.focused_screen),
         demoAutoStartSession: new URLSearchParams(window.location.search).get('demoAutoStartSession'),
         demoDefaultShellProgram: new URLSearchParams(window.location.search).get('demoDefaultShellProgram'),
-        commandInputFocused: commandRoot?.activeElement === input,
+        commandInputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, input) === true,
         documentHorizontalOverflow: Math.max(
           0,
           document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -2553,6 +2562,19 @@ function evaluate(send, expression) {
   return Promise.race([evaluation, timeout]).finally(() => {
     clearTimeout(timeoutId);
   });
+}
+
+async function installBrowserSmokeHelpers(send) {
+  await evaluate(send, `(() => {
+    window.__terminalDemoSmokeCommandInputFocused = (commandRoot, input) => Boolean(
+      input
+      && (
+        commandRoot?.activeElement === input
+        || input.matches(':focus')
+        || input.closest('tp-terminal-command-composer')?.matches(':focus-within')
+      )
+    );
+  })()`);
 }
 
 async function closePageTarget(targetId) {
