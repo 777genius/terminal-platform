@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 
 use std::{
+    ffi::OsStr,
     fs, io,
+    ops::Deref,
     path::{Path, PathBuf},
     process::{Child, Command, Output, Stdio},
     thread,
@@ -50,15 +52,15 @@ pub fn locate_cdylib() -> std::io::Result<PathBuf> {
     ))
 }
 
-pub fn materialize_node_addon() -> std::io::Result<PathBuf> {
+pub fn materialize_node_addon() -> std::io::Result<ScopedTempPath> {
     let source = locate_cdylib()?;
-    let target = unique_temp_path("terminal-node-napi", "node");
+    let target = scoped_temp_path("terminal-node-napi", "node");
     fs::copy(&source, &target)?;
     Ok(target)
 }
 
-pub fn stage_node_package(addon_source: &Path) -> std::io::Result<PathBuf> {
-    let stage_dir = unique_temp_dir("terminal-node-package");
+pub fn stage_node_package(addon_source: &Path) -> std::io::Result<ScopedTempPath> {
+    let stage_dir = scoped_temp_dir("terminal-node-package");
     let script_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("package/scripts/stage-package.mjs");
     let mut command = Command::new("node");
@@ -115,12 +117,9 @@ pub fn verify_node_package(package_dir: &Path) -> std::io::Result<()> {
 }
 
 pub fn pack_node_package(package_dir: &Path) -> std::io::Result<PathBuf> {
+    let npm_cache = scoped_temp_dir("terminal-node-npm-cache");
     let mut command = Command::new(node_package_manager());
-    command
-        .arg("pack")
-        .arg("--json")
-        .env("npm_config_cache", unique_temp_dir("terminal-node-npm-cache"))
-        .current_dir(package_dir);
+    command.arg("pack").arg("--json").env("npm_config_cache", &npm_cache).current_dir(package_dir);
     let output = command_output(&mut command, "npm pack")?;
 
     if !output.status.success() {
@@ -144,8 +143,8 @@ pub fn pack_node_package(package_dir: &Path) -> std::io::Result<PathBuf> {
     Ok(package_dir.join(filename))
 }
 
-pub fn install_node_package_tarball(tarball_path: &Path) -> std::io::Result<PathBuf> {
-    let project_dir = unique_temp_dir("terminal-node-install");
+pub fn install_node_package_tarball(tarball_path: &Path) -> std::io::Result<ScopedTempPath> {
+    let project_dir = scoped_temp_dir("terminal-node-install");
     fs::create_dir_all(&project_dir)?;
     fs::write(
         project_dir.join("package.json"),
@@ -158,10 +157,11 @@ pub fn install_node_package_tarball(tarball_path: &Path) -> std::io::Result<Path
     )?;
 
     let mut command = Command::new(node_package_manager());
+    let npm_cache = scoped_temp_dir("terminal-node-npm-cache");
     command
         .args(["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock"])
         .arg(tarball_path)
-        .env("npm_config_cache", unique_temp_dir("terminal-node-npm-cache"))
+        .env("npm_config_cache", &npm_cache)
         .current_dir(&project_dir);
     let output = command_output(&mut command, "npm install")?;
 
@@ -269,6 +269,57 @@ pub fn process_timeout() -> Duration {
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     unique_temp_path(prefix, "dir")
+}
+
+fn scoped_temp_dir(prefix: &str) -> ScopedTempPath {
+    ScopedTempPath { path: unique_temp_dir(prefix) }
+}
+
+fn scoped_temp_path(prefix: &str, suffix: &str) -> ScopedTempPath {
+    ScopedTempPath { path: unique_temp_path(prefix, suffix) }
+}
+
+pub struct ScopedTempPath {
+    path: PathBuf,
+}
+
+impl ScopedTempPath {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AsRef<OsStr> for ScopedTempPath {
+    fn as_ref(&self) -> &OsStr {
+        self.path.as_os_str()
+    }
+}
+
+impl AsRef<Path> for ScopedTempPath {
+    fn as_ref(&self) -> &Path {
+        self.path()
+    }
+}
+
+impl Deref for ScopedTempPath {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        self.path()
+    }
+}
+
+impl Drop for ScopedTempPath {
+    fn drop(&mut self) {
+        if self.path.is_dir() {
+            let _ = fs::remove_dir_all(&self.path);
+            return;
+        }
+
+        if self.path.exists() {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
