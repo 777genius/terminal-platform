@@ -140,6 +140,84 @@ const terminalLayoutSourceContracts = [
     ],
   },
   {
+    name: "terminal tab strip preserves keyboard focus contract",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-tab-strip-element.ts",
+    ),
+    includes: [
+      {
+        label: "tab strip exposes tablist semantics",
+        marker: 'role="tablist"',
+      },
+      {
+        label: "tab strip exposes tab semantics",
+        marker: 'role="tab"',
+      },
+      {
+        label: "tab strip keeps stable item keys for focus recovery",
+        marker: "data-tab-key=${tab.itemKey}",
+      },
+      {
+        label: "tab strip uses roving tab order",
+        marker: "tabindex=${String(tab.tabIndex)}",
+      },
+      {
+        label: "tab close controls use explicit tab order",
+        marker: "tabindex=${String(tab.closeTabIndex)}",
+      },
+      {
+        label: "tab strip handles keyboard events through an adapter",
+        marker: "handleTabKeydown",
+      },
+      {
+        label: "tab strip restores focus after topology updates",
+        marker: "focusPendingTabButton",
+      },
+    ],
+  },
+  {
+    name: "terminal tab strip keyboard intent stays pure",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-tab-strip-keyboard-navigation.ts",
+    ),
+    includes: [
+      {
+        label: "keyboard resolver is exported as a pure function",
+        marker: "export function resolveTerminalTabStripKeyboardIntent",
+      },
+      {
+        label: "keyboard resolver supports backward navigation",
+        marker: 'case "ArrowLeft":',
+      },
+      {
+        label: "keyboard resolver supports forward navigation",
+        marker: 'case "ArrowRight":',
+      },
+      {
+        label: "keyboard resolver supports first tab navigation",
+        marker: 'case "Home":',
+      },
+      {
+        label: "keyboard resolver supports last tab navigation",
+        marker: 'case "End":',
+      },
+      {
+        label: "keyboard resolver supports keyboard close intent",
+        marker: 'input.key === "Delete" || input.key === "Backspace"',
+      },
+    ],
+  },
+  {
     name: "terminal screen hides editor-style gutters in terminal placement",
     relativePath: path.join(
       "sdk",

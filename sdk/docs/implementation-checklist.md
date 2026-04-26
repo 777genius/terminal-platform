@@ -115,7 +115,7 @@ Use this file as the operational progress list while implementing the SDK plan.
 - [ ] Add slots and parts
 - [x] Add documented element registration helper
 - [ ] Add accessibility baseline
-- [ ] Add documented keyboard and focus behavior
+- [x] Add documented keyboard and focus behavior
 - [ ] Add renderer seam
 - [ ] Add overlays
 - [x] Verify kernel-only integration
