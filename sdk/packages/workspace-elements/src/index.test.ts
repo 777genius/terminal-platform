@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   TERMINAL_COMMAND_QUICK_COMMAND_LIMIT,
+  TERMINAL_COMMAND_COMPOSER_EVENTS,
   TERMINAL_PANE_MAX_COLS,
   TERMINAL_PANE_MAX_ROWS,
   TERMINAL_PANE_MIN_COLS,
@@ -35,6 +36,8 @@ import {
   type TerminalCommandDockCapabilityStatus,
   type TerminalCommandDockControlState,
   type TerminalCommandComposerDraftChangeDetail,
+  type TerminalCommandComposerEventMap,
+  type TerminalCommandComposerEventType,
   type TerminalCommandComposerHistoryNavigateDetail,
   type TerminalCommandComposerShortcut,
   type TerminalCommandComposerShortcutDetail,
@@ -73,6 +76,8 @@ type PublicControlTypes =
   | TerminalCommandDockCapabilityStatus
   | TerminalCommandDockControlState
   | TerminalCommandComposerDraftChangeDetail
+  | TerminalCommandComposerEventMap
+  | TerminalCommandComposerEventType
   | TerminalCommandComposerHistoryNavigateDetail
   | TerminalCommandComposerShortcut
   | TerminalCommandComposerShortcutDetail
@@ -140,6 +145,7 @@ describe("workspace elements public api", () => {
 
   it("exports stable control constants", () => {
     expect(TERMINAL_COMMAND_QUICK_COMMAND_LIMIT).toBeGreaterThan(0);
+    expect(TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
     expect(TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT).toBeGreaterThan(0);
     expect(TERMINAL_PANE_MIN_ROWS).toBeLessThan(TERMINAL_PANE_MAX_ROWS);
     expect(TERMINAL_PANE_MIN_COLS).toBeLessThan(TERMINAL_PANE_MAX_COLS);

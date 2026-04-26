@@ -7,6 +7,14 @@ import type {
 
 export type TerminalCommandComposerShortcut = "\u0003" | "\r";
 
+export const TERMINAL_COMMAND_COMPOSER_EVENTS = {
+  draftChange: "tp-terminal-command-draft-change",
+  historyNavigate: "tp-terminal-command-history-navigate",
+  paste: "tp-terminal-command-paste",
+  shortcut: "tp-terminal-command-shortcut",
+  submit: "tp-terminal-command-submit",
+} as const;
+
 export type TerminalCommandComposerDraftChangeDetail = {
   value: string;
 };
@@ -18,6 +26,17 @@ export type TerminalCommandComposerHistoryNavigateDetail = {
 
 export type TerminalCommandComposerShortcutDetail = {
   data: TerminalCommandComposerShortcut;
+};
+
+export type TerminalCommandComposerEventType =
+  (typeof TERMINAL_COMMAND_COMPOSER_EVENTS)[keyof typeof TERMINAL_COMMAND_COMPOSER_EVENTS];
+
+export type TerminalCommandComposerEventMap = {
+  [TERMINAL_COMMAND_COMPOSER_EVENTS.draftChange]: CustomEvent<TerminalCommandComposerDraftChangeDetail>;
+  [TERMINAL_COMMAND_COMPOSER_EVENTS.historyNavigate]: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>;
+  [TERMINAL_COMMAND_COMPOSER_EVENTS.paste]: CustomEvent<void>;
+  [TERMINAL_COMMAND_COMPOSER_EVENTS.shortcut]: CustomEvent<TerminalCommandComposerShortcutDetail>;
+  [TERMINAL_COMMAND_COMPOSER_EVENTS.submit]: CustomEvent<void>;
 };
 
 export class TerminalCommandComposerElement extends LitElement {
@@ -55,9 +74,10 @@ export class TerminalCommandComposerElement extends LitElement {
 
   override render() {
     return html`
-      <span class="prompt" aria-hidden="true">&gt;_</span>
+      <span class="prompt" part="prompt" aria-hidden="true">&gt;_</span>
       <textarea
         data-testid="tp-command-input"
+        part="input"
         name="tp-command-input"
         .value=${this.draft}
         ?disabled=${!this.canWriteInput}
@@ -74,27 +94,30 @@ export class TerminalCommandComposerElement extends LitElement {
       >
         <button
           class="primary"
+          part="send-command"
           type="button"
           data-testid="tp-send-command"
           title="Send command to the focused pane"
           aria-label="Send command to the focused pane"
           ?disabled=${!this.canSend}
-          @click=${() => this.dispatchComposerEvent("tp-terminal-command-submit")}
+          @click=${() => this.dispatchComposerEvent(TERMINAL_COMMAND_COMPOSER_EVENTS.submit)}
         >
           Run
         </button>
         <button
           type="button"
+          part="paste-clipboard"
           data-testid="tp-paste-clipboard"
           title=${this.pasteTitle}
           aria-label="Paste clipboard into the focused pane"
           ?disabled=${!this.canPasteClipboard}
-          @click=${() => this.dispatchComposerEvent("tp-terminal-command-paste")}
+          @click=${() => this.dispatchComposerEvent(TERMINAL_COMMAND_COMPOSER_EVENTS.paste)}
         >
           Paste
         </button>
         <button
           type="button"
+          part="send-interrupt"
           data-testid="tp-send-interrupt"
           title="Send Ctrl+C to the focused pane"
           aria-label="Send Ctrl+C to the focused pane"
@@ -105,6 +128,7 @@ export class TerminalCommandComposerElement extends LitElement {
         </button>
         <button
           type="button"
+          part="send-enter"
           data-testid="tp-send-enter"
           title="Send Enter to the focused pane"
           aria-label="Send Enter to the focused pane"
@@ -172,7 +196,7 @@ export class TerminalCommandComposerElement extends LitElement {
   private handleInput(event: Event): void {
     const target = event.currentTarget as HTMLTextAreaElement;
     this.dispatchEvent(
-      new CustomEvent<TerminalCommandComposerDraftChangeDetail>("tp-terminal-command-draft-change", {
+      new CustomEvent<TerminalCommandComposerDraftChangeDetail>(TERMINAL_COMMAND_COMPOSER_EVENTS.draftChange, {
         bubbles: true,
         composed: true,
         detail: {
@@ -190,7 +214,7 @@ export class TerminalCommandComposerElement extends LitElement {
     const target = event.currentTarget as HTMLTextAreaElement;
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       const handled = !this.dispatchEvent(
-        new CustomEvent<TerminalCommandComposerHistoryNavigateDetail>("tp-terminal-command-history-navigate", {
+        new CustomEvent<TerminalCommandComposerHistoryNavigateDetail>(TERMINAL_COMMAND_COMPOSER_EVENTS.historyNavigate, {
           bubbles: true,
           cancelable: true,
           composed: true,
@@ -212,13 +236,13 @@ export class TerminalCommandComposerElement extends LitElement {
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      this.dispatchComposerEvent("tp-terminal-command-submit");
+      this.dispatchComposerEvent(TERMINAL_COMMAND_COMPOSER_EVENTS.submit);
     }
   }
 
   private dispatchShortcut(data: TerminalCommandComposerShortcut): void {
     this.dispatchEvent(
-      new CustomEvent<TerminalCommandComposerShortcutDetail>("tp-terminal-command-shortcut", {
+      new CustomEvent<TerminalCommandComposerShortcutDetail>(TERMINAL_COMMAND_COMPOSER_EVENTS.shortcut, {
         bubbles: true,
         composed: true,
         detail: { data },
@@ -226,7 +250,9 @@ export class TerminalCommandComposerElement extends LitElement {
     );
   }
 
-  private dispatchComposerEvent(type: "tp-terminal-command-paste" | "tp-terminal-command-submit"): void {
+  private dispatchComposerEvent(
+    type: typeof TERMINAL_COMMAND_COMPOSER_EVENTS.paste | typeof TERMINAL_COMMAND_COMPOSER_EVENTS.submit,
+  ): void {
     this.dispatchEvent(new CustomEvent(type, { bubbles: true, composed: true }));
   }
 }

@@ -170,6 +170,9 @@ async function main() {
       || !result.afterCreate.terminalComposerBeforeDockStatusDom
       || !result.afterCreate.terminalComposerFirstInDockDom
       || result.afterCreate.terminalComposerTagName !== "TP-TERMINAL-COMMAND-COMPOSER"
+      || result.afterCreate.terminalComposerPromptPart !== "prompt"
+      || result.afterCreate.terminalComposerInputPart !== "input"
+      || result.afterCreate.terminalComposerActionParts.join("|") !== "send-command|paste-clipboard|send-interrupt|send-enter"
       || !result.afterCreate.terminalCommandActionsInsideComposer
       || result.afterCreate.terminalFooterActionCount !== 0
       || /Command Input|Focused pane command lane/.test(result.afterCreate.commandDockVisibleText ?? "")
@@ -703,6 +706,8 @@ async function runSmokeScenario(browserUrl) {
       const screenViewportRect = screenViewport?.getBoundingClientRect() ?? null;
       const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
       const commandComposer = commandRoot?.querySelector('[part="composer"]') ?? null;
+      const commandComposerPrompt = commandComposer?.querySelector('[part="prompt"]') ?? null;
+      const commandComposerInput = commandComposer?.querySelector('[part="input"]') ?? null;
       const commandComposerRect = commandComposer?.getBoundingClientRect() ?? null;
       const commandDockPanelRect = commandDockPanel?.getBoundingClientRect() ?? null;
       const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
@@ -801,6 +806,9 @@ async function runSmokeScenario(browserUrl) {
         ),
         terminalComposerFirstInDockDom: commandDockPanel?.firstElementChild === commandComposer,
         terminalComposerTagName: commandComposer?.tagName ?? null,
+        terminalComposerPromptPart: commandComposerPrompt?.getAttribute('part') ?? null,
+        terminalComposerInputPart: commandComposerInput?.getAttribute('part') ?? null,
+        terminalComposerActionParts: commandActionButtons.map((button) => button?.getAttribute('part') ?? null),
         terminalCommandActionsInsideComposer: Boolean(
           commandComposer
           && commandActionButtons.every((button) => button && commandComposer.contains(button))

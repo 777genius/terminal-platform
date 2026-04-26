@@ -1,8 +1,11 @@
 export { defineTerminalPlatformElements } from "./define.js";
 
 export {
+  TERMINAL_COMMAND_COMPOSER_EVENTS,
   TerminalCommandComposerElement,
   type TerminalCommandComposerDraftChangeDetail,
+  type TerminalCommandComposerEventMap,
+  type TerminalCommandComposerEventType,
   type TerminalCommandComposerHistoryNavigateDetail,
   type TerminalCommandComposerShortcut,
   type TerminalCommandComposerShortcutDetail,
