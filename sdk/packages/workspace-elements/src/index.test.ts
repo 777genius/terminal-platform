@@ -29,6 +29,7 @@ import {
   resolveTerminalSavedSessionsControlState,
   resolveTerminalScreenControlState,
   resolveTerminalScreenInputStatus,
+  TerminalTabStripElement,
   resolveTerminalToolbarFontScaleOption,
   resolveTerminalToolbarLineWrapOption,
   resolveTerminalToolbarThemeOption,
@@ -124,6 +125,7 @@ describe("workspace elements public api", () => {
   it("exports reusable control resolvers for custom UI surfaces", () => {
     const resolvers = [
       TerminalCommandComposerElement,
+      TerminalTabStripElement,
       resolveTerminalCommandComposerActions,
       findRestorableSavedSession,
       hasSavedSession,

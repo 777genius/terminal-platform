@@ -48,6 +48,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         gap: var(--tp-space-3);
         padding: var(--tp-terminal-screen-panel-padding, var(--tp-space-4));
         padding-bottom: var(--tp-terminal-screen-panel-padding-bottom, var(--tp-space-4));
+        border-top-left-radius: var(
+          --tp-terminal-screen-panel-border-top-left-radius,
+          var(--tp-radius-md)
+        );
+        border-top-right-radius: var(
+          --tp-terminal-screen-panel-border-top-right-radius,
+          var(--tp-radius-md)
+        );
         border-bottom-left-radius: var(
           --tp-terminal-screen-panel-border-bottom-left-radius,
           var(--tp-radius-md)

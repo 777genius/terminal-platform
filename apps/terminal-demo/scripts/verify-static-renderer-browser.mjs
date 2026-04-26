@@ -354,7 +354,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         workspacePanelShadow: workspaceFrame
           ? getComputedStyle(workspaceFrame).getPropertyValue('--tp-shadow-panel').trim()
           : null,
-        terminalComposerGapPx: viewportRect && composerRect ? composerRect.top - viewportRect.bottom : null,
+        terminalComposerGapPx: viewportRect && composerRect ? Math.round(composerRect.top - viewportRect.bottom) : null,
       };
     })()`);
 

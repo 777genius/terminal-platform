@@ -39,8 +39,20 @@ const terminalLayoutSourceContracts = [
     ),
     includes: [
       {
-        label: "terminal column reserves remaining height for output and auto height for composer",
-        marker: "grid-template-rows: minmax(0, 1fr) auto;",
+        label: "terminal column reserves tab chrome, remaining output, and auto-height composer",
+        marker: "grid-template-rows: auto minmax(0, 1fr) auto;",
+      },
+      {
+        label: "terminal column exposes a top tab strip",
+        marker: "<tp-terminal-tab-strip .kernel=${this.kernel}></tp-terminal-tab-strip>",
+      },
+      {
+        label: "terminal screen removes top-left radius after the tab strip",
+        marker: "--tp-terminal-screen-panel-border-top-left-radius: 0;",
+      },
+      {
+        label: "terminal screen removes top-right radius after the tab strip",
+        marker: "--tp-terminal-screen-panel-border-top-right-radius: 0;",
       },
       {
         label: "terminal output and command dock are flush",
@@ -73,9 +85,10 @@ const terminalLayoutSourceContracts = [
     ],
     order: [
       {
-        label: "terminal output renders before the attached command dock",
+        label: "terminal tabs render before output and the attached command dock",
         markers: [
           'data-testid="tp-workspace-terminal-column"',
+          "<tp-terminal-tab-strip",
           '<tp-terminal-screen .kernel=${this.kernel} placement="terminal"></tp-terminal-screen>',
           "<tp-terminal-command-dock",
         ],

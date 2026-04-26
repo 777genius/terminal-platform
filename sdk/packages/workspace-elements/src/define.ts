@@ -5,6 +5,7 @@ import { TerminalSavedSessionsElement } from "./elements/terminal-saved-sessions
 import { TerminalScreenElement } from "./elements/terminal-screen-element.js";
 import { TerminalSessionListElement } from "./elements/terminal-session-list-element.js";
 import { TerminalStatusBarElement } from "./elements/terminal-status-bar-element.js";
+import { TerminalTabStripElement } from "./elements/terminal-tab-strip-element.js";
 import { TerminalToolbarElement } from "./elements/terminal-toolbar-element.js";
 import { TerminalWorkspaceElement } from "./elements/terminal-workspace-element.js";
 
@@ -20,6 +21,7 @@ export function defineTerminalPlatformElements(registry?: CustomElementRegistry)
   defineIfNeeded(resolvedRegistry, "tp-terminal-command-composer", TerminalCommandComposerElement);
   defineIfNeeded(resolvedRegistry, "tp-terminal-command-dock", TerminalCommandDockElement);
   defineIfNeeded(resolvedRegistry, "tp-terminal-toolbar", TerminalToolbarElement);
+  defineIfNeeded(resolvedRegistry, "tp-terminal-tab-strip", TerminalTabStripElement);
   defineIfNeeded(resolvedRegistry, "tp-terminal-screen", TerminalScreenElement);
   defineIfNeeded(resolvedRegistry, "tp-terminal-pane-tree", TerminalPaneTreeElement);
   defineIfNeeded(resolvedRegistry, "tp-terminal-saved-sessions", TerminalSavedSessionsElement);

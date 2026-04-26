@@ -86,11 +86,13 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
       }
 
       .terminal-column {
-        grid-template-rows: minmax(0, 1fr) auto;
+        grid-template-rows: auto minmax(0, 1fr) auto;
         align-content: stretch;
         gap: 0;
         min-height: var(--tp-workspace-terminal-column-min-height);
         overflow: hidden;
+        --tp-terminal-screen-panel-border-top-left-radius: 0;
+        --tp-terminal-screen-panel-border-top-right-radius: 0;
         --tp-terminal-screen-panel-border-bottom-left-radius: 0;
         --tp-terminal-screen-panel-border-bottom-right-radius: 0;
         --tp-terminal-screen-panel-padding-bottom: 0;
@@ -118,6 +120,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
       }
 
       tp-terminal-screen,
+      tp-terminal-tab-strip,
       tp-terminal-pane-tree,
       tp-terminal-command-dock,
       tp-terminal-toolbar,
@@ -242,6 +245,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           <div class="content" part="content">
             <div class="operations-deck" part="operations-deck" data-testid="tp-workspace-operations-deck">
               <div class="terminal-column" part="terminal-column" data-testid="tp-workspace-terminal-column">
+                <tp-terminal-tab-strip .kernel=${this.kernel}></tp-terminal-tab-strip>
                 <tp-terminal-screen .kernel=${this.kernel} placement="terminal"></tp-terminal-screen>
                 <div class="command-region" part="command-region" data-testid="tp-workspace-command-region">
                   <tp-terminal-command-dock
