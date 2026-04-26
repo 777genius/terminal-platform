@@ -53,6 +53,7 @@ button {
   gap: 18px;
   padding: 18px;
   overflow: hidden;
+  color: var(--text);
   animation: shell-enter 220ms ease-out;
 }
 

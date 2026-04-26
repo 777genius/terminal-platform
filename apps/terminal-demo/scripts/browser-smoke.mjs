@@ -332,6 +332,8 @@ async function main() {
       || result.afterThemeSwitch.themeButtonTitle !== "Switch workspace theme to Light."
       || result.afterThemeSwitch.demoShellTheme !== "terminal-platform-light"
       || result.afterThemeSwitch.demoShellBgToken !== "#f6f8fb"
+      || result.afterThemeSwitch.demoShellTextColor !== "rgb(23, 32, 51)"
+      || result.afterThemeSwitch.heroTitleColor !== "rgb(23, 32, 51)"
       || !String(result.afterThemeSwitch.demoShellColorScheme ?? "").includes("light")
       || result.afterThemeSwitch.screenBgToken !== "#f6f8fb"
       || result.afterThemeSwitch.storedTheme !== "terminal-platform-light"
@@ -1184,6 +1186,7 @@ async function runSmokeScenario(browserUrl) {
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const commandDockHost = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
       const demoShell = document.querySelector('[data-testid="terminal-demo-shell"]') ?? null;
+      const heroTitle = document.querySelector('.hero__title') ?? null;
       const themeButton = [...(toolbarRoot?.querySelectorAll('[part="theme-option"]') ?? [])]
         .find((button) => button.getAttribute('data-theme-id') === 'terminal-platform-light') ?? null;
       if (!themeButton) {
@@ -1202,13 +1205,16 @@ async function runSmokeScenario(browserUrl) {
       themeButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
+      const heroTitleStyle = heroTitle ? getComputedStyle(heroTitle) : null;
 
       return {
         clicked: true,
         themeId: window.terminalDemoDebug?.getState?.()?.theme?.themeId ?? null,
         demoShellTheme: demoShell?.getAttribute('data-workspace-theme') ?? null,
         demoShellBgToken: demoShellStyle?.getPropertyValue('--bg').trim() ?? null,
+        demoShellTextColor: demoShellStyle?.color ?? null,
         demoShellColorScheme: demoShellStyle?.colorScheme ?? null,
+        heroTitleColor: heroTitleStyle?.color ?? null,
         workspaceTheme: workspaceHost?.getAttribute('data-tp-theme') ?? null,
         screenTheme: screenHost?.getAttribute('data-tp-theme') ?? null,
         commandDockTheme: commandDockHost?.getAttribute('data-tp-theme') ?? null,
