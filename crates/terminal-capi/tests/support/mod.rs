@@ -2,6 +2,7 @@
 
 use std::{
     fs,
+    ops::Deref,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -192,6 +193,42 @@ pub fn unique_temp_path(prefix: &str, suffix: &str) -> PathBuf {
 
 pub fn unique_temp_dir(prefix: &str) -> PathBuf {
     unique_temp_path(prefix, "dir")
+}
+
+pub fn scoped_temp_dir(prefix: &str) -> ScopedTempDir {
+    ScopedTempDir { path: unique_temp_dir(prefix) }
+}
+
+pub struct ScopedTempDir {
+    path: PathBuf,
+}
+
+impl ScopedTempDir {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for ScopedTempDir {
+    fn as_ref(&self) -> &Path {
+        self.path()
+    }
+}
+
+impl Deref for ScopedTempDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        self.path()
+    }
+}
+
+impl Drop for ScopedTempDir {
+    fn drop(&mut self) {
+        if self.path.exists() {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 }
 
 #[cfg(unix)]

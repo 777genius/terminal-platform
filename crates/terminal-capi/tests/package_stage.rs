@@ -21,7 +21,7 @@ use terminal_testing::{daemon, daemon_fixture, unique_socket_address, wait_for_d
 async fn stages_and_verifies_terminal_capi_package() {
     let fixture = daemon_fixture("capi-stage").expect("daemon fixture should start");
     wait_for_daemon_ready(&fixture.client).await;
-    let stage_dir = support::unique_temp_dir("terminal-capi-package");
+    let stage_dir = support::scoped_temp_dir("terminal-capi-package");
     let workspace_root = workspace_root();
     stage_capi_package(&workspace_root, &stage_dir);
     verify_staged_capi_package(&workspace_root, &stage_dir);
@@ -68,7 +68,7 @@ async fn stages_and_verifies_terminal_capi_package() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn staged_terminal_capi_package_handles_shutdown_and_restart_flows() {
-    let stage_dir = support::unique_temp_dir("terminal-capi-package");
+    let stage_dir = support::scoped_temp_dir("terminal-capi-package");
     let workspace_root = workspace_root();
     stage_capi_package(&workspace_root, &stage_dir);
     verify_staged_capi_package(&workspace_root, &stage_dir);

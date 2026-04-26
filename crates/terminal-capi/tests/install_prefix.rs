@@ -21,8 +21,8 @@ use terminal_testing::{daemon, daemon_fixture, unique_socket_address, wait_for_d
 async fn installs_terminal_capi_package_into_prefix_layout() {
     let fixture = daemon_fixture("capi-install").expect("daemon fixture should start");
     wait_for_daemon_ready(&fixture.client).await;
-    let stage_dir = support::unique_temp_dir("terminal-capi-package");
-    let prefix_dir = support::unique_temp_dir("terminal-capi-prefix");
+    let stage_dir = support::scoped_temp_dir("terminal-capi-package");
+    let prefix_dir = support::scoped_temp_dir("terminal-capi-prefix");
     let workspace_root = workspace_root();
 
     stage_capi_package(&workspace_root, &stage_dir);
@@ -68,8 +68,8 @@ async fn installs_terminal_capi_package_into_prefix_layout() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn installed_prefix_handles_shutdown_and_restart_flows() {
-    let stage_dir = support::unique_temp_dir("terminal-capi-package");
-    let prefix_dir = support::unique_temp_dir("terminal-capi-prefix");
+    let stage_dir = support::scoped_temp_dir("terminal-capi-package");
+    let prefix_dir = support::scoped_temp_dir("terminal-capi-prefix");
     let workspace_root = workspace_root();
 
     stage_capi_package(&workspace_root, &stage_dir);
