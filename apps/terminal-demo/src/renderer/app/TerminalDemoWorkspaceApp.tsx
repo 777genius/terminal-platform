@@ -26,6 +26,7 @@ import {
   createDemoPreviewWorkspaceSnapshot,
   createStaticWorkspaceKernel,
 } from "./terminal-demo-static-workspace.js";
+import { resolveTerminalDemoShellChromeState } from "./terminal-demo-shell-chrome.js";
 
 export {
   createDemoPreviewBackendCapabilities,
@@ -126,6 +127,7 @@ export function TerminalDemoWorkspaceScreen(props: {
   const terminalDisplay = snapshot.terminalDisplay ?? DEFAULT_TERMINAL_DEMO_DISPLAY;
   const diagnosticsPreview = snapshot.diagnostics.slice(0, 3);
   const advancedNoticeCount = diagnosticsPreview.length + (actionError ? 1 : 0);
+  const shellChrome = useMemo(() => resolveTerminalDemoShellChromeState(snapshot), [snapshot]);
   const advancedSavedSessionsControl = useMemo(
     () => resolveTerminalSavedSessionsControlState(snapshot, {
       visibleSavedSessionCount: ADVANCED_SAVED_LAYOUT_VISIBLE_COUNT,
@@ -317,49 +319,53 @@ export function TerminalDemoWorkspaceScreen(props: {
   return (
     <div
       className="shell"
-      data-has-active-session={activeSessionId ? "true" : "false"}
+      data-has-active-session={shellChrome.hasActiveSession ? "true" : "false"}
+      data-shell-density={shellChrome.density}
+      data-shell-mode={shellChrome.mode}
       data-workspace-theme={snapshot.theme.themeId}
       data-testid="terminal-demo-shell"
     >
       <aside className="shell__sidebar">
-        <section className="panel hero hero--demo">
-          <div className="hero__content">
-            <div className="section__eyebrow">Terminal Platform</div>
-            <h1 className="hero__title">NativeMux workspace</h1>
-            <p className="hero__copy">{connectionSummary.copy}</p>
+        {shellChrome.showWorkspaceHero ? (
+          <section className="panel hero hero--demo" data-testid="terminal-demo-workspace-hero">
+            <div className="hero__content">
+              <div className="section__eyebrow">Terminal Platform</div>
+              <h1 className="hero__title">NativeMux workspace</h1>
+              <p className="hero__copy">{connectionSummary.copy}</p>
 
-            <div className="hero__kpis" aria-label="Workspace summary">
-              <div className="hero__stat">
-                <span>Sessions</span>
-                <strong>{snapshot.catalog.sessions.length}</strong>
-              </div>
-              <div className="hero__stat">
-                <span>Saved</span>
-                <strong>{snapshot.catalog.savedSessions.length}</strong>
-              </div>
-              <div className="hero__stat">
-                <span>Health</span>
-                <strong>{healthSummary.label}</strong>
+              <div className="hero__kpis" aria-label="Workspace summary">
+                <div className="hero__stat">
+                  <span>Sessions</span>
+                  <strong>{snapshot.catalog.sessions.length}</strong>
+                </div>
+                <div className="hero__stat">
+                  <span>Saved</span>
+                  <strong>{snapshot.catalog.savedSessions.length}</strong>
+                </div>
+                <div className="hero__stat">
+                  <span>Health</span>
+                  <strong>{healthSummary.label}</strong>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="meta-stack">
-            <span className={`badge ${badgeToneForConnection(snapshot.connection.state)}`}>
-              {connectionSummary.label}
-            </span>
-            <span className="badge badge--neutral">{snapshot.catalog.sessions.length} running shells</span>
-            <span className="badge badge--neutral">
-              {activeSessionId ? "Shell selected" : "No shell selected"}
-            </span>
-          </div>
-        </section>
+            <div className="meta-stack">
+              <span className={`badge ${badgeToneForConnection(snapshot.connection.state)}`}>
+                {connectionSummary.label}
+              </span>
+              <span className="badge badge--neutral">{snapshot.catalog.sessions.length} running shells</span>
+              <span className="badge badge--neutral">
+                {activeSessionId ? "Shell selected" : "No shell selected"}
+              </span>
+            </div>
+          </section>
+        ) : null}
 
         <section className="panel panel--surface section">
           <div className="section__header">
             <div>
               <div className="section__eyebrow">Launch</div>
-              <h2 className="section__title">Session launcher</h2>
+              <h2 className="section__title">{shellChrome.launcherTitle}</h2>
             </div>
             <span className="section__meta">{createPending ? "starting" : "ready"}</span>
           </div>
@@ -394,7 +400,7 @@ export function TerminalDemoWorkspaceScreen(props: {
 
           <details className="details-panel">
             <summary>
-              Advanced tools
+              {shellChrome.advancedToolsLabel}
               {advancedNoticeCount > 0
                 ? ` - ${advancedNoticeCount} notice${advancedNoticeCount === 1 ? "" : "s"}`
                 : ""}

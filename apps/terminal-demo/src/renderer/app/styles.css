@@ -110,9 +110,18 @@ button {
 }
 
 .shell[data-has-active-session="true"] {
-  grid-template-columns: minmax(13.5rem, 16rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(13.5rem, 16rem);
   gap: 10px;
   padding: 10px;
+}
+
+.shell[data-shell-mode="terminal"] .shell__main {
+  order: 1;
+}
+
+.shell[data-shell-mode="terminal"] .shell__sidebar {
+  order: 2;
+  align-content: start;
 }
 
 .shell--error {
@@ -297,6 +306,29 @@ button {
 
 .shell[data-has-active-session="true"] .panel--surface {
   padding: 10px;
+}
+
+.shell[data-shell-mode="terminal"] .section__header {
+  align-items: flex-start;
+}
+
+.shell[data-shell-mode="terminal"] .section__title {
+  font-size: 0.98rem;
+}
+
+.shell[data-shell-mode="terminal"] .button-row .button--primary {
+  width: 100%;
+}
+
+.shell[data-shell-mode="terminal"] .section-callout {
+  gap: 5px;
+  padding: 10px 11px;
+  font-size: 0.86rem;
+}
+
+.shell[data-shell-mode="terminal"] .details-panel summary {
+  padding: 10px 12px;
+  font-size: 0.86rem;
 }
 
 .shell[data-has-active-session="true"] .shell__sidebar,

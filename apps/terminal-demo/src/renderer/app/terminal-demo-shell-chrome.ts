@@ -1,0 +1,33 @@
+import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
+
+export type TerminalDemoShellMode = "launcher" | "terminal";
+export type TerminalDemoShellDensity = "browse" | "focus";
+
+export interface TerminalDemoShellChromeState {
+  hasActiveSession: boolean;
+  mode: TerminalDemoShellMode;
+  density: TerminalDemoShellDensity;
+  showWorkspaceHero: boolean;
+  launcherTitle: string;
+  advancedToolsLabel: string;
+}
+
+export function resolveTerminalDemoShellChromeState(
+  snapshot: Pick<WorkspaceSnapshot, "attachedSession" | "catalog" | "selection">,
+): TerminalDemoShellChromeState {
+  const activeSessionId =
+    snapshot.selection.activeSessionId
+    ?? snapshot.catalog.sessions[0]?.session_id
+    ?? snapshot.attachedSession?.session.session_id
+    ?? null;
+  const hasActiveSession = Boolean(activeSessionId);
+
+  return {
+    hasActiveSession,
+    mode: hasActiveSession ? "terminal" : "launcher",
+    density: hasActiveSession ? "focus" : "browse",
+    showWorkspaceHero: !hasActiveSession,
+    launcherTitle: hasActiveSession ? "Shell controls" : "Session launcher",
+    advancedToolsLabel: hasActiveSession ? "Tools" : "Advanced tools",
+  };
+}

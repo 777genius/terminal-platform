@@ -137,7 +137,10 @@ async function main() {
       || !result.afterCreate.hasStatusBar
       || !result.afterCreate.hasCommandDock
       || result.afterCreate.demoShellActive !== "true"
+      || result.afterCreate.demoShellMode !== "terminal"
+      || result.afterCreate.workspaceHeroVisible !== false
       || result.afterCreate.demoShellColumnCount !== 2
+      || !result.afterCreate.demoMainBeforeSidebar
       || result.afterCreate.demoMainWidth < 1000
       || result.afterCreate.demoMainWidth <= result.afterCreate.demoSidebarWidth * 3
       || result.afterCreate.workspaceHostWidth < 1000
@@ -291,6 +294,7 @@ async function main() {
     if (
       !result.afterCreateMobileLayout.checked
       || result.afterCreateMobileLayout.demoShellActive !== "true"
+      || result.afterCreateMobileLayout.demoShellMode !== "terminal"
       || result.afterCreateMobileLayout.demoShellColumnCount !== 1
       || result.afterCreateMobileLayout.operationsDeckColumnCount !== 1
       || result.afterCreateMobileLayout.workspaceInspectorMode !== "collapsed"
@@ -354,7 +358,8 @@ async function main() {
       || result.afterThemeSwitch.demoShellTheme !== "terminal-platform-light"
       || result.afterThemeSwitch.demoShellBgToken !== "#f6f8fb"
       || result.afterThemeSwitch.demoShellTextColor !== "rgb(23, 32, 51)"
-      || result.afterThemeSwitch.heroTitleColor !== "rgb(23, 32, 51)"
+      || result.afterThemeSwitch.demoShellMode !== "terminal"
+      || result.afterThemeSwitch.workspaceHeroVisible !== false
       || !String(result.afterThemeSwitch.demoShellColorScheme ?? "").includes("light")
       || result.afterThemeSwitch.screenBgToken !== "#f6f8fb"
       || result.afterThemeSwitch.storedTheme !== "terminal-platform-light"
@@ -831,9 +836,16 @@ async function runSmokeScenario(browserUrl) {
         hasSavedFilter: Boolean(savedRoot?.querySelector('[data-testid="tp-saved-session-filter"]')),
         healthPhase: debug?.attachedSession?.health?.phase ?? null,
         demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
+        demoShellMode: demoShell?.getAttribute('data-shell-mode') ?? null,
+        workspaceHeroVisible: Boolean(demoShell?.querySelector('[data-testid="terminal-demo-workspace-hero"]')),
         demoShellColumnCount: demoShell
           ? getComputedStyle(demoShell).gridTemplateColumns.split(' ').filter(Boolean).length
           : 0,
+        demoMainBeforeSidebar: Boolean(
+          demoMain
+          && demoSidebar
+          && demoMain.getBoundingClientRect().left < demoSidebar.getBoundingClientRect().left
+        ),
         demoSidebarWidth: Math.round(demoSidebar?.getBoundingClientRect().width ?? 0),
         demoMainWidth: Math.round(demoMain?.getBoundingClientRect().width ?? 0),
         workspaceHostWidth: Math.round(workspaceHostSlot?.getBoundingClientRect().width ?? 0),
@@ -1048,6 +1060,7 @@ async function runSmokeScenario(browserUrl) {
       return {
         checked: Boolean(demoShell && demoSidebar && demoMain && operationsDeck),
         demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
+        demoShellMode: demoShell?.getAttribute('data-shell-mode') ?? null,
         demoShellColumnCount: demoShell
           ? getComputedStyle(demoShell).gridTemplateColumns.split(' ').filter(Boolean).length
           : 0,
@@ -1302,6 +1315,8 @@ async function runSmokeScenario(browserUrl) {
         clicked: true,
         themeId: window.terminalDemoDebug?.getState?.()?.theme?.themeId ?? null,
         demoShellTheme: demoShell?.getAttribute('data-workspace-theme') ?? null,
+        demoShellMode: demoShell?.getAttribute('data-shell-mode') ?? null,
+        workspaceHeroVisible: Boolean(demoShell?.querySelector('[data-testid="terminal-demo-workspace-hero"]')),
         demoShellBgToken: demoShellStyle?.getPropertyValue('--bg').trim() ?? null,
         demoShellTextColor: demoShellStyle?.color ?? null,
         demoShellColorScheme: demoShellStyle?.colorScheme ?? null,

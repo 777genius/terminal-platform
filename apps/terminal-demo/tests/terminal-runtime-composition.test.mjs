@@ -9,6 +9,7 @@ import {
   createDemoPreviewWorkspaceSnapshot,
   createStaticWorkspaceKernel,
 } from "../dist/renderer-node-test/renderer/app/TerminalDemoWorkspaceApp.js";
+import { resolveTerminalDemoShellChromeState } from "../dist/renderer-node-test/renderer/app/terminal-demo-shell-chrome.js";
 import { buildTerminalRuntimeBrowserUrl } from "../dist/renderer-node-test/features/terminal-runtime-host/contracts/index.js";
 import { resolveDemoDefaultShellProgram } from "../dist/renderer-node-test/features/terminal-runtime-host/main/composition/shell-policy.js";
 
@@ -26,9 +27,9 @@ test("renderer app mounts the sdk react workspace shell", () => {
     kernel,
   }));
 
-  assert.match(markup, /Terminal Platform/);
-  assert.match(markup, /NativeMux workspace/);
-  assert.match(markup, /Session launcher/);
+  assert.match(markup, /data-shell-mode="terminal"/);
+  assert.doesNotMatch(markup, /data-testid="terminal-demo-workspace-hero"/);
+  assert.match(markup, /Shell controls/);
   assert.match(markup, /data-testid="terminal-workspace-host"/);
   assert.match(markup, /tp-terminal-workspace/);
   assert.match(markup, /Terminal Platform preview/);
@@ -37,6 +38,38 @@ test("renderer app mounts the sdk react workspace shell", () => {
   assert.equal(snapshot.catalog.backendCapabilities.native.capabilities.pane_input_write, true);
   assert.equal(snapshot.catalog.backendCapabilities.native.capabilities.pane_paste_write, true);
   assert.equal(snapshot.catalog.backendCapabilities.native.capabilities.explicit_session_save, true);
+});
+
+test("demo shell chrome hides overview content once a terminal is active", () => {
+  const terminalSnapshot = createDemoPreviewWorkspaceSnapshot({ runtimeSlug: "terminal-demo" });
+  const terminalChrome = resolveTerminalDemoShellChromeState(terminalSnapshot);
+
+  assert.deepEqual(terminalChrome, {
+    hasActiveSession: true,
+    mode: "terminal",
+    density: "focus",
+    showWorkspaceHero: false,
+    launcherTitle: "Shell controls",
+    advancedToolsLabel: "Tools",
+  });
+
+  const launcherChrome = resolveTerminalDemoShellChromeState({
+    ...terminalSnapshot,
+    attachedSession: null,
+    catalog: {
+      ...terminalSnapshot.catalog,
+      sessions: [],
+    },
+    selection: {
+      activeSessionId: null,
+      activePaneId: null,
+    },
+  });
+
+  assert.equal(launcherChrome.mode, "launcher");
+  assert.equal(launcherChrome.density, "browse");
+  assert.equal(launcherChrome.showWorkspaceHero, true);
+  assert.equal(launcherChrome.launcherTitle, "Session launcher");
 });
 
 test("static preview kernel exposes ready native backend capabilities", async () => {

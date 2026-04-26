@@ -15,6 +15,7 @@
     "src/features/terminal-runtime-host/renderer/window.d.ts",
     "src/features/terminal-runtime-host/main/composition/shell-policy.ts",
     "src/renderer/app/TerminalDemoWorkspaceApp.tsx",
+    "src/renderer/app/terminal-demo-shell-chrome.ts",
     "src/renderer/app/terminal-demo-static-workspace.ts"
   ]
 }
