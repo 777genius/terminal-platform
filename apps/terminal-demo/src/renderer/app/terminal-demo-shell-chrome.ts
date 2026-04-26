@@ -7,6 +7,7 @@ export interface TerminalDemoShellChromeState {
   hasActiveSession: boolean;
   mode: TerminalDemoShellMode;
   density: TerminalDemoShellDensity;
+  showLauncherPanel: boolean;
   showWorkspaceHero: boolean;
   launcherTitle: string;
   advancedToolsLabel: string;
@@ -26,8 +27,9 @@ export function resolveTerminalDemoShellChromeState(
     hasActiveSession,
     mode: hasActiveSession ? "terminal" : "launcher",
     density: hasActiveSession ? "focus" : "browse",
+    showLauncherPanel: !hasActiveSession,
     showWorkspaceHero: !hasActiveSession,
-    launcherTitle: hasActiveSession ? "Shell controls" : "Session launcher",
-    advancedToolsLabel: hasActiveSession ? "Tools" : "Advanced tools",
+    launcherTitle: "Session launcher",
+    advancedToolsLabel: "Advanced tools",
   };
 }

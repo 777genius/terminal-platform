@@ -139,10 +139,9 @@ async function main() {
       || result.afterCreate.demoShellActive !== "true"
       || result.afterCreate.demoShellMode !== "terminal"
       || result.afterCreate.workspaceHeroVisible !== false
-      || result.afterCreate.demoShellColumnCount !== 2
-      || !result.afterCreate.demoMainBeforeSidebar
+      || result.afterCreate.launcherPanelVisible !== false
+      || result.afterCreate.demoShellColumnCount !== 1
       || result.afterCreate.demoMainWidth < 1000
-      || result.afterCreate.demoMainWidth <= result.afterCreate.demoSidebarWidth * 3
       || result.afterCreate.workspaceHostWidth < 1000
       || result.afterCreate.workspaceHostTopOffset == null
       || result.afterCreate.workspaceHostTopOffset > 20
@@ -301,6 +300,7 @@ async function main() {
       !result.afterCreateMobileLayout.checked
       || result.afterCreateMobileLayout.demoShellActive !== "true"
       || result.afterCreateMobileLayout.demoShellMode !== "terminal"
+      || result.afterCreateMobileLayout.launcherPanelVisible !== false
       || result.afterCreateMobileLayout.demoShellColumnCount !== 1
       || result.afterCreateMobileLayout.operationsDeckColumnCount !== 1
       || result.afterCreateMobileLayout.workspaceNavigationMode !== "collapsed"
@@ -309,7 +309,6 @@ async function main() {
       || !result.afterCreateMobileLayout.hasInspectorDrawer
       || result.afterCreateMobileLayout.inspectorDrawerOpen !== false
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
-      || !result.afterCreateMobileLayout.mainPrecedesSidebar
       || result.afterCreateMobileLayout.demoMainWidth < 430
       || result.afterCreateMobileLayout.screenViewportHeight < 260
       || result.afterCreateMobileLayout.terminalScreenHeight > 650
@@ -368,6 +367,7 @@ async function main() {
       || result.afterThemeSwitch.demoShellTextColor !== "rgb(23, 32, 51)"
       || result.afterThemeSwitch.demoShellMode !== "terminal"
       || result.afterThemeSwitch.workspaceHeroVisible !== false
+      || result.afterThemeSwitch.launcherPanelVisible !== false
       || !String(result.afterThemeSwitch.demoShellColorScheme ?? "").includes("light")
       || result.afterThemeSwitch.screenBgToken !== "#f6f8fb"
       || result.afterThemeSwitch.storedTheme !== "terminal-platform-light"
@@ -474,25 +474,6 @@ async function main() {
       || result.afterSavedSearch.afterClearPanelCount !== String(result.afterSaveLayout.savedSessionCount)
     ) {
       throw new Error(`Saved layout filter did not settle correctly: ${JSON.stringify(result.afterSavedSearch)}`);
-    }
-
-    if (
-      !result.afterAdvancedSavedLayouts.opened
-      || result.afterAdvancedSavedLayouts.savedItemsRendered < 1
-      || result.afterAdvancedSavedLayouts.savedPanelCount !== String(result.afterSaveLayout.savedSessionCount)
-      || result.afterAdvancedSavedLayouts.savedVisibleCount !== String(Math.min(6, result.afterSaveLayout.savedSessionCount))
-      || result.afterAdvancedSavedLayouts.firstSavedCanRestore !== "true"
-      || result.afterAdvancedSavedLayouts.firstSavedRestoreStatus !== "available"
-      || result.afterAdvancedSavedLayouts.firstSavedRestoreDisabled !== false
-      || !result.afterAdvancedSavedLayouts.firstSavedRestoreTitle?.includes("Restore saved layout")
-      || !result.afterAdvancedSavedLayouts.firstSavedSemanticsCodes?.includes("process_state_not_preserved")
-      || !result.afterAdvancedSavedLayouts.firstSavedSemanticsCodes?.includes("screen_buffers_not_replayed")
-      || !result.afterAdvancedSavedLayouts.firstSavedSemanticsLabels?.includes("processes restart")
-      || !result.afterAdvancedSavedLayouts.firstSavedSemanticsLabels?.includes("no screen replay")
-      || !result.afterAdvancedSavedLayouts.deletePrompted
-      || result.afterAdvancedSavedLayouts.savedSessionCountAfterDeletePrompt !== result.afterSaveLayout.savedSessionCount
-    ) {
-      throw new Error(`Advanced saved layout controls did not settle: ${JSON.stringify(result.afterAdvancedSavedLayouts)}`);
     }
 
     if (
@@ -860,15 +841,10 @@ async function runSmokeScenario(browserUrl) {
         demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
         demoShellMode: demoShell?.getAttribute('data-shell-mode') ?? null,
         workspaceHeroVisible: Boolean(demoShell?.querySelector('[data-testid="terminal-demo-workspace-hero"]')),
+        launcherPanelVisible: Boolean(demoSidebar),
         demoShellColumnCount: demoShell
           ? getComputedStyle(demoShell).gridTemplateColumns.split(' ').filter(Boolean).length
           : 0,
-        demoMainBeforeSidebar: Boolean(
-          demoMain
-          && demoSidebar
-          && demoMain.getBoundingClientRect().left < demoSidebar.getBoundingClientRect().left
-        ),
-        demoSidebarWidth: Math.round(demoSidebar?.getBoundingClientRect().width ?? 0),
         demoMainWidth: Math.round(demoMain?.getBoundingClientRect().width ?? 0),
         workspaceHostWidth: Math.round(workspaceHostSlot?.getBoundingClientRect().width ?? 0),
         workspaceHostTopOffset: demoMain && workspaceHostSlot
@@ -1088,9 +1064,10 @@ async function runSmokeScenario(browserUrl) {
       const commandComposerRect = commandComposer?.getBoundingClientRect() ?? null;
       const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
       return {
-        checked: Boolean(demoShell && demoSidebar && demoMain && operationsDeck),
+        checked: Boolean(demoShell && demoMain && operationsDeck),
         demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
         demoShellMode: demoShell?.getAttribute('data-shell-mode') ?? null,
+        launcherPanelVisible: Boolean(demoSidebar),
         demoShellColumnCount: demoShell
           ? getComputedStyle(demoShell).gridTemplateColumns.split(' ').filter(Boolean).length
           : 0,
@@ -1155,11 +1132,6 @@ async function runSmokeScenario(browserUrl) {
           && [...terminalColumn.children].indexOf(tabStripHost) < [...terminalColumn.children].indexOf(terminalScreen)
         ),
         terminalTabStripTabCount: tabStripPanel?.getAttribute('data-tab-count') ?? null,
-        mainPrecedesSidebar: Boolean(
-          demoMain
-          && demoSidebar
-          && demoMain.getBoundingClientRect().top < demoSidebar.getBoundingClientRect().top
-        ),
       };
     })()`);
     await send("Emulation.setDeviceMetricsOverride", {
@@ -1349,6 +1321,7 @@ async function runSmokeScenario(browserUrl) {
         demoShellTheme: demoShell?.getAttribute('data-workspace-theme') ?? null,
         demoShellMode: demoShell?.getAttribute('data-shell-mode') ?? null,
         workspaceHeroVisible: Boolean(demoShell?.querySelector('[data-testid="terminal-demo-workspace-hero"]')),
+        launcherPanelVisible: Boolean(demoShell?.querySelector('.shell__sidebar')),
         demoShellBgToken: demoShellStyle?.getPropertyValue('--bg').trim() ?? null,
         demoShellTextColor: demoShellStyle?.color ?? null,
         demoShellColorScheme: demoShellStyle?.colorScheme ?? null,
@@ -1757,50 +1730,6 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
 
-    const afterAdvancedSavedLayouts = await evaluate(send, `(async () => {
-      const details = document.querySelector('.details-panel') ?? null;
-      if (details) {
-        details.open = true;
-      }
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-      const savedPanel = document.querySelector('[data-testid="advanced-saved-layouts"]') ?? null;
-      const restoreButton = savedPanel?.querySelector('[data-testid="advanced-restore-saved-layout"]') ?? null;
-      const deleteButton = savedPanel?.querySelector('[data-testid="advanced-delete-saved-layout"]') ?? null;
-      const restoreSemantics = [...(savedPanel?.querySelectorAll('[data-testid="advanced-saved-layout-restore-semantics"]') ?? [])];
-      const savedSessionCount = window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
-      const deletePromptResult = {
-        deletePrompted: false,
-        deleteButtonText: deleteButton?.textContent?.trim() ?? null,
-        savedSessionCountAfterDeletePrompt: savedSessionCount,
-      };
-
-      if (deleteButton && !deleteButton.disabled) {
-        deleteButton.click();
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        deletePromptResult.deletePrompted = deleteButton.getAttribute('data-confirming') === 'true'
-          && /confirm delete/i.test(deleteButton.textContent ?? '');
-        deletePromptResult.deleteButtonText = deleteButton.textContent?.trim() ?? null;
-        deletePromptResult.savedSessionCountAfterDeletePrompt =
-          window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
-      }
-
-      return {
-        opened: Boolean(details?.open),
-        savedPanelCount: savedPanel?.getAttribute('data-saved-count') ?? null,
-        savedVisibleCount: savedPanel?.getAttribute('data-visible-count') ?? null,
-        savedHiddenCount: savedPanel?.getAttribute('data-hidden-count') ?? null,
-        savedItemsRendered: savedPanel?.querySelectorAll('[data-testid="advanced-saved-layout"]')?.length ?? 0,
-        firstSavedCanRestore: restoreButton?.getAttribute('data-can-restore') ?? null,
-        firstSavedRestoreStatus: restoreButton?.getAttribute('data-restore-status') ?? null,
-        firstSavedRestoreDisabled: restoreButton?.disabled ?? null,
-        firstSavedRestoreTitle: restoreButton?.getAttribute('title') ?? null,
-        firstSavedSemanticsCodes: restoreSemantics.map((note) => note.getAttribute('data-semantics-code')),
-        firstSavedSemanticsLabels: restoreSemantics.map((note) => note.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
-        ...deletePromptResult,
-      };
-    })()`);
-
     const afterPruneHidden = await evaluate(send, `(async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const waitForState = async (predicate, timeoutMs = 8000) => {
@@ -1829,8 +1758,9 @@ async function runSmokeScenario(browserUrl) {
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
       const sessionTools = commandRoot?.querySelector('[data-testid="tp-session-tools"]') ?? null;
-      const startShellButton = document.querySelector('[data-testid="start-default-shell"]') ?? null;
-      if (!workspaceHost || !savedRoot || !sessionTools || !startShellButton) {
+      const kernelCommands = window.terminalDemoDebug?.controller?.commands ?? null;
+      const defaultProgram = new URL(window.location.href).searchParams.get('demoDefaultShellProgram') || 'zsh';
+      if (!workspaceHost || !commandRoot || !savedRoot || !sessionTools || !kernelCommands?.createSession) {
         return {
           prompted: false,
           confirmed: false,
@@ -1851,25 +1781,33 @@ async function runSmokeScenario(browserUrl) {
         setupAttempts += 1;
         const stateBeforeCreate = window.terminalDemoDebug?.getState?.();
         const sessionCountBefore = stateBeforeCreate?.catalog?.sessions?.length ?? 0;
-        if (startShellButton.disabled) {
+        const activeSessionBefore = stateBeforeCreate?.selection?.activeSessionId ?? null;
+        await kernelCommands.createSession('native', {
+          title: \`Smoke prune seed \${setupAttempts}\`,
+          launch: {
+            program: defaultProgram,
+            args: [],
+            cwd: null,
+          },
+        });
+        const stateAfterCreate = await waitForState((state) => {
+          const nextSessionCount = state?.catalog?.sessions?.length ?? 0;
+          return nextSessionCount > sessionCountBefore
+            && state?.selection?.activeSessionId
+            && state.selection.activeSessionId !== activeSessionBefore;
+        });
+        if ((stateAfterCreate?.catalog?.sessions?.length ?? 0) <= sessionCountBefore) {
           await wait(200);
           continue;
         }
-        startShellButton.click();
-        const stateAfterCreate = await waitForState((state) => {
-          const nextSessionCount = state?.catalog?.sessions?.length ?? 0;
-          return nextSessionCount > sessionCountBefore && Boolean(state?.attachedSession?.focused_screen);
-        });
-        if ((stateAfterCreate?.catalog?.sessions?.length ?? 0) <= sessionCountBefore) {
-          continue;
-        }
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
         const saveLayoutButton = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
         if (!saveLayoutButton) {
           return {
             prompted: false,
             confirmed: false,
-            reason: 'save layout missing after setup session',
+            reason: 'save layout missing while seeding prune workflow',
             savedSessionCountBefore: savedCount,
             visibleCountBefore: savedRoot.querySelectorAll('[part="item"]')?.length ?? 0,
             savedSessionCountAfterPrompt: savedCount,
@@ -1882,9 +1820,11 @@ async function runSmokeScenario(browserUrl) {
           await wait(200);
           continue;
         }
+
         saveLayoutButton.click();
         const nextSavedCount = await waitForSavedCount(savedCount + 1);
         if (nextSavedCount <= savedCount) {
+          await wait(200);
           continue;
         }
         savedCount = nextSavedCount;
@@ -2677,7 +2617,6 @@ async function runSmokeScenario(browserUrl) {
       afterTopologyActions,
       afterSaveLayout,
       afterSavedSearch,
-      afterAdvancedSavedLayouts,
       afterPruneHidden,
       afterCommand: {
         ...afterCommand,

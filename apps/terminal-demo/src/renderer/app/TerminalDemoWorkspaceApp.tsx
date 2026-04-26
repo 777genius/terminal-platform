@@ -325,286 +325,288 @@ export function TerminalDemoWorkspaceScreen(props: {
       data-workspace-theme={snapshot.theme.themeId}
       data-testid="terminal-demo-shell"
     >
-      <aside className="shell__sidebar">
-        {shellChrome.showWorkspaceHero ? (
-          <section className="panel hero hero--demo" data-testid="terminal-demo-workspace-hero">
-            <div className="hero__content">
-              <div className="section__eyebrow">Terminal Platform</div>
-              <h1 className="hero__title">NativeMux workspace</h1>
-              <p className="hero__copy">{connectionSummary.copy}</p>
+      {shellChrome.showLauncherPanel ? (
+        <aside className="shell__sidebar">
+          {shellChrome.showWorkspaceHero ? (
+            <section className="panel hero hero--demo" data-testid="terminal-demo-workspace-hero">
+              <div className="hero__content">
+                <div className="section__eyebrow">Terminal Platform</div>
+                <h1 className="hero__title">NativeMux workspace</h1>
+                <p className="hero__copy">{connectionSummary.copy}</p>
 
-              <div className="hero__kpis" aria-label="Workspace summary">
-                <div className="hero__stat">
-                  <span>Sessions</span>
-                  <strong>{snapshot.catalog.sessions.length}</strong>
-                </div>
-                <div className="hero__stat">
-                  <span>Saved</span>
-                  <strong>{snapshot.catalog.savedSessions.length}</strong>
-                </div>
-                <div className="hero__stat">
-                  <span>Health</span>
-                  <strong>{healthSummary.label}</strong>
+                <div className="hero__kpis" aria-label="Workspace summary">
+                  <div className="hero__stat">
+                    <span>Sessions</span>
+                    <strong>{snapshot.catalog.sessions.length}</strong>
+                  </div>
+                  <div className="hero__stat">
+                    <span>Saved</span>
+                    <strong>{snapshot.catalog.savedSessions.length}</strong>
+                  </div>
+                  <div className="hero__stat">
+                    <span>Health</span>
+                    <strong>{healthSummary.label}</strong>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="meta-stack">
-              <span className={`badge ${badgeToneForConnection(snapshot.connection.state)}`}>
-                {connectionSummary.label}
-              </span>
-              <span className="badge badge--neutral">{snapshot.catalog.sessions.length} running shells</span>
-              <span className="badge badge--neutral">
-                {activeSessionId ? "Shell selected" : "No shell selected"}
-              </span>
-            </div>
-          </section>
-        ) : null}
+              <div className="meta-stack">
+                <span className={`badge ${badgeToneForConnection(snapshot.connection.state)}`}>
+                  {connectionSummary.label}
+                </span>
+                <span className="badge badge--neutral">{snapshot.catalog.sessions.length} running shells</span>
+                <span className="badge badge--neutral">
+                  {activeSessionId ? "Shell selected" : "No shell selected"}
+                </span>
+              </div>
+            </section>
+          ) : null}
 
-        <section className="panel panel--surface section">
-          <div className="section__header">
-            <div>
-              <div className="section__eyebrow">Launch</div>
-              <h2 className="section__title">{shellChrome.launcherTitle}</h2>
-            </div>
-            <span className="section__meta">{createPending ? "starting" : "ready"}</span>
-          </div>
-
-          <div className="button-row">
-            <button
-              className="button button--primary"
-              data-testid="start-default-shell"
-              disabled={createPending}
-              onClick={() => void handleCreateNativeSession()}
-            >
-              {createPending ? "Starting shell..." : "Start default shell"}
-            </button>
-          </div>
-
-          {activeSessionId ? (
-            <div className="banner banner--subtle section-callout">
-              <strong>Current focus</strong>
+          <section className="panel panel--surface section">
+            <div className="section__header">
               <div>
-                {activeTitle}
-                {activePaneId ? (
-                  <span title={activePaneId}> - pane {activePaneLabel}</span>
+                <div className="section__eyebrow">Launch</div>
+                <h2 className="section__title">{shellChrome.launcherTitle}</h2>
+              </div>
+              <span className="section__meta">{createPending ? "starting" : "ready"}</span>
+            </div>
+
+            <div className="button-row">
+              <button
+                className="button button--primary"
+                data-testid="start-default-shell"
+                disabled={createPending}
+                onClick={() => void handleCreateNativeSession()}
+              >
+                {createPending ? "Starting shell..." : "Start default shell"}
+              </button>
+            </div>
+
+            {activeSessionId ? (
+              <div className="banner banner--subtle section-callout">
+                <strong>Current focus</strong>
+                <div>
+                  {activeTitle}
+                  {activePaneId ? (
+                    <span title={activePaneId}> - pane {activePaneLabel}</span>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="banner banner--subtle section-callout">
+                <strong>No shell selected yet</strong>
+                <div>Start a shell, then pick it from the workspace rail to route terminal output and input.</div>
+              </div>
+            )}
+
+            <details className="details-panel">
+              <summary>
+                {shellChrome.advancedToolsLabel}
+                {advancedNoticeCount > 0
+                  ? ` - ${advancedNoticeCount} notice${advancedNoticeCount === 1 ? "" : "s"}`
+                  : ""}
+              </summary>
+
+              <div className="advanced-stack">
+                <div className="advanced-block">
+                  <div className="section__eyebrow">Maintenance</div>
+                  <div className="advanced-actions">
+                    <button className="button" disabled={createPending} onClick={() => void handleRefreshCatalog()}>
+                      Refresh shells
+                    </button>
+                    <button className="button" onClick={() => void handleRebootstrap()}>
+                      Reconnect workspace
+                    </button>
+                  </div>
+                </div>
+
+                {actionError || hasDiagnostics ? (
+                  <div className="advanced-block">
+                    <div className="section__eyebrow">Notices</div>
+
+                    {actionError ? (
+                      <div className="banner banner--warning">
+                        <strong>Last action failed</strong>
+                        <div>{actionError}</div>
+                      </div>
+                    ) : null}
+
+                    {hasDiagnostics ? (
+                      <div className="degraded-list">
+                        {diagnosticsPreview.map((diagnostic, index) => (
+                          <div
+                            className="degraded-list__item"
+                            key={`${diagnostic.code}-${diagnostic.timestampMs}-${index}`}
+                          >
+                            <strong>{diagnostic.code}</strong>
+                            <small>{diagnostic.message}</small>
+                          </div>
+                        ))}
+                        {snapshot.diagnostics.length > diagnosticsPreview.length ? (
+                          <small className="section__copy">
+                            {snapshot.diagnostics.length - diagnosticsPreview.length} more notices are listed
+                            inside the workspace tools panel.
+                          </small>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 ) : null}
-              </div>
-            </div>
-          ) : (
-            <div className="banner banner--subtle section-callout">
-              <strong>No shell selected yet</strong>
-              <div>Start a shell, then pick it from the workspace rail to route terminal output and input.</div>
-            </div>
-          )}
 
-          <details className="details-panel">
-            <summary>
-              {shellChrome.advancedToolsLabel}
-              {advancedNoticeCount > 0
-                ? ` - ${advancedNoticeCount} notice${advancedNoticeCount === 1 ? "" : "s"}`
-                : ""}
-            </summary>
-
-            <div className="advanced-stack">
-              <div className="advanced-block">
-                <div className="section__eyebrow">Maintenance</div>
-                <div className="advanced-actions">
-                  <button className="button" disabled={createPending} onClick={() => void handleRefreshCatalog()}>
-                    Refresh shells
-                  </button>
-                  <button className="button" onClick={() => void handleRebootstrap()}>
-                    Reconnect workspace
-                  </button>
-                </div>
-              </div>
-
-              {actionError || hasDiagnostics ? (
                 <div className="advanced-block">
-                  <div className="section__eyebrow">Notices</div>
+                  <div className="section__eyebrow">Advanced launch</div>
 
-                  {actionError ? (
-                    <div className="banner banner--warning">
-                      <strong>Last action failed</strong>
-                      <div>{actionError}</div>
+                  <div className="form-grid">
+                    <label>
+                      <span>Title</span>
+                      <input
+                        name="terminal-demo-session-title"
+                        value={createForm.title}
+                        onChange={(event) => {
+                          setCreateForm((current) => ({
+                            ...current,
+                            title: event.target.value,
+                          }));
+                        }}
+                      />
+                    </label>
+                    <label>
+                      <span>Program</span>
+                      <input
+                        name="terminal-demo-session-program"
+                        value={createForm.program}
+                        onChange={(event) => {
+                          setCreateForm((current) => ({
+                            ...current,
+                            program: event.target.value,
+                          }));
+                        }}
+                      />
+                    </label>
+                    <label>
+                      <span>Args</span>
+                      <input
+                        name="terminal-demo-session-args"
+                        value={createForm.args}
+                        onChange={(event) => {
+                          setCreateForm((current) => ({
+                            ...current,
+                            args: event.target.value,
+                          }));
+                        }}
+                      />
+                    </label>
+                    <label>
+                      <span>Working directory</span>
+                      <input
+                        name="terminal-demo-session-cwd"
+                        value={createForm.cwd}
+                        onChange={(event) => {
+                          setCreateForm((current) => ({
+                            ...current,
+                            cwd: event.target.value,
+                          }));
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="advanced-block">
+                  <div className="section__eyebrow">Runtime details</div>
+
+                  <dl className="definition-list">
+                    <div>
+                      <dt>Control plane</dt>
+                      <dd>{props.config.controlPlaneUrl}</dd>
                     </div>
-                  ) : null}
+                    <div>
+                      <dt>Session stream</dt>
+                      <dd>{props.config.sessionStreamUrl}</dd>
+                    </div>
+                    <div>
+                      <dt>Attached session</dt>
+                      <dd title={attachedSessionId ?? undefined}>{attachedSessionLabel ?? "Not attached yet"}</dd>
+                    </div>
+                  </dl>
+                </div>
 
-                  {hasDiagnostics ? (
-                    <div className="degraded-list">
-                      {diagnosticsPreview.map((diagnostic, index) => (
+                {advancedSavedSessionsControl.savedSessionCount > 0 ? (
+                  <div className="advanced-block">
+                    <div className="section__eyebrow">Saved layouts</div>
+                    <div
+                      className="list-stack list-stack--scroll"
+                      data-testid="advanced-saved-layouts"
+                      data-saved-count={advancedSavedSessionsControl.savedSessionCount}
+                      data-visible-count={advancedSavedSessionsControl.visibleCount}
+                      data-hidden-count={advancedSavedSessionsControl.hiddenCount}
+                      data-pending={advancedSavedSessionsControl.anyPending ? "true" : "false"}
+                    >
+                      {advancedSavedSessionsControl.items.map((item) => (
                         <div
-                          className="degraded-list__item"
-                          key={`${diagnostic.code}-${diagnostic.timestampMs}-${index}`}
+                          className="list-card list-card--saved list-card--advanced-saved"
+                          data-testid="advanced-saved-layout"
+                          data-can-restore={item.canRestore ? "true" : "false"}
+                          data-restore-status={item.restoreStatus}
+                          key={item.session.session_id}
                         >
-                          <strong>{diagnostic.code}</strong>
-                          <small>{diagnostic.message}</small>
-                        </div>
-                      ))}
-                      {snapshot.diagnostics.length > diagnosticsPreview.length ? (
-                        <small className="section__copy">
-                          {snapshot.diagnostics.length - diagnosticsPreview.length} more notices are listed
-                          inside the workspace tools panel.
-                        </small>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <div className="advanced-block">
-                <div className="section__eyebrow">Advanced launch</div>
-
-                <div className="form-grid">
-                  <label>
-                    <span>Title</span>
-                    <input
-                      name="terminal-demo-session-title"
-                      value={createForm.title}
-                      onChange={(event) => {
-                        setCreateForm((current) => ({
-                          ...current,
-                          title: event.target.value,
-                        }));
-                      }}
-                    />
-                  </label>
-                  <label>
-                    <span>Program</span>
-                    <input
-                      name="terminal-demo-session-program"
-                      value={createForm.program}
-                      onChange={(event) => {
-                        setCreateForm((current) => ({
-                          ...current,
-                          program: event.target.value,
-                        }));
-                      }}
-                    />
-                  </label>
-                  <label>
-                    <span>Args</span>
-                    <input
-                      name="terminal-demo-session-args"
-                      value={createForm.args}
-                      onChange={(event) => {
-                        setCreateForm((current) => ({
-                          ...current,
-                          args: event.target.value,
-                        }));
-                      }}
-                    />
-                  </label>
-                  <label>
-                    <span>Working directory</span>
-                    <input
-                      name="terminal-demo-session-cwd"
-                      value={createForm.cwd}
-                      onChange={(event) => {
-                        setCreateForm((current) => ({
-                          ...current,
-                          cwd: event.target.value,
-                        }));
-                      }}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="advanced-block">
-                <div className="section__eyebrow">Runtime details</div>
-
-                <dl className="definition-list">
-                  <div>
-                    <dt>Control plane</dt>
-                    <dd>{props.config.controlPlaneUrl}</dd>
-                  </div>
-                  <div>
-                    <dt>Session stream</dt>
-                    <dd>{props.config.sessionStreamUrl}</dd>
-                  </div>
-                  <div>
-                    <dt>Attached session</dt>
-                    <dd title={attachedSessionId ?? undefined}>{attachedSessionLabel ?? "Not attached yet"}</dd>
-                  </div>
-                </dl>
-              </div>
-
-              {advancedSavedSessionsControl.savedSessionCount > 0 ? (
-                <div className="advanced-block">
-                  <div className="section__eyebrow">Saved layouts</div>
-                  <div
-                    className="list-stack list-stack--scroll"
-                    data-testid="advanced-saved-layouts"
-                    data-saved-count={advancedSavedSessionsControl.savedSessionCount}
-                    data-visible-count={advancedSavedSessionsControl.visibleCount}
-                    data-hidden-count={advancedSavedSessionsControl.hiddenCount}
-                    data-pending={advancedSavedSessionsControl.anyPending ? "true" : "false"}
-                  >
-                    {advancedSavedSessionsControl.items.map((item) => (
-                      <div
-                        className="list-card list-card--saved list-card--advanced-saved"
-                        data-testid="advanced-saved-layout"
-                        data-can-restore={item.canRestore ? "true" : "false"}
-                        data-restore-status={item.restoreStatus}
-                        key={item.session.session_id}
-                      >
-                        <div className="saved-layout-card__body">
-                          <strong>{item.title}</strong>
-                          <small>{item.compatibilityLabel}</small>
-                          <div className="saved-layout-card__badges" aria-label="Restore semantics">
-                            {item.restoreSemanticsNotes.map((note) => (
-                              <span
-                                className={`badge ${badgeClassForRestoreSemantics(note.tone)}`}
-                                data-semantics-code={note.code}
-                                data-semantics-tone={note.tone}
-                                data-testid="advanced-saved-layout-restore-semantics"
-                                key={note.code}
-                                title={note.detail}
-                              >
-                                {note.label}
-                              </span>
-                            ))}
+                          <div className="saved-layout-card__body">
+                            <strong>{item.title}</strong>
+                            <small>{item.compatibilityLabel}</small>
+                            <div className="saved-layout-card__badges" aria-label="Restore semantics">
+                              {item.restoreSemanticsNotes.map((note) => (
+                                <span
+                                  className={`badge ${badgeClassForRestoreSemantics(note.tone)}`}
+                                  data-semantics-code={note.code}
+                                  data-semantics-tone={note.tone}
+                                  data-testid="advanced-saved-layout-restore-semantics"
+                                  key={note.code}
+                                  title={note.detail}
+                                >
+                                  {note.label}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="button-row button-row--compact">
+                            <button
+                              className="button"
+                              data-can-restore={item.canRestore ? "true" : "false"}
+                              data-restore-status={item.restoreStatus}
+                              data-testid="advanced-restore-saved-layout"
+                              disabled={!item.canRestore}
+                              onClick={() => void handleRestoreSavedSession(item.session.session_id)}
+                              title={item.restoreTitle}
+                            >
+                              {item.isRestoring ? "Restoring..." : "Restore"}
+                            </button>
+                            <button
+                              className="button button--danger"
+                              data-confirming={item.isConfirmingDelete ? "true" : "false"}
+                              data-testid="advanced-delete-saved-layout"
+                              disabled={!item.canDelete}
+                              onClick={() => void handleDeleteSavedSession(item.session.session_id)}
+                              title={item.isConfirmingDelete ? "Confirm saved layout deletion." : "Delete saved layout."}
+                            >
+                              {item.isDeleting ? "Deleting..." : item.isConfirmingDelete ? "Confirm delete" : "Delete"}
+                            </button>
                           </div>
                         </div>
-                        <div className="button-row button-row--compact">
-                          <button
-                            className="button"
-                            data-can-restore={item.canRestore ? "true" : "false"}
-                            data-restore-status={item.restoreStatus}
-                            data-testid="advanced-restore-saved-layout"
-                            disabled={!item.canRestore}
-                            onClick={() => void handleRestoreSavedSession(item.session.session_id)}
-                            title={item.restoreTitle}
-                          >
-                            {item.isRestoring ? "Restoring..." : "Restore"}
-                          </button>
-                          <button
-                            className="button button--danger"
-                            data-confirming={item.isConfirmingDelete ? "true" : "false"}
-                            data-testid="advanced-delete-saved-layout"
-                            disabled={!item.canDelete}
-                            onClick={() => void handleDeleteSavedSession(item.session.session_id)}
-                            title={item.isConfirmingDelete ? "Confirm saved layout deletion." : "Delete saved layout."}
-                          >
-                            {item.isDeleting ? "Deleting..." : item.isConfirmingDelete ? "Confirm delete" : "Delete"}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                    {advancedSavedSessionsControl.hiddenCount > 0 ? (
+                      <small className="section__copy">
+                        Showing {advancedSavedSessionsControl.visibleCount} of{" "}
+                        {advancedSavedSessionsControl.savedSessionCount} saved layouts.
+                      </small>
+                    ) : null}
                   </div>
-                  {advancedSavedSessionsControl.hiddenCount > 0 ? (
-                    <small className="section__copy">
-                      Showing {advancedSavedSessionsControl.visibleCount} of{" "}
-                      {advancedSavedSessionsControl.savedSessionCount} saved layouts.
-                    </small>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </details>
-        </section>
-      </aside>
+                ) : null}
+              </div>
+            </details>
+          </section>
+        </aside>
+      ) : null}
 
       <main className="shell__main">
         <section className="panel panel--surface panel--workspace">

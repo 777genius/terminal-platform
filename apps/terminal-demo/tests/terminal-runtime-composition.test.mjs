@@ -29,7 +29,9 @@ test("renderer app mounts the sdk react workspace shell", () => {
 
   assert.match(markup, /data-shell-mode="terminal"/);
   assert.doesNotMatch(markup, /data-testid="terminal-demo-workspace-hero"/);
-  assert.match(markup, /Shell controls/);
+  assert.doesNotMatch(markup, /class="shell__sidebar"/);
+  assert.doesNotMatch(markup, /Shell controls/);
+  assert.doesNotMatch(markup, /Session launcher/);
   assert.match(markup, /data-testid="terminal-workspace-host"/);
   assert.match(markup, /tp-terminal-workspace/);
   assert.match(markup, /Terminal Platform preview/);
@@ -48,9 +50,10 @@ test("demo shell chrome hides overview content once a terminal is active", () =>
     hasActiveSession: true,
     mode: "terminal",
     density: "focus",
+    showLauncherPanel: false,
     showWorkspaceHero: false,
-    launcherTitle: "Shell controls",
-    advancedToolsLabel: "Tools",
+    launcherTitle: "Session launcher",
+    advancedToolsLabel: "Advanced tools",
   });
 
   const launcherChrome = resolveTerminalDemoShellChromeState({
@@ -68,6 +71,7 @@ test("demo shell chrome hides overview content once a terminal is active", () =>
 
   assert.equal(launcherChrome.mode, "launcher");
   assert.equal(launcherChrome.density, "browse");
+  assert.equal(launcherChrome.showLauncherPanel, true);
   assert.equal(launcherChrome.showWorkspaceHero, true);
   assert.equal(launcherChrome.launcherTitle, "Session launcher");
 });

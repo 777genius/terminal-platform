@@ -110,18 +110,13 @@ button {
 }
 
 .shell[data-has-active-session="true"] {
-  grid-template-columns: minmax(0, 1fr) minmax(13.5rem, 16rem);
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   padding: 10px;
 }
 
 .shell[data-shell-mode="terminal"] .shell__main {
   order: 1;
-}
-
-.shell[data-shell-mode="terminal"] .shell__sidebar {
-  order: 2;
-  align-content: start;
 }
 
 .shell--error {
