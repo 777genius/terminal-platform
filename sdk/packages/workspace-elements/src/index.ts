@@ -95,8 +95,10 @@ export {
 } from "./elements/terminal-toolbar-preferences.js";
 export { TerminalStatusBarElement } from "./elements/terminal-status-bar-element.js";
 export {
-  TERMINAL_SCREEN_EVENTS,
   TerminalScreenElement,
+} from "./elements/terminal-screen-element.js";
+export {
+  TERMINAL_SCREEN_EVENTS,
   type TerminalScreenCopiedDetail,
   type TerminalScreenCopyFailedDetail,
   type TerminalScreenEventMap,
@@ -105,7 +107,7 @@ export {
   type TerminalScreenInputSubmittedDetail,
   type TerminalScreenPasteFailedDetail,
   type TerminalScreenPasteSubmittedDetail,
-} from "./elements/terminal-screen-element.js";
+} from "./elements/terminal-screen-events.js";
 export {
   TERMINAL_SCREEN_ACTION_IDS,
   resolveTerminalScreenActions,
