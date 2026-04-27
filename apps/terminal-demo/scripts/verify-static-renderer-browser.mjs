@@ -131,6 +131,13 @@ async function main() {
       || result.terminalSearchActionLabels.join("|") !== "\u2191|\u2193|\u00d7"
       || result.terminalSearchActionAriaLabels.join("|") !== "Select previous search match|Select next search match|Clear search query"
       || !result.terminalSearchActionsInsideChrome
+      || result.terminalSearchInputType !== "search"
+      || result.terminalSearchInputAutocomplete !== "off"
+      || result.terminalSearchInputAutocapitalize !== "off"
+      || result.terminalSearchInputAutocorrect !== "off"
+      || result.terminalSearchInputEnterKeyHint !== "search"
+      || result.terminalSearchInputInputMode !== "search"
+      || result.terminalSearchInputSpellcheck !== "false"
       || result.workspaceLayoutPreset !== "terminal"
       || result.workspaceNavigationMode !== "collapsed"
       || result.workspaceInspectorMode !== "collapsed"
@@ -602,6 +609,13 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         terminalSearchActionLabels,
         terminalSearchActionAriaLabels,
         terminalSearchActionsInsideChrome,
+        terminalSearchInputType: searchInput?.getAttribute('type') ?? null,
+        terminalSearchInputAutocomplete: searchInput?.getAttribute('autocomplete') ?? null,
+        terminalSearchInputAutocapitalize: searchInput?.getAttribute('autocapitalize') ?? null,
+        terminalSearchInputAutocorrect: searchInput?.getAttribute('autocorrect') ?? null,
+        terminalSearchInputEnterKeyHint: searchInput?.getAttribute('enterkeyhint') ?? null,
+        terminalSearchInputInputMode: searchInput?.getAttribute('inputmode') ?? null,
+        terminalSearchInputSpellcheck: searchInput?.getAttribute('spellcheck') ?? null,
         workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,

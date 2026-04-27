@@ -509,6 +509,34 @@ const terminalLayoutSourceContracts = [
         label: "screen search actions route through action ids",
         marker: "handleSearchActionClick",
       },
+      {
+        label: "screen search uses native search semantics",
+        marker: 'type="search"',
+      },
+      {
+        label: "screen search disables browser autocomplete",
+        marker: 'autocomplete="off"',
+      },
+      {
+        label: "screen search disables browser autocapitalize",
+        marker: 'autocapitalize="off"',
+      },
+      {
+        label: "screen search disables browser autocorrect",
+        marker: 'autocorrect="off"',
+      },
+      {
+        label: "screen search presents search enter semantics",
+        marker: 'enterkeyhint="search"',
+      },
+      {
+        label: "screen search uses search keyboard mode",
+        marker: 'inputmode="search"',
+      },
+      {
+        label: "screen search disables spellcheck",
+        marker: 'spellcheck="false"',
+      },
     ],
   },
   {

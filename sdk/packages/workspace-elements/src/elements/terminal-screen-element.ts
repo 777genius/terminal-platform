@@ -832,8 +832,15 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         <input
           data-testid="tp-screen-search"
           name="tp-screen-search"
+          type="search"
           .value=${this.searchQuery}
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          enterkeyhint="search"
+          inputmode="search"
           placeholder="Find output"
+          spellcheck="false"
           aria-label="Find terminal output"
           aria-keyshortcuts="Control+F Meta+F"
           @input=${(event: Event) => this.handleSearchInput(event)}

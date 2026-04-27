@@ -214,6 +214,13 @@ async function main() {
       || result.afterCreate.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.afterCreate.terminalScreenActionTitles.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.afterCreate.terminalScreenActionPressedFlags.join("|") !== "true||"
+      || result.afterCreate.terminalSearchInputType !== "search"
+      || result.afterCreate.terminalSearchInputAutocomplete !== "off"
+      || result.afterCreate.terminalSearchInputAutocapitalize !== "off"
+      || result.afterCreate.terminalSearchInputAutocorrect !== "off"
+      || result.afterCreate.terminalSearchInputEnterKeyHint !== "search"
+      || result.afterCreate.terminalSearchInputInputMode !== "search"
+      || result.afterCreate.terminalSearchInputSpellcheck !== "false"
       || !result.afterCreate.hasScreenDirectInput
       || result.afterCreate.screenPlacement !== "terminal"
       || result.afterCreate.screenChromeMode !== "compact"
@@ -1080,6 +1087,13 @@ async function runSmokeScenario(browserUrl) {
           : null,
         hasScreenFollowControls: Boolean(screenFollow && screenRoot?.querySelector('[data-testid="tp-screen-scroll-latest"]')),
         hasScreenSearchControls: Boolean(screenSearch),
+        terminalSearchInputType: screenSearch?.getAttribute('type') ?? null,
+        terminalSearchInputAutocomplete: screenSearch?.getAttribute('autocomplete') ?? null,
+        terminalSearchInputAutocapitalize: screenSearch?.getAttribute('autocapitalize') ?? null,
+        terminalSearchInputAutocorrect: screenSearch?.getAttribute('autocorrect') ?? null,
+        terminalSearchInputEnterKeyHint: screenSearch?.getAttribute('enterkeyhint') ?? null,
+        terminalSearchInputInputMode: screenSearch?.getAttribute('inputmode') ?? null,
+        terminalSearchInputSpellcheck: screenSearch?.getAttribute('spellcheck') ?? null,
         hasScreenCopyControl: Boolean(screenCopy && !screenCopy.disabled),
         terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
         terminalScreenActionTones: screenActionButtons.map((button) =>
