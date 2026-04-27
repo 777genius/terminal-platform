@@ -137,6 +137,54 @@ test("static preview kernel labels simulated git status output", async () => {
   assert.equal(screen?.surface.lines.at(-1)?.text, "nothing to commit, working tree clean");
 });
 
+test("static preview kernel models terminal tab lifecycle", async () => {
+  const kernel = createStaticWorkspaceKernel(createDemoPreviewWorkspaceSnapshot({ runtimeSlug: "terminal-demo" }));
+
+  await kernel.commands.dispatchMuxCommand("preview-session-native", {
+    kind: "new_tab",
+    title: "Logs",
+  });
+
+  const afterCreate = kernel.getSnapshot().attachedSession;
+  const createdTab = afterCreate?.topology.tabs.find((tab) => tab.title === "Logs");
+  assert.equal(afterCreate?.topology.tabs.length, 2);
+  assert.equal(afterCreate?.topology.focused_tab, createdTab?.tab_id);
+  assert.equal(afterCreate?.focused_screen?.pane_id, createdTab?.focused_pane);
+  assert.equal(afterCreate?.focused_screen?.surface.title, "Logs");
+  assert.equal(afterCreate?.focused_screen?.surface.lines.at(-2)?.text, "static preview: simulated output, no native host is attached");
+
+  await kernel.commands.dispatchMuxCommand("preview-session-native", {
+    kind: "focus_tab",
+    tab_id: "preview-tab-shell",
+  });
+  assert.equal(kernel.getSnapshot().attachedSession?.topology.focused_tab, "preview-tab-shell");
+  assert.equal(kernel.getSnapshot().attachedSession?.focused_screen?.pane_id, "preview-pane-main");
+
+  await kernel.commands.dispatchMuxCommand("preview-session-native", {
+    kind: "focus_tab",
+    tab_id: createdTab.tab_id,
+  });
+  await kernel.commands.dispatchMuxCommand("preview-session-native", {
+    kind: "rename_tab",
+    tab_id: createdTab.tab_id,
+    title: "Renamed logs",
+  });
+  assert.equal(
+    kernel.getSnapshot().attachedSession?.topology.tabs.find((tab) => tab.tab_id === createdTab.tab_id)?.title,
+    "Renamed logs",
+  );
+  assert.equal(kernel.getSnapshot().attachedSession?.focused_screen?.surface.title, "Renamed logs");
+
+  await kernel.commands.dispatchMuxCommand("preview-session-native", {
+    kind: "close_tab",
+    tab_id: createdTab.tab_id,
+  });
+  const afterClose = kernel.getSnapshot().attachedSession;
+  assert.equal(afterClose?.topology.tabs.length, 1);
+  assert.equal(afterClose?.topology.focused_tab, "preview-tab-shell");
+  assert.equal(afterClose?.focused_screen?.pane_id, "preview-pane-main");
+});
+
 test("static preview kernel models save layout as local demo state", async () => {
   const kernel = createStaticWorkspaceKernel(createDemoPreviewWorkspaceSnapshot({ runtimeSlug: "terminal-demo" }));
   await kernel.commands.dispatchMuxCommand("preview-session-native", { kind: "save_session" });

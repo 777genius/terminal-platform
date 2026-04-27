@@ -829,6 +829,10 @@ const terminalLayoutSourceContracts = [
         marker: "dispatchStaticMuxCommand",
       },
       {
+        label: "static kernel models advertised terminal tab creation",
+        marker: "createStaticPreviewTab",
+      },
+      {
         label: "static kernel makes simulated output explicit",
         marker: "static preview: simulated output, no native host is attached",
       },

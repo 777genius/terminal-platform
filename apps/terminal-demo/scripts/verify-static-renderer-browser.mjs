@@ -196,6 +196,11 @@ async function main() {
       || result.workspacePanelShadow !== "none"
       || Math.abs(result.terminalComposerGapPx ?? 99) > 1
       || result.commandHistoryLatest !== "git status"
+      || !result.staticTabCreateClicked
+      || result.staticTabCountAfterCreate !== result.staticTabCountBeforeCreate + 1
+      || result.staticCreatedTabTitle !== "Tab 2"
+      || result.terminalTabStripTabCountAfterCreate !== String(result.staticTabCountAfterCreate)
+      || result.terminalTabStripRenderedAfterCreate !== result.staticTabCountAfterCreate
     ) {
       throw new Error(`Static preview browser contract failed: ${JSON.stringify(result, null, 2)}`);
     }
@@ -396,6 +401,10 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
       const inspectorDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-inspector-drawer"]') ?? null;
       const navigationDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-navigation-drawer"]') ?? null;
+      const tabStripElement = workspaceRoot?.querySelector('tp-terminal-tab-strip') ?? null;
+      const tabStripRoot = tabStripElement?.shadowRoot ?? null;
+      const tabStripPanel = tabStripRoot?.querySelector('[data-testid="tp-terminal-tab-strip"]') ?? null;
+      const terminalNewTab = tabStripRoot?.querySelector('[data-testid="tp-terminal-new-tab"]') ?? null;
       const commandDockElement = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
       const screenElement = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const workspaceFrame = workspaceRoot?.querySelector('[part="workspace"]') ?? null;
@@ -486,6 +495,18 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const terminalText = state?.attachedSession?.focused_screen?.surface?.lines
         ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n')
         : '';
+      const staticTabCountBeforeCreate = state?.attachedSession?.topology?.tabs?.length ?? 0;
+      const staticTabCreateClicked = Boolean(terminalNewTab && !terminalNewTab.disabled);
+      if (staticTabCreateClicked) {
+        terminalNewTab.click();
+        await waitFor(() => {
+          const nextState = window.terminalDemoDebug?.getState?.();
+          return (nextState?.attachedSession?.topology?.tabs?.length ?? 0) > staticTabCountBeforeCreate
+            && nextState?.attachedSession?.focused_screen?.surface?.title === 'Tab 2';
+        });
+      }
+      const stateAfterTabCreate = window.terminalDemoDebug?.getState?.();
+      const tabStripTabsAfterCreate = [...(tabStripRoot?.querySelectorAll('[data-testid="tp-terminal-tab"]') ?? [])];
       const terminalColumnRect = terminalColumn?.getBoundingClientRect();
       const screenChromeRect = screenChrome?.getBoundingClientRect();
       const viewportRect = viewport?.getBoundingClientRect();
@@ -688,6 +709,13 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         hasOldAcceptedPreviewLine: /preview runtime accepted input without native host/.test(terminalText),
         hasCommandFailure: Boolean(commandRoot?.textContent?.includes('Command failed')),
         commandHistoryLatest: state?.commandHistory?.entries?.at?.(-1) ?? null,
+        staticTabCreateClicked,
+        staticTabCountBeforeCreate,
+        staticTabCountAfterCreate: stateAfterTabCreate?.attachedSession?.topology?.tabs?.length ?? 0,
+        staticFocusedTabAfterCreate: stateAfterTabCreate?.attachedSession?.topology?.focused_tab ?? null,
+        staticCreatedTabTitle: stateAfterTabCreate?.attachedSession?.topology?.tabs?.at?.(-1)?.title ?? null,
+        terminalTabStripTabCountAfterCreate: tabStripPanel?.getAttribute('data-tab-count') ?? null,
+        terminalTabStripRenderedAfterCreate: tabStripTabsAfterCreate.length,
         documentHorizontalOverflow: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
         workspaceHostTopOffset: demoMain && workspaceHostSlot
           ? Math.round(workspaceHostSlot.getBoundingClientRect().top - demoMain.getBoundingClientRect().top)
