@@ -10,7 +10,9 @@ export interface TerminalScreenControlState {
   screen: FocusedScreen | null;
   canCopyVisibleOutput: boolean;
   canUseDirectInput: boolean;
+  canUseDirectPaste: boolean;
   inputCapabilityStatus: TerminalWorkspaceCapabilityStatus;
+  pasteCapabilityStatus: TerminalWorkspaceCapabilityStatus;
 }
 
 export function resolveTerminalScreenControlState(snapshot: WorkspaceSnapshot): TerminalScreenControlState {
@@ -18,6 +20,10 @@ export function resolveTerminalScreenControlState(snapshot: WorkspaceSnapshot): 
   const activeSessionId = snapshot.selection.activeSessionId ?? snapshot.attachedSession?.session.session_id ?? null;
   const activePaneId = snapshot.selection.activePaneId ?? screen?.pane_id ?? null;
   const inputCapability = resolveWorkspaceCapability(snapshot, "pane_input_write", {
+    missingBackend: false,
+    pendingCapabilities: true,
+  });
+  const pasteCapability = resolveWorkspaceCapability(snapshot, "pane_paste_write", {
     missingBackend: false,
     pendingCapabilities: true,
   });
@@ -29,6 +35,8 @@ export function resolveTerminalScreenControlState(snapshot: WorkspaceSnapshot): 
     screen,
     canCopyVisibleOutput: Boolean(screen),
     canUseDirectInput: Boolean(hasInputTarget && inputCapability.enabled),
+    canUseDirectPaste: Boolean(hasInputTarget && pasteCapability.enabled),
     inputCapabilityStatus: inputCapability.status,
+    pasteCapabilityStatus: pasteCapability.status,
   };
 }

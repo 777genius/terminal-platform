@@ -29,7 +29,7 @@ export function resolveTerminalScreenInputStatus(
     };
   }
 
-  if (!controls.canUseDirectInput) {
+  if (!controls.canUseDirectInput && !controls.canUseDirectPaste) {
     return {
       label: "Read only",
       tone: "readonly",
@@ -37,7 +37,7 @@ export function resolveTerminalScreenInputStatus(
     };
   }
 
-  if (controls.inputCapabilityStatus === "unknown") {
+  if (controls.inputCapabilityStatus === "unknown" || controls.pasteCapabilityStatus === "unknown") {
     return {
       label: "Input pending",
       tone: "pending",
@@ -45,9 +45,19 @@ export function resolveTerminalScreenInputStatus(
     };
   }
 
+  if (!controls.canUseDirectInput && controls.canUseDirectPaste) {
+    return {
+      label: "Paste ready",
+      tone: "ready",
+      title: "Focused pane accepts paste input.",
+    };
+  }
+
   return {
     label: "Input ready",
     tone: "ready",
-    title: "Focused pane accepts keyboard input.",
+    title: controls.canUseDirectPaste
+      ? "Focused pane accepts keyboard input and paste."
+      : "Focused pane accepts keyboard input.",
   };
 }

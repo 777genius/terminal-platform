@@ -23,9 +23,20 @@ describe("terminal screen input status", () => {
   it("reports read only when the active backend rejects direct input", () => {
     expect(resolveTerminalScreenInputStatus(createControls({
       canUseDirectInput: false,
+      canUseDirectPaste: false,
     }), "idle")).toMatchObject({
       label: "Read only",
       tone: "readonly",
+    });
+  });
+
+  it("reports paste-ready when direct paste is the only focused pane input", () => {
+    expect(resolveTerminalScreenInputStatus(createControls({
+      canUseDirectInput: false,
+      canUseDirectPaste: true,
+    }), "idle")).toMatchObject({
+      label: "Paste ready",
+      tone: "ready",
     });
   });
 
@@ -34,6 +45,7 @@ describe("terminal screen input status", () => {
       activePaneId: null,
       screen: null,
       canUseDirectInput: false,
+      canUseDirectPaste: false,
     }), "idle")).toMatchObject({
       label: "No input",
       tone: "readonly",
@@ -68,7 +80,9 @@ function createControls(
     },
     canCopyVisibleOutput: true,
     canUseDirectInput: true,
+    canUseDirectPaste: true,
     inputCapabilityStatus: "known",
+    pasteCapabilityStatus: "known",
     ...overrides,
   };
 }

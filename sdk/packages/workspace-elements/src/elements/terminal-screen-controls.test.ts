@@ -13,7 +13,9 @@ describe("terminal screen controls", () => {
     expect(controls.activePaneId).toBe("pane-1");
     expect(controls.canCopyVisibleOutput).toBe(true);
     expect(controls.canUseDirectInput).toBe(true);
+    expect(controls.canUseDirectPaste).toBe(true);
     expect(controls.inputCapabilityStatus).toBe("known");
+    expect(controls.pasteCapabilityStatus).toBe("known");
   });
 
   it("disables direct input when loaded backend capabilities reject pane input writes", () => {
@@ -31,6 +33,21 @@ describe("terminal screen controls", () => {
     expect(controls.inputCapabilityStatus).toBe("known");
   });
 
+  it("disables direct paste when loaded backend capabilities reject pane paste writes", () => {
+    const controls = resolveTerminalScreenControlState(createWorkspaceSnapshot({
+      catalog: {
+        ...createInitialWorkspaceSnapshot().catalog,
+        backendCapabilities: {
+          native: createCapabilities({ pane_paste_write: false }),
+        },
+      },
+    }));
+
+    expect(controls.canUseDirectInput).toBe(true);
+    expect(controls.canUseDirectPaste).toBe(false);
+    expect(controls.pasteCapabilityStatus).toBe("known");
+  });
+
   it("keeps direct input enabled while capabilities are pending and a focused pane exists", () => {
     const controls = resolveTerminalScreenControlState(createWorkspaceSnapshot({
       catalog: {
@@ -40,7 +57,9 @@ describe("terminal screen controls", () => {
     }));
 
     expect(controls.canUseDirectInput).toBe(true);
+    expect(controls.canUseDirectPaste).toBe(true);
     expect(controls.inputCapabilityStatus).toBe("unknown");
+    expect(controls.pasteCapabilityStatus).toBe("unknown");
   });
 
   it("disables screen actions when no screen is attached", () => {
@@ -51,6 +70,7 @@ describe("terminal screen controls", () => {
     expect(controls.screen).toBeNull();
     expect(controls.canCopyVisibleOutput).toBe(false);
     expect(controls.canUseDirectInput).toBe(false);
+    expect(controls.canUseDirectPaste).toBe(false);
   });
 });
 

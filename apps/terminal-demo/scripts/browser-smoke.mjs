@@ -713,6 +713,17 @@ async function main() {
       throw new Error(`Direct terminal screen input did not settle correctly: ${JSON.stringify(result.afterDirectScreenInput)}`);
     }
 
+    if (
+      !result.afterDirectScreenPaste.focused
+      || !result.afterDirectScreenPaste.defaultPrevented
+      || result.afterDirectScreenPaste.submittedEvents !== 1
+      || result.afterDirectScreenPaste.failedEvents !== 0
+      || !result.afterDirectScreenPaste.connectionReady
+      || !result.afterDirectScreenPaste.containsPasteOutput
+    ) {
+      throw new Error(`Direct terminal screen paste did not settle correctly: ${JSON.stringify(result.afterDirectScreenPaste)}`);
+    }
+
     process.stdout.write(`Browser smoke passed - ${browserUrl}\n`);
     process.stdout.write(`Browser smoke screenshot - ${screenshotPath}\n`);
   } finally {
@@ -2879,6 +2890,78 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
 
+    const directScreenPasteResult = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
+      const screenRoot = screenHost?.shadowRoot ?? null;
+      const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      if (!screenHost || !screenRoot || !viewport) {
+        return {
+          ok: false,
+          reason: 'screen viewport missing',
+          focused: false,
+          defaultPrevented: false,
+          submittedEvents: 0,
+          failedEvents: 0,
+        };
+      }
+
+      let submittedEvents = 0;
+      let failedEvents = 0;
+      const handleSubmitted = () => {
+        submittedEvents += 1;
+      };
+      const handleFailed = () => {
+        failedEvents += 1;
+      };
+      screenHost.addEventListener('tp-terminal-screen-paste-submitted', handleSubmitted);
+      screenHost.addEventListener('tp-terminal-screen-paste-failed', handleFailed);
+      viewport.focus();
+      const pasteText = ${JSON.stringify('printf "screen-paste-ok\\n"\n')};
+      const pasteEvent = new Event('paste', {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(pasteEvent, 'clipboardData', {
+        value: {
+          getData: (type) => type === 'text/plain' ? pasteText : '',
+        },
+      });
+      const dispatchResult = viewport.dispatchEvent(pasteEvent);
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+      screenHost.removeEventListener('tp-terminal-screen-paste-submitted', handleSubmitted);
+      screenHost.removeEventListener('tp-terminal-screen-paste-failed', handleFailed);
+
+      return {
+        ok: true,
+        focused: screenRoot.activeElement === viewport,
+        defaultPrevented: !dispatchResult || pasteEvent.defaultPrevented,
+        submittedEvents,
+        failedEvents,
+      };
+    })()`);
+    if (!directScreenPasteResult.ok) {
+      throw new Error(`Unable to paste through terminal screen: ${JSON.stringify(directScreenPasteResult)}`);
+    }
+
+    await sleep(2500);
+
+    const afterDirectScreenPaste = await evaluate(send, `(() => {
+      const debug = window.terminalDemoDebug?.getState?.();
+      const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
+        ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+        : '';
+      return {
+        focused: ${JSON.stringify(directScreenPasteResult.focused)},
+        defaultPrevented: ${JSON.stringify(directScreenPasteResult.defaultPrevented)},
+        submittedEvents: ${JSON.stringify(directScreenPasteResult.submittedEvents)},
+        failedEvents: ${JSON.stringify(directScreenPasteResult.failedEvents)},
+        connectionReady: debug?.connection?.state === 'ready',
+        terminalScreenText,
+        containsPasteOutput: /screen-paste-ok/i.test(terminalScreenText),
+      };
+    })()`);
+
     const screenshot = await send("Page.captureScreenshot", {
       format: "png",
       captureBeyondViewport: true,
@@ -2919,6 +3002,7 @@ async function runSmokeScenario(browserUrl) {
       },
       afterCommandHistoryClear,
       afterDirectScreenInput,
+      afterDirectScreenPaste,
       issues,
     };
   } finally {

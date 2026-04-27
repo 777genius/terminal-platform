@@ -611,6 +611,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         data-font-scale=${terminalDisplay.fontScale}
         data-line-wrap=${String(terminalDisplay.lineWrap)}
         data-direct-input=${String(controls.canUseDirectInput)}
+        data-direct-paste=${String(controls.canUseDirectPaste)}
         data-input-capability=${controls.inputCapabilityStatus}
         data-input-status=${inputStatus.tone}
       >
@@ -625,14 +626,15 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 class="viewport"
                 part="screen-lines"
                 data-testid="tp-screen-viewport"
-                tabindex=${controls.canUseDirectInput ? "0" : nothing}
+                tabindex=${controls.canUseDirectInput || controls.canUseDirectPaste ? "0" : nothing}
                 role="region"
                 aria-describedby="tp-screen-input-status"
                 aria-keyshortcuts="Control+F Meta+F"
-                aria-label=${controls.canUseDirectInput
+                aria-label=${controls.canUseDirectInput || controls.canUseDirectPaste
                   ? "Terminal output and focused pane input"
                   : "Terminal output"}
                 @keydown=${(event: KeyboardEvent) => this.handleViewportKeydown(event)}
+                @paste=${(event: ClipboardEvent) => this.handleViewportPaste(event)}
                 @scroll=${(event: Event) => this.handleViewportScroll(event)}
               >
                 ${searchResult.lines.map((line) => renderLine(line.lineIndex + 1, line.segments))}
@@ -1014,10 +1016,36 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     this.#directInputBuffer.push(input);
   }
 
+  private handleViewportPaste(event: ClipboardEvent): void {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    const controls = resolveTerminalScreenControlState(this.snapshot);
+    if (!controls.canUseDirectPaste) {
+      return;
+    }
+
+    const pastedText = event.clipboardData?.getData("text/plain") ?? "";
+    if (pastedText.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    this.#directInputBuffer.flush();
+    this.queueDirectPaste(pastedText);
+  }
+
   private queueDirectInput(input: string): void {
     this.#directInputQueue = this.#directInputQueue
       .catch(() => undefined)
       .then(() => this.dispatchDirectInput(input));
+  }
+
+  private queueDirectPaste(data: string): void {
+    this.#directInputQueue = this.#directInputQueue
+      .catch(() => undefined)
+      .then(() => this.dispatchDirectPaste(data));
   }
 
   private async dispatchDirectInput(input: string): Promise<void> {
@@ -1053,6 +1081,49 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       this.setDirectInputActivity("failed");
       this.dispatchEvent(
         new CustomEvent("tp-terminal-screen-input-failed", {
+          bubbles: true,
+          composed: true,
+          detail: {
+            sessionId: controls.activeSessionId,
+            paneId: controls.activePaneId,
+            error,
+          },
+        }),
+      );
+    }
+  }
+
+  private async dispatchDirectPaste(data: string): Promise<void> {
+    const controls = resolveTerminalScreenControlState(this.snapshot);
+    if (!controls.activeSessionId || !controls.activePaneId || !controls.canUseDirectPaste) {
+      return;
+    }
+
+    try {
+      await this.kernel?.commands.dispatchMuxCommand(controls.activeSessionId, {
+        kind: "send_paste",
+        pane_id: controls.activePaneId,
+        data,
+      });
+      await this.kernel?.commands.attachSession(controls.activeSessionId);
+      if (this.directInputActivity !== "idle") {
+        this.setDirectInputActivity("idle");
+      }
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-screen-paste-submitted", {
+          bubbles: true,
+          composed: true,
+          detail: {
+            sessionId: controls.activeSessionId,
+            paneId: controls.activePaneId,
+            inputLength: data.length,
+          },
+        }),
+      );
+    } catch (error) {
+      this.setDirectInputActivity("failed");
+      this.dispatchEvent(
+        new CustomEvent("tp-terminal-screen-paste-failed", {
           bubbles: true,
           composed: true,
           detail: {
