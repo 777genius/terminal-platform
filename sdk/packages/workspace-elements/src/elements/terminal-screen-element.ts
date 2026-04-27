@@ -39,6 +39,61 @@ import {
 
 type TerminalScreenPlacement = "panel" | "terminal";
 
+export const TERMINAL_SCREEN_EVENTS = {
+  copied: "tp-terminal-screen-copied",
+  copyFailed: "tp-terminal-screen-copy-failed",
+  inputSubmitted: "tp-terminal-screen-input-submitted",
+  inputFailed: "tp-terminal-screen-input-failed",
+  pasteSubmitted: "tp-terminal-screen-paste-submitted",
+  pasteFailed: "tp-terminal-screen-paste-failed",
+} as const;
+
+export type TerminalScreenCopiedDetail = {
+  paneId: string;
+  lineCount: number;
+};
+
+export type TerminalScreenCopyFailedDetail = {
+  paneId: string;
+  error: unknown;
+};
+
+export type TerminalScreenInputSubmittedDetail = {
+  sessionId: string;
+  paneId: string;
+  inputLength: number;
+};
+
+export type TerminalScreenInputFailedDetail = {
+  sessionId: string;
+  paneId: string;
+  error: unknown;
+};
+
+export type TerminalScreenPasteSubmittedDetail = {
+  sessionId: string;
+  paneId: string;
+  inputLength: number;
+};
+
+export type TerminalScreenPasteFailedDetail = {
+  sessionId: string;
+  paneId: string;
+  error: unknown;
+};
+
+export type TerminalScreenEventType =
+  (typeof TERMINAL_SCREEN_EVENTS)[keyof typeof TERMINAL_SCREEN_EVENTS];
+
+export type TerminalScreenEventMap = {
+  [TERMINAL_SCREEN_EVENTS.copied]: CustomEvent<TerminalScreenCopiedDetail>;
+  [TERMINAL_SCREEN_EVENTS.copyFailed]: CustomEvent<TerminalScreenCopyFailedDetail>;
+  [TERMINAL_SCREEN_EVENTS.inputSubmitted]: CustomEvent<TerminalScreenInputSubmittedDetail>;
+  [TERMINAL_SCREEN_EVENTS.inputFailed]: CustomEvent<TerminalScreenInputFailedDetail>;
+  [TERMINAL_SCREEN_EVENTS.pasteSubmitted]: CustomEvent<TerminalScreenPasteSubmittedDetail>;
+  [TERMINAL_SCREEN_EVENTS.pasteFailed]: CustomEvent<TerminalScreenPasteFailedDetail>;
+};
+
 export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
@@ -888,7 +943,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       await writeClipboardText(output);
       this.setCopyState("copied");
       this.dispatchEvent(
-        new CustomEvent("tp-terminal-screen-copied", {
+        new CustomEvent<TerminalScreenCopiedDetail>(TERMINAL_SCREEN_EVENTS.copied, {
           bubbles: true,
           composed: true,
           detail: { paneId: screen.pane_id, lineCount: screen.surface.lines.length },
@@ -897,7 +952,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     } catch (error) {
       this.setCopyState("failed");
       this.dispatchEvent(
-        new CustomEvent("tp-terminal-screen-copy-failed", {
+        new CustomEvent<TerminalScreenCopyFailedDetail>(TERMINAL_SCREEN_EVENTS.copyFailed, {
           bubbles: true,
           composed: true,
           detail: { paneId: screen.pane_id, error },
@@ -1067,7 +1122,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         this.setDirectInputActivity("idle");
       }
       this.dispatchEvent(
-        new CustomEvent("tp-terminal-screen-input-submitted", {
+        new CustomEvent<TerminalScreenInputSubmittedDetail>(TERMINAL_SCREEN_EVENTS.inputSubmitted, {
           bubbles: true,
           composed: true,
           detail: {
@@ -1080,7 +1135,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     } catch (error) {
       this.setDirectInputActivity("failed");
       this.dispatchEvent(
-        new CustomEvent("tp-terminal-screen-input-failed", {
+        new CustomEvent<TerminalScreenInputFailedDetail>(TERMINAL_SCREEN_EVENTS.inputFailed, {
           bubbles: true,
           composed: true,
           detail: {
@@ -1110,7 +1165,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         this.setDirectInputActivity("idle");
       }
       this.dispatchEvent(
-        new CustomEvent("tp-terminal-screen-paste-submitted", {
+        new CustomEvent<TerminalScreenPasteSubmittedDetail>(TERMINAL_SCREEN_EVENTS.pasteSubmitted, {
           bubbles: true,
           composed: true,
           detail: {
@@ -1123,7 +1178,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     } catch (error) {
       this.setDirectInputActivity("failed");
       this.dispatchEvent(
-        new CustomEvent("tp-terminal-screen-paste-failed", {
+        new CustomEvent<TerminalScreenPasteFailedDetail>(TERMINAL_SCREEN_EVENTS.pasteFailed, {
           bubbles: true,
           composed: true,
           detail: {

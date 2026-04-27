@@ -11,6 +11,7 @@ import {
   TERMINAL_COMMAND_COMPOSER_EVENTS,
   TERMINAL_SCREEN_ACTION_IDS,
   TERMINAL_SCREEN_CHROME_MODES,
+  TERMINAL_SCREEN_EVENTS,
   TERMINAL_PANE_MAX_COLS,
   TERMINAL_PANE_MAX_ROWS,
   TERMINAL_PANE_MIN_COLS,
@@ -100,6 +101,8 @@ import {
   type TerminalScreenActionOptions,
   type TerminalScreenActionPlacement,
   type TerminalScreenActionPresentation,
+  type TerminalScreenCopiedDetail,
+  type TerminalScreenCopyFailedDetail,
   type TerminalScreenCopyState,
   type TerminalScreenControlState,
   type TerminalScreenChromeMetaItem,
@@ -107,9 +110,15 @@ import {
   type TerminalScreenChromeMode,
   type TerminalScreenChromeOptions,
   type TerminalScreenChromeState,
+  type TerminalScreenEventMap,
+  type TerminalScreenEventType,
+  type TerminalScreenInputFailedDetail,
+  type TerminalScreenInputSubmittedDetail,
   type TerminalScreenInputActivity,
   type TerminalScreenInputStatus,
   type TerminalScreenInputTone,
+  type TerminalScreenPasteFailedDetail,
+  type TerminalScreenPasteSubmittedDetail,
   type TerminalTabStripControlOptions,
   type TerminalTabStripControlState,
   type TerminalTabStripItemControlState,
@@ -177,6 +186,8 @@ type PublicControlTypes =
   | TerminalScreenActionOptions
   | TerminalScreenActionPlacement
   | TerminalScreenActionPresentation
+  | TerminalScreenCopiedDetail
+  | TerminalScreenCopyFailedDetail
   | TerminalScreenCopyState
   | TerminalScreenControlState
   | TerminalScreenChromeMetaItem
@@ -184,9 +195,15 @@ type PublicControlTypes =
   | TerminalScreenChromeMode
   | TerminalScreenChromeOptions
   | TerminalScreenChromeState
+  | TerminalScreenEventMap
+  | TerminalScreenEventType
+  | TerminalScreenInputFailedDetail
+  | TerminalScreenInputSubmittedDetail
   | TerminalScreenInputActivity
   | TerminalScreenInputStatus
   | TerminalScreenInputTone
+  | TerminalScreenPasteFailedDetail
+  | TerminalScreenPasteSubmittedDetail
   | TerminalTabStripControlOptions
   | TerminalTabStripControlState
   | TerminalTabStripItemControlState
@@ -267,6 +284,8 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe("save-layout");
     expect(TERMINAL_SCREEN_ACTION_IDS.copyVisible).toBe("copy-visible");
     expect(TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
+    expect(TERMINAL_SCREEN_EVENTS.inputSubmitted).toBe("tp-terminal-screen-input-submitted");
+    expect(TERMINAL_SCREEN_EVENTS.pasteSubmitted).toBe("tp-terminal-screen-paste-submitted");
     expect(TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT).toBeGreaterThan(0);
     expect(TERMINAL_PANE_MIN_ROWS).toBeLessThan(TERMINAL_PANE_MAX_ROWS);
     expect(TERMINAL_PANE_MIN_COLS).toBeLessThan(TERMINAL_PANE_MAX_COLS);

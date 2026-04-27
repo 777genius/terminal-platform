@@ -94,7 +94,18 @@ export {
   type TerminalToolbarThemeOptionPresentation,
 } from "./elements/terminal-toolbar-preferences.js";
 export { TerminalStatusBarElement } from "./elements/terminal-status-bar-element.js";
-export { TerminalScreenElement } from "./elements/terminal-screen-element.js";
+export {
+  TERMINAL_SCREEN_EVENTS,
+  TerminalScreenElement,
+  type TerminalScreenCopiedDetail,
+  type TerminalScreenCopyFailedDetail,
+  type TerminalScreenEventMap,
+  type TerminalScreenEventType,
+  type TerminalScreenInputFailedDetail,
+  type TerminalScreenInputSubmittedDetail,
+  type TerminalScreenPasteFailedDetail,
+  type TerminalScreenPasteSubmittedDetail,
+} from "./elements/terminal-screen-element.js";
 export {
   TERMINAL_SCREEN_ACTION_IDS,
   resolveTerminalScreenActions,
