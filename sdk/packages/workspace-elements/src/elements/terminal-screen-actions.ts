@@ -9,6 +9,7 @@ export type TerminalScreenActionId =
 
 export type TerminalScreenActionPlacement = "panel" | "terminal";
 export type TerminalScreenCopyState = "idle" | "copied" | "failed";
+export type TerminalScreenActionTone = "danger" | "primary" | "secondary" | "success";
 
 export interface TerminalScreenActionOptions {
   canCopyVisibleOutput?: boolean;
@@ -25,6 +26,7 @@ export interface TerminalScreenActionPresentation {
   readonly label: string;
   readonly testId: string;
   readonly title: string;
+  readonly tone: TerminalScreenActionTone;
 }
 
 export function resolveTerminalScreenActions(
@@ -45,6 +47,7 @@ export function resolveTerminalScreenActions(
       ariaLabel: followOutput ? "Pause automatic terminal output follow" : "Follow terminal output",
       ariaPressed: followOutput,
       disabled: false,
+      tone: followOutput ? "primary" : "secondary",
     },
     {
       id: TERMINAL_SCREEN_ACTION_IDS.scrollLatest,
@@ -53,6 +56,7 @@ export function resolveTerminalScreenActions(
       title: "Scroll to latest terminal output",
       ariaLabel: "Scroll to latest terminal output",
       disabled: false,
+      tone: "secondary",
     },
     {
       id: TERMINAL_SCREEN_ACTION_IDS.copyVisible,
@@ -61,6 +65,7 @@ export function resolveTerminalScreenActions(
       title: resolveCopyVisibleTitle(copyState),
       ariaLabel: resolveCopyVisibleAriaLabel(copyState),
       disabled: !canCopyVisibleOutput,
+      tone: resolveCopyVisibleTone(copyState),
     },
   ];
 }
@@ -119,4 +124,16 @@ function resolveCopyVisibleAriaLabel(copyState: TerminalScreenCopyState): string
   }
 
   return "Copy visible terminal output";
+}
+
+function resolveCopyVisibleTone(copyState: TerminalScreenCopyState): TerminalScreenActionTone {
+  if (copyState === "copied") {
+    return "success";
+  }
+
+  if (copyState === "failed") {
+    return "danger";
+  }
+
+  return "secondary";
 }

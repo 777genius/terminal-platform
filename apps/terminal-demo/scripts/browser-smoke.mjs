@@ -207,6 +207,7 @@ async function main() {
       || !result.afterCreate.hasScreenSearchControls
       || !result.afterCreate.hasScreenCopyControl
       || result.afterCreate.terminalScreenActionIds.join("|") !== "follow-output|scroll-latest|copy-visible"
+      || result.afterCreate.terminalScreenActionTones.join("|") !== "primary|secondary|secondary"
       || result.afterCreate.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
       || result.afterCreate.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.afterCreate.terminalScreenActionTitles.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
@@ -404,6 +405,7 @@ async function main() {
       || result.afterCreateMobileLayout.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
       || result.afterCreateMobileLayout.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
       || result.afterCreateMobileLayout.terminalScreenActionIds.join("|") !== "follow-output|scroll-latest|copy-visible"
+      || result.afterCreateMobileLayout.terminalScreenActionTones.join("|") !== "primary|secondary|secondary"
       || result.afterCreateMobileLayout.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
       || result.afterCreateMobileLayout.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.afterCreateMobileLayout.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
@@ -1014,6 +1016,9 @@ async function runSmokeScenario(browserUrl) {
         hasScreenSearchControls: Boolean(screenSearch),
         hasScreenCopyControl: Boolean(screenCopy && !screenCopy.disabled),
         terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
+        terminalScreenActionTones: screenActionButtons.map((button) =>
+          button?.getAttribute('data-screen-action-tone') ?? '',
+        ),
         terminalScreenActionLabels: screenActionButtons.map((button) =>
           button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),
@@ -1387,6 +1392,9 @@ async function runSmokeScenario(browserUrl) {
           button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),
         terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
+        terminalScreenActionTones: screenActionButtons.map((button) =>
+          button?.getAttribute('data-screen-action-tone') ?? '',
+        ),
         terminalScreenActionLabels: screenActionButtons.map((button) =>
           button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),

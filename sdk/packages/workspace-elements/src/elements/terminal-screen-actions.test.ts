@@ -24,6 +24,7 @@ describe("terminal screen actions", () => {
       "tp-screen-scroll-latest",
       "tp-screen-copy",
     ]);
+    expect(actions.map((action) => action.tone)).toEqual(["primary", "secondary", "secondary"]);
     expect(actions[0]).toMatchObject({
       ariaLabel: "Pause automatic terminal output follow",
       ariaPressed: true,
@@ -58,6 +59,7 @@ describe("terminal screen actions", () => {
       disabled: false,
       label: "Paused",
       title: "Follow terminal output",
+      tone: "secondary",
     });
     expect(actions[1]).toMatchObject({ disabled: false, label: "Latest" });
   });
@@ -72,6 +74,7 @@ describe("terminal screen actions", () => {
       disabled: false,
       label: "Copied",
       title: "Visible terminal output copied",
+      tone: "success",
     });
 
     expect(resolveTerminalScreenActions({
@@ -83,6 +86,7 @@ describe("terminal screen actions", () => {
       disabled: false,
       label: "Failed",
       title: "Visible terminal output could not be copied",
+      tone: "danger",
     });
 
     expect(resolveTerminalScreenActions({

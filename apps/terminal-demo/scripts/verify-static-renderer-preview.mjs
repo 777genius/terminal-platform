@@ -237,6 +237,10 @@ const terminalLayoutSourceContracts = [
         marker: "data-screen-action=${action.id}",
       },
       {
+        label: "screen actions expose action tone for theme adapters",
+        marker: "data-screen-action-tone=${action.tone}",
+      },
+      {
         label: "screen actions route through action ids",
         marker: "handleScreenActionClick",
       },

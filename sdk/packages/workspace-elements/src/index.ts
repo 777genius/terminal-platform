@@ -128,6 +128,7 @@ export {
   type TerminalScreenActionOptions,
   type TerminalScreenActionPlacement,
   type TerminalScreenActionPresentation,
+  type TerminalScreenActionTone,
   type TerminalScreenCopyState,
 } from "./elements/terminal-screen-actions.js";
 export {

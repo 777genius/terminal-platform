@@ -68,6 +68,7 @@ async function main() {
       || result.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
       || result.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.terminalComposerActionTones.join("|") !== "primary|secondary|secondary|secondary"
+      || result.terminalScreenActionTones.join("|") !== "primary|secondary|secondary"
       || result.commandDockPlacement !== "terminal"
       || result.commandDockAccessoryMode !== "bar"
       || result.commandAccessoryBarMode !== "bar"
@@ -464,6 +465,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
           : null,
         terminalScreenCompactSizeLabel: screenRoot?.querySelector('[data-meta-id="size"]')?.textContent?.trim() ?? null,
         terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
+        terminalScreenActionTones: screenActionButtons.map((button) =>
+          button?.getAttribute('data-screen-action-tone') ?? '',
+        ),
         terminalScreenActionLabels: screenActionButtons.map((button) =>
           button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),

@@ -110,6 +110,7 @@ import {
   type TerminalScreenActionOptions,
   type TerminalScreenActionPlacement,
   type TerminalScreenActionPresentation,
+  type TerminalScreenActionTone,
   type TerminalScreenCopiedDetail,
   type TerminalScreenCopyFailedDetail,
   type TerminalScreenCopyState,
@@ -201,6 +202,7 @@ type PublicControlTypes =
   | TerminalScreenActionOptions
   | TerminalScreenActionPlacement
   | TerminalScreenActionPresentation
+  | TerminalScreenActionTone
   | TerminalScreenCopiedDetail
   | TerminalScreenCopyFailedDetail
   | TerminalScreenCopyState

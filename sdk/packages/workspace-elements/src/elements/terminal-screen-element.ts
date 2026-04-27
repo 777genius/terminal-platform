@@ -743,6 +743,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
             type="button"
             data-testid=${action.testId}
             data-screen-action=${action.id}
+            data-screen-action-tone=${action.tone}
             aria-label=${action.ariaLabel}
             aria-pressed=${action.ariaPressed == null ? nothing : String(action.ariaPressed)}
             title=${action.title}

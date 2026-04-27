@@ -90,6 +90,7 @@ export type {
   TerminalSavedSessionsBulkAction,
   TerminalSavedSessionsControlOptions,
   TerminalSavedSessionsControlState,
+  TerminalScreenActionTone,
   TerminalScreenChromeMetaItem,
   TerminalScreenChromeMetaItemId,
   TerminalScreenChromeMode,
