@@ -247,7 +247,13 @@ async function main() {
       || result.afterCreate.commandComposerMaxRows !== 5
       || !result.afterCreate.terminalCommandActionsInsideComposer
       || result.afterCreate.terminalFooterActionCount !== 0
-      || /Command Input|Focused pane command lane/.test(result.afterCreate.commandDockVisibleText ?? "")
+      || result.afterCreate.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
+      || result.afterCreate.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
+      || result.afterCreate.terminalSessionActionAriaLabels.join("|") !== "Save the focused session layout|Refresh the active terminal session|Clear 0 command history entries"
+      || result.afterCreate.terminalSessionActionTitles.join("|") !== "Save the focused session layout|Refresh the active terminal session|Clear 0 command history entries"
+      || result.afterCreate.terminalSessionActionDangerFlags.join("|") !== "||true"
+      || result.afterCreate.terminalSessionActionConfirmingFlags.join("|") !== "false|false|false"
+      || /Command Input|Focused pane command lane|Save layout|Refresh terminal|Clear history/.test(result.afterCreate.commandDockVisibleText ?? "")
       || result.afterCreate.commandInputStatus !== "Ready"
       || !result.afterCreate.commandInputFocused
       || !result.afterCreate.focusedPaneBadgeText?.includes("Focused pane")
@@ -376,6 +382,9 @@ async function main() {
       || result.afterCreateMobileLayout.terminalComposerActionIds.join("|") !== "submit|paste|interrupt|enter"
       || result.afterCreateMobileLayout.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
       || result.afterCreateMobileLayout.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
+      || result.afterCreateMobileLayout.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
+      || result.afterCreateMobileLayout.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
+      || result.afterCreateMobileLayout.terminalSessionActionAriaLabels.join("|") !== "Save the focused session layout|Refresh the active terminal session|Clear 0 command history entries"
       || result.afterCreateMobileLayout.commandInputRows !== 1
       || result.afterCreateMobileLayout.commandInputRowCount !== "1"
       || result.afterCreateMobileLayout.commandInputMultiline !== "false"
@@ -837,6 +846,9 @@ async function runSmokeScenario(browserUrl) {
         commandRoot?.querySelector('[data-testid="tp-send-interrupt"]') ?? null,
         commandRoot?.querySelector('[data-testid="tp-send-enter"]') ?? null,
       ];
+      const sessionActionButtons = [
+        ...(commandRoot?.querySelectorAll('[data-testid="tp-session-actions"] button') ?? []),
+      ];
       const statusSession = statusRoot?.querySelector('[data-testid="tp-status-session-id"]') ?? null;
       const statusPane = statusRoot?.querySelector('[data-testid="tp-status-pane-id"]') ?? null;
       const activeSessionListId = sessionListRoot
@@ -1033,6 +1045,16 @@ async function runSmokeScenario(browserUrl) {
         terminalFooterActionCount: commandRoot?.querySelectorAll('.dock-footer .actions button')?.length ?? 0,
         commandActionLabels: commandActionButtons.map((button) => button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null),
         commandActionAriaLabels: commandActionButtons.map((button) => button?.getAttribute('aria-label') ?? null),
+        terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
+        terminalSessionActionLabels: sessionActionButtons.map((button) =>
+          button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        ),
+        terminalSessionActionAriaLabels: sessionActionButtons.map((button) => button.getAttribute('aria-label')),
+        terminalSessionActionTitles: sessionActionButtons.map((button) => button.getAttribute('title')),
+        terminalSessionActionDangerFlags: sessionActionButtons.map((button) => button.getAttribute('data-danger') ?? ''),
+        terminalSessionActionConfirmingFlags: sessionActionButtons.map((button) =>
+          button.getAttribute('data-confirming') ?? '',
+        ),
         commandDockVisibleText: commandDockPanel?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         commandInputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, input) === true,
         saveLayoutTitle: saveLayout?.getAttribute('title') ?? null,
@@ -1163,6 +1185,9 @@ async function runSmokeScenario(browserUrl) {
         commandRoot?.querySelector('[data-testid="tp-send-interrupt"]') ?? null,
         commandRoot?.querySelector('[data-testid="tp-send-enter"]') ?? null,
       ];
+      const sessionActionButtons = [
+        ...(commandRoot?.querySelectorAll('[data-testid="tp-session-actions"] button') ?? []),
+      ];
       const terminalScreenRect = terminalScreen?.getBoundingClientRect() ?? null;
       const screenChromeRect = screenChrome?.getBoundingClientRect() ?? null;
       const screenViewportRect = screenViewport?.getBoundingClientRect() ?? null;
@@ -1248,6 +1273,11 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>
           button?.getAttribute('aria-keyshortcuts') ?? '',
         ),
+        terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
+        terminalSessionActionLabels: sessionActionButtons.map((button) =>
+          button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        ),
+        terminalSessionActionAriaLabels: sessionActionButtons.map((button) => button.getAttribute('aria-label')),
         quickCommandHeights: [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])]
           .map((button) => Math.round(button.getBoundingClientRect().height)),
         quickCommandWhiteSpaces: [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])]

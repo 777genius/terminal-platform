@@ -40,6 +40,14 @@ export {
   type TerminalCommandDockControlState,
 } from "./elements/terminal-command-dock-controls.js";
 export {
+  TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS,
+  resolveTerminalCommandDockSessionActions,
+  type TerminalCommandDockSessionActionId,
+  type TerminalCommandDockSessionActionOptions,
+  type TerminalCommandDockSessionActionPlacement,
+  type TerminalCommandDockSessionActionPresentation,
+} from "./elements/terminal-command-dock-session-actions.js";
+export {
   resolveTerminalCommandInputStatus,
   type TerminalCommandInputStatus,
 } from "./elements/terminal-command-input-status.js";

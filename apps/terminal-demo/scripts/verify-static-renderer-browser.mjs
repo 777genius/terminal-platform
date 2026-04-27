@@ -95,6 +95,11 @@ async function main() {
       || result.navigationDrawerSecondaryDensity !== "compact"
       || result.navigationDrawerSummaryHeight < 24
       || result.navigationDrawerSummaryHeight > 34
+      || result.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
+      || result.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
+      || result.terminalSessionActionAriaLabels[0] !== "Save the focused session layout"
+      || result.terminalSessionActionAriaLabels[1] !== "Refresh the active terminal session"
+      || !/^Clear \d+ command history entr(?:y|ies)$/.test(result.terminalSessionActionAriaLabels[2] ?? "")
       || !result.runEnabledBeforeSubmit
       || result.runEnabledAfterSubmit
       || !result.pasteEnabled
@@ -330,6 +335,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const paste = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
       const interrupt = commandRoot?.querySelector('[data-testid="tp-send-interrupt"]') ?? null;
       const enter = commandRoot?.querySelector('[data-testid="tp-send-enter"]') ?? null;
+      const sessionActionButtons = [
+        ...(commandRoot?.querySelectorAll('[data-testid="tp-session-actions"] button') ?? []),
+      ];
       const screenPanel = screenRoot?.querySelector('[data-testid="tp-terminal-screen"]') ?? null;
       const screenChrome = screenRoot?.querySelector('[data-testid="tp-screen-chrome"]') ?? null;
       const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
@@ -418,6 +426,11 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         navigationDrawerSecondaryChrome: navigationDrawer?.getAttribute('data-secondary-chrome') ?? null,
         navigationDrawerSecondaryDensity: navigationDrawer?.getAttribute('data-secondary-density') ?? null,
         navigationDrawerSummaryHeight: Math.round(navigationDrawerSummary?.getBoundingClientRect().height ?? 0),
+        terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
+        terminalSessionActionLabels: sessionActionButtons.map((button) =>
+          button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        ),
+        terminalSessionActionAriaLabels: sessionActionButtons.map((button) => button.getAttribute('aria-label')),
         runEnabledBeforeSubmit,
         runEnabledAfterSubmit: Boolean(run && !run.disabled),
         pasteEnabled: Boolean(paste && !paste.disabled),

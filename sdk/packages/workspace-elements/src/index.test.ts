@@ -4,6 +4,7 @@ import {
   TERMINAL_COMMAND_COMPOSER_ACTIONS,
   TERMINAL_COMMAND_COMPOSER_ACTION_IDS,
   TERMINAL_COMMAND_DOCK_ACCESSORY_MODES,
+  TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS,
   TERMINAL_COMMAND_QUICK_COMMAND_LIMIT,
   TERMINAL_COMMAND_COMPOSER_EVENTS,
   TERMINAL_SCREEN_CHROME_MODES,
@@ -31,6 +32,7 @@ import {
   resolvePaneResizeCommand,
   resolveTerminalCommandDockAccessoryMode,
   resolveTerminalCommandDockControlState,
+  resolveTerminalCommandDockSessionActions,
   resolveTerminalCommandHistoryNavigation,
   resolveTerminalCommandInputStatus,
   resolveTerminalCommandQuickCommands,
@@ -58,6 +60,10 @@ import {
   type TerminalCommandComposerActionPresentation,
   type TerminalCommandDockCapabilityStatus,
   type TerminalCommandDockControlState,
+  type TerminalCommandDockSessionActionId,
+  type TerminalCommandDockSessionActionOptions,
+  type TerminalCommandDockSessionActionPlacement,
+  type TerminalCommandDockSessionActionPresentation,
   type TerminalCommandComposerDraftChangeDetail,
   type TerminalCommandComposerEventMap,
   type TerminalCommandComposerEventType,
@@ -124,6 +130,10 @@ type PublicControlTypes =
   | TerminalCommandComposerActionPresentation
   | TerminalCommandDockCapabilityStatus
   | TerminalCommandDockControlState
+  | TerminalCommandDockSessionActionId
+  | TerminalCommandDockSessionActionOptions
+  | TerminalCommandDockSessionActionPlacement
+  | TerminalCommandDockSessionActionPresentation
   | TerminalCommandComposerDraftChangeDetail
   | TerminalCommandComposerEventMap
   | TerminalCommandComposerEventType
@@ -195,6 +205,7 @@ describe("workspace elements public api", () => {
       resolvePaneResizeCommand,
       resolveTerminalCommandDockAccessoryMode,
       resolveTerminalCommandDockControlState,
+      resolveTerminalCommandDockSessionActions,
       resolveTerminalCommandHistoryNavigation,
       resolveTerminalCommandInputStatus,
       resolveTerminalCommandQuickCommands,
@@ -230,6 +241,7 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_COMMAND_COMPOSER_ACTIONS[0]?.id).toBe(TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit);
     expect(TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
     expect(TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");
+    expect(TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe("save-layout");
     expect(TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
     expect(TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT).toBeGreaterThan(0);
     expect(TERMINAL_PANE_MIN_ROWS).toBeLessThan(TERMINAL_PANE_MAX_ROWS);

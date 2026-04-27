@@ -155,6 +155,14 @@ const terminalLayoutSourceContracts = [
         label: "dock remains addressable for e2e checks",
         marker: 'data-testid="tp-command-dock"',
       },
+      {
+        label: "session actions come from a presentation resolver",
+        marker: "resolveTerminalCommandDockSessionActions",
+      },
+      {
+        label: "session actions expose stable action ids",
+        marker: "data-session-action=${action.id}",
+      },
     ],
     order: [
       {
@@ -165,6 +173,39 @@ const terminalLayoutSourceContracts = [
           "errorTemplate,",
           "headerTemplate,",
         ],
+      },
+    ],
+  },
+  {
+    name: "terminal command dock session actions stay presentation-driven",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-command-dock-session-actions.ts",
+    ),
+    includes: [
+      {
+        label: "session action ids are exported as a public contract",
+        marker: "TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS",
+      },
+      {
+        label: "session actions resolve through a pure function",
+        marker: "export function resolveTerminalCommandDockSessionActions",
+      },
+      {
+        label: "terminal placement uses compact save label",
+        marker: 'label: compact ? "Save" : "Save layout"',
+      },
+      {
+        label: "terminal placement uses compact refresh label",
+        marker: 'label: compact ? "Refresh" : "Refresh terminal"',
+      },
+      {
+        label: "clear history still requires explicit confirmation",
+        marker: "historyClearConfirmationArmed",
       },
     ],
   },

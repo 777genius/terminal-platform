@@ -25,6 +25,11 @@ import {
 } from "./terminal-command-quick-commands.js";
 import { resolveTerminalCommandDockAccessoryMode } from "./terminal-command-dock-accessories.js";
 import { resolveTerminalCommandDockControlState } from "./terminal-command-dock-controls.js";
+import {
+  TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS,
+  resolveTerminalCommandDockSessionActions,
+  type TerminalCommandDockSessionActionId,
+} from "./terminal-command-dock-session-actions.js";
 import { resolveTerminalEntityIdLabel } from "./terminal-identity.js";
 
 type TerminalCommandInputFocusOptions = {
@@ -524,22 +529,16 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     const pasteTitle = controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
       ? "Paste is not supported by the active backend"
       : "Paste clipboard into the focused pane";
-    const saveLayoutTitle = controls.saveCapabilityStatus === "known" && !controls.canSaveLayout
-      ? "Save layout is not supported by the active backend"
-      : controls.saveCapabilityStatus === "unknown"
-        ? "Save layout is disabled until backend capabilities load"
-        : "Save the focused session layout";
     const activePaneIdentity = controls.activePaneId
       ? resolveTerminalEntityIdLabel(controls.activePaneId, { prefix: "Pane" })
       : null;
-    const historyCountLabel = formatCommandHistoryCount(controls.commandHistory.length);
-    const isHistoryClearConfirming =
-      this.historyClearConfirmationArmed && controls.commandHistory.length > 0 && !this.pending;
-    const clearHistoryTitle = isHistoryClearConfirming
-      ? `Confirm clearing ${historyCountLabel}`
-      : `Clear ${historyCountLabel}`;
     const isTerminalPlacement = this.placement === "terminal";
     const accessoryMode = resolveTerminalCommandDockAccessoryMode({ placement: this.placement });
+    const sessionActions = resolveTerminalCommandDockSessionActions(controls, {
+      historyClearConfirmationArmed: this.historyClearConfirmationArmed,
+      pending: this.pending,
+      placement: this.placement,
+    });
 
     const headerTemplate = html`
       <div class="dock-header">
@@ -666,33 +665,23 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
     const sessionActionsTemplate = html`
       <div class="actions session-actions" part="session-actions" data-testid="tp-session-actions">
-            <button
-              data-testid="tp-save-layout"
-              title=${saveLayoutTitle}
-              ?disabled=${!controls.canSaveLayout}
-              @click=${() => this.saveLayout()}
-            >
-              Save layout
-            </button>
-            <button
-              data-testid="tp-refresh-terminal"
-              ?disabled=${!controls.activeSessionId || this.pending}
-              @click=${() => this.refreshActiveSession()}
-            >
-              Refresh terminal
-            </button>
-            <button
-              data-testid="tp-clear-command-history"
-              data-danger="true"
-              data-confirming=${String(isHistoryClearConfirming)}
-              data-history-count=${String(controls.commandHistory.length)}
-              title=${clearHistoryTitle}
-              aria-label=${clearHistoryTitle}
-              ?disabled=${controls.commandHistory.length === 0 || this.pending}
-              @click=${() => this.handleClearCommandHistoryClick()}
-            >
-              ${isHistoryClearConfirming ? `Confirm clear ${controls.commandHistory.length}` : "Clear history"}
-            </button>
+            ${sessionActions.map(
+              (action) => html`
+                <button
+                  data-testid=${action.testId}
+                  data-session-action=${action.id}
+                  data-danger=${action.dangerous ? "true" : nothing}
+                  data-confirming=${String(action.confirming)}
+                  data-history-count=${action.historyCount == null ? nothing : String(action.historyCount)}
+                  title=${action.title}
+                  aria-label=${action.ariaLabel}
+                  ?disabled=${action.disabled}
+                  @click=${() => this.handleSessionActionClick(action.id)}
+                >
+                  ${action.label}
+                </button>
+              `,
+            )}
           </div>
     `;
 
@@ -1069,6 +1058,20 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
   }
 
+  private handleSessionActionClick(actionId: TerminalCommandDockSessionActionId): void {
+    switch (actionId) {
+      case TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout:
+        void this.saveLayout();
+        return;
+      case TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.refreshTerminal:
+        void this.refreshActiveSession();
+        return;
+      case TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.clearCommandHistory:
+        this.handleClearCommandHistoryClick();
+        return;
+    }
+  }
+
   private handleClearCommandHistoryClick(): void {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
     if (controls.commandHistory.length === 0 || this.pending) {
@@ -1125,8 +1128,4 @@ function getErrorMessage(error: unknown): string {
   }
 
   return "Workspace command failed";
-}
-
-function formatCommandHistoryCount(count: number): string {
-  return `${count} command history ${count === 1 ? "entry" : "entries"}`;
 }
