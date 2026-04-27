@@ -56,6 +56,8 @@ async function main() {
     if (
       !result.hasReadyState
       || !result.hasWorkspace
+      || result.demoShellCanvas !== "terminal"
+      || result.demoShellPaddingPx !== 0
       || !result.hasTerminalColumn
       || !result.hasCommandDock
       || !result.hasTerminalScreen
@@ -94,6 +96,9 @@ async function main() {
       || result.workspaceHostTopOffset > 20
       || result.terminalColumnHeight < 560
       || result.screenViewportHeight < 340
+      || result.workspaceOuterPanelBorderTopWidthPx !== 0
+      || result.workspaceOuterPanelRadiusPx !== 0
+      || result.workspaceOuterPanelShadow !== "none"
       || result.workspacePanelShadow !== "none"
       || Math.abs(result.terminalComposerGapPx ?? 99) > 1
       || result.commandHistoryLatest !== "printf \"static-browser-ok\\n\""
@@ -286,7 +291,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       });
 
       const workspace = document.querySelector('tp-terminal-workspace');
+      const demoShell = document.querySelector('[data-testid="terminal-demo-shell"]') ?? null;
       const demoMain = document.querySelector('.shell__main') ?? null;
+      const workspaceOuterPanel = document.querySelector('.panel--workspace') ?? null;
       const workspaceHostSlot = document.querySelector('[data-testid="terminal-workspace-host"]') ?? null;
       const workspaceHostHeader = document.querySelector('.panel__header--workspace') ?? null;
       const workspaceRoot = workspace?.shadowRoot ?? null;
@@ -347,10 +354,14 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const viewportRect = viewport?.getBoundingClientRect();
       const composerRect = composer?.getBoundingClientRect();
       const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect();
+      const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
+      const workspaceOuterPanelStyle = workspaceOuterPanel ? getComputedStyle(workspaceOuterPanel) : null;
 
       return {
         hasReadyState: state?.connection?.state === 'ready',
         hasWorkspace: Boolean(workspace),
+        demoShellCanvas: demoShell?.getAttribute('data-shell-canvas') ?? null,
+        demoShellPaddingPx: Number.parseFloat(demoShellStyle?.paddingTop ?? '0'),
         hasTerminalColumn: Boolean(terminalColumn),
         hasCommandDock: Boolean(commandDockPanel),
         hasTerminalScreen: Boolean(screenRoot),
@@ -394,6 +405,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         workspaceHostHeaderDisplay: workspaceHostHeader ? getComputedStyle(workspaceHostHeader).display : null,
         terminalColumnHeight: Math.round(terminalColumnRect?.height ?? 0),
         screenViewportHeight: Math.round(viewportRect?.height ?? 0),
+        workspaceOuterPanelBorderTopWidthPx: Number.parseFloat(workspaceOuterPanelStyle?.borderTopWidth ?? '0'),
+        workspaceOuterPanelRadiusPx: Number.parseFloat(workspaceOuterPanelStyle?.borderTopLeftRadius ?? '0'),
+        workspaceOuterPanelShadow: workspaceOuterPanelStyle?.boxShadow ?? null,
         workspacePanelShadow: workspaceFrame
           ? getComputedStyle(workspaceFrame).getPropertyValue('--tp-shadow-panel').trim()
           : null,

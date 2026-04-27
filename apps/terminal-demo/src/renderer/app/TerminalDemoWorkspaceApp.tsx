@@ -320,6 +320,7 @@ export function TerminalDemoWorkspaceScreen(props: {
     <div
       className="shell"
       data-has-active-session={shellChrome.hasActiveSession ? "true" : "false"}
+      data-shell-canvas={shellChrome.canvasTone}
       data-shell-density={shellChrome.density}
       data-shell-mode={shellChrome.mode}
       data-workspace-theme={snapshot.theme.themeId}

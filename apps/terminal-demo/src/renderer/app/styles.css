@@ -115,8 +115,35 @@ button {
   padding: 10px;
 }
 
+.shell[data-has-active-session="true"][data-shell-canvas="terminal"] {
+  gap: 0;
+  padding: 0;
+}
+
+.shell[data-shell-canvas="terminal"] {
+  color-scheme: dark;
+  --bg: #07080a;
+  --bg-elevated: rgba(7, 8, 10, 0.98);
+  --bg-hero: #07080a;
+  --border: rgba(154, 165, 177, 0.18);
+  --border-strong: rgba(125, 211, 252, 0.34);
+  --text: #eef2f6;
+  --text-soft: #9ca7b3;
+  --brand: #7dd3fc;
+  --brand-soft: rgba(125, 211, 252, 0.14);
+  --success: #8ee6a8;
+  --success-soft: rgba(142, 230, 168, 0.14);
+  --warning: #f8d36b;
+  --warning-soft: rgba(248, 211, 107, 0.14);
+  --danger: #ff7a69;
+  --danger-soft: rgba(255, 122, 105, 0.15);
+  --shadow: none;
+  background: #050607;
+}
+
 .shell[data-shell-mode="terminal"] .shell__main {
   order: 1;
+  overflow: hidden;
 }
 
 .shell--error {
@@ -337,6 +364,14 @@ button {
   height: 100%;
   overflow: hidden;
   padding: 0;
+}
+
+.shell[data-shell-canvas="terminal"] .panel--workspace {
+  background: #050607;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .shell[data-has-active-session="true"] .panel__header--workspace {
@@ -882,6 +917,11 @@ textarea:focus-visible {
   .shell[data-has-active-session="true"] {
     gap: 10px;
     padding: 10px;
+  }
+
+  .shell[data-has-active-session="true"][data-shell-canvas="terminal"] {
+    gap: 0;
+    padding: 0;
   }
 
   .shell[data-has-active-session="true"] tp-terminal-workspace {

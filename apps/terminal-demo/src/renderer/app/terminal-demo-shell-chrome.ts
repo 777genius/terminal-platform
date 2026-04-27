@@ -2,11 +2,13 @@ import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
 export type TerminalDemoShellMode = "launcher" | "terminal";
 export type TerminalDemoShellDensity = "browse" | "focus";
+export type TerminalDemoShellCanvasTone = "workspace" | "terminal";
 
 export interface TerminalDemoShellChromeState {
   hasActiveSession: boolean;
   mode: TerminalDemoShellMode;
   density: TerminalDemoShellDensity;
+  canvasTone: TerminalDemoShellCanvasTone;
   showLauncherPanel: boolean;
   showWorkspaceHero: boolean;
   launcherTitle: string;
@@ -27,6 +29,7 @@ export function resolveTerminalDemoShellChromeState(
     hasActiveSession,
     mode: hasActiveSession ? "terminal" : "launcher",
     density: hasActiveSession ? "focus" : "browse",
+    canvasTone: hasActiveSession ? "terminal" : "workspace",
     showLauncherPanel: !hasActiveSession,
     showWorkspaceHero: !hasActiveSession,
     launcherTitle: "Session launcher",

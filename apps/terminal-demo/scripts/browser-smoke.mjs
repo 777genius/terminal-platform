@@ -138,6 +138,8 @@ async function main() {
       || !result.afterCreate.hasCommandDock
       || result.afterCreate.demoShellActive !== "true"
       || result.afterCreate.demoShellMode !== "terminal"
+      || result.afterCreate.demoShellCanvas !== "terminal"
+      || result.afterCreate.demoShellPaddingPx !== 0
       || result.afterCreate.workspaceHeroVisible !== false
       || result.afterCreate.launcherPanelVisible !== false
       || result.afterCreate.demoShellColumnCount !== 1
@@ -149,6 +151,9 @@ async function main() {
       || result.afterCreate.workspaceHostHeaderDisplay !== "none"
       || result.afterCreate.terminalColumnHeight < 560
       || result.afterCreate.screenViewportHeight < 360
+      || result.afterCreate.workspaceOuterPanelBorderTopWidthPx !== 0
+      || result.afterCreate.workspaceOuterPanelRadiusPx !== 0
+      || result.afterCreate.workspaceOuterPanelShadow !== "none"
       || result.afterCreate.workspacePanelShadow !== "none"
       || result.afterCreate.documentHorizontalOverflow > 1
       || result.afterCreate.workspaceLayout !== "operations-deck"
@@ -314,6 +319,8 @@ async function main() {
       !result.afterCreateMobileLayout.checked
       || result.afterCreateMobileLayout.demoShellActive !== "true"
       || result.afterCreateMobileLayout.demoShellMode !== "terminal"
+      || result.afterCreateMobileLayout.demoShellCanvas !== "terminal"
+      || result.afterCreateMobileLayout.demoShellPaddingPx !== 0
       || result.afterCreateMobileLayout.launcherPanelVisible !== false
       || result.afterCreateMobileLayout.demoShellColumnCount !== 1
       || result.afterCreateMobileLayout.operationsDeckColumnCount !== 1
@@ -328,6 +335,9 @@ async function main() {
       || result.afterCreateMobileLayout.inspectorDrawerSecondaryChrome !== "terminal"
       || result.afterCreateMobileLayout.inspectorDrawerOpen !== false
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
+      || result.afterCreateMobileLayout.workspaceOuterPanelBorderTopWidthPx !== 0
+      || result.afterCreateMobileLayout.workspaceOuterPanelRadiusPx !== 0
+      || result.afterCreateMobileLayout.workspaceOuterPanelShadow !== "none"
       || result.afterCreateMobileLayout.demoMainWidth < 430
       || result.afterCreateMobileLayout.screenViewportHeight < 260
       || result.afterCreateMobileLayout.screenChromeMode !== "compact"
@@ -390,12 +400,13 @@ async function main() {
       || result.afterThemeSwitch.themeButtonLabel !== "Light"
       || result.afterThemeSwitch.themeButtonTitle !== "Switch workspace theme to Light."
       || result.afterThemeSwitch.demoShellTheme !== "terminal-platform-light"
-      || result.afterThemeSwitch.demoShellBgToken !== "#f6f8fb"
-      || result.afterThemeSwitch.demoShellTextColor !== "rgb(23, 32, 51)"
       || result.afterThemeSwitch.demoShellMode !== "terminal"
+      || result.afterThemeSwitch.demoShellCanvas !== "terminal"
+      || result.afterThemeSwitch.demoShellBgToken !== "#07080a"
+      || result.afterThemeSwitch.demoShellTextColor !== "rgb(238, 242, 246)"
       || result.afterThemeSwitch.workspaceHeroVisible !== false
       || result.afterThemeSwitch.launcherPanelVisible !== false
-      || !String(result.afterThemeSwitch.demoShellColorScheme ?? "").includes("light")
+      || !String(result.afterThemeSwitch.demoShellColorScheme ?? "").includes("dark")
       || result.afterThemeSwitch.screenBgToken !== "#f6f8fb"
       || result.afterThemeSwitch.storedTheme !== "terminal-platform-light"
     ) {
@@ -750,6 +761,7 @@ async function runSmokeScenario(browserUrl) {
       const demoShell = document.querySelector('[data-testid="terminal-demo-shell"]') ?? null;
       const demoSidebar = demoShell?.querySelector('.shell__sidebar') ?? null;
       const demoMain = demoShell?.querySelector('.shell__main') ?? null;
+      const workspaceOuterPanel = document.querySelector('.panel--workspace') ?? null;
       const workspaceHostHeader = document.querySelector('.panel__header--workspace') ?? null;
       const workspaceHostSlot = document.querySelector('[data-testid="terminal-workspace-host"]') ?? null;
       const workspaceHost = document.querySelector('tp-terminal-workspace');
@@ -822,6 +834,8 @@ async function runSmokeScenario(browserUrl) {
       const activeTitle = document.querySelector('.workspace-summary__title')?.textContent?.trim() ?? null;
       const focusedPaneBadge = document.querySelector('[data-testid="workspace-focused-pane-badge"]') ?? null;
       const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
+      const workspaceOuterPanelStyle = workspaceOuterPanel ? getComputedStyle(workspaceOuterPanel) : null;
       const screenRect = screenHost?.getBoundingClientRect() ?? null;
       const tabStripRect = tabStripHost?.getBoundingClientRect() ?? null;
       const screenChromeRect = screenChrome?.getBoundingClientRect() ?? null;
@@ -872,6 +886,8 @@ async function runSmokeScenario(browserUrl) {
         healthPhase: debug?.attachedSession?.health?.phase ?? null,
         demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
         demoShellMode: demoShell?.getAttribute('data-shell-mode') ?? null,
+        demoShellCanvas: demoShell?.getAttribute('data-shell-canvas') ?? null,
+        demoShellPaddingPx: Number.parseFloat(demoShellStyle?.paddingTop ?? '0'),
         workspaceHeroVisible: Boolean(demoShell?.querySelector('[data-testid="terminal-demo-workspace-hero"]')),
         launcherPanelVisible: Boolean(demoSidebar),
         demoShellColumnCount: demoShell
@@ -886,6 +902,9 @@ async function runSmokeScenario(browserUrl) {
         workspaceContentWidth: Math.round(workspaceContent?.getBoundingClientRect().width ?? 0),
         terminalColumnHeight: Math.round(terminalColumn?.getBoundingClientRect().height ?? 0),
         screenViewportHeight: Math.round(screenViewport?.getBoundingClientRect().height ?? 0),
+        workspaceOuterPanelBorderTopWidthPx: Number.parseFloat(workspaceOuterPanelStyle?.borderTopWidth ?? '0'),
+        workspaceOuterPanelRadiusPx: Number.parseFloat(workspaceOuterPanelStyle?.borderTopLeftRadius ?? '0'),
+        workspaceOuterPanelShadow: workspaceOuterPanelStyle?.boxShadow ?? null,
         workspacePanelShadow: workspaceFrame
           ? getComputedStyle(workspaceFrame).getPropertyValue('--tp-shadow-panel').trim()
           : null,
@@ -1082,6 +1101,7 @@ async function runSmokeScenario(browserUrl) {
       const demoShell = document.querySelector('[data-testid="terminal-demo-shell"]') ?? null;
       const demoSidebar = demoShell?.querySelector('.shell__sidebar') ?? null;
       const demoMain = demoShell?.querySelector('.shell__main') ?? null;
+      const workspaceOuterPanel = document.querySelector('.panel--workspace') ?? null;
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const workspaceFrame = workspaceRoot?.querySelector('[part="workspace"]') ?? null;
       const layoutRoot = workspaceRoot?.querySelector('[data-testid="tp-workspace-layout"]') ?? null;
@@ -1117,10 +1137,14 @@ async function runSmokeScenario(browserUrl) {
       const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect() ?? null;
       const commandComposerRect = commandComposer?.getBoundingClientRect() ?? null;
       const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
+      const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
+      const workspaceOuterPanelStyle = workspaceOuterPanel ? getComputedStyle(workspaceOuterPanel) : null;
       return {
         checked: Boolean(demoShell && demoMain && operationsDeck),
         demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
         demoShellMode: demoShell?.getAttribute('data-shell-mode') ?? null,
+        demoShellCanvas: demoShell?.getAttribute('data-shell-canvas') ?? null,
+        demoShellPaddingPx: Number.parseFloat(demoShellStyle?.paddingTop ?? '0'),
         launcherPanelVisible: Boolean(demoSidebar),
         demoShellColumnCount: demoShell
           ? getComputedStyle(demoShell).gridTemplateColumns.split(' ').filter(Boolean).length
@@ -1143,6 +1167,9 @@ async function runSmokeScenario(browserUrl) {
           0,
           document.documentElement.scrollWidth - document.documentElement.clientWidth,
         ),
+        workspaceOuterPanelBorderTopWidthPx: Number.parseFloat(workspaceOuterPanelStyle?.borderTopWidth ?? '0'),
+        workspaceOuterPanelRadiusPx: Number.parseFloat(workspaceOuterPanelStyle?.borderTopLeftRadius ?? '0'),
+        workspaceOuterPanelShadow: workspaceOuterPanelStyle?.boxShadow ?? null,
         terminalScreenHeight: Math.round(terminalScreen?.getBoundingClientRect().height ?? 0),
         screenViewportHeight: Math.round(screenViewport?.getBoundingClientRect().height ?? 0),
         screenChromeMode: screenPanel?.getAttribute('data-chrome-mode') ?? null,
@@ -1389,6 +1416,7 @@ async function runSmokeScenario(browserUrl) {
         themeId: window.terminalDemoDebug?.getState?.()?.theme?.themeId ?? null,
         demoShellTheme: demoShell?.getAttribute('data-workspace-theme') ?? null,
         demoShellMode: demoShell?.getAttribute('data-shell-mode') ?? null,
+        demoShellCanvas: demoShell?.getAttribute('data-shell-canvas') ?? null,
         workspaceHeroVisible: Boolean(demoShell?.querySelector('[data-testid="terminal-demo-workspace-hero"]')),
         launcherPanelVisible: Boolean(demoShell?.querySelector('.shell__sidebar')),
         demoShellBgToken: demoShellStyle?.getPropertyValue('--bg').trim() ?? null,
