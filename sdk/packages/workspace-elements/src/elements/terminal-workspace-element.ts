@@ -13,7 +13,9 @@ import {
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
   type TerminalWorkspaceLayoutPreset,
   type TerminalWorkspaceInspectorMode,
+  type TerminalWorkspaceInspectorState,
   type TerminalWorkspaceNavigationMode,
+  type TerminalWorkspaceNavigationState,
 } from "./terminal-workspace-layout.js";
 
 export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
@@ -178,22 +180,28 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         position: static;
       }
 
-      .inspector-drawer summary,
-      .navigation-drawer summary {
+      .secondary-toggle summary {
         align-items: center;
         display: flex;
+        gap: 0.6rem;
         justify-content: space-between;
       }
 
-      .inspector-drawer summary::after,
-      .navigation-drawer summary::after {
+      .secondary-toggle__label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .secondary-toggle__action {
         color: var(--tp-color-text-muted);
-        content: "Open";
+        flex: 0 0 auto;
         font-size: 0.76rem;
         font-weight: 500;
       }
 
-      .secondary-toggle[data-secondary-chrome="terminal"] summary::after {
+      .secondary-toggle[data-secondary-chrome="terminal"] .secondary-toggle__action {
         border: 1px solid color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
         border-radius: 0.42rem;
         background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
@@ -201,9 +209,9 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         padding: 0.18rem 0.44rem;
       }
 
-      .inspector-drawer[open] summary::after,
-      .navigation-drawer[open] summary::after {
-        content: "Close";
+      .secondary-toggle[open] .secondary-toggle__action-open,
+      .secondary-toggle:not([open]) .secondary-toggle__action-close {
+        display: none;
       }
 
       .inspector-drawer__content {
@@ -310,7 +318,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         line-height: 1.2;
       }
 
-      .secondary-toggle[data-secondary-density="compact"] summary::after {
+      .secondary-toggle[data-secondary-density="compact"] .secondary-toggle__action {
         font-size: 0.68rem;
         padding: 0.1rem 0.34rem;
       }
@@ -468,7 +476,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                       data-secondary-chrome=${chromeState.secondaryChrome}
                       data-secondary-density=${chromeState.secondaryDensity}
                     >
-                      <summary>${inspectorState.summaryLabel}</summary>
+                      ${this.renderSecondarySummary(inspectorState)}
                       <div class="inspector-drawer__content">
                         <div class="inspector-column" part="inspector-column" data-testid="tp-workspace-inspector-column">
                           ${this.renderInspectorContent()}
@@ -489,7 +497,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                   data-secondary-chrome=${chromeState.secondaryChrome}
                   data-secondary-density=${chromeState.secondaryDensity}
                 >
-                  <summary>${navigationState.summaryLabel}</summary>
+                  ${this.renderSecondarySummary(navigationState)}
                   <div class="navigation-drawer__content">
                     <div class="sidebar" part="sidebar" data-testid="tp-workspace-sidebar">
                       ${this.renderNavigationContent()}
@@ -507,6 +515,20 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     return html`
       <tp-terminal-session-list .kernel=${this.kernel}></tp-terminal-session-list>
       <tp-terminal-saved-sessions .kernel=${this.kernel}></tp-terminal-saved-sessions>
+    `;
+  }
+
+  private renderSecondarySummary(
+    state: TerminalWorkspaceInspectorState | TerminalWorkspaceNavigationState,
+  ): TemplateResult {
+    return html`
+      <summary part="secondary-summary">
+        <span class="secondary-toggle__label" part="secondary-summary-label">${state.summaryLabel}</span>
+        <span class="secondary-toggle__action" part="secondary-summary-action">
+          <span class="secondary-toggle__action-open">${state.summaryActionClosedLabel}</span>
+          <span class="secondary-toggle__action-close">${state.summaryActionOpenLabel}</span>
+        </span>
+      </summary>
     `;
   }
 

@@ -94,6 +94,18 @@ const terminalLayoutSourceContracts = [
         label: "terminal command dock opts into terminal placement",
         marker: 'placement="terminal"',
       },
+      {
+        label: "secondary drawers render real summary action labels",
+        marker: "renderSecondarySummary",
+      },
+      {
+        label: "secondary drawer open action is real DOM",
+        marker: "secondary-toggle__action-open",
+      },
+      {
+        label: "secondary drawer action is styleable through part contract",
+        marker: 'part="secondary-summary-action"',
+      },
     ],
     order: [
       {
@@ -104,6 +116,35 @@ const terminalLayoutSourceContracts = [
           '<tp-terminal-screen .kernel=${this.kernel} placement="terminal"></tp-terminal-screen>',
           "<tp-terminal-command-dock",
         ],
+      },
+    ],
+  },
+  {
+    name: "terminal workspace layout resolves compact secondary summaries",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-workspace-layout.ts",
+    ),
+    includes: [
+      {
+        label: "terminal preset uses compact tools label",
+        marker: 'summaryLabel: "Tools"',
+      },
+      {
+        label: "terminal preset uses compact sessions label",
+        marker: 'summaryLabel: "Sessions"',
+      },
+      {
+        label: "closed secondary action label is explicit state",
+        marker: 'summaryActionClosedLabel: "Open"',
+      },
+      {
+        label: "open secondary action label is explicit state",
+        marker: 'summaryActionOpenLabel: "Close"',
       },
     ],
   },

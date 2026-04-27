@@ -127,6 +127,7 @@ import {
   type TerminalWorkspaceLayoutState,
   type TerminalWorkspaceNavigationMode,
   type TerminalWorkspaceNavigationState,
+  type TerminalWorkspaceSecondarySummaryOptions,
   type TerminalWorkspaceSecondaryChromeMode,
   type TerminalWorkspaceSecondaryDensity,
 } from "./index.js";
@@ -202,6 +203,7 @@ type PublicControlTypes =
   | TerminalWorkspaceLayoutState
   | TerminalWorkspaceNavigationMode
   | TerminalWorkspaceNavigationState
+  | TerminalWorkspaceSecondarySummaryOptions
   | TerminalWorkspaceSecondaryChromeMode
   | TerminalWorkspaceSecondaryDensity;
 

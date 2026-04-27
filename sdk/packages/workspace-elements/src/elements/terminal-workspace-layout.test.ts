@@ -20,6 +20,8 @@ describe("terminal workspace layout", () => {
       renderCollapsedInspector: false,
       renderInlineInspector: true,
       renderInspector: true,
+      summaryActionClosedLabel: "Open",
+      summaryActionOpenLabel: "Close",
       summaryLabel: "Layout and tools",
     });
   });
@@ -30,6 +32,8 @@ describe("terminal workspace layout", () => {
       renderCollapsedInspector: true,
       renderInlineInspector: false,
       renderInspector: true,
+      summaryActionClosedLabel: "Open",
+      summaryActionOpenLabel: "Close",
       summaryLabel: "Layout and tools",
     });
   });
@@ -40,6 +44,8 @@ describe("terminal workspace layout", () => {
       renderCollapsedInspector: false,
       renderInlineInspector: false,
       renderInspector: false,
+      summaryActionClosedLabel: "Open",
+      summaryActionOpenLabel: "Close",
       summaryLabel: "Layout and tools",
     });
   });
@@ -58,6 +64,8 @@ describe("terminal workspace layout", () => {
       renderCollapsedNavigation: false,
       renderInlineNavigation: true,
       renderNavigation: true,
+      summaryActionClosedLabel: "Open",
+      summaryActionOpenLabel: "Close",
       summaryLabel: "Sessions and saved layouts",
     });
   });
@@ -68,6 +76,8 @@ describe("terminal workspace layout", () => {
       renderCollapsedNavigation: true,
       renderInlineNavigation: false,
       renderNavigation: true,
+      summaryActionClosedLabel: "Open",
+      summaryActionOpenLabel: "Close",
       summaryLabel: "Sessions and saved layouts",
     });
   });
@@ -78,6 +88,8 @@ describe("terminal workspace layout", () => {
       renderCollapsedNavigation: false,
       renderInlineNavigation: false,
       renderNavigation: false,
+      summaryActionClosedLabel: "Open",
+      summaryActionOpenLabel: "Close",
       summaryLabel: "Sessions and saved layouts",
     });
   });
@@ -122,11 +134,30 @@ describe("terminal workspace layout", () => {
       inspector: {
         mode: TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed,
         renderCollapsedInspector: true,
+        summaryLabel: "Tools",
       },
       navigation: {
         mode: TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed,
         renderCollapsedNavigation: true,
+        summaryLabel: "Sessions",
       },
+    });
+  });
+
+  it("allows hosts to provide compact secondary drawer labels", () => {
+    expect(resolveTerminalWorkspaceInspectorState("collapsed", {
+      summaryLabel: "Tools",
+    })).toMatchObject({
+      summaryLabel: "Tools",
+      summaryActionClosedLabel: "Open",
+      summaryActionOpenLabel: "Close",
+    });
+    expect(resolveTerminalWorkspaceNavigationState("collapsed", {
+      summaryLabel: "Sessions",
+    })).toMatchObject({
+      summaryLabel: "Sessions",
+      summaryActionClosedLabel: "Open",
+      summaryActionOpenLabel: "Close",
     });
   });
 

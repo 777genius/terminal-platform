@@ -184,6 +184,7 @@ export {
   type TerminalWorkspaceLayoutState,
   type TerminalWorkspaceNavigationMode,
   type TerminalWorkspaceNavigationState,
+  type TerminalWorkspaceSecondarySummaryOptions,
   type TerminalWorkspaceSecondaryChromeMode,
   type TerminalWorkspaceSecondaryDensity,
 } from "./elements/terminal-workspace-layout.js";

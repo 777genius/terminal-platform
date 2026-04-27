@@ -96,10 +96,14 @@ async function main() {
       || result.inspectorDrawerSecondaryDensity !== "compact"
       || result.inspectorDrawerSummaryHeight < 24
       || result.inspectorDrawerSummaryHeight > 34
+      || result.inspectorDrawerSummaryLabel !== "Tools"
+      || result.inspectorDrawerClosedSummaryAction !== "Open"
       || result.navigationDrawerSecondaryChrome !== "terminal"
       || result.navigationDrawerSecondaryDensity !== "compact"
       || result.navigationDrawerSummaryHeight < 24
       || result.navigationDrawerSummaryHeight > 34
+      || result.navigationDrawerSummaryLabel !== "Sessions"
+      || result.navigationDrawerClosedSummaryAction !== "Open"
       || result.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
       || result.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
       || result.terminalSessionActionAriaLabels[0] !== "Save the focused session layout"
@@ -388,6 +392,23 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect();
       const inspectorDrawerSummary = inspectorDrawer?.querySelector('summary') ?? null;
       const navigationDrawerSummary = navigationDrawer?.querySelector('summary') ?? null;
+      const readSecondarySummary = (summary) => {
+        const label = summary?.querySelector('.secondary-toggle__label')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null;
+        const openAction = summary?.querySelector('.secondary-toggle__action-open') ?? null;
+        const closeAction = summary?.querySelector('.secondary-toggle__action-close') ?? null;
+        const openVisible = openAction ? getComputedStyle(openAction).display !== 'none' : false;
+        const closeVisible = closeAction ? getComputedStyle(closeAction).display !== 'none' : false;
+        return {
+          action: openVisible
+            ? openAction.textContent?.replace(/\\s+/g, ' ').trim() ?? null
+            : closeVisible
+              ? closeAction.textContent?.replace(/\\s+/g, ' ').trim() ?? null
+              : null,
+          label,
+        };
+      };
+      const inspectorDrawerSummaryClosed = readSecondarySummary(inspectorDrawerSummary);
+      const navigationDrawerSummaryClosed = readSecondarySummary(navigationDrawerSummary);
       const historyEntries = [...(commandRoot?.querySelectorAll('[data-testid="tp-command-history-entry"]') ?? [])];
       const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
       const workspaceOuterPanelStyle = workspaceOuterPanel ? getComputedStyle(workspaceOuterPanel) : null;
@@ -440,9 +461,13 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         inspectorDrawerSecondaryChrome: inspectorDrawer?.getAttribute('data-secondary-chrome') ?? null,
         inspectorDrawerSecondaryDensity: inspectorDrawer?.getAttribute('data-secondary-density') ?? null,
         inspectorDrawerSummaryHeight: Math.round(inspectorDrawerSummary?.getBoundingClientRect().height ?? 0),
+        inspectorDrawerSummaryLabel: inspectorDrawerSummaryClosed.label,
+        inspectorDrawerClosedSummaryAction: inspectorDrawerSummaryClosed.action,
         navigationDrawerSecondaryChrome: navigationDrawer?.getAttribute('data-secondary-chrome') ?? null,
         navigationDrawerSecondaryDensity: navigationDrawer?.getAttribute('data-secondary-density') ?? null,
         navigationDrawerSummaryHeight: Math.round(navigationDrawerSummary?.getBoundingClientRect().height ?? 0),
+        navigationDrawerSummaryLabel: navigationDrawerSummaryClosed.label,
+        navigationDrawerClosedSummaryAction: navigationDrawerSummaryClosed.action,
         terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
         terminalSessionActionLabels: sessionActionButtons.map((button) =>
           button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,

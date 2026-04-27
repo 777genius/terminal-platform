@@ -53,6 +53,8 @@ export interface TerminalWorkspaceInspectorState {
   renderCollapsedInspector: boolean;
   renderInlineInspector: boolean;
   renderInspector: boolean;
+  summaryActionClosedLabel: string;
+  summaryActionOpenLabel: string;
   summaryLabel: string;
 }
 
@@ -61,6 +63,8 @@ export interface TerminalWorkspaceNavigationState {
   renderCollapsedNavigation: boolean;
   renderInlineNavigation: boolean;
   renderNavigation: boolean;
+  summaryActionClosedLabel: string;
+  summaryActionOpenLabel: string;
   summaryLabel: string;
 }
 
@@ -83,6 +87,10 @@ export interface TerminalWorkspaceLayoutOptions {
   navigationMode?: string | null | undefined;
 }
 
+export interface TerminalWorkspaceSecondarySummaryOptions {
+  summaryLabel?: string | null | undefined;
+}
+
 export function resolveTerminalWorkspaceLayoutState(
   options: TerminalWorkspaceLayoutOptions = {},
 ): TerminalWorkspaceLayoutState {
@@ -92,8 +100,14 @@ export function resolveTerminalWorkspaceLayoutState(
     return {
       preset,
       chrome: resolveTerminalWorkspaceChromeState(preset),
-      inspector: resolveTerminalWorkspaceInspectorState(TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed),
-      navigation: resolveTerminalWorkspaceNavigationState(TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed),
+      inspector: resolveTerminalWorkspaceInspectorState(
+        TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed,
+        { summaryLabel: "Tools" },
+      ),
+      navigation: resolveTerminalWorkspaceNavigationState(
+        TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed,
+        { summaryLabel: "Sessions" },
+      ),
     };
   }
 
@@ -127,6 +141,7 @@ export function resolveTerminalWorkspaceChromeState(
 
 export function resolveTerminalWorkspaceInspectorState(
   requestedMode: string | null | undefined,
+  options: TerminalWorkspaceSecondarySummaryOptions = {},
 ): TerminalWorkspaceInspectorState {
   const mode = normalizeTerminalWorkspaceInspectorMode(requestedMode);
 
@@ -135,12 +150,15 @@ export function resolveTerminalWorkspaceInspectorState(
     renderCollapsedInspector: mode === TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed,
     renderInlineInspector: mode === TERMINAL_WORKSPACE_INSPECTOR_MODES.inline,
     renderInspector: mode !== TERMINAL_WORKSPACE_INSPECTOR_MODES.hidden,
-    summaryLabel: "Layout and tools",
+    summaryActionClosedLabel: "Open",
+    summaryActionOpenLabel: "Close",
+    summaryLabel: normalizeTerminalWorkspaceSummaryLabel(options.summaryLabel, "Layout and tools"),
   };
 }
 
 export function resolveTerminalWorkspaceNavigationState(
   requestedMode: string | null | undefined,
+  options: TerminalWorkspaceSecondarySummaryOptions = {},
 ): TerminalWorkspaceNavigationState {
   const mode = normalizeTerminalWorkspaceNavigationMode(requestedMode);
 
@@ -149,7 +167,9 @@ export function resolveTerminalWorkspaceNavigationState(
     renderCollapsedNavigation: mode === TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed,
     renderInlineNavigation: mode === TERMINAL_WORKSPACE_NAVIGATION_MODES.inline,
     renderNavigation: mode !== TERMINAL_WORKSPACE_NAVIGATION_MODES.hidden,
-    summaryLabel: "Sessions and saved layouts",
+    summaryActionClosedLabel: "Open",
+    summaryActionOpenLabel: "Close",
+    summaryLabel: normalizeTerminalWorkspaceSummaryLabel(options.summaryLabel, "Sessions and saved layouts"),
   };
 }
 
@@ -195,4 +215,12 @@ function normalizeTerminalWorkspaceLayoutPreset(
   }
 
   return TERMINAL_WORKSPACE_LAYOUT_PRESETS.classic;
+}
+
+function normalizeTerminalWorkspaceSummaryLabel(
+  requestedLabel: string | null | undefined,
+  fallback: string,
+): string {
+  const normalized = requestedLabel?.trim();
+  return normalized ? normalized : fallback;
 }
