@@ -802,6 +802,10 @@ const terminalLayoutSourceContracts = [
         marker: "data-action=${action.id}",
       },
       {
+        label: "composer exposes disabled state for theme adapters",
+        marker: "data-action-disabled=${String(disabled)}",
+      },
+      {
         label: "composer exposes action tone for theme adapters",
         marker: "data-action-tone=${action.tone}",
       },

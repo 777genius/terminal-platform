@@ -69,8 +69,11 @@ async function main() {
       || result.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.terminalComposerActionTones.join("|") !== "primary|secondary|secondary|secondary"
       || result.terminalComposerActionLabelModes.join("|") !== "glyph|glyph|glyph|glyph"
+      || result.terminalComposerActionDisabledFlags.join("|") !== "true|false|false|false"
       || !result.terminalComposerPrimaryToneStyle
       || !result.terminalComposerSecondaryToneStyle
+      || result.terminalComposerPrimaryToneStyle.opacity >= 0.7
+      || result.terminalComposerPrimaryToneStyle.cursor !== "not-allowed"
       || result.terminalComposerPrimaryToneStyle.borderColor === result.terminalComposerSecondaryToneStyle.borderColor
       || result.terminalComposerPrimaryToneStyle.backgroundColor
         === result.terminalComposerSecondaryToneStyle.backgroundColor
@@ -489,6 +492,8 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
           backgroundColor: style.backgroundColor,
           borderColor: style.borderTopColor,
           color: style.color,
+          cursor: style.cursor,
+          opacity: Number.parseFloat(style.opacity),
         };
       };
 
@@ -515,6 +520,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         ),
         terminalComposerActionLabelModes: commandActionButtons.map((button) =>
           button?.getAttribute('data-action-label-mode') ?? '',
+        ),
+        terminalComposerActionDisabledFlags: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-disabled') ?? '',
         ),
         terminalComposerPrimaryToneStyle: readActionToneStyle(run),
         terminalComposerSecondaryToneStyle: readActionToneStyle(paste),

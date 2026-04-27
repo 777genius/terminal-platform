@@ -306,6 +306,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         padding: 0.3rem 0.48rem;
       }
 
+      .dock[data-placement="terminal"] .composer-actions button[data-action-disabled="true"] {
+        cursor: not-allowed;
+        opacity: 0.46;
+      }
+
       .dock[data-placement="terminal"] .composer-actions button[data-action-label-mode="glyph"] {
         inline-size: 2.2rem;
         min-width: 2.2rem;

@@ -255,6 +255,9 @@ async function main() {
       || result.afterCreate.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.afterCreate.terminalComposerActionTones.join("|") !== "primary|secondary|secondary|secondary"
       || result.afterCreate.terminalComposerActionLabelModes.join("|") !== "glyph|glyph|glyph|glyph"
+      || result.afterCreate.terminalComposerActionDisabledFlags.join("|") !== "true|false|false|false"
+      || result.afterCreate.terminalComposerSubmitDisabledOpacity >= 0.7
+      || result.afterCreate.terminalComposerSubmitDisabledCursor !== "not-allowed"
       || result.afterCreate.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
       || result.afterCreate.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
       || result.afterCreate.commandActionLabels.join("|") !== "\u25b6|\u2398|^C|\u21b5"
@@ -974,6 +977,7 @@ async function runSmokeScenario(browserUrl) {
       const commandComposerPrompt = commandComposer?.querySelector('[part="prompt"]') ?? null;
       const commandComposerInput = commandComposer?.querySelector('[part="input"]') ?? null;
       const commandComposerRect = commandComposer?.getBoundingClientRect() ?? null;
+      const commandSubmitStyle = commandActionButtons[0] ? getComputedStyle(commandActionButtons[0]) : null;
       const commandDockPanelRect = commandDockPanel?.getBoundingClientRect() ?? null;
       const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect() ?? null;
       const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
@@ -1167,6 +1171,11 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerActionLabelModes: commandActionButtons.map((button) =>
           button?.getAttribute('data-action-label-mode') ?? '',
         ),
+        terminalComposerActionDisabledFlags: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-disabled') ?? '',
+        ),
+        terminalComposerSubmitDisabledOpacity: Number.parseFloat(commandSubmitStyle?.opacity ?? '1'),
+        terminalComposerSubmitDisabledCursor: commandSubmitStyle?.cursor ?? null,
         terminalComposerActionKeyHints: commandActionButtons.map((button) => button?.getAttribute('data-key-hint') ?? ''),
         terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>
           button?.getAttribute('aria-keyshortcuts') ?? '',

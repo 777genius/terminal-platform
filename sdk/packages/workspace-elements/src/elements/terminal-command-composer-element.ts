@@ -242,12 +242,15 @@ export class TerminalCommandComposerElement extends LitElement {
   }
 
   private renderAction(action: TerminalCommandComposerActionPresentation) {
+    const disabled = this.isActionDisabled(action.id);
+
     return html`
       <button
         class=${action.primary ? "primary" : ""}
         part=${action.part}
         type="button"
         data-action=${action.id}
+        data-action-disabled=${String(disabled)}
         data-action-label-mode=${action.labelMode}
         data-action-placement=${action.placement}
         data-action-tone=${action.tone}
@@ -256,7 +259,7 @@ export class TerminalCommandComposerElement extends LitElement {
         title=${action.title}
         aria-label=${action.ariaLabel}
         aria-keyshortcuts=${action.ariaKeyShortcuts ?? nothing}
-        ?disabled=${this.isActionDisabled(action.id)}
+        ?disabled=${disabled}
         @click=${() => this.handleActionClick(action)}
       >
         ${action.label}
