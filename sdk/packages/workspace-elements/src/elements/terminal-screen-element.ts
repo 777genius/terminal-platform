@@ -131,6 +131,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         padding: 0.42rem 0.65rem;
       }
 
+      .screen-chrome[data-search-active="true"] {
+        grid-template-columns: minmax(0, 1fr) minmax(10rem, 0.42fr) auto auto;
+      }
+
       .screen-chrome__title {
         display: flex;
         align-items: center;
@@ -233,7 +237,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen-chrome .search-actions {
-        display: none;
+        flex-wrap: nowrap;
       }
 
       .search {
@@ -495,6 +499,18 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         color: var(--tp-color-danger);
       }
 
+      @media (max-width: 960px) {
+        .screen[data-placement="terminal"] .screen-chrome,
+        .screen[data-placement="terminal"] .screen-chrome[data-search-active="true"] {
+          grid-template-columns: minmax(0, 1fr) auto auto;
+        }
+
+        .screen[data-placement="terminal"] .screen-chrome__title {
+          grid-column: 1 / -1;
+          overflow: hidden;
+        }
+      }
+
       @media (max-width: 720px) {
         .screen {
           gap: var(--tp-space-2);
@@ -725,6 +741,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         part="screen-chrome"
         data-testid="tp-screen-chrome"
         data-chrome-mode=${chrome.mode}
+        data-search-active=${String(Boolean(searchResult.query))}
       >
         <div class="screen-chrome__title">
           <span class="panel-title">${chrome.title}</span>
@@ -732,10 +749,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         </div>
         <div class="screen-chrome__tools">
           ${this.renderSearch(searchResult)}
+          ${searchResult.query ? this.renderSearchActions(searchResult) : nothing}
           ${this.renderScreenActions(canCopyVisibleOutput)}
         </div>
       </div>
-      ${searchResult.query ? this.renderSearchActions(searchResult) : nothing}
     `;
   }
 

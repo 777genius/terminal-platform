@@ -118,6 +118,7 @@ async function main() {
       || result.terminalSearchActionPlacements.join("|") !== "terminal|terminal|terminal"
       || result.terminalSearchActionLabels.join("|") !== "\u2191|\u2193|\u00d7"
       || result.terminalSearchActionAriaLabels.join("|") !== "Select previous search match|Select next search match|Clear search query"
+      || !result.terminalSearchActionsInsideChrome
       || result.workspaceLayoutPreset !== "terminal"
       || result.workspaceNavigationMode !== "collapsed"
       || result.workspaceInspectorMode !== "collapsed"
@@ -444,12 +445,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const terminalSearchActionAriaLabels = searchActionButtons.map((button) =>
         button.getAttribute('aria-label') ?? '',
       );
-      if (searchInput) {
-        const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-        descriptor?.set?.call(searchInput, '');
-        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      }
+      const terminalSearchActionsInsideChrome =
+        searchActionButtons.length > 0
+        && searchActionButtons.every((button) => Boolean(screenChrome?.contains(button)));
 
       const state = window.terminalDemoDebug?.getState?.();
       const terminalText = state?.attachedSession?.focused_screen?.surface?.lines
@@ -574,6 +572,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         terminalSearchActionPlacements,
         terminalSearchActionLabels,
         terminalSearchActionAriaLabels,
+        terminalSearchActionsInsideChrome,
         workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
