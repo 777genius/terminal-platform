@@ -30,8 +30,13 @@ import {
   type TerminalScreenChromeMetaItem,
   type TerminalScreenChromeState,
 } from "./terminal-screen-chrome.js";
+import {
+  resolveTerminalScreenActions,
+  TERMINAL_SCREEN_ACTION_IDS,
+  type TerminalScreenActionId,
+  type TerminalScreenCopyState,
+} from "./terminal-screen-actions.js";
 
-type ScreenCopyState = "idle" | "copied" | "failed";
 type TerminalScreenPlacement = "panel" | "terminal";
 
 export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
@@ -526,7 +531,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   protected declare followOutput: boolean;
   protected declare searchQuery: string;
   protected declare activeSearchMatchIndex: number | null;
-  protected declare copyState: ScreenCopyState;
+  protected declare copyState: TerminalScreenCopyState;
   protected declare directInputActivity: TerminalScreenInputActivity;
 
   #autoScrolling = false;
@@ -713,33 +718,45 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private renderScreenActions(canCopyVisibleOutput: boolean): TemplateResult {
+    const actions = resolveTerminalScreenActions({
+      canCopyVisibleOutput,
+      copyState: this.copyState,
+      followOutput: this.followOutput,
+      placement: this.placement,
+    });
+
     return html`
       <div class="screen-actions" part="screen-actions">
-        <button
-          type="button"
-          data-testid="tp-screen-follow"
-          aria-pressed=${String(this.followOutput)}
-          @click=${() => this.toggleFollowOutput()}
-        >
-          ${this.followOutput ? "Following" : "Paused"}
-        </button>
-        <button
-          type="button"
-          data-testid="tp-screen-scroll-latest"
-          @click=${() => this.scrollLatest()}
-        >
-          Scroll latest
-        </button>
-        <button
-          type="button"
-          data-testid="tp-screen-copy"
-          ?disabled=${!canCopyVisibleOutput}
-          @click=${() => this.copyVisibleOutput()}
-        >
-          ${this.copyState === "copied" ? "Copied" : this.copyState === "failed" ? "Copy failed" : "Copy visible"}
-        </button>
+        ${actions.map((action) => html`
+          <button
+            type="button"
+            data-testid=${action.testId}
+            data-screen-action=${action.id}
+            aria-label=${action.ariaLabel}
+            aria-pressed=${action.ariaPressed == null ? nothing : String(action.ariaPressed)}
+            title=${action.title}
+            ?disabled=${action.disabled}
+            @click=${() => this.handleScreenActionClick(action.id)}
+          >
+            ${action.label}
+          </button>
+        `)}
       </div>
     `;
+  }
+
+  private handleScreenActionClick(actionId: TerminalScreenActionId): void {
+    switch (actionId) {
+      case TERMINAL_SCREEN_ACTION_IDS.followOutput:
+        this.toggleFollowOutput();
+        return;
+      case TERMINAL_SCREEN_ACTION_IDS.scrollLatest:
+        this.scrollLatest();
+        return;
+      case TERMINAL_SCREEN_ACTION_IDS.copyVisible:
+        void this.copyVisibleOutput();
+        return;
+    }
   }
 
   private renderSearch(searchResult: TerminalOutputSearchResult): TemplateResult {
@@ -887,7 +904,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     }
   }
 
-  private setCopyState(copyState: ScreenCopyState): void {
+  private setCopyState(copyState: TerminalScreenCopyState): void {
     this.copyState = copyState;
     this.clearCopyStateResetTimer();
     this.#copyStateResetTimer = setTimeout(() => {

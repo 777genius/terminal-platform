@@ -177,6 +177,64 @@ const terminalLayoutSourceContracts = [
     ],
   },
   {
+    name: "terminal screen actions stay presentation-driven",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-screen-element.ts",
+    ),
+    includes: [
+      {
+        label: "screen actions come from a presentation resolver",
+        marker: "resolveTerminalScreenActions",
+      },
+      {
+        label: "screen actions expose stable action ids",
+        marker: "data-screen-action=${action.id}",
+      },
+      {
+        label: "screen actions route through action ids",
+        marker: "handleScreenActionClick",
+      },
+    ],
+  },
+  {
+    name: "terminal screen action labels stay presentation-driven",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-screen-actions.ts",
+    ),
+    includes: [
+      {
+        label: "screen action ids are exported as a public contract",
+        marker: "TERMINAL_SCREEN_ACTION_IDS",
+      },
+      {
+        label: "screen actions resolve through a pure function",
+        marker: "export function resolveTerminalScreenActions",
+      },
+      {
+        label: "terminal placement uses compact live label",
+        marker: 'return compact ? "Live" : "Following";',
+      },
+      {
+        label: "terminal placement uses compact latest label",
+        marker: 'label: compact ? "Latest" : "Scroll latest"',
+      },
+      {
+        label: "copy failure state remains explicit",
+        marker: 'return compact ? "Failed" : "Copy failed";',
+      },
+    ],
+  },
+  {
     name: "terminal command dock session actions stay presentation-driven",
     relativePath: path.join(
       "sdk",

@@ -200,6 +200,11 @@ async function main() {
       || !result.afterCreate.hasScreenFollowControls
       || !result.afterCreate.hasScreenSearchControls
       || !result.afterCreate.hasScreenCopyControl
+      || result.afterCreate.terminalScreenActionIds.join("|") !== "follow-output|scroll-latest|copy-visible"
+      || result.afterCreate.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
+      || result.afterCreate.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
+      || result.afterCreate.terminalScreenActionTitles.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
+      || result.afterCreate.terminalScreenActionPressedFlags.join("|") !== "true||"
       || !result.afterCreate.hasScreenDirectInput
       || result.afterCreate.screenPlacement !== "terminal"
       || result.afterCreate.screenChromeMode !== "compact"
@@ -382,6 +387,9 @@ async function main() {
       || result.afterCreateMobileLayout.terminalComposerActionIds.join("|") !== "submit|paste|interrupt|enter"
       || result.afterCreateMobileLayout.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
       || result.afterCreateMobileLayout.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
+      || result.afterCreateMobileLayout.terminalScreenActionIds.join("|") !== "follow-output|scroll-latest|copy-visible"
+      || result.afterCreateMobileLayout.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
+      || result.afterCreateMobileLayout.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.afterCreateMobileLayout.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
       || result.afterCreateMobileLayout.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
       || result.afterCreateMobileLayout.terminalSessionActionAriaLabels.join("|") !== "Save the focused session layout|Refresh the active terminal session|Clear 0 command history entries"
@@ -828,6 +836,11 @@ async function runSmokeScenario(browserUrl) {
       const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
       const screenSearch = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
       const screenCopy = screenRoot?.querySelector('[data-testid="tp-screen-copy"]') ?? null;
+      const screenActionButtons = [
+        screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null,
+        screenRoot?.querySelector('[data-testid="tp-screen-scroll-latest"]') ?? null,
+        screenRoot?.querySelector('[data-testid="tp-screen-copy"]') ?? null,
+      ];
       const screenInputStatus = screenRoot?.querySelector('[data-testid="tp-screen-input-status"]') ?? null;
       const screenChrome = screenRoot?.querySelector('[data-testid="tp-screen-chrome"]') ?? null;
       const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
@@ -954,6 +967,13 @@ async function runSmokeScenario(browserUrl) {
         hasScreenFollowControls: Boolean(screenFollow && screenRoot?.querySelector('[data-testid="tp-screen-scroll-latest"]')),
         hasScreenSearchControls: Boolean(screenSearch),
         hasScreenCopyControl: Boolean(screenCopy && !screenCopy.disabled),
+        terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
+        terminalScreenActionLabels: screenActionButtons.map((button) =>
+          button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        ),
+        terminalScreenActionAriaLabels: screenActionButtons.map((button) => button?.getAttribute('aria-label') ?? null),
+        terminalScreenActionTitles: screenActionButtons.map((button) => button?.getAttribute('title') ?? null),
+        terminalScreenActionPressedFlags: screenActionButtons.map((button) => button?.getAttribute('aria-pressed') ?? ''),
         hasScreenDirectInput: Boolean(
           screenViewport
           && screenViewport.getAttribute('tabindex') === '0'
@@ -1173,6 +1193,11 @@ async function runSmokeScenario(browserUrl) {
       const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
       const screenChrome = screenRoot?.querySelector('[data-testid="tp-screen-chrome"]') ?? null;
       const screenPanel = screenRoot?.querySelector('[data-testid="tp-terminal-screen"]') ?? null;
+      const screenActionButtons = [
+        screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null,
+        screenRoot?.querySelector('[data-testid="tp-screen-scroll-latest"]') ?? null,
+        screenRoot?.querySelector('[data-testid="tp-screen-copy"]') ?? null,
+      ];
       const commandRegion = workspaceRoot?.querySelector('[data-testid="tp-workspace-command-region"]') ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
@@ -1273,6 +1298,11 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>
           button?.getAttribute('aria-keyshortcuts') ?? '',
         ),
+        terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
+        terminalScreenActionLabels: screenActionButtons.map((button) =>
+          button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        ),
+        terminalScreenActionAriaLabels: screenActionButtons.map((button) => button?.getAttribute('aria-label') ?? null),
         terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
         terminalSessionActionLabels: sessionActionButtons.map((button) =>
           button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
@@ -2529,7 +2559,7 @@ async function runSmokeScenario(browserUrl) {
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       }
       const startedFollowing =
-        followButton.getAttribute('aria-pressed') === 'true' && followButton.textContent?.trim() === 'Following';
+        followButton.getAttribute('aria-pressed') === 'true' && followButton.textContent?.trim() === 'Live';
 
       followButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -2537,7 +2567,7 @@ async function runSmokeScenario(browserUrl) {
 
       scrollLatestButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const resumed = followButton.getAttribute('aria-pressed') === 'true' && followButton.textContent?.trim() === 'Following';
+      const resumed = followButton.getAttribute('aria-pressed') === 'true' && followButton.textContent?.trim() === 'Live';
 
       return {
         paused,

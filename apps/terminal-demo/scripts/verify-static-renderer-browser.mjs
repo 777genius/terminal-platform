@@ -81,6 +81,11 @@ async function main() {
       || result.terminalScreenChromeHeight > 58
       || Math.abs(result.terminalScreenChromeViewportGapPx ?? 99) > 1
       || result.terminalScreenCompactSizeLabel !== "96x24"
+      || result.terminalScreenActionIds.join("|") !== "follow-output|scroll-latest|copy-visible"
+      || result.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
+      || result.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
+      || result.terminalScreenActionTitles.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
+      || result.terminalScreenActionPressedFlags.join("|") !== "true||"
       || result.workspaceLayoutPreset !== "terminal"
       || result.workspaceNavigationMode !== "collapsed"
       || result.workspaceInspectorMode !== "collapsed"
@@ -341,6 +346,11 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const screenPanel = screenRoot?.querySelector('[data-testid="tp-terminal-screen"]') ?? null;
       const screenChrome = screenRoot?.querySelector('[data-testid="tp-screen-chrome"]') ?? null;
       const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      const screenActionButtons = [
+        screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null,
+        screenRoot?.querySelector('[data-testid="tp-screen-scroll-latest"]') ?? null,
+        screenRoot?.querySelector('[data-testid="tp-screen-copy"]') ?? null,
+      ];
       const runEnabledBeforeSubmit = Boolean(run && !run.disabled);
 
       if (input && run) {
@@ -414,6 +424,13 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
           ? Math.round(viewportRect.top - screenChromeRect.bottom)
           : null,
         terminalScreenCompactSizeLabel: screenRoot?.querySelector('[data-meta-id="size"]')?.textContent?.trim() ?? null,
+        terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
+        terminalScreenActionLabels: screenActionButtons.map((button) =>
+          button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        ),
+        terminalScreenActionAriaLabels: screenActionButtons.map((button) => button?.getAttribute('aria-label') ?? null),
+        terminalScreenActionTitles: screenActionButtons.map((button) => button?.getAttribute('title') ?? null),
+        terminalScreenActionPressedFlags: screenActionButtons.map((button) => button?.getAttribute('aria-pressed') ?? ''),
         workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,

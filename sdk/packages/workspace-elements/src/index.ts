@@ -92,6 +92,15 @@ export {
 export { TerminalStatusBarElement } from "./elements/terminal-status-bar-element.js";
 export { TerminalScreenElement } from "./elements/terminal-screen-element.js";
 export {
+  TERMINAL_SCREEN_ACTION_IDS,
+  resolveTerminalScreenActions,
+  type TerminalScreenActionId,
+  type TerminalScreenActionOptions,
+  type TerminalScreenActionPlacement,
+  type TerminalScreenActionPresentation,
+  type TerminalScreenCopyState,
+} from "./elements/terminal-screen-actions.js";
+export {
   TERMINAL_SCREEN_CHROME_MODES,
   resolveTerminalScreenChromeState,
   type TerminalScreenChromeMetaItem,

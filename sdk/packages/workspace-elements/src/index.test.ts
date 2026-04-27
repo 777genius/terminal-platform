@@ -7,6 +7,7 @@ import {
   TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS,
   TERMINAL_COMMAND_QUICK_COMMAND_LIMIT,
   TERMINAL_COMMAND_COMPOSER_EVENTS,
+  TERMINAL_SCREEN_ACTION_IDS,
   TERMINAL_SCREEN_CHROME_MODES,
   TERMINAL_PANE_MAX_COLS,
   TERMINAL_PANE_MAX_ROWS,
@@ -38,6 +39,7 @@ import {
   resolveTerminalCommandQuickCommands,
   resolveTerminalEntityIdLabel,
   resolveTerminalSavedSessionsControlState,
+  resolveTerminalScreenActions,
   resolveTerminalScreenChromeState,
   resolveTerminalScreenControlState,
   resolveTerminalScreenInputStatus,
@@ -90,6 +92,11 @@ import {
   type TerminalSavedSessionsBulkAction,
   type TerminalSavedSessionsControlOptions,
   type TerminalSavedSessionsControlState,
+  type TerminalScreenActionId,
+  type TerminalScreenActionOptions,
+  type TerminalScreenActionPlacement,
+  type TerminalScreenActionPresentation,
+  type TerminalScreenCopyState,
   type TerminalScreenControlState,
   type TerminalScreenChromeMetaItem,
   type TerminalScreenChromeMetaItemId,
@@ -160,6 +167,11 @@ type PublicControlTypes =
   | TerminalSavedSessionsBulkAction
   | TerminalSavedSessionsControlOptions
   | TerminalSavedSessionsControlState
+  | TerminalScreenActionId
+  | TerminalScreenActionOptions
+  | TerminalScreenActionPlacement
+  | TerminalScreenActionPresentation
+  | TerminalScreenCopyState
   | TerminalScreenControlState
   | TerminalScreenChromeMetaItem
   | TerminalScreenChromeMetaItemId
@@ -211,6 +223,7 @@ describe("workspace elements public api", () => {
       resolveTerminalCommandQuickCommands,
       resolveTerminalEntityIdLabel,
       resolveTerminalSavedSessionsControlState,
+      resolveTerminalScreenActions,
       resolveTerminalScreenChromeState,
       resolveTerminalScreenControlState,
       resolveTerminalScreenInputStatus,
@@ -242,6 +255,7 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
     expect(TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");
     expect(TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe("save-layout");
+    expect(TERMINAL_SCREEN_ACTION_IDS.copyVisible).toBe("copy-visible");
     expect(TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
     expect(TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT).toBeGreaterThan(0);
     expect(TERMINAL_PANE_MIN_ROWS).toBeLessThan(TERMINAL_PANE_MAX_ROWS);
