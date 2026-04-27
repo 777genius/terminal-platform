@@ -663,6 +663,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                 data-testid=${badge.testId}
                 data-tone=${badge.tone}
                 title=${badge.title}
+                aria-live=${badge.id === TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input ? "polite" : nothing}
+                aria-atomic=${badge.id === TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input ? "true" : nothing}
               >
                 ${badge.label}
               </span>

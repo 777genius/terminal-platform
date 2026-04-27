@@ -205,6 +205,14 @@ const terminalLayoutSourceContracts = [
         marker: "id=${badge.id === TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input",
       },
       {
+        label: "input status announces capability changes politely",
+        marker: 'aria-live=${badge.id === TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input ? "polite" : nothing}',
+      },
+      {
+        label: "input status announces complete status labels",
+        marker: 'aria-atomic=${badge.id === TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input ? "true" : nothing}',
+      },
+      {
         label: "session actions come from a presentation resolver",
         marker: "resolveTerminalCommandDockSessionActions",
       },

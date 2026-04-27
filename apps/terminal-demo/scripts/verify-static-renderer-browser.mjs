@@ -66,6 +66,8 @@ async function main() {
       || result.commandInputStatus !== "Ready"
       || result.commandInputDescribedBy !== "tp-command-input-status"
       || !result.commandInputDescribedByResolves
+      || result.commandInputStatusLive !== "polite"
+      || result.commandInputStatusAtomic !== "true"
       || !/^\d+ cmd$/.test(result.commandHistoryBadgeText ?? "")
       || result.commandActionLabels.join("|") !== "\u25b6|\u2398|^C|\u21b5"
       || result.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
@@ -515,6 +517,8 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
           input?.getAttribute('aria-describedby')
           && commandRoot?.getElementById(input.getAttribute('aria-describedby') ?? ''),
         ),
+        commandInputStatusLive: commandInputStatus?.getAttribute('aria-live') ?? null,
+        commandInputStatusAtomic: commandInputStatus?.getAttribute('aria-atomic') ?? null,
         commandHistoryBadgeText: commandHistoryBadge?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
         commandActionLabels: commandActionButtons.map((button) =>
           button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,

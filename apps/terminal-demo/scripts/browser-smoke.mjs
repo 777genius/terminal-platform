@@ -266,6 +266,8 @@ async function main() {
       || result.afterCreate.commandInputMultiline !== "false"
       || result.afterCreate.commandInputDescribedBy !== "tp-command-input-status"
       || !result.afterCreate.commandInputDescribedByResolves
+      || result.afterCreate.commandInputStatusLive !== "polite"
+      || result.afterCreate.commandInputStatusAtomic !== "true"
       || result.afterCreate.commandComposerMinRows !== 1
       || result.afterCreate.commandComposerMaxRows !== 5
       || !result.afterCreate.terminalCommandActionsInsideComposer
@@ -1234,6 +1236,8 @@ async function runSmokeScenario(browserUrl) {
         activeSessionListIdTitle: activeSessionListId?.getAttribute('title') ?? null,
         commandInputStatus: commandInputStatus?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         commandInputStatusTitle: commandInputStatus?.getAttribute('title') ?? null,
+        commandInputStatusLive: commandInputStatus?.getAttribute('aria-live') ?? null,
+        commandInputStatusAtomic: commandInputStatus?.getAttribute('aria-atomic') ?? null,
         quickCommandIds: quickCommands.map((button) => button.getAttribute('data-quick-command') ?? ''),
         quickCommandTones: quickCommands.map((button) => button.getAttribute('data-quick-command-tone') ?? ''),
         quickCommandAriaLabels: quickCommands.map((button) => button.getAttribute('aria-label') ?? ''),
