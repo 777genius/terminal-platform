@@ -53,17 +53,31 @@ export async function withFileLock(lockFile, work, options = {}) {
   }
 }
 
-async function clearStaleLockIfNeeded(lockFile, staleMs) {
+export async function clearStaleLockIfNeeded(lockFile, staleMs) {
   const metadata = await readMetadata(lockFile);
   const createdAt = metadata?.createdAt ? Date.parse(metadata.createdAt) : Number.NaN;
-  const ageMs = Number.isFinite(createdAt) ? Date.now() - createdAt : Number.POSITIVE_INFINITY;
+  const fileAgeMs = await readFileAgeMs(lockFile);
+  const ageMs = Number.isFinite(createdAt) ? Date.now() - createdAt : fileAgeMs;
   const pid = typeof metadata?.pid === "number" ? metadata.pid : null;
 
-  if (ageMs < staleMs && pid && isPidAlive(pid)) {
+  if (pid && isPidAlive(pid)) {
+    return;
+  }
+
+  if (ageMs < staleMs) {
     return;
   }
 
   await fs.rm(lockFile, { recursive: true, force: true });
+}
+
+async function readFileAgeMs(lockFile) {
+  try {
+    const stat = await fs.stat(lockFile);
+    return Date.now() - stat.mtimeMs;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 async function readMetadata(lockFile) {
