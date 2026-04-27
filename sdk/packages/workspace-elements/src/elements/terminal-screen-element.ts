@@ -430,10 +430,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       mark {
+        -webkit-box-decoration-break: clone;
+        box-decoration-break: clone;
         border-radius: 0.2rem;
         background: color-mix(in srgb, var(--tp-color-warning) 36%, transparent);
         color: var(--tp-color-text);
-        padding: 0 0.08rem;
+        line-height: inherit;
+        padding: 0 0.08em;
       }
 
       mark[data-active="true"] {
@@ -1282,15 +1285,11 @@ function renderHighlightedSegments(
       return segment.value;
     }
 
-    return html`
-      <mark
-        part=${segment.active ? "search-match active-search-match" : "search-match"}
-        data-active=${String(segment.active)}
-        data-testid=${segment.active ? "tp-screen-active-search-match" : nothing}
-      >
-        ${segment.value}
-      </mark>
-    `;
+    return html`<mark
+      part=${segment.active ? "search-match active-search-match" : "search-match"}
+      data-active=${String(segment.active)}
+      data-testid=${segment.active ? "tp-screen-active-search-match" : nothing}
+    >${segment.value}</mark>`;
   })}`;
 }
 

@@ -636,6 +636,8 @@ async function main() {
       || result.afterScreenSearch.matchCount < 1
       || !result.afterScreenSearch.hasHighlights
       || !result.afterScreenSearch.hasActiveHighlight
+      || result.afterScreenSearch.activeHighlightText !== result.afterScreenSearch.query
+      || result.afterScreenSearch.highlightTexts.some((text) => text !== result.afterScreenSearch.query)
       || !result.afterScreenSearch.nextClicked
       || result.afterScreenSearch.actionIds.join("|") !== "previous-match|next-match|clear-search"
       || result.afterScreenSearch.actionLabelModes.join("|") !== "glyph|glyph|glyph"
@@ -2792,6 +2794,8 @@ async function runSmokeScenario(browserUrl) {
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       }
       const countText = screenRoot?.querySelector('[part="search-count"]')?.textContent?.trim() ?? '';
+      const highlights = [...(screenRoot?.querySelectorAll('[part~="search-match"]') ?? [])];
+      const activeHighlight = screenRoot?.querySelector('[part~="active-search-match"]') ?? null;
       return {
         searched: true,
         query,
@@ -2799,6 +2803,8 @@ async function runSmokeScenario(browserUrl) {
         matchCount: Number.parseInt(countText, 10) || 0,
         hasHighlights: Boolean(screenRoot?.querySelector('[part~="search-match"]')),
         hasActiveHighlight: Boolean(screenRoot?.querySelector('[part~="active-search-match"]')),
+        highlightTexts: highlights.map((highlight) => highlight.textContent ?? ''),
+        activeHighlightText: activeHighlight?.textContent ?? null,
         nextClicked,
         actionIds: searchActionButtons.map((button) => button.getAttribute('data-screen-search-action') ?? ''),
         actionLabelModes: searchActionButtons.map((button) =>

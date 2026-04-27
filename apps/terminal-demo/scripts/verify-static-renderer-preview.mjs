@@ -549,6 +549,10 @@ const terminalLayoutSourceContracts = [
         label: "screen search count announces complete labels",
         marker: 'aria-atomic="true"',
       },
+      {
+        label: "screen search match avoids template whitespace",
+        marker: ">${segment.value}</mark>",
+      },
     ],
   },
   {

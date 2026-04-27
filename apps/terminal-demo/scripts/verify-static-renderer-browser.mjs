@@ -142,6 +142,8 @@ async function main() {
       || !result.terminalSearchInputDescribedByResolves
       || result.terminalSearchCountLive !== "polite"
       || result.terminalSearchCountAtomic !== "true"
+      || result.terminalSearchActiveHighlightText !== "static-browser-ok"
+      || result.terminalSearchHighlightTexts.some((text) => text !== "static-browser-ok")
       || result.workspaceLayoutPreset !== "terminal"
       || result.workspaceNavigationMode !== "collapsed"
       || result.workspaceInspectorMode !== "collapsed"
@@ -468,6 +470,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const terminalSearchActionAriaLabels = searchActionButtons.map((button) =>
         button.getAttribute('aria-label') ?? '',
       );
+      const terminalSearchHighlights = [...(screenRoot?.querySelectorAll('[part~="search-match"]') ?? [])];
+      const terminalSearchActiveHighlight =
+        screenRoot?.querySelector('[part~="active-search-match"]') ?? null;
       const terminalSearchActionsInsideChrome =
         searchActionButtons.length > 0
         && searchActionButtons.every((button) => Boolean(screenChrome?.contains(button)));
@@ -629,6 +634,8 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
           screenRoot?.querySelector('[part="search-count"]')?.getAttribute('aria-live') ?? null,
         terminalSearchCountAtomic:
           screenRoot?.querySelector('[part="search-count"]')?.getAttribute('aria-atomic') ?? null,
+        terminalSearchHighlightTexts: terminalSearchHighlights.map((highlight) => highlight.textContent ?? ''),
+        terminalSearchActiveHighlightText: terminalSearchActiveHighlight?.textContent ?? null,
         workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
