@@ -28,6 +28,12 @@ import type {
   TerminalScreenActionPlacement,
   TerminalScreenActionPresentation,
   TerminalScreenActionTone,
+  TerminalScreenSearchActionId,
+  TerminalScreenSearchActionLabelMode,
+  TerminalScreenSearchActionOptions,
+  TerminalScreenSearchActionPlacement,
+  TerminalScreenSearchActionPresentation,
+  TerminalScreenSearchActionTone,
   TerminalScreenChromeMode,
   TerminalScreenChromeState,
   TerminalWorkspaceChromeState,
@@ -106,6 +112,12 @@ type _ComposerActionContractTypesRemainImportable =
   | TerminalScreenActionPlacement
   | TerminalScreenActionPresentation
   | TerminalScreenActionTone
+  | TerminalScreenSearchActionId
+  | TerminalScreenSearchActionLabelMode
+  | TerminalScreenSearchActionOptions
+  | TerminalScreenSearchActionPlacement
+  | TerminalScreenSearchActionPresentation
+  | TerminalScreenSearchActionTone
   | TerminalScreenChromeMode
   | TerminalScreenChromeState
   | TerminalWorkspaceChromeState
@@ -141,6 +153,12 @@ describe("workspace react public api", () => {
     expect(workspaceReact.resolveTerminalScreenActions({ placement: "terminal", followOutput: true })
       .map((action) => action.labelMode)
       .join("|")).toBe("glyph|glyph|glyph");
+    expect(workspaceReact.TERMINAL_SCREEN_SEARCH_ACTION_IDS.nextMatch).toBe("next-match");
+    expect(workspaceReact.resolveTerminalScreenSearchActions({
+      matchCount: 1,
+      placement: "terminal",
+      query: "ok",
+    }).map((action) => action.labelMode).join("|")).toBe("glyph|glyph|glyph");
     expect(workspaceReact.TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");
     expect(workspaceReact.resolveTerminalCommandDockAccessoryMode({ placement: "terminal" })).toBe("bar");
     expect(workspaceReact.TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe("save-layout");

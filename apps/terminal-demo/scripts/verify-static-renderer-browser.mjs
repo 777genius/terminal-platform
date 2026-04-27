@@ -113,6 +113,11 @@ async function main() {
       || result.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.terminalScreenActionTitles.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.terminalScreenActionPressedFlags.join("|") !== "true||"
+      || result.terminalSearchActionIds.join("|") !== "previous-match|next-match|clear-search"
+      || result.terminalSearchActionLabelModes.join("|") !== "glyph|glyph|glyph"
+      || result.terminalSearchActionPlacements.join("|") !== "terminal|terminal|terminal"
+      || result.terminalSearchActionLabels.join("|") !== "\u2191|\u2193|\u00d7"
+      || result.terminalSearchActionAriaLabels.join("|") !== "Select previous search match|Select next search match|Clear search query"
       || result.workspaceLayoutPreset !== "terminal"
       || result.workspaceNavigationMode !== "collapsed"
       || result.workspaceInspectorMode !== "collapsed"
@@ -416,6 +421,36 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         });
       }
 
+      const searchInput = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
+      if (searchInput) {
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+        descriptor?.set?.call(searchInput, 'static-browser-ok');
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }
+      const searchActionButtons = [...(screenRoot?.querySelectorAll('[part="search-actions"] button') ?? [])];
+      const terminalSearchActionIds = searchActionButtons.map((button) =>
+        button.getAttribute('data-screen-search-action') ?? '',
+      );
+      const terminalSearchActionLabelModes = searchActionButtons.map((button) =>
+        button.getAttribute('data-screen-search-action-label-mode') ?? '',
+      );
+      const terminalSearchActionPlacements = searchActionButtons.map((button) =>
+        button.getAttribute('data-screen-search-action-placement') ?? '',
+      );
+      const terminalSearchActionLabels = searchActionButtons.map((button) =>
+        button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+      );
+      const terminalSearchActionAriaLabels = searchActionButtons.map((button) =>
+        button.getAttribute('aria-label') ?? '',
+      );
+      if (searchInput) {
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+        descriptor?.set?.call(searchInput, '');
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }
+
       const state = window.terminalDemoDebug?.getState?.();
       const terminalText = state?.attachedSession?.focused_screen?.surface?.lines
         ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n')
@@ -534,6 +569,11 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         terminalScreenActionAriaLabels: screenActionButtons.map((button) => button?.getAttribute('aria-label') ?? null),
         terminalScreenActionTitles: screenActionButtons.map((button) => button?.getAttribute('title') ?? null),
         terminalScreenActionPressedFlags: screenActionButtons.map((button) => button?.getAttribute('aria-pressed') ?? ''),
+        terminalSearchActionIds,
+        terminalSearchActionLabelModes,
+        terminalSearchActionPlacements,
+        terminalSearchActionLabels,
+        terminalSearchActionAriaLabels,
         workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,

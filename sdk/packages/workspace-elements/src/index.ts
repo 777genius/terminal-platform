@@ -146,6 +146,16 @@ export {
   type TerminalScreenCopyState,
 } from "./elements/terminal-screen-actions.js";
 export {
+  TERMINAL_SCREEN_SEARCH_ACTION_IDS,
+  resolveTerminalScreenSearchActions,
+  type TerminalScreenSearchActionId,
+  type TerminalScreenSearchActionLabelMode,
+  type TerminalScreenSearchActionOptions,
+  type TerminalScreenSearchActionPlacement,
+  type TerminalScreenSearchActionPresentation,
+  type TerminalScreenSearchActionTone,
+} from "./elements/terminal-screen-search-actions.js";
+export {
   TERMINAL_SCREEN_CHROME_MODES,
   resolveTerminalScreenChromeState,
   type TerminalScreenChromeMetaItem,

@@ -469,6 +469,71 @@ const terminalLayoutSourceContracts = [
         label: "screen actions route through action ids",
         marker: "handleScreenActionClick",
       },
+      {
+        label: "screen search actions come from a presentation resolver",
+        marker: "resolveTerminalScreenSearchActions",
+      },
+      {
+        label: "screen search actions expose stable action ids",
+        marker: "data-screen-search-action=${action.id}",
+      },
+      {
+        label: "screen search actions expose compact label mode",
+        marker: "data-screen-search-action-label-mode=${action.labelMode}",
+      },
+      {
+        label: "screen search actions expose placement metadata",
+        marker: "data-screen-search-action-placement=${action.placement}",
+      },
+      {
+        label: "screen search compact glyph mode drives terminal styling",
+        marker: 'button[data-screen-search-action-label-mode="glyph"]',
+      },
+      {
+        label: "screen search actions route through action ids",
+        marker: "handleSearchActionClick",
+      },
+    ],
+  },
+  {
+    name: "terminal screen search actions stay presentation-driven",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-screen-search-actions.ts",
+    ),
+    includes: [
+      {
+        label: "screen search action ids are exported as a public contract",
+        marker: "TERMINAL_SCREEN_SEARCH_ACTION_IDS",
+      },
+      {
+        label: "screen search actions resolve through a pure function",
+        marker: "export function resolveTerminalScreenSearchActions",
+      },
+      {
+        label: "screen search label mode is a public presentation contract",
+        marker: "TerminalScreenSearchActionLabelMode",
+      },
+      {
+        label: "terminal previous match resolves to a compact glyph",
+        marker: 'label: compact ? "\\u2191" : "Prev"',
+      },
+      {
+        label: "terminal next match resolves to a compact glyph",
+        marker: 'label: compact ? "\\u2193" : "Next"',
+      },
+      {
+        label: "terminal clear query resolves to a compact glyph",
+        marker: 'label: compact ? "\\u00d7" : "Clear"',
+      },
+      {
+        label: "label mode is resolved outside rendering",
+        marker: "resolveTerminalScreenSearchActionLabelMode",
+      },
     ],
   },
   {

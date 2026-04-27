@@ -614,6 +614,11 @@ async function main() {
       || !result.afterScreenSearch.hasHighlights
       || !result.afterScreenSearch.hasActiveHighlight
       || !result.afterScreenSearch.nextClicked
+      || result.afterScreenSearch.actionIds.join("|") !== "previous-match|next-match|clear-search"
+      || result.afterScreenSearch.actionLabelModes.join("|") !== "glyph|glyph|glyph"
+      || result.afterScreenSearch.actionPlacements.join("|") !== "terminal|terminal|terminal"
+      || result.afterScreenSearch.actionLabels.join("|") !== "\u2191|\u2193|\u00d7"
+      || result.afterScreenSearch.actionAriaLabels.join("|") !== "Select previous search match|Select next search match|Clear search query"
     ) {
       throw new Error(`Terminal screen search did not highlight output: ${JSON.stringify(result.afterScreenSearch)}`);
     }
@@ -2717,6 +2722,7 @@ async function runSmokeScenario(browserUrl) {
       searchInput.dispatchEvent(new Event('input', { bubbles: true }));
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const nextButton = screenRoot?.querySelector('[data-testid="tp-screen-search-next"]') ?? null;
+      const searchActionButtons = [...(screenRoot?.querySelectorAll('[part="search-actions"] button') ?? [])];
       const nextClicked = Boolean(nextButton && !nextButton.disabled);
       if (nextClicked) {
         nextButton.click();
@@ -2731,6 +2737,15 @@ async function runSmokeScenario(browserUrl) {
         hasHighlights: Boolean(screenRoot?.querySelector('[part~="search-match"]')),
         hasActiveHighlight: Boolean(screenRoot?.querySelector('[part~="active-search-match"]')),
         nextClicked,
+        actionIds: searchActionButtons.map((button) => button.getAttribute('data-screen-search-action') ?? ''),
+        actionLabelModes: searchActionButtons.map((button) =>
+          button.getAttribute('data-screen-search-action-label-mode') ?? '',
+        ),
+        actionPlacements: searchActionButtons.map((button) =>
+          button.getAttribute('data-screen-search-action-placement') ?? '',
+        ),
+        actionLabels: searchActionButtons.map((button) => button.textContent?.replace(/\\s+/g, ' ').trim() ?? null),
+        actionAriaLabels: searchActionButtons.map((button) => button.getAttribute('aria-label') ?? ''),
       };
     })()`);
 

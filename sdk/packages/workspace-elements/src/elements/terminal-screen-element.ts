@@ -25,6 +25,11 @@ import { terminalInputForKeyboardEvent } from "./terminal-keyboard-input.js";
 import { resolveTerminalScreenControlState } from "./terminal-screen-controls.js";
 import { isTerminalScreenSearchShortcut } from "./terminal-screen-shortcuts.js";
 import {
+  TERMINAL_SCREEN_SEARCH_ACTION_IDS,
+  resolveTerminalScreenSearchActions,
+  type TerminalScreenSearchActionId,
+} from "./terminal-screen-search-actions.js";
+import {
   resolveTerminalScreenChromeState,
   TERMINAL_SCREEN_CHROME_MODES,
   type TerminalScreenChromeMetaItem,
@@ -302,12 +307,26 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .search-actions button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
         border-radius: 0.45rem;
         background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 84%, transparent);
         color: var(--tp-terminal-color-text);
         font-size: 0.82rem;
+        min-width: 2.15rem;
         padding: 0.34rem 0.55rem;
+      }
+
+      .screen[data-placement="terminal"] .search-actions button[data-screen-search-action-label-mode="glyph"] {
+        inline-size: 2.2rem;
+        min-width: 2.2rem;
+        aspect-ratio: 1;
+        padding: 0;
+        font-family: var(--tp-font-family-mono);
+        font-size: 0.92rem;
+        line-height: 1;
       }
 
       .viewport {
@@ -820,34 +839,46 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private renderSearchActions(searchResult: TerminalOutputSearchResult): TemplateResult {
+    const actions = resolveTerminalScreenSearchActions({
+      matchCount: searchResult.matchCount,
+      placement: this.placement,
+      query: searchResult.query,
+    });
+
     return html`
       <div class="search-actions" part="search-actions">
-        <button
-          type="button"
-          data-testid="tp-screen-search-prev"
-          ?disabled=${searchResult.matchCount === 0}
-          @click=${() => this.selectSearchMatch("previous")}
-        >
-          Prev
-        </button>
-        <button
-          type="button"
-          data-testid="tp-screen-search-next"
-          ?disabled=${searchResult.matchCount === 0}
-          @click=${() => this.selectSearchMatch("next")}
-        >
-          Next
-        </button>
-        <button
-          type="button"
-          data-testid="tp-screen-search-clear"
-          ?disabled=${!searchResult.query}
-          @click=${() => this.clearSearch()}
-        >
-          Clear
-        </button>
+        ${actions.map((action) => html`
+          <button
+            type="button"
+            data-testid=${action.testId}
+            data-screen-search-action=${action.id}
+            data-screen-search-action-label-mode=${action.labelMode}
+            data-screen-search-action-placement=${action.placement}
+            data-screen-search-action-tone=${action.tone}
+            aria-label=${action.ariaLabel}
+            title=${action.title}
+            ?disabled=${action.disabled}
+            @click=${() => this.handleSearchActionClick(action.id)}
+          >
+            ${action.label}
+          </button>
+        `)}
       </div>
     `;
+  }
+
+  private handleSearchActionClick(actionId: TerminalScreenSearchActionId): void {
+    switch (actionId) {
+      case TERMINAL_SCREEN_SEARCH_ACTION_IDS.previousMatch:
+        this.selectSearchMatch("previous");
+        return;
+      case TERMINAL_SCREEN_SEARCH_ACTION_IDS.nextMatch:
+        this.selectSearchMatch("next");
+        return;
+      case TERMINAL_SCREEN_SEARCH_ACTION_IDS.clearSearch:
+        this.clearSearch();
+        return;
+    }
   }
 
   private toggleFollowOutput(): void {

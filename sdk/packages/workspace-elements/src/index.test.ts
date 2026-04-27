@@ -13,6 +13,7 @@ import {
   TERMINAL_COMMAND_COMPOSER_EVENTS,
   TERMINAL_SCREEN_ACTION_IDS,
   TERMINAL_SCREEN_CHROME_MODES,
+  TERMINAL_SCREEN_SEARCH_ACTION_IDS,
   TERMINAL_SCREEN_EVENTS,
   TERMINAL_PANE_MAX_COLS,
   TERMINAL_PANE_MAX_ROWS,
@@ -53,6 +54,7 @@ import {
   resolveTerminalScreenChromeState,
   resolveTerminalScreenControlState,
   resolveTerminalScreenInputStatus,
+  resolveTerminalScreenSearchActions,
   resolveTerminalTabStripControlState,
   resolveTerminalTabStripKeyboardIntent,
   TerminalTabStripElement,
@@ -139,6 +141,12 @@ import {
   type TerminalScreenInputActivity,
   type TerminalScreenInputStatus,
   type TerminalScreenInputTone,
+  type TerminalScreenSearchActionId,
+  type TerminalScreenSearchActionLabelMode,
+  type TerminalScreenSearchActionOptions,
+  type TerminalScreenSearchActionPlacement,
+  type TerminalScreenSearchActionPresentation,
+  type TerminalScreenSearchActionTone,
   type TerminalScreenPasteFailedDetail,
   type TerminalScreenPasteSubmittedDetail,
   type TerminalTabStripControlOptions,
@@ -240,6 +248,12 @@ type PublicControlTypes =
   | TerminalScreenInputActivity
   | TerminalScreenInputStatus
   | TerminalScreenInputTone
+  | TerminalScreenSearchActionId
+  | TerminalScreenSearchActionLabelMode
+  | TerminalScreenSearchActionOptions
+  | TerminalScreenSearchActionPlacement
+  | TerminalScreenSearchActionPresentation
+  | TerminalScreenSearchActionTone
   | TerminalScreenPasteFailedDetail
   | TerminalScreenPasteSubmittedDetail
   | TerminalTabStripControlOptions
@@ -294,6 +308,7 @@ describe("workspace elements public api", () => {
       resolveTerminalScreenChromeState,
       resolveTerminalScreenControlState,
       resolveTerminalScreenInputStatus,
+      resolveTerminalScreenSearchActions,
       resolveTerminalTabStripControlState,
       resolveTerminalTabStripKeyboardIntent,
       resolveTerminalToolbarFontScaleOption,
@@ -328,6 +343,7 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_COMMAND_QUICK_COMMAND_TONES.primary).toBe("primary");
     expect(TERMINAL_SCREEN_ACTION_IDS.copyVisible).toBe("copy-visible");
     expect(TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
+    expect(TERMINAL_SCREEN_SEARCH_ACTION_IDS.nextMatch).toBe("next-match");
     expect(TERMINAL_SCREEN_EVENTS.inputSubmitted).toBe("tp-terminal-screen-input-submitted");
     expect(TERMINAL_SCREEN_EVENTS.pasteSubmitted).toBe("tp-terminal-screen-paste-submitted");
     expect(TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT).toBeGreaterThan(0);
