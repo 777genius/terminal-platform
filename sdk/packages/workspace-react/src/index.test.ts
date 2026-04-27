@@ -65,6 +65,7 @@ type _ComposerRefTargetsElement = Assert<
 type _ComposerDraftProp = Assert<Equal<ComposerProps["draft"], string | undefined>>;
 type _ComposerMinRowsProp = Assert<Equal<ComposerProps["minRows"], number | undefined>>;
 type _ComposerMaxRowsProp = Assert<Equal<ComposerProps["maxRows"], number | undefined>>;
+type _ComposerInputDescriptionIdProp = Assert<Equal<ComposerProps["inputDescriptionId"], string | undefined>>;
 type _ComposerDraftChangeEvent = Assert<
   Equal<EventParameter<ComposerProps["onCommandDraftChange"]>, CustomEvent<TerminalCommandComposerDraftChangeDetail>>
 >;
@@ -160,6 +161,7 @@ describe("workspace react public api", () => {
       query: "ok",
     }).map((action) => action.labelMode).join("|")).toBe("glyph|glyph|glyph");
     expect(workspaceReact.TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");
+    expect(workspaceReact.TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID).toBe("tp-command-input-status");
     expect(workspaceReact.resolveTerminalCommandDockAccessoryMode({ placement: "terminal" })).toBe("bar");
     expect(workspaceReact.TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe("save-layout");
     expect(workspaceReact.resolveTerminalCommandDockSessionActions({

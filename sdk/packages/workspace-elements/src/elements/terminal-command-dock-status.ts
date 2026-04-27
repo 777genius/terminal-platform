@@ -8,6 +8,8 @@ export const TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS = {
   input: "input",
 } as const;
 
+export const TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID = "tp-command-input-status";
+
 export type TerminalCommandDockStatusBadgeId =
   (typeof TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS)[keyof typeof TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS];
 
@@ -48,7 +50,7 @@ export function resolveTerminalCommandDockStatusBadges(
     {
       id: TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input,
       label: inputStatus.label,
-      testId: "tp-command-input-status",
+      testId: TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID,
       title: inputStatus.title,
       tone: inputStatus.tone,
     },

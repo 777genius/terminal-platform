@@ -62,6 +62,7 @@ export {
 } from "./elements/terminal-command-dock-session-actions.js";
 export {
   TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS,
+  TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID,
   resolveTerminalCommandDockStatusBadges,
   resolveTerminalCommandDockStatusPlacement,
   type TerminalCommandDockStatusBadge,

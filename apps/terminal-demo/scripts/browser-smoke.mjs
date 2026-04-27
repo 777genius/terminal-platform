@@ -264,6 +264,8 @@ async function main() {
       || result.afterCreate.commandInputRows !== 1
       || result.afterCreate.commandInputRowCount !== "1"
       || result.afterCreate.commandInputMultiline !== "false"
+      || result.afterCreate.commandInputDescribedBy !== "tp-command-input-status"
+      || !result.afterCreate.commandInputDescribedByResolves
       || result.afterCreate.commandComposerMinRows !== 1
       || result.afterCreate.commandComposerMaxRows !== 5
       || !result.afterCreate.terminalCommandActionsInsideComposer
@@ -1183,6 +1185,11 @@ async function runSmokeScenario(browserUrl) {
         commandInputRows: input?.rows ?? null,
         commandInputRowCount: input?.getAttribute('data-row-count') ?? null,
         commandInputMultiline: input?.getAttribute('data-multiline') ?? null,
+        commandInputDescribedBy: input?.getAttribute('aria-describedby') ?? null,
+        commandInputDescribedByResolves: Boolean(
+          input?.getAttribute('aria-describedby')
+          && commandRoot?.getElementById(input.getAttribute('aria-describedby') ?? ''),
+        ),
         commandInputHeight: Math.round(input?.getBoundingClientRect().height ?? 0),
         commandComposerMinRows: commandComposer?.minRows ?? null,
         commandComposerMaxRows: commandComposer?.maxRows ?? null,

@@ -197,6 +197,14 @@ const terminalLayoutSourceContracts = [
         marker: 'data-testid="tp-command-dock"',
       },
       {
+        label: "dock links composer input to the command input status",
+        marker: ".inputDescriptionId=${TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID}",
+      },
+      {
+        label: "input status exposes a host-owned description id",
+        marker: "id=${badge.id === TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input",
+      },
+      {
         label: "session actions come from a presentation resolver",
         marker: "resolveTerminalCommandDockSessionActions",
       },
@@ -798,6 +806,10 @@ const terminalLayoutSourceContracts = [
         marker: "data-row-count",
       },
       {
+        label: "composer can describe the input from host status text",
+        marker: "aria-describedby=${this.inputDescriptionId || nothing}",
+      },
+      {
         label: "composer exposes stable action ids for e2e and host wrappers",
         marker: "data-action=${action.id}",
       },
@@ -828,6 +840,10 @@ const terminalLayoutSourceContracts = [
       {
         label: "composer supports maximum rows",
         marker: "maxRows",
+      },
+      {
+        label: "composer accepts a host-owned description id",
+        marker: "inputDescriptionId",
       },
       {
         label: "composer synchronizes textarea height after draft changes",

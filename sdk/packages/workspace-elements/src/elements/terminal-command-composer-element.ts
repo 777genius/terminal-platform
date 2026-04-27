@@ -40,6 +40,7 @@ export class TerminalCommandComposerElement extends LitElement {
     canPasteClipboard: { attribute: "can-paste-clipboard", type: Boolean },
     maxRows: { attribute: "max-rows", type: Number },
     minRows: { attribute: "min-rows", type: Number },
+    inputDescriptionId: { attribute: "input-description-id", type: String },
     placeholder: { type: String },
     pasteTitle: { attribute: "paste-title", type: String },
     placement: { type: String },
@@ -51,6 +52,7 @@ export class TerminalCommandComposerElement extends LitElement {
   declare canPasteClipboard: boolean;
   declare maxRows: number;
   declare minRows: number;
+  declare inputDescriptionId: string;
   declare placeholder: string;
   declare pasteTitle: string;
   declare placement: TerminalCommandComposerActionPlacement;
@@ -65,6 +67,7 @@ export class TerminalCommandComposerElement extends LitElement {
     this.canPasteClipboard = false;
     this.maxRows = TERMINAL_COMMAND_COMPOSER_DEFAULT_MAX_ROWS;
     this.minRows = TERMINAL_COMMAND_COMPOSER_DEFAULT_MIN_ROWS;
+    this.inputDescriptionId = "";
     this.placeholder = "";
     this.pasteTitle = TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE;
     this.placement = "panel";
@@ -94,6 +97,7 @@ export class TerminalCommandComposerElement extends LitElement {
         ?disabled=${!this.canWriteInput}
         placeholder=${this.placeholder}
         aria-label="Focused pane command input"
+        aria-describedby=${this.inputDescriptionId || nothing}
         rows=${rowCount}
         @input=${(event: Event) => this.handleInput(event)}
         @keydown=${(event: KeyboardEvent) => this.handleKeydown(event)}

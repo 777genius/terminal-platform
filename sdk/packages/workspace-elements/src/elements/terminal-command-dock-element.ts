@@ -10,7 +10,11 @@ import type {
   TerminalCommandComposerShortcutDetail,
 } from "./terminal-command-composer-events.js";
 import { resolveTerminalCommandInputStatus } from "./terminal-command-input-status.js";
-import { resolveTerminalCommandDockStatusBadges } from "./terminal-command-dock-status.js";
+import {
+  TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS,
+  TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID,
+  resolveTerminalCommandDockStatusBadges,
+} from "./terminal-command-dock-status.js";
 import {
   createTerminalCommandHistoryNavigationState,
   resolveTerminalCommandHistoryNavigation,
@@ -652,6 +656,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             (badge) => html`
               <span
                 class="badge"
+                id=${badge.id === TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input
+                  ? TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID
+                  : nothing}
                 data-status-badge=${badge.id}
                 data-testid=${badge.testId}
                 data-tone=${badge.tone}
@@ -727,6 +734,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         .canSend=${controls.canSend}
         .canPasteClipboard=${controls.canPasteClipboard}
         .placeholder=${inputStatus.placeholder}
+        .inputDescriptionId=${TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID}
         .pasteTitle=${pasteTitle}
         .placement=${this.placement}
         @tp-terminal-command-draft-change=${(event: CustomEvent<TerminalCommandComposerDraftChangeDetail>) =>

@@ -64,6 +64,8 @@ async function main() {
       || result.commandInputRows !== 1
       || result.commandInputPlaceholder !== "Type shell input for the focused pane"
       || result.commandInputStatus !== "Ready"
+      || result.commandInputDescribedBy !== "tp-command-input-status"
+      || !result.commandInputDescribedByResolves
       || !/^\d+ cmd$/.test(result.commandHistoryBadgeText ?? "")
       || result.commandActionLabels.join("|") !== "\u25b6|\u2398|^C|\u21b5"
       || result.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
@@ -508,6 +510,11 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         commandInputRows: input?.rows ?? null,
         commandInputPlaceholder: input?.placeholder ?? null,
         commandInputStatus: commandInputStatus?.textContent?.trim() ?? null,
+        commandInputDescribedBy: input?.getAttribute('aria-describedby') ?? null,
+        commandInputDescribedByResolves: Boolean(
+          input?.getAttribute('aria-describedby')
+          && commandRoot?.getElementById(input.getAttribute('aria-describedby') ?? ''),
+        ),
         commandHistoryBadgeText: commandHistoryBadge?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
         commandActionLabels: commandActionButtons.map((button) =>
           button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
