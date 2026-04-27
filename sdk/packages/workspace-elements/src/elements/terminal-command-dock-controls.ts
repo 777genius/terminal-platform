@@ -1,5 +1,9 @@
 import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
+import {
+  resolveTerminalCommandRecentCommands,
+  type TerminalCommandRecentCommandPresentation,
+} from "./terminal-command-recent-commands.js";
 import { resolveWorkspaceCapability, type TerminalWorkspaceCapabilityStatus } from "./terminal-workspace-capabilities.js";
 
 export const TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT = 5;
@@ -13,6 +17,7 @@ export interface TerminalCommandDockControlState {
   draft: string;
   commandHistory: string[];
   recentCommands: string[];
+  recentCommandEntries: TerminalCommandRecentCommandPresentation[];
   canSend: boolean;
   canUsePane: boolean;
   canWriteInput: boolean;
@@ -38,13 +43,15 @@ export function resolveTerminalCommandDockControlState(
   const saveCapability = resolveSaveCapability(snapshot);
   const canWriteInput = Boolean(canUsePane && inputCapability.canWrite);
   const recentCommandLimit = normalizeRecentCommandLimit(options.recentCommandLimit);
+  const recentCommandEntries = resolveTerminalCommandRecentCommands(snapshot.commandHistory.entries, recentCommandLimit);
 
   return {
     activeSessionId,
     activePaneId,
     draft,
     commandHistory: snapshot.commandHistory.entries,
-    recentCommands: resolveRecentCommands(snapshot.commandHistory.entries, recentCommandLimit),
+    recentCommands: recentCommandEntries.map((entry) => entry.value),
+    recentCommandEntries,
     canSend: Boolean(canWriteInput && draft.trim().length > 0),
     canUsePane,
     canWriteInput,
@@ -54,14 +61,6 @@ export function resolveTerminalCommandDockControlState(
     pasteCapabilityStatus: pasteCapability.status,
     saveCapabilityStatus: saveCapability.status,
   };
-}
-
-function resolveRecentCommands(commandHistory: readonly string[], limit: number): string[] {
-  if (limit <= 0) {
-    return [];
-  }
-
-  return [...commandHistory].slice(-limit).reverse();
 }
 
 function normalizeRecentCommandLimit(value: number | null | undefined): number {

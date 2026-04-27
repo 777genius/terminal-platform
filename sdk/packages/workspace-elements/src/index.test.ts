@@ -45,6 +45,7 @@ import {
   resolveTerminalCommandHistoryNavigation,
   resolveTerminalCommandInputStatus,
   resolveTerminalCommandQuickCommands,
+  resolveTerminalCommandRecentCommands,
   resolveTerminalEntityIdLabel,
   resolveTerminalSavedSessionsControlState,
   resolveTerminalScreenActions,
@@ -98,6 +99,7 @@ import {
   type TerminalCommandQuickCommand,
   type TerminalCommandQuickCommandPresentation,
   type TerminalCommandQuickCommandTone,
+  type TerminalCommandRecentCommandPresentation,
   type TerminalEntityIdLabel,
   type TerminalEntityIdLabelOptions,
   type TerminalPaneResizeDelta,
@@ -193,6 +195,7 @@ type PublicControlTypes =
   | TerminalCommandQuickCommand
   | TerminalCommandQuickCommandPresentation
   | TerminalCommandQuickCommandTone
+  | TerminalCommandRecentCommandPresentation
   | TerminalEntityIdLabel
   | TerminalEntityIdLabelOptions
   | TerminalPaneResizeDelta
@@ -272,6 +275,7 @@ describe("workspace elements public api", () => {
       resolveTerminalCommandHistoryNavigation,
       resolveTerminalCommandInputStatus,
       resolveTerminalCommandQuickCommands,
+      resolveTerminalCommandRecentCommands,
       resolveTerminalEntityIdLabel,
       resolveTerminalSavedSessionsControlState,
       resolveTerminalScreenActions,

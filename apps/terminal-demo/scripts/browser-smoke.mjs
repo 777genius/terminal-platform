@@ -627,6 +627,8 @@ async function main() {
       || !isCompactCommandHistoryBadge(result.afterCommand.historyBadgeText)
       || result.afterCommand.historyChipWhiteSpaces.some((value) => value !== "nowrap")
       || Math.max(0, ...result.afterCommand.historyChipHeights) > 38
+      || !result.afterCommand.historyChipIds.every((id) => /^history-\d+$/.test(id))
+      || !result.afterCommand.historyChipAriaLabels.every((label) => label.startsWith("Use recent command "))
       || (!result.afterCommand.sequenceAdvanced && !result.afterCommand.containsCommandOutput)
     ) {
       throw new Error(`Command lane did not advance the focused screen: ${JSON.stringify(result.afterCommand)}`);
@@ -2306,6 +2308,9 @@ async function runSmokeScenario(browserUrl) {
           ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         historyChipHeights: historyEntries.map((button) => Math.round(button.getBoundingClientRect().height)),
         historyChipWhiteSpaces: historyEntries.map((button) => getComputedStyle(button).whiteSpace),
+        historyChipIds: historyEntries.map((button) => button.getAttribute('data-command-history-entry') ?? ''),
+        historyChipHistoryIndexes: historyEntries.map((button) => button.getAttribute('data-history-index') ?? ''),
+        historyChipAriaLabels: historyEntries.map((button) => button.getAttribute('aria-label') ?? ''),
         terminalScreenText,
         containsCommandOutput: /browser-smoke-ok/i.test(terminalScreenText),
       };

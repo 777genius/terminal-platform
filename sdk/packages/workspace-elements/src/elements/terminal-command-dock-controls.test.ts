@@ -41,6 +41,13 @@ describe("terminal command dock controls", () => {
       "git status",
       "ls -la",
     ]);
+    expect(controls.recentCommandEntries.map(({ id, historyIndex, value }) => ({ id, historyIndex, value }))).toEqual([
+      { id: "history-6", historyIndex: 5, value: "git diff" },
+      { id: "history-5", historyIndex: 4, value: "cargo test" },
+      { id: "history-4", historyIndex: 3, value: "npm test" },
+      { id: "history-3", historyIndex: 2, value: "git status" },
+      { id: "history-2", historyIndex: 1, value: "ls -la" },
+    ]);
     expect(controls.recentCommands).toHaveLength(TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT);
   });
 
@@ -60,6 +67,7 @@ describe("terminal command dock controls", () => {
 
     expect(controls.commandHistory).toEqual(["pwd", "ls -la", "git status", "npm test"]);
     expect(controls.recentCommands).toEqual(["npm test", "git status"]);
+    expect(controls.recentCommandEntries.map((entry) => entry.id)).toEqual(["history-4", "history-3"]);
   });
 
   it("allows hosts to hide recent command chips for constrained placements", () => {
@@ -77,6 +85,7 @@ describe("terminal command dock controls", () => {
     );
 
     expect(controls.recentCommands).toEqual([]);
+    expect(controls.recentCommandEntries).toEqual([]);
   });
 
   it("disables command input when loaded backend capabilities reject pane input writes", () => {

@@ -617,23 +617,26 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         `
       : nothing;
 
-    const commandHistoryTemplate = controls.recentCommands.length > 0
+    const commandHistoryTemplate = controls.recentCommandEntries.length > 0
       ? html`
           <div class="history-row" part="command-history" aria-label="Recent commands">
             <span class="history-label">Recent</span>
             <div class="history-actions">
-              ${controls.recentCommands.map(
-                (command, index) => html`
+              ${controls.recentCommandEntries.map(
+                (command) => html`
                   <button
                     class="history-chip"
                     type="button"
                     data-testid="tp-command-history-entry"
-                    data-history-index=${index}
-                    title=${command}
+                    data-command-history-entry=${command.id}
+                    data-history-index=${command.historyIndex}
+                    data-recent-index=${command.index}
+                    title=${command.title}
+                    aria-label=${command.ariaLabel}
                     ?disabled=${!controls.canWriteInput}
-                    @click=${() => this.setDraft(command, { focusInput: true })}
+                    @click=${() => this.setDraft(command.value, { focusInput: true })}
                   >
-                    <span class="history-command">${command}</span>
+                    <span class="history-command">${command.label}</span>
                   </button>
                 `,
               )}

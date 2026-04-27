@@ -228,6 +228,18 @@ const terminalLayoutSourceContracts = [
         label: "quick commands expose resolved accessible labels",
         marker: "aria-label=${command.ariaLabel}",
       },
+      {
+        label: "recent command chips render stable history ids",
+        marker: "data-command-history-entry=${command.id}",
+      },
+      {
+        label: "recent command chips render original history indexes",
+        marker: "data-history-index=${command.historyIndex}",
+      },
+      {
+        label: "recent command chips expose resolved accessible labels",
+        marker: "aria-label=${command.ariaLabel}",
+      },
     ],
     order: [
       {
@@ -271,6 +283,35 @@ const terminalLayoutSourceContracts = [
       {
         label: "quick commands resolve tones independently from rendering",
         marker: "tone: resolveQuickCommandTone",
+      },
+    ],
+  },
+  {
+    name: "recent commands resolve presentation metadata",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-command-recent-commands.ts",
+    ),
+    includes: [
+      {
+        label: "recent command chips resolve to presentation state",
+        marker: "TerminalCommandRecentCommandPresentation",
+      },
+      {
+        label: "recent command ids avoid command value selectors",
+        marker: "id: `history-${historyIndex + 1}`",
+      },
+      {
+        label: "recent command entries preserve original history position",
+        marker: "historyIndex",
+      },
+      {
+        label: "recent command entries expose accessible labels",
+        marker: "ariaLabel: `Use recent command ${command}`",
       },
     ],
   },

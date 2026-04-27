@@ -87,6 +87,10 @@ export {
   type TerminalCommandHistoryNavigationResult,
   type TerminalCommandHistoryNavigationState,
 } from "./elements/terminal-command-history-navigation.js";
+export {
+  resolveTerminalCommandRecentCommands,
+  type TerminalCommandRecentCommandPresentation,
+} from "./elements/terminal-command-recent-commands.js";
 export { TerminalWorkspaceElement } from "./elements/terminal-workspace-element.js";
 export { TerminalSessionListElement } from "./elements/terminal-session-list-element.js";
 export { TerminalTabStripElement } from "./elements/terminal-tab-strip-element.js";

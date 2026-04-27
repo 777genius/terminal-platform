@@ -92,6 +92,9 @@ async function main() {
       || result.historyChipWhiteSpaces.some((value) => value !== "nowrap")
       || Math.max(0, ...result.historyChipHeights) > 38
       || result.historyChipCount > 2
+      || result.historyChipIds.join("|") !== "history-4|history-3"
+      || result.historyChipHistoryIndexes.join("|") !== "3|2"
+      || !result.historyChipAriaLabels[0]?.includes("static-browser-ok")
       || result.commandDockCanWrite !== "true"
       || result.commandDockInputCapability !== "known"
       || result.screenChromeMode !== "compact"
@@ -487,6 +490,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         historyChipHeights: historyEntries.map((button) => Math.round(button.getBoundingClientRect().height)),
         historyChipWhiteSpaces: historyEntries.map((button) => getComputedStyle(button).whiteSpace),
         historyChipCount: historyEntries.length,
+        historyChipIds: historyEntries.map((button) => button.getAttribute('data-command-history-entry') ?? ''),
+        historyChipHistoryIndexes: historyEntries.map((button) => button.getAttribute('data-history-index') ?? ''),
+        historyChipAriaLabels: historyEntries.map((button) => button.getAttribute('aria-label') ?? ''),
         commandDockCanWrite: commandDockPanel?.getAttribute('data-command-input') ?? null,
         commandDockInputCapability: commandDockPanel?.getAttribute('data-input-capability') ?? null,
         screenChromeMode: screenPanel?.getAttribute('data-chrome-mode') ?? null,
