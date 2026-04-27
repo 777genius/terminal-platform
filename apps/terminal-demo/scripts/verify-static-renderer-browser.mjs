@@ -69,6 +69,11 @@ async function main() {
       || result.commandAccessoryBarMode !== "bar"
       || !result.hasCommandAccessoryBar
       || result.terminalCommandAccessoryBarHeight > 72
+      || result.quickCommandWhiteSpaces.some((value) => value !== "nowrap")
+      || Math.max(0, ...result.quickCommandHeights) > 38
+      || result.quickCommandRowOverflowPx > 1
+      || result.historyChipWhiteSpaces.some((value) => value !== "nowrap")
+      || Math.max(0, ...result.historyChipHeights) > 38
       || result.commandDockCanWrite !== "true"
       || result.commandDockInputCapability !== "known"
       || result.screenChromeMode !== "compact"
@@ -311,6 +316,8 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const commandAccessoryBar = commandRoot?.querySelector('[data-testid="tp-command-accessory-bar"]') ?? null;
       const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
       const composer = commandRoot?.querySelector('tp-terminal-command-composer') ?? null;
+      const quickCommands = [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])];
+      const quickCommandRow = commandRoot?.querySelector('[part="quick-commands"]') ?? null;
       const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
       const run = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
       const paste = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
@@ -354,6 +361,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const viewportRect = viewport?.getBoundingClientRect();
       const composerRect = composer?.getBoundingClientRect();
       const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect();
+      const historyEntries = [...(commandRoot?.querySelectorAll('[data-testid="tp-command-history-entry"]') ?? [])];
       const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
       const workspaceOuterPanelStyle = workspaceOuterPanel ? getComputedStyle(workspaceOuterPanel) : null;
 
@@ -373,6 +381,13 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         commandAccessoryBarMode: commandAccessoryBar?.getAttribute('data-accessory-mode') ?? null,
         hasCommandAccessoryBar: Boolean(commandAccessoryBar),
         terminalCommandAccessoryBarHeight: Math.round(commandAccessoryBarRect?.height ?? 0),
+        quickCommandHeights: quickCommands.map((button) => Math.round(button.getBoundingClientRect().height)),
+        quickCommandWhiteSpaces: quickCommands.map((button) => getComputedStyle(button).whiteSpace),
+        quickCommandRowOverflowPx: quickCommandRow
+          ? Math.max(0, quickCommandRow.scrollWidth - quickCommandRow.clientWidth)
+          : null,
+        historyChipHeights: historyEntries.map((button) => Math.round(button.getBoundingClientRect().height)),
+        historyChipWhiteSpaces: historyEntries.map((button) => getComputedStyle(button).whiteSpace),
         commandDockCanWrite: commandDockPanel?.getAttribute('data-command-input') ?? null,
         commandDockInputCapability: commandDockPanel?.getAttribute('data-input-capability') ?? null,
         screenChromeMode: screenPanel?.getAttribute('data-chrome-mode') ?? null,

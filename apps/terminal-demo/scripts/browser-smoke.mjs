@@ -276,6 +276,9 @@ async function main() {
       || !Array.isArray(result.afterCreate.quickCommandLabels)
       || result.afterCreate.quickCommandLabels.join("|") !== "pwd|ls -la|git status|node -v|hello"
       || !result.afterCreate.quickCommandTitles.includes("Print the active Node.js version")
+      || result.afterCreate.quickCommandWhiteSpaces.some((value) => value !== "nowrap")
+      || Math.max(0, ...result.afterCreate.quickCommandHeights) > 38
+      || result.afterCreate.quickCommandRowOverflowPx > 1
       || !result.afterQuickCommandDraft.clicked
       || result.afterQuickCommandDraft.draft !== "node -v"
       || result.afterQuickCommandDraft.kernelDraft !== "node -v"
@@ -362,6 +365,8 @@ async function main() {
       || result.afterCreateMobileLayout.commandInputRows !== 1
       || result.afterCreateMobileLayout.commandInputRowCount !== "1"
       || result.afterCreateMobileLayout.commandInputMultiline !== "false"
+      || result.afterCreateMobileLayout.quickCommandWhiteSpaces.some((value) => value !== "nowrap")
+      || Math.max(0, ...result.afterCreateMobileLayout.quickCommandHeights) > 38
       || !result.afterCreateMobileLayout.terminalCommandActionsInsideComposer
       || result.afterCreateMobileLayout.terminalFooterActionCount !== 0
       || !result.afterCreateMobileLayout.commandRegionFollowsScreen
@@ -564,6 +569,8 @@ async function main() {
       || result.afterCommand.commandHistoryCount < 1
       || !result.afterCommand.commandHistoryLatest?.includes("browser-smoke-ok")
       || !result.afterCommand.historyBadgeText?.includes("history")
+      || result.afterCommand.historyChipWhiteSpaces.some((value) => value !== "nowrap")
+      || Math.max(0, ...result.afterCommand.historyChipHeights) > 38
       || (!result.afterCommand.sequenceAdvanced && !result.afterCommand.containsCommandOutput)
     ) {
       throw new Error(`Command lane did not advance the focused screen: ${JSON.stringify(result.afterCommand)}`);
@@ -805,6 +812,7 @@ async function runSmokeScenario(browserUrl) {
       const saveLayout = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
       const pasteClipboard = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
       const quickCommands = [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])];
+      const quickCommandRow = commandRoot?.querySelector('[part="quick-commands"]') ?? null;
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
       const commandAccessoryBar = commandRoot?.querySelector('[data-testid="tp-command-accessory-bar"]') ?? null;
       const commandActivePane = commandRoot?.querySelector('[data-testid="tp-command-active-pane"]') ?? null;
@@ -1026,6 +1034,11 @@ async function runSmokeScenario(browserUrl) {
         commandInputStatusTitle: commandInputStatus?.getAttribute('title') ?? null,
         quickCommandLabels: quickCommands.map((button) => button.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
         quickCommandTitles: quickCommands.map((button) => button.getAttribute('title')),
+        quickCommandHeights: quickCommands.map((button) => Math.round(button.getBoundingClientRect().height)),
+        quickCommandWhiteSpaces: quickCommands.map((button) => getComputedStyle(button).whiteSpace),
+        quickCommandRowOverflowPx: quickCommandRow
+          ? Math.max(0, quickCommandRow.scrollWidth - quickCommandRow.clientWidth)
+          : null,
         screenFollowPressed: screenFollow?.getAttribute('aria-pressed') === 'true',
         screenViewportAtBottom: screenViewport
           ? screenViewport.scrollHeight - screenViewport.scrollTop - screenViewport.clientHeight <= 2
@@ -1207,6 +1220,10 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>
           button?.getAttribute('aria-keyshortcuts') ?? '',
         ),
+        quickCommandHeights: [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])]
+          .map((button) => Math.round(button.getBoundingClientRect().height)),
+        quickCommandWhiteSpaces: [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])]
+          .map((button) => getComputedStyle(button).whiteSpace),
         commandInputRows: commandRoot?.querySelector('[data-testid="tp-command-input"]')?.rows ?? null,
         commandInputRowCount: commandRoot?.querySelector('[data-testid="tp-command-input"]')?.getAttribute('data-row-count') ?? null,
         commandInputMultiline: commandRoot?.querySelector('[data-testid="tp-command-input"]')?.getAttribute('data-multiline') ?? null,
@@ -2052,6 +2069,7 @@ async function runSmokeScenario(browserUrl) {
       const screenRoot = screenHost?.shadowRoot ?? null;
       const screenFollow = screenRoot?.querySelector('[data-testid="tp-screen-follow"]') ?? null;
       const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      const historyEntries = [...(commandRoot?.querySelectorAll('[data-testid="tp-command-history-entry"]') ?? [])];
       const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
         ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : (screenRoot?.querySelector('[part=\"screen-lines\"]')?.textContent?.trim() ?? '');
@@ -2083,6 +2101,8 @@ async function runSmokeScenario(browserUrl) {
         ),
         historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
           ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        historyChipHeights: historyEntries.map((button) => Math.round(button.getBoundingClientRect().height)),
+        historyChipWhiteSpaces: historyEntries.map((button) => getComputedStyle(button).whiteSpace),
         terminalScreenText,
         containsCommandOutput: /browser-smoke-ok/i.test(terminalScreenText),
       };

@@ -114,7 +114,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
       .dock-accessory-bar {
         display: grid;
-        grid-template-columns: auto minmax(10rem, 0.62fr) minmax(11rem, 0.72fr) auto;
+        grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 1fr) auto;
         gap: 0.42rem;
         align-items: center;
         min-width: 0;
@@ -163,6 +163,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .chip {
+        flex: 0 0 auto;
+        max-width: min(14rem, 100%);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         color: var(--tp-color-text-muted);
         font-family: var(--tp-font-family-mono);
         font-size: 0.82rem;
@@ -193,8 +198,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .history-chip {
+        flex: 0 0 auto;
         max-width: min(22rem, 100%);
+        min-width: 0;
+        overflow: hidden;
         justify-content: flex-start;
+        white-space: nowrap;
         color: var(--tp-color-text);
         font-family: var(--tp-font-family-mono);
         font-size: 0.82rem;
