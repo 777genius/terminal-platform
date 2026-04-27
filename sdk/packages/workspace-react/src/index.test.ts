@@ -14,12 +14,15 @@ import type {
   TerminalCommandDockAccessoryOptions,
   TerminalScreenChromeMode,
   TerminalScreenChromeState,
+  TerminalWorkspaceChromeState,
+  TerminalWorkspaceChromeTone,
   TerminalWorkspaceInspectorMode,
   TerminalWorkspaceInspectorState,
   TerminalWorkspaceLayoutPreset,
   TerminalWorkspaceLayoutState,
   TerminalWorkspaceNavigationMode,
   TerminalWorkspaceNavigationState,
+  TerminalWorkspaceSecondaryChromeMode,
 } from "./index.js";
 import type { TerminalCommandComposerElement } from "@terminal-platform/workspace-elements";
 
@@ -73,12 +76,15 @@ type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandDockAccessoryOptions
   | TerminalScreenChromeMode
   | TerminalScreenChromeState
+  | TerminalWorkspaceChromeState
+  | TerminalWorkspaceChromeTone
   | TerminalWorkspaceInspectorMode
   | TerminalWorkspaceInspectorState
   | TerminalWorkspaceLayoutPreset
   | TerminalWorkspaceLayoutState
   | TerminalWorkspaceNavigationMode
-  | TerminalWorkspaceNavigationState;
+  | TerminalWorkspaceNavigationState
+  | TerminalWorkspaceSecondaryChromeMode;
 
 describe("workspace react public api", () => {
   it("exports the command composer wrapper and composer utilities", async () => {
@@ -98,9 +104,15 @@ describe("workspace react public api", () => {
     expect(workspaceReact.TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
     expect(typeof workspaceReact.resolveTerminalScreenChromeState).toBe("function");
     expect(workspaceReact.resolveTerminalCommandComposerRows("echo one\necho two")).toBe(2);
+    expect(workspaceReact.TERMINAL_WORKSPACE_CHROME_TONES.terminal).toBe("terminal");
     expect(workspaceReact.TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed).toBe("collapsed");
     expect(workspaceReact.TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal).toBe("terminal");
     expect(workspaceReact.TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed).toBe("collapsed");
+    expect(workspaceReact.TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal).toBe("terminal");
+    expect(workspaceReact.resolveTerminalWorkspaceChromeState("terminal")).toMatchObject({
+      tone: "terminal",
+      secondaryChrome: "terminal",
+    });
     expect(workspaceReact.resolveTerminalWorkspaceLayoutState({ layoutPreset: "terminal" }).navigation.mode).toBe(
       "collapsed",
     );

@@ -77,6 +77,10 @@ async function main() {
       || result.workspaceLayoutPreset !== "terminal"
       || result.workspaceNavigationMode !== "collapsed"
       || result.workspaceInspectorMode !== "collapsed"
+      || result.workspaceChromeTone !== "terminal"
+      || result.workspaceSecondaryChrome !== "terminal"
+      || result.inspectorDrawerSecondaryChrome !== "terminal"
+      || result.navigationDrawerSecondaryChrome !== "terminal"
       || !result.runEnabledBeforeSubmit
       || result.runEnabledAfterSubmit
       || !result.pasteEnabled
@@ -289,6 +293,8 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const layoutRoot = workspaceRoot?.querySelector('[data-testid="tp-workspace-layout"]') ?? null;
       const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
       const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
+      const inspectorDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-inspector-drawer"]') ?? null;
+      const navigationDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-navigation-drawer"]') ?? null;
       const commandDockElement = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
       const screenElement = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const workspaceFrame = workspaceRoot?.querySelector('[part="workspace"]') ?? null;
@@ -368,6 +374,10 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
+        workspaceChromeTone: workspaceFrame?.getAttribute('data-chrome-tone') ?? null,
+        workspaceSecondaryChrome: layoutRoot?.getAttribute('data-secondary-chrome') ?? null,
+        inspectorDrawerSecondaryChrome: inspectorDrawer?.getAttribute('data-secondary-chrome') ?? null,
+        navigationDrawerSecondaryChrome: navigationDrawer?.getAttribute('data-secondary-chrome') ?? null,
         runEnabledBeforeSubmit,
         runEnabledAfterSubmit: Boolean(run && !run.disabled),
         pasteEnabled: Boolean(paste && !paste.disabled),

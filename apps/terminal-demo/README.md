@@ -84,7 +84,7 @@ open "file://$(pwd)/dist/renderer/index.html?demoStaticWorkspace=1"
 
 This mode renders the full workspace shell from a static NativeMux preview snapshot and verifies that the renderer bundle still includes the static preview contract. It is useful for fast visual QA when the native runtime or localhost preview server is unavailable, but it does not replace `npm run smoke:browser`.
 
-The demo uses `layoutPreset="terminal"` so the workspace opens as a dense terminal-first surface: collapsed navigation and inspector drawers, compact terminal screen chrome, a single command composer directly under the output viewport, a compact command accessory bar, and no launcher sidebar after an active session is available.
+The demo uses `layoutPreset="terminal"` so the workspace opens as a dense terminal-first surface: unified terminal chrome, collapsed navigation and inspector drawers, compact terminal screen chrome, a single command composer directly under the output viewport, a compact command accessory bar, and no launcher sidebar after an active session is available.
 
 Fast offline verification for sandboxed or dependency-constrained environments:
 

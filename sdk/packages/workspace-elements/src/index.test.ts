@@ -12,9 +12,11 @@ import {
   TERMINAL_PANE_MIN_COLS,
   TERMINAL_PANE_MIN_ROWS,
   TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT,
+  TERMINAL_WORKSPACE_CHROME_TONES,
   TERMINAL_WORKSPACE_INSPECTOR_MODES,
   TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
+  TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES,
   canRunTerminalTopologyCommand,
   canNavigateTerminalCommandHistory,
   compactTerminalId,
@@ -44,6 +46,7 @@ import {
   resolveTerminalToolbarThemeOption,
   resolveTerminalTopologyControlState,
   resolveTerminalTopologyStatus,
+  resolveTerminalWorkspaceChromeState,
   resolveTerminalWorkspaceInspectorState,
   resolveTerminalWorkspaceLayoutState,
   resolveTerminalWorkspaceNavigationState,
@@ -101,6 +104,8 @@ import {
   type TerminalTopologyStatus,
   type TerminalWorkspaceCapabilityState,
   type TerminalWorkspaceCapabilityStatus,
+  type TerminalWorkspaceChromeState,
+  type TerminalWorkspaceChromeTone,
   type TerminalWorkspaceInspectorMode,
   type TerminalWorkspaceInspectorState,
   type TerminalWorkspaceLayoutOptions,
@@ -108,6 +113,7 @@ import {
   type TerminalWorkspaceLayoutState,
   type TerminalWorkspaceNavigationMode,
   type TerminalWorkspaceNavigationState,
+  type TerminalWorkspaceSecondaryChromeMode,
 } from "./index.js";
 
 type PublicControlTypes =
@@ -163,13 +169,16 @@ type PublicControlTypes =
   | TerminalTopologyStatus
   | TerminalWorkspaceCapabilityState
   | TerminalWorkspaceCapabilityStatus
+  | TerminalWorkspaceChromeState
+  | TerminalWorkspaceChromeTone
   | TerminalWorkspaceInspectorMode
   | TerminalWorkspaceInspectorState
   | TerminalWorkspaceLayoutOptions
   | TerminalWorkspaceLayoutPreset
   | TerminalWorkspaceLayoutState
   | TerminalWorkspaceNavigationMode
-  | TerminalWorkspaceNavigationState;
+  | TerminalWorkspaceNavigationState
+  | TerminalWorkspaceSecondaryChromeMode;
 
 describe("workspace elements public api", () => {
   it("exports reusable control resolvers for custom UI surfaces", () => {
@@ -198,6 +207,7 @@ describe("workspace elements public api", () => {
       resolveTerminalToolbarThemeOption,
       resolveTerminalTopologyControlState,
       resolveTerminalTopologyStatus,
+      resolveTerminalWorkspaceChromeState,
       resolveTerminalWorkspaceInspectorState,
       resolveTerminalWorkspaceLayoutState,
       resolveTerminalWorkspaceNavigationState,
@@ -222,9 +232,11 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_PANE_MIN_ROWS).toBeLessThan(TERMINAL_PANE_MAX_ROWS);
     expect(TERMINAL_PANE_MIN_COLS).toBeLessThan(TERMINAL_PANE_MAX_COLS);
     expect(defaultTerminalCommandQuickCommands.length).toBeGreaterThan(0);
+    expect(TERMINAL_WORKSPACE_CHROME_TONES.terminal).toBe("terminal");
     expect(TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed).toBe("collapsed");
     expect(TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal).toBe("terminal");
     expect(TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed).toBe("collapsed");
+    expect(TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal).toBe("terminal");
   });
 });
 

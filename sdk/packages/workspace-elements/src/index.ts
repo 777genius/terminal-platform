@@ -148,12 +148,17 @@ export {
   type TerminalWorkspaceCapabilityStatus,
 } from "./elements/terminal-workspace-capabilities.js";
 export {
+  TERMINAL_WORKSPACE_CHROME_TONES,
   TERMINAL_WORKSPACE_INSPECTOR_MODES,
   TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
+  TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES,
+  resolveTerminalWorkspaceChromeState,
   resolveTerminalWorkspaceInspectorState,
   resolveTerminalWorkspaceLayoutState,
   resolveTerminalWorkspaceNavigationState,
+  type TerminalWorkspaceChromeState,
+  type TerminalWorkspaceChromeTone,
   type TerminalWorkspaceInspectorMode,
   type TerminalWorkspaceInspectorState,
   type TerminalWorkspaceLayoutOptions,
@@ -161,4 +166,5 @@ export {
   type TerminalWorkspaceLayoutState,
   type TerminalWorkspaceNavigationMode,
   type TerminalWorkspaceNavigationState,
+  type TerminalWorkspaceSecondaryChromeMode,
 } from "./elements/terminal-workspace-layout.js";

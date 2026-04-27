@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  TERMINAL_WORKSPACE_CHROME_TONES,
   TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_INSPECTOR_MODES,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
+  TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES,
+  resolveTerminalWorkspaceChromeState,
   resolveTerminalWorkspaceLayoutState,
   resolveTerminalWorkspaceInspectorState,
   resolveTerminalWorkspaceNavigationState,
@@ -110,6 +113,10 @@ describe("terminal workspace layout", () => {
       navigationMode: "hidden",
     })).toMatchObject({
       preset: TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal,
+      chrome: {
+        tone: TERMINAL_WORKSPACE_CHROME_TONES.terminal,
+        secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal,
+      },
       inspector: {
         mode: TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed,
         renderCollapsedInspector: true,
@@ -121,9 +128,24 @@ describe("terminal workspace layout", () => {
     });
   });
 
+  it("resolves preset chrome without coupling hosts to CSS internals", () => {
+    expect(resolveTerminalWorkspaceChromeState("terminal")).toEqual({
+      tone: TERMINAL_WORKSPACE_CHROME_TONES.terminal,
+      secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal,
+    });
+    expect(resolveTerminalWorkspaceChromeState("classic")).toEqual({
+      tone: TERMINAL_WORKSPACE_CHROME_TONES.workspace,
+      secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.panel,
+    });
+  });
+
   it("falls back to the classic preset for unknown host input", () => {
     expect(resolveTerminalWorkspaceLayoutState({ layoutPreset: "unknown" })).toMatchObject({
       preset: TERMINAL_WORKSPACE_LAYOUT_PRESETS.classic,
+      chrome: {
+        tone: TERMINAL_WORKSPACE_CHROME_TONES.workspace,
+        secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.panel,
+      },
       inspector: {
         mode: TERMINAL_WORKSPACE_INSPECTOR_MODES.inline,
       },

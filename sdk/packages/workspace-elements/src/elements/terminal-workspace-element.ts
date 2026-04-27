@@ -51,6 +51,21 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         min-height: 0;
       }
 
+      .workspace[data-chrome-tone="terminal"] {
+        --tp-workspace-gap: 0.55rem;
+      }
+
+      .workspace[data-chrome-tone="terminal"] tp-terminal-status-bar {
+        --tp-color-bg: var(--tp-terminal-color-bg);
+        --tp-color-bg-inset: var(--tp-terminal-color-bg);
+        --tp-color-panel: var(--tp-terminal-color-bg-raised);
+        --tp-color-panel-raised: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 84%, white 4%);
+        --tp-color-border: color-mix(in srgb, var(--tp-terminal-color-border) 82%, transparent);
+        --tp-color-text: var(--tp-terminal-color-text);
+        --tp-color-text-muted: var(--tp-terminal-color-text-muted);
+        --tp-shadow-panel: none;
+      }
+
       .body {
         display: grid;
         grid-template-columns: minmax(14rem, var(--tp-workspace-sidebar-width)) minmax(0, 1fr);
@@ -178,6 +193,14 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         font-weight: 500;
       }
 
+      .secondary-toggle[data-secondary-chrome="terminal"] summary::after {
+        border: 1px solid color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
+        border-radius: 0.42rem;
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
+        color: var(--tp-terminal-color-text-muted);
+        padding: 0.18rem 0.44rem;
+      }
+
       .inspector-drawer[open] summary::after,
       .navigation-drawer[open] summary::after {
         content: "Close";
@@ -240,11 +263,40 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         overflow: hidden;
       }
 
+      .secondary-toggle[data-secondary-chrome="terminal"] {
+        --tp-color-bg: var(--tp-terminal-color-bg);
+        --tp-color-bg-inset: var(--tp-terminal-color-bg);
+        --tp-color-panel: var(--tp-terminal-color-bg-raised);
+        --tp-color-panel-raised: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, white 4%);
+        --tp-color-border: color-mix(in srgb, var(--tp-terminal-color-border) 82%, transparent);
+        --tp-color-text: var(--tp-terminal-color-text);
+        --tp-color-text-muted: var(--tp-terminal-color-text-muted);
+        --tp-shadow-panel: none;
+
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
+        border-radius: 0.5rem;
+        background:
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--tp-terminal-color-bg-raised) 86%, transparent),
+            var(--tp-terminal-color-bg)
+          ),
+          var(--tp-terminal-color-bg);
+        color: var(--tp-terminal-color-text);
+      }
+
       .secondary-toggle summary {
         cursor: pointer;
         list-style: none;
         padding: var(--tp-space-3);
         font-weight: 600;
+      }
+
+      .secondary-toggle[data-secondary-chrome="terminal"] summary {
+        min-height: 2.18rem;
+        align-items: center;
+        color: var(--tp-terminal-color-text);
+        padding: 0.5rem 0.7rem;
       }
 
       .secondary-toggle summary::-webkit-details-marker {
@@ -255,8 +307,18 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         border-bottom: 1px solid var(--tp-color-border);
       }
 
+      .secondary-toggle[data-secondary-chrome="terminal"][open] summary {
+        border-bottom-color: color-mix(in srgb, var(--tp-terminal-color-border) 74%, transparent);
+      }
+
       .secondary-toggle .advanced-stack {
         padding: var(--tp-space-3);
+      }
+
+      .secondary-toggle[data-secondary-chrome="terminal"] .advanced-stack,
+      .secondary-toggle[data-secondary-chrome="terminal"] .navigation-drawer__content,
+      .secondary-toggle[data-secondary-chrome="terminal"] .inspector-drawer__content {
+        padding: 0.62rem;
       }
 
       .workspace-tools {
@@ -330,9 +392,10 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     });
     const inspectorState = layoutState.inspector;
     const navigationState = layoutState.navigation;
+    const chromeState = layoutState.chrome;
 
     return html`
-      <div class="workspace" part="workspace">
+      <div class="workspace" part="workspace" data-chrome-tone=${chromeState.tone}>
         <tp-terminal-status-bar .kernel=${this.kernel}></tp-terminal-status-bar>
 
         <div
@@ -342,6 +405,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           data-layout="operations-deck"
           data-layout-preset=${layoutState.preset}
           data-navigation-mode=${navigationState.mode}
+          data-secondary-chrome=${chromeState.secondaryChrome}
         >
           ${navigationState.renderInlineNavigation
             ? html`
@@ -384,6 +448,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                       class="secondary-toggle inspector-drawer"
                       part="inspector-drawer"
                       data-testid="tp-workspace-inspector-drawer"
+                      data-secondary-chrome=${chromeState.secondaryChrome}
                     >
                       <summary>${inspectorState.summaryLabel}</summary>
                       <div class="inspector-drawer__content">
@@ -403,6 +468,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                   class="secondary-toggle navigation-drawer"
                   part="navigation-drawer"
                   data-testid="tp-workspace-navigation-drawer"
+                  data-secondary-chrome=${chromeState.secondaryChrome}
                 >
                   <summary>${navigationState.summaryLabel}</summary>
                   <div class="navigation-drawer__content">

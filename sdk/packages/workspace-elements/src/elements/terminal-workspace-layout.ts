@@ -15,6 +15,16 @@ export const TERMINAL_WORKSPACE_LAYOUT_PRESETS = {
   terminal: "terminal",
 } as const;
 
+export const TERMINAL_WORKSPACE_CHROME_TONES = {
+  terminal: "terminal",
+  workspace: "workspace",
+} as const;
+
+export const TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES = {
+  panel: "panel",
+  terminal: "terminal",
+} as const;
+
 export type TerminalWorkspaceInspectorMode =
   (typeof TERMINAL_WORKSPACE_INSPECTOR_MODES)[keyof typeof TERMINAL_WORKSPACE_INSPECTOR_MODES];
 
@@ -23,6 +33,12 @@ export type TerminalWorkspaceNavigationMode =
 
 export type TerminalWorkspaceLayoutPreset =
   (typeof TERMINAL_WORKSPACE_LAYOUT_PRESETS)[keyof typeof TERMINAL_WORKSPACE_LAYOUT_PRESETS];
+
+export type TerminalWorkspaceChromeTone =
+  (typeof TERMINAL_WORKSPACE_CHROME_TONES)[keyof typeof TERMINAL_WORKSPACE_CHROME_TONES];
+
+export type TerminalWorkspaceSecondaryChromeMode =
+  (typeof TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES)[keyof typeof TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES];
 
 export interface TerminalWorkspaceInspectorState {
   mode: TerminalWorkspaceInspectorMode;
@@ -40,8 +56,14 @@ export interface TerminalWorkspaceNavigationState {
   summaryLabel: string;
 }
 
+export interface TerminalWorkspaceChromeState {
+  tone: TerminalWorkspaceChromeTone;
+  secondaryChrome: TerminalWorkspaceSecondaryChromeMode;
+}
+
 export interface TerminalWorkspaceLayoutState {
   preset: TerminalWorkspaceLayoutPreset;
+  chrome: TerminalWorkspaceChromeState;
   inspector: TerminalWorkspaceInspectorState;
   navigation: TerminalWorkspaceNavigationState;
 }
@@ -60,6 +82,7 @@ export function resolveTerminalWorkspaceLayoutState(
   if (preset === TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal) {
     return {
       preset,
+      chrome: resolveTerminalWorkspaceChromeState(preset),
       inspector: resolveTerminalWorkspaceInspectorState(TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed),
       navigation: resolveTerminalWorkspaceNavigationState(TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed),
     };
@@ -67,8 +90,27 @@ export function resolveTerminalWorkspaceLayoutState(
 
   return {
     preset,
+    chrome: resolveTerminalWorkspaceChromeState(preset),
     inspector: resolveTerminalWorkspaceInspectorState(options.inspectorMode),
     navigation: resolveTerminalWorkspaceNavigationState(options.navigationMode),
+  };
+}
+
+export function resolveTerminalWorkspaceChromeState(
+  layoutPreset: string | null | undefined,
+): TerminalWorkspaceChromeState {
+  const preset = normalizeTerminalWorkspaceLayoutPreset(layoutPreset);
+
+  if (preset === TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal) {
+    return {
+      tone: TERMINAL_WORKSPACE_CHROME_TONES.terminal,
+      secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal,
+    };
+  }
+
+  return {
+    tone: TERMINAL_WORKSPACE_CHROME_TONES.workspace,
+    secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.panel,
   };
 }
 

@@ -154,14 +154,18 @@ async function main() {
       || result.afterCreate.workspaceLayout !== "operations-deck"
       || result.afterCreate.workspaceLayoutPreset !== "terminal"
       || result.afterCreate.workspaceNavigationMode !== "collapsed"
+      || result.afterCreate.workspaceChromeTone !== "terminal"
+      || result.afterCreate.workspaceSecondaryChrome !== "terminal"
       || !result.afterCreate.hasOperationsDeck
       || !result.afterCreate.hasNavigationDrawer
+      || result.afterCreate.navigationDrawerSecondaryChrome !== "terminal"
       || result.afterCreate.navigationDrawerOpen !== false
       || !result.afterCreate.navigationDrawerOpenedAfterClick
       || !result.afterCreate.navigationDrawerClosedAfterToggle
       || !result.afterCreate.navigationVisibleAfterDrawerOpen
       || result.afterCreate.workspaceInspectorMode !== "collapsed"
       || !result.afterCreate.hasInspectorDrawer
+      || result.afterCreate.inspectorDrawerSecondaryChrome !== "terminal"
       || result.afterCreate.inspectorDrawerOpen !== false
       || !result.afterCreate.inspectorDrawerOpenedAfterClick
       || !result.afterCreate.inspectorDrawerClosedAfterToggle
@@ -316,8 +320,12 @@ async function main() {
       || result.afterCreateMobileLayout.workspaceLayoutPreset !== "terminal"
       || result.afterCreateMobileLayout.workspaceNavigationMode !== "collapsed"
       || result.afterCreateMobileLayout.workspaceInspectorMode !== "collapsed"
+      || result.afterCreateMobileLayout.workspaceChromeTone !== "terminal"
+      || result.afterCreateMobileLayout.workspaceSecondaryChrome !== "terminal"
       || !result.afterCreateMobileLayout.hasNavigationDrawer
+      || result.afterCreateMobileLayout.navigationDrawerSecondaryChrome !== "terminal"
       || !result.afterCreateMobileLayout.hasInspectorDrawer
+      || result.afterCreateMobileLayout.inspectorDrawerSecondaryChrome !== "terminal"
       || result.afterCreateMobileLayout.inspectorDrawerOpen !== false
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
       || result.afterCreateMobileLayout.demoMainWidth < 430
@@ -1006,14 +1014,18 @@ async function runSmokeScenario(browserUrl) {
         workspaceLayout: layoutRoot?.getAttribute('data-layout') ?? null,
         workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
+        workspaceChromeTone: workspaceFrame?.getAttribute('data-chrome-tone') ?? null,
+        workspaceSecondaryChrome: layoutRoot?.getAttribute('data-secondary-chrome') ?? null,
         hasOperationsDeck: Boolean(layoutRoot && operationsDeck),
         hasNavigationDrawer: Boolean(navigationDrawer),
+        navigationDrawerSecondaryChrome: navigationDrawer?.getAttribute('data-secondary-chrome') ?? null,
         navigationDrawerOpen: navigationDrawer?.hasAttribute('open') ?? null,
         navigationDrawerOpenedAfterClick,
         navigationDrawerClosedAfterToggle,
         navigationVisibleAfterDrawerOpen,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
         hasInspectorDrawer: Boolean(inspectorDrawer),
+        inspectorDrawerSecondaryChrome: inspectorDrawer?.getAttribute('data-secondary-chrome') ?? null,
         inspectorDrawerOpen: inspectorDrawer?.hasAttribute('open') ?? null,
         inspectorDrawerOpenedAfterClick,
         inspectorDrawerClosedAfterToggle,
@@ -1071,6 +1083,7 @@ async function runSmokeScenario(browserUrl) {
       const demoSidebar = demoShell?.querySelector('.shell__sidebar') ?? null;
       const demoMain = demoShell?.querySelector('.shell__main') ?? null;
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const workspaceFrame = workspaceRoot?.querySelector('[part="workspace"]') ?? null;
       const layoutRoot = workspaceRoot?.querySelector('[data-testid="tp-workspace-layout"]') ?? null;
       const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
       const navigationDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-navigation-drawer"]') ?? null;
@@ -1118,8 +1131,12 @@ async function runSmokeScenario(browserUrl) {
         workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
+        workspaceChromeTone: workspaceFrame?.getAttribute('data-chrome-tone') ?? null,
+        workspaceSecondaryChrome: layoutRoot?.getAttribute('data-secondary-chrome') ?? null,
         hasNavigationDrawer: Boolean(navigationDrawer),
+        navigationDrawerSecondaryChrome: navigationDrawer?.getAttribute('data-secondary-chrome') ?? null,
         hasInspectorDrawer: Boolean(inspectorDrawer),
+        inspectorDrawerSecondaryChrome: inspectorDrawer?.getAttribute('data-secondary-chrome') ?? null,
         inspectorDrawerOpen: inspectorDrawer?.hasAttribute('open') ?? null,
         demoMainWidth: Math.round(demoMain?.getBoundingClientRect().width ?? 0),
         documentHorizontalOverflow: Math.max(
