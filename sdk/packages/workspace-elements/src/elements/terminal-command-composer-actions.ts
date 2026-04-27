@@ -12,6 +12,8 @@ export type TerminalCommandComposerActionPlacement = "panel" | "terminal";
 
 export type TerminalCommandComposerShortcut = "\u0003" | "\r";
 
+export type TerminalCommandComposerActionTone = "primary" | "secondary";
+
 export type TerminalCommandComposerActionPresentation = {
   readonly id: TerminalCommandComposerActionId;
   readonly ariaKeyShortcuts?: string;
@@ -24,6 +26,7 @@ export type TerminalCommandComposerActionPresentation = {
   readonly shortcut?: TerminalCommandComposerShortcut;
   readonly testId: string;
   readonly title: string;
+  readonly tone: TerminalCommandComposerActionTone;
 };
 
 export type TerminalCommandComposerActionOptions = {
@@ -54,6 +57,7 @@ const terminalCommandComposerActions = [
     primary: true,
     testId: "tp-send-command",
     title: "Send command to the focused pane",
+    tone: "primary",
   },
   {
     id: TERMINAL_COMMAND_COMPOSER_ACTION_IDS.paste,
@@ -67,6 +71,7 @@ const terminalCommandComposerActions = [
     primary: false,
     testId: "tp-paste-clipboard",
     title: TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE,
+    tone: "secondary",
   },
   {
     id: TERMINAL_COMMAND_COMPOSER_ACTION_IDS.interrupt,
@@ -82,6 +87,7 @@ const terminalCommandComposerActions = [
     shortcut: "\u0003",
     testId: "tp-send-interrupt",
     title: "Send Ctrl+C to the focused pane",
+    tone: "secondary",
   },
   {
     id: TERMINAL_COMMAND_COMPOSER_ACTION_IDS.enter,
@@ -97,6 +103,7 @@ const terminalCommandComposerActions = [
     shortcut: "\r",
     testId: "tp-send-enter",
     title: "Send Enter to the focused pane",
+    tone: "secondary",
   },
 ] as const satisfies readonly TerminalCommandComposerActionDefinition[];
 

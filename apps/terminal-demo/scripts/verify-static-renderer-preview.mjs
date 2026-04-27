@@ -492,6 +492,10 @@ const terminalLayoutSourceContracts = [
         marker: "data-action=${action.id}",
       },
       {
+        label: "composer exposes action tone for theme adapters",
+        marker: "data-action-tone=${action.tone}",
+      },
+      {
         label: "composer exposes key hints for terminal-style controls",
         marker: "data-key-hint=${action.keyHint ?? nothing}",
       },

@@ -250,6 +250,7 @@ async function main() {
       || result.afterCreate.terminalComposerActionParts.join("|") !== "send-command|paste-clipboard|send-interrupt|send-enter"
       || result.afterCreate.terminalComposerActionIds.join("|") !== "submit|paste|interrupt|enter"
       || result.afterCreate.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
+      || result.afterCreate.terminalComposerActionTones.join("|") !== "primary|secondary|secondary|secondary"
       || result.afterCreate.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
       || result.afterCreate.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
       || result.afterCreate.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
@@ -398,6 +399,7 @@ async function main() {
       || result.afterCreateMobileLayout.terminalComposerTagName !== "TP-TERMINAL-COMMAND-COMPOSER"
       || result.afterCreateMobileLayout.terminalComposerActionIds.join("|") !== "submit|paste|interrupt|enter"
       || result.afterCreateMobileLayout.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
+      || result.afterCreateMobileLayout.terminalComposerActionTones.join("|") !== "primary|secondary|secondary|secondary"
       || result.afterCreateMobileLayout.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
       || result.afterCreateMobileLayout.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
       || result.afterCreateMobileLayout.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
@@ -1095,6 +1097,9 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerActionPlacements: commandActionButtons.map((button) =>
           button?.getAttribute('data-action-placement') ?? '',
         ),
+        terminalComposerActionTones: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-tone') ?? '',
+        ),
         terminalComposerActionKeyHints: commandActionButtons.map((button) => button?.getAttribute('data-key-hint') ?? ''),
         terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>
           button?.getAttribute('aria-keyshortcuts') ?? '',
@@ -1370,6 +1375,9 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerActionIds: commandActionButtons.map((button) => button?.getAttribute('data-action') ?? ''),
         terminalComposerActionPlacements: commandActionButtons.map((button) =>
           button?.getAttribute('data-action-placement') ?? '',
+        ),
+        terminalComposerActionTones: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-tone') ?? '',
         ),
         terminalComposerActionKeyHints: commandActionButtons.map((button) => button?.getAttribute('data-key-hint') ?? ''),
         terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>

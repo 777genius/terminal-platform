@@ -67,6 +67,7 @@ async function main() {
       || !/^\d+ cmd$/.test(result.commandHistoryBadgeText ?? "")
       || result.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
       || result.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
+      || result.terminalComposerActionTones.join("|") !== "primary|secondary|secondary|secondary"
       || result.commandDockPlacement !== "terminal"
       || result.commandDockAccessoryMode !== "bar"
       || result.commandAccessoryBarMode !== "bar"
@@ -436,6 +437,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         ),
         terminalComposerActionPlacements: commandActionButtons.map((button) =>
           button?.getAttribute('data-action-placement') ?? '',
+        ),
+        terminalComposerActionTones: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-tone') ?? '',
         ),
         commandDockPlacement: commandDockPanel?.getAttribute('data-placement') ?? null,
         commandDockAccessoryMode: commandDockPanel?.getAttribute('data-accessory-mode') ?? null,

@@ -63,6 +63,7 @@ export type {
   TerminalCommandComposerActionId,
   TerminalCommandComposerActionOptions,
   TerminalCommandComposerActionPresentation,
+  TerminalCommandComposerActionTone,
   TerminalCommandComposerDraftChangeDetail,
   TerminalCommandComposerEventMap,
   TerminalCommandComposerEventType,

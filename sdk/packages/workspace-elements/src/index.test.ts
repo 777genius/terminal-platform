@@ -68,6 +68,7 @@ import {
   type TerminalCommandComposerActionOptions,
   type TerminalCommandComposerActionPlacement,
   type TerminalCommandComposerActionPresentation,
+  type TerminalCommandComposerActionTone,
   type TerminalCommandDockCapabilityStatus,
   type TerminalCommandDockControlState,
   type TerminalCommandDockSessionActionId,
@@ -158,6 +159,7 @@ type PublicControlTypes =
   | TerminalCommandComposerActionOptions
   | TerminalCommandComposerActionPlacement
   | TerminalCommandComposerActionPresentation
+  | TerminalCommandComposerActionTone
   | TerminalCommandDockCapabilityStatus
   | TerminalCommandDockControlState
   | TerminalCommandDockSessionActionId

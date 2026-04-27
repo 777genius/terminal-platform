@@ -34,6 +34,13 @@ describe("terminal command composer actions", () => {
       "Ctrl+C",
       "Enter",
     ]);
+    expect(TERMINAL_COMMAND_COMPOSER_ACTIONS.map((action) => action.tone)).toEqual([
+      "primary",
+      "secondary",
+      "secondary",
+      "secondary",
+    ]);
+    expect(TERMINAL_COMMAND_COMPOSER_ACTIONS.map((action) => action.primary)).toEqual([true, false, false, false]);
     expect(TERMINAL_COMMAND_COMPOSER_ACTIONS.map((action) => action.placement)).toEqual([
       "panel",
       "panel",

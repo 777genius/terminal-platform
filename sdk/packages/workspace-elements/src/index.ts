@@ -10,6 +10,7 @@ export {
   type TerminalCommandComposerActionOptions,
   type TerminalCommandComposerActionPlacement,
   type TerminalCommandComposerActionPresentation,
+  type TerminalCommandComposerActionTone,
 } from "./elements/terminal-command-composer-actions.js";
 export {
   TerminalCommandComposerElement,

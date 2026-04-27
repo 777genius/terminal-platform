@@ -7,6 +7,7 @@ import type {
   TerminalCommandComposerActionId,
   TerminalCommandComposerActionOptions,
   TerminalCommandComposerActionPresentation,
+  TerminalCommandComposerActionTone,
   TerminalCommandComposerDraftChangeDetail,
   TerminalCommandComposerHistoryNavigateDetail,
   TerminalCommandComposerShortcutDetail,
@@ -72,6 +73,7 @@ type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandComposerActionId
   | TerminalCommandComposerActionOptions
   | TerminalCommandComposerActionPresentation
+  | TerminalCommandComposerActionTone
   | TerminalCommandDockAccessoryMode
   | TerminalCommandDockAccessoryOptions
   | TerminalScreenChromeMode
@@ -96,6 +98,9 @@ describe("workspace react public api", () => {
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit).toBe("submit");
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_ACTIONS.map((action) => action.id).join("|")).toBe(
       "submit|paste|interrupt|enter",
+    );
+    expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_ACTIONS.map((action) => action.tone).join("|")).toBe(
+      "primary|secondary|secondary|secondary",
     );
     expect(workspaceReact.resolveTerminalCommandComposerActions()[0]?.keyHint).toBe("Enter");
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
