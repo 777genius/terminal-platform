@@ -68,7 +68,16 @@ async function main() {
       || result.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
       || result.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.terminalComposerActionTones.join("|") !== "primary|secondary|secondary|secondary"
+      || !result.terminalComposerPrimaryToneStyle
+      || !result.terminalComposerSecondaryToneStyle
+      || result.terminalComposerPrimaryToneStyle.borderColor === result.terminalComposerSecondaryToneStyle.borderColor
+      || result.terminalComposerPrimaryToneStyle.backgroundColor
+        === result.terminalComposerSecondaryToneStyle.backgroundColor
       || result.terminalScreenActionTones.join("|") !== "primary|secondary|secondary"
+      || !result.terminalScreenPrimaryToneStyle
+      || !result.terminalScreenSecondaryToneStyle
+      || result.terminalScreenPrimaryToneStyle.borderColor === result.terminalScreenSecondaryToneStyle.borderColor
+      || result.terminalScreenPrimaryToneStyle.backgroundColor === result.terminalScreenSecondaryToneStyle.backgroundColor
       || result.commandDockPlacement !== "terminal"
       || result.commandDockAccessoryMode !== "bar"
       || result.commandAccessoryBarMode !== "bar"
@@ -112,6 +121,9 @@ async function main() {
       || result.navigationDrawerClosedSummaryAction !== "Open"
       || result.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
       || result.terminalSessionActionTones.join("|") !== "secondary|secondary|danger"
+      || !result.terminalSessionSecondaryToneStyle
+      || !result.terminalSessionDangerToneStyle
+      || result.terminalSessionDangerToneStyle.color === result.terminalSessionSecondaryToneStyle.color
       || result.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
       || result.terminalSessionActionAriaLabels[0] !== "Save the focused session layout"
       || result.terminalSessionActionAriaLabels[1] !== "Refresh the active terminal session"
@@ -421,6 +433,17 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const historyEntries = [...(commandRoot?.querySelectorAll('[data-testid="tp-command-history-entry"]') ?? [])];
       const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
       const workspaceOuterPanelStyle = workspaceOuterPanel ? getComputedStyle(workspaceOuterPanel) : null;
+      const readActionToneStyle = (button) => {
+        if (!button) {
+          return null;
+        }
+        const style = getComputedStyle(button);
+        return {
+          backgroundColor: style.backgroundColor,
+          borderColor: style.borderTopColor,
+          color: style.color,
+        };
+      };
 
       return {
         hasReadyState: state?.connection?.state === 'ready',
@@ -443,6 +466,8 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         terminalComposerActionTones: commandActionButtons.map((button) =>
           button?.getAttribute('data-action-tone') ?? '',
         ),
+        terminalComposerPrimaryToneStyle: readActionToneStyle(run),
+        terminalComposerSecondaryToneStyle: readActionToneStyle(paste),
         commandDockPlacement: commandDockPanel?.getAttribute('data-placement') ?? null,
         commandDockAccessoryMode: commandDockPanel?.getAttribute('data-accessory-mode') ?? null,
         commandAccessoryBarMode: commandAccessoryBar?.getAttribute('data-accessory-mode') ?? null,
@@ -469,6 +494,8 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         terminalScreenActionTones: screenActionButtons.map((button) =>
           button?.getAttribute('data-screen-action-tone') ?? '',
         ),
+        terminalScreenPrimaryToneStyle: readActionToneStyle(screenActionButtons[0]),
+        terminalScreenSecondaryToneStyle: readActionToneStyle(screenActionButtons[1]),
         terminalScreenActionLabels: screenActionButtons.map((button) =>
           button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),
@@ -494,6 +521,10 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
         terminalSessionActionTones: sessionActionButtons.map((button) =>
           button.getAttribute('data-session-action-tone') ?? '',
+        ),
+        terminalSessionSecondaryToneStyle: readActionToneStyle(sessionActionButtons[0]),
+        terminalSessionDangerToneStyle: readActionToneStyle(
+          sessionActionButtons.find((button) => button.getAttribute('data-session-action-tone') === 'danger') ?? null,
         ),
         terminalSessionActionLabels: sessionActionButtons.map((button) =>
           button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,

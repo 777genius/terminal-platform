@@ -94,6 +94,23 @@ export const terminalElementStyles = css`
     color: var(--tp-color-danger);
   }
 
+  button[data-action-tone="primary"],
+  button[data-screen-action-tone="primary"] {
+    border-color: color-mix(in srgb, var(--tp-color-accent) 52%, transparent);
+    background: color-mix(in srgb, var(--tp-color-accent) 16%, var(--tp-color-panel-raised));
+  }
+
+  button[data-screen-action-tone="success"] {
+    border-color: color-mix(in srgb, var(--tp-color-success) 52%, transparent);
+    color: var(--tp-color-success);
+  }
+
+  button[data-screen-action-tone="danger"],
+  button[data-session-action-tone="danger"] {
+    border-color: color-mix(in srgb, var(--tp-color-danger) 46%, transparent);
+    color: var(--tp-color-danger);
+  }
+
   button[data-confirming="true"] {
     background: color-mix(in srgb, var(--tp-color-danger) 16%, var(--tp-color-panel-raised));
   }

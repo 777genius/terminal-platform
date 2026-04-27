@@ -189,9 +189,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         padding: 0.32rem 0.55rem;
       }
 
-      .screen-actions button[aria-pressed="true"] {
-        border-color: color-mix(in srgb, var(--tp-color-success) 52%, transparent);
-        color: var(--tp-color-success);
+      .screen[data-placement="terminal"] .screen-actions button[data-screen-action-tone="primary"] {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 54%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 16%,
+          var(--tp-terminal-color-bg-raised)
+        );
       }
 
       .screen-tools {

@@ -297,7 +297,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         padding: 0.3rem 0.48rem;
       }
 
-      .dock[data-placement="terminal"] .composer-actions .primary {
+      .dock[data-placement="terminal"] .composer-actions .primary,
+      .dock[data-placement="terminal"] .composer-actions button[data-action-tone="primary"] {
         border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 54%, transparent);
         background: color-mix(
           in srgb,
@@ -386,13 +387,19 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         background: color-mix(in srgb, var(--tp-color-accent) 18%, var(--tp-color-panel-raised));
       }
 
-      .dock[data-placement="terminal"] .primary {
+      .dock[data-placement="terminal"] .primary,
+      .dock[data-placement="terminal"] button[data-action-tone="primary"] {
         border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 54%, transparent);
         background: color-mix(
           in srgb,
           var(--tp-terminal-color-accent) 16%,
           var(--tp-terminal-color-bg-raised)
         );
+      }
+
+      .dock[data-placement="terminal"] .session-actions button[data-session-action-tone="danger"] {
+        border-color: color-mix(in srgb, var(--tp-color-danger) 52%, transparent);
+        color: var(--tp-color-danger);
       }
 
       .badge {

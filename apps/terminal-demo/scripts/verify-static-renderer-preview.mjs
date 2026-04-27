@@ -208,6 +208,14 @@ const terminalLayoutSourceContracts = [
         label: "session actions expose action tone for theme adapters",
         marker: "data-session-action-tone=${action.tone}",
       },
+      {
+        label: "session danger tone drives visual state",
+        marker: 'button[data-session-action-tone="danger"]',
+      },
+      {
+        label: "composer primary tone drives terminal styling",
+        marker: 'button[data-action-tone="primary"]',
+      },
     ],
     order: [
       {
@@ -243,6 +251,10 @@ const terminalLayoutSourceContracts = [
       {
         label: "screen actions expose action tone for theme adapters",
         marker: "data-screen-action-tone=${action.tone}",
+      },
+      {
+        label: "screen action tone drives visual state",
+        marker: 'button[data-screen-action-tone="primary"]',
       },
       {
         label: "screen actions route through action ids",
