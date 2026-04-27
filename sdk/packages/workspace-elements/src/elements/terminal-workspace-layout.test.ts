@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_INSPECTOR_MODES,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
+  resolveTerminalWorkspaceLayoutState,
   resolveTerminalWorkspaceInspectorState,
   resolveTerminalWorkspaceNavigationState,
 } from "./terminal-workspace-layout.js";
@@ -81,6 +83,53 @@ describe("terminal workspace layout", () => {
       mode: TERMINAL_WORKSPACE_NAVIGATION_MODES.inline,
       renderInlineNavigation: true,
       renderNavigation: true,
+    });
+  });
+
+  it("keeps classic as the default preset and respects granular layout modes", () => {
+    expect(resolveTerminalWorkspaceLayoutState({
+      inspectorMode: "hidden",
+      navigationMode: "collapsed",
+    })).toMatchObject({
+      preset: TERMINAL_WORKSPACE_LAYOUT_PRESETS.classic,
+      inspector: {
+        mode: TERMINAL_WORKSPACE_INSPECTOR_MODES.hidden,
+        renderInspector: false,
+      },
+      navigation: {
+        mode: TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed,
+        renderCollapsedNavigation: true,
+      },
+    });
+  });
+
+  it("maps the terminal preset to collapsed navigation and inspector drawers", () => {
+    expect(resolveTerminalWorkspaceLayoutState({
+      layoutPreset: "terminal",
+      inspectorMode: "inline",
+      navigationMode: "hidden",
+    })).toMatchObject({
+      preset: TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal,
+      inspector: {
+        mode: TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed,
+        renderCollapsedInspector: true,
+      },
+      navigation: {
+        mode: TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed,
+        renderCollapsedNavigation: true,
+      },
+    });
+  });
+
+  it("falls back to the classic preset for unknown host input", () => {
+    expect(resolveTerminalWorkspaceLayoutState({ layoutPreset: "unknown" })).toMatchObject({
+      preset: TERMINAL_WORKSPACE_LAYOUT_PRESETS.classic,
+      inspector: {
+        mode: TERMINAL_WORKSPACE_INSPECTOR_MODES.inline,
+      },
+      navigation: {
+        mode: TERMINAL_WORKSPACE_NAVIGATION_MODES.inline,
+      },
     });
   });
 });

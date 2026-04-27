@@ -7,10 +7,11 @@ import {
   type TerminalCommandQuickCommand,
 } from "./terminal-command-quick-commands.js";
 import {
-  resolveTerminalWorkspaceInspectorState,
-  resolveTerminalWorkspaceNavigationState,
+  resolveTerminalWorkspaceLayoutState,
+  TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_INSPECTOR_MODES,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
+  type TerminalWorkspaceLayoutPreset,
   type TerminalWorkspaceInspectorMode,
   type TerminalWorkspaceNavigationMode,
 } from "./terminal-workspace-layout.js";
@@ -20,6 +21,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     ...WorkspaceKernelConsumerElement.properties,
     quickCommands: { attribute: false },
     autoFocusCommandInput: { attribute: "auto-focus-command-input", type: Boolean },
+    layoutPreset: { attribute: "layout-preset", type: String },
     inspectorMode: { attribute: "inspector-mode", type: String },
     navigationMode: { attribute: "navigation-mode", type: String },
   };
@@ -81,6 +83,11 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
       .content {
         container-type: inline-size;
         height: 100%;
+      }
+
+      .body[data-navigation-mode="collapsed"] .content,
+      .body[data-navigation-mode="hidden"] .content {
+        align-content: stretch;
       }
 
       .operations-deck {
@@ -302,6 +309,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
 
   declare quickCommands: readonly TerminalCommandQuickCommand[] | null | undefined;
   declare autoFocusCommandInput: boolean;
+  declare layoutPreset: TerminalWorkspaceLayoutPreset;
   declare inspectorMode: TerminalWorkspaceInspectorMode;
   declare navigationMode: TerminalWorkspaceNavigationMode;
 
@@ -309,13 +317,19 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     super();
     this.quickCommands = defaultTerminalCommandQuickCommands;
     this.autoFocusCommandInput = false;
+    this.layoutPreset = TERMINAL_WORKSPACE_LAYOUT_PRESETS.classic;
     this.inspectorMode = TERMINAL_WORKSPACE_INSPECTOR_MODES.inline;
     this.navigationMode = TERMINAL_WORKSPACE_NAVIGATION_MODES.inline;
   }
 
   override render() {
-    const inspectorState = resolveTerminalWorkspaceInspectorState(this.inspectorMode);
-    const navigationState = resolveTerminalWorkspaceNavigationState(this.navigationMode);
+    const layoutState = resolveTerminalWorkspaceLayoutState({
+      layoutPreset: this.layoutPreset,
+      inspectorMode: this.inspectorMode,
+      navigationMode: this.navigationMode,
+    });
+    const inspectorState = layoutState.inspector;
+    const navigationState = layoutState.navigation;
 
     return html`
       <div class="workspace" part="workspace">
@@ -326,6 +340,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           part="body"
           data-testid="tp-workspace-layout"
           data-layout="operations-deck"
+          data-layout-preset=${layoutState.preset}
           data-navigation-mode=${navigationState.mode}
         >
           ${navigationState.renderInlineNavigation

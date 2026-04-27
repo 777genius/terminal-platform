@@ -152,6 +152,7 @@ async function main() {
       || result.afterCreate.workspacePanelShadow !== "none"
       || result.afterCreate.documentHorizontalOverflow > 1
       || result.afterCreate.workspaceLayout !== "operations-deck"
+      || result.afterCreate.workspaceLayoutPreset !== "terminal"
       || result.afterCreate.workspaceNavigationMode !== "collapsed"
       || !result.afterCreate.hasOperationsDeck
       || !result.afterCreate.hasNavigationDrawer
@@ -303,6 +304,7 @@ async function main() {
       || result.afterCreateMobileLayout.launcherPanelVisible !== false
       || result.afterCreateMobileLayout.demoShellColumnCount !== 1
       || result.afterCreateMobileLayout.operationsDeckColumnCount !== 1
+      || result.afterCreateMobileLayout.workspaceLayoutPreset !== "terminal"
       || result.afterCreateMobileLayout.workspaceNavigationMode !== "collapsed"
       || result.afterCreateMobileLayout.workspaceInspectorMode !== "collapsed"
       || !result.afterCreateMobileLayout.hasNavigationDrawer
@@ -969,6 +971,7 @@ async function runSmokeScenario(browserUrl) {
           ? screenViewport.scrollHeight - screenViewport.scrollTop - screenViewport.clientHeight <= 2
           : false,
         workspaceLayout: layoutRoot?.getAttribute('data-layout') ?? null,
+        workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         hasOperationsDeck: Boolean(layoutRoot && operationsDeck),
         hasNavigationDrawer: Boolean(navigationDrawer),
@@ -1074,6 +1077,7 @@ async function runSmokeScenario(browserUrl) {
         operationsDeckColumnCount: operationsDeck
           ? getComputedStyle(operationsDeck).gridTemplateColumns.split(' ').filter(Boolean).length
           : 0,
+        workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
         hasNavigationDrawer: Boolean(navigationDrawer),

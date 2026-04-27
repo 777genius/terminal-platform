@@ -11,6 +11,7 @@ import {
   TERMINAL_PANE_MIN_ROWS,
   TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT,
   TERMINAL_WORKSPACE_INSPECTOR_MODES,
+  TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
   canRunTerminalTopologyCommand,
   canNavigateTerminalCommandHistory,
@@ -40,6 +41,7 @@ import {
   resolveTerminalTopologyControlState,
   resolveTerminalTopologyStatus,
   resolveTerminalWorkspaceInspectorState,
+  resolveTerminalWorkspaceLayoutState,
   resolveTerminalWorkspaceNavigationState,
   resolveWorkspaceCapability,
   TerminalCommandComposerElement,
@@ -90,6 +92,9 @@ import {
   type TerminalWorkspaceCapabilityStatus,
   type TerminalWorkspaceInspectorMode,
   type TerminalWorkspaceInspectorState,
+  type TerminalWorkspaceLayoutOptions,
+  type TerminalWorkspaceLayoutPreset,
+  type TerminalWorkspaceLayoutState,
   type TerminalWorkspaceNavigationMode,
   type TerminalWorkspaceNavigationState,
 } from "./index.js";
@@ -142,6 +147,9 @@ type PublicControlTypes =
   | TerminalWorkspaceCapabilityStatus
   | TerminalWorkspaceInspectorMode
   | TerminalWorkspaceInspectorState
+  | TerminalWorkspaceLayoutOptions
+  | TerminalWorkspaceLayoutPreset
+  | TerminalWorkspaceLayoutState
   | TerminalWorkspaceNavigationMode
   | TerminalWorkspaceNavigationState;
 
@@ -171,6 +179,7 @@ describe("workspace elements public api", () => {
       resolveTerminalTopologyControlState,
       resolveTerminalTopologyStatus,
       resolveTerminalWorkspaceInspectorState,
+      resolveTerminalWorkspaceLayoutState,
       resolveTerminalWorkspaceNavigationState,
       resolveWorkspaceCapability,
       canRunTerminalTopologyCommand,
@@ -192,6 +201,7 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_PANE_MIN_COLS).toBeLessThan(TERMINAL_PANE_MAX_COLS);
     expect(defaultTerminalCommandQuickCommands.length).toBeGreaterThan(0);
     expect(TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed).toBe("collapsed");
+    expect(TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal).toBe("terminal");
     expect(TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed).toBe("collapsed");
   });
 });

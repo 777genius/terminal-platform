@@ -12,6 +12,8 @@ import type {
   TerminalCommandComposerShortcutDetail,
   TerminalWorkspaceInspectorMode,
   TerminalWorkspaceInspectorState,
+  TerminalWorkspaceLayoutPreset,
+  TerminalWorkspaceLayoutState,
   TerminalWorkspaceNavigationMode,
   TerminalWorkspaceNavigationState,
 } from "./index.js";
@@ -56,12 +58,17 @@ type _WorkspaceInspectorModeProp = Assert<
 type _WorkspaceNavigationModeProp = Assert<
   Equal<WorkspaceProps["navigationMode"], TerminalWorkspaceNavigationMode | undefined>
 >;
+type _WorkspaceLayoutPresetProp = Assert<
+  Equal<WorkspaceProps["layoutPreset"], TerminalWorkspaceLayoutPreset | undefined>
+>;
 type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandComposerActionId
   | TerminalCommandComposerActionOptions
   | TerminalCommandComposerActionPresentation
   | TerminalWorkspaceInspectorMode
   | TerminalWorkspaceInspectorState
+  | TerminalWorkspaceLayoutPreset
+  | TerminalWorkspaceLayoutState
   | TerminalWorkspaceNavigationMode
   | TerminalWorkspaceNavigationState;
 
@@ -80,7 +87,11 @@ describe("workspace react public api", () => {
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
     expect(workspaceReact.resolveTerminalCommandComposerRows("echo one\necho two")).toBe(2);
     expect(workspaceReact.TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed).toBe("collapsed");
+    expect(workspaceReact.TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal).toBe("terminal");
     expect(workspaceReact.TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed).toBe("collapsed");
+    expect(workspaceReact.resolveTerminalWorkspaceLayoutState({ layoutPreset: "terminal" }).navigation.mode).toBe(
+      "collapsed",
+    );
     expect(workspaceReact.resolveTerminalWorkspaceInspectorState("hidden").renderInspector).toBe(false);
     expect(workspaceReact.resolveTerminalWorkspaceNavigationState("hidden").renderNavigation).toBe(false);
   });

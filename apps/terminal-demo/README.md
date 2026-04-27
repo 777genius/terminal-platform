@@ -100,7 +100,7 @@ This gate verifies architecture boundaries, renderer type safety, the React/stat
 | `npm run test:offline` | fresh workspace SDK staging, architecture boundaries, renderer types, static workspace composition, renderer bundle, terminal layout contracts | Node dependencies |
 | `npm run smoke:renderer-static` | fresh workspace SDK staging, renderer bundle, static NativeMux preview contract | Node dependencies |
 | `npm run verify:renderer-static:browser` | static NativeMux preview in real headless Chrome, command input flow, attached terminal layout, screenshot artifact | Node dependencies, Chrome CDP |
-| `cd ../../sdk && npm run test:public-api` | workspace elements and React public exports, composer action IDs, keyboard hints, row layout helpers | Node dependencies |
+| `cd ../../sdk && npm run test:public-api` | workspace elements and React public exports, workspace layout presets, composer action IDs, keyboard hints, row layout helpers | Node dependencies |
 | `npm run smoke:browser` | full native host, WebSocket gateway, browser UI, terminal layout, command composer interaction | Cargo dependencies, local bind to `127.0.0.1`, Chrome |
 
 Use `npm run test:offline` as the fast sandbox gate and `cd ../../sdk && npm run test:public-api` before changing SDK exports. Use `npm run verify:renderer-static:browser` for real Chrome QA when native dependencies are unavailable. Use `npm run smoke:browser` before release or when the native runtime and localhost browser preview are available.

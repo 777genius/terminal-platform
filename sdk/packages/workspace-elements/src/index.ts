@@ -134,11 +134,16 @@ export {
 } from "./elements/terminal-workspace-capabilities.js";
 export {
   TERMINAL_WORKSPACE_INSPECTOR_MODES,
+  TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
   resolveTerminalWorkspaceInspectorState,
+  resolveTerminalWorkspaceLayoutState,
   resolveTerminalWorkspaceNavigationState,
   type TerminalWorkspaceInspectorMode,
   type TerminalWorkspaceInspectorState,
+  type TerminalWorkspaceLayoutOptions,
+  type TerminalWorkspaceLayoutPreset,
+  type TerminalWorkspaceLayoutState,
   type TerminalWorkspaceNavigationMode,
   type TerminalWorkspaceNavigationState,
 } from "./elements/terminal-workspace-layout.js";

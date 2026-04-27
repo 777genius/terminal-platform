@@ -65,6 +65,9 @@ async function main() {
       || result.commandDockPlacement !== "terminal"
       || result.commandDockCanWrite !== "true"
       || result.commandDockInputCapability !== "known"
+      || result.workspaceLayoutPreset !== "terminal"
+      || result.workspaceNavigationMode !== "collapsed"
+      || result.workspaceInspectorMode !== "collapsed"
       || !result.runEnabledBeforeSubmit
       || result.runEnabledAfterSubmit
       || !result.pasteEnabled
@@ -274,6 +277,8 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const workspaceHostSlot = document.querySelector('[data-testid="terminal-workspace-host"]') ?? null;
       const workspaceHostHeader = document.querySelector('.panel__header--workspace') ?? null;
       const workspaceRoot = workspace?.shadowRoot ?? null;
+      const layoutRoot = workspaceRoot?.querySelector('[data-testid="tp-workspace-layout"]') ?? null;
+      const operationsDeck = workspaceRoot?.querySelector('[data-testid="tp-workspace-operations-deck"]') ?? null;
       const terminalColumn = workspaceRoot?.querySelector('[data-testid="tp-workspace-terminal-column"]') ?? null;
       const commandDockElement = workspaceRoot?.querySelector('tp-terminal-command-dock') ?? null;
       const screenElement = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
@@ -335,6 +340,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         commandDockPlacement: commandDockPanel?.getAttribute('data-placement') ?? null,
         commandDockCanWrite: commandDockPanel?.getAttribute('data-command-input') ?? null,
         commandDockInputCapability: commandDockPanel?.getAttribute('data-input-capability') ?? null,
+        workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
+        workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
+        workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
         runEnabledBeforeSubmit,
         runEnabledAfterSubmit: Boolean(run && !run.disabled),
         pasteEnabled: Boolean(paste && !paste.disabled),

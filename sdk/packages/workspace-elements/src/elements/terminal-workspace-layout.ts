@@ -10,11 +10,19 @@ export const TERMINAL_WORKSPACE_NAVIGATION_MODES = {
   inline: "inline",
 } as const;
 
+export const TERMINAL_WORKSPACE_LAYOUT_PRESETS = {
+  classic: "classic",
+  terminal: "terminal",
+} as const;
+
 export type TerminalWorkspaceInspectorMode =
   (typeof TERMINAL_WORKSPACE_INSPECTOR_MODES)[keyof typeof TERMINAL_WORKSPACE_INSPECTOR_MODES];
 
 export type TerminalWorkspaceNavigationMode =
   (typeof TERMINAL_WORKSPACE_NAVIGATION_MODES)[keyof typeof TERMINAL_WORKSPACE_NAVIGATION_MODES];
+
+export type TerminalWorkspaceLayoutPreset =
+  (typeof TERMINAL_WORKSPACE_LAYOUT_PRESETS)[keyof typeof TERMINAL_WORKSPACE_LAYOUT_PRESETS];
 
 export interface TerminalWorkspaceInspectorState {
   mode: TerminalWorkspaceInspectorMode;
@@ -30,6 +38,38 @@ export interface TerminalWorkspaceNavigationState {
   renderInlineNavigation: boolean;
   renderNavigation: boolean;
   summaryLabel: string;
+}
+
+export interface TerminalWorkspaceLayoutState {
+  preset: TerminalWorkspaceLayoutPreset;
+  inspector: TerminalWorkspaceInspectorState;
+  navigation: TerminalWorkspaceNavigationState;
+}
+
+export interface TerminalWorkspaceLayoutOptions {
+  layoutPreset?: string | null | undefined;
+  inspectorMode?: string | null | undefined;
+  navigationMode?: string | null | undefined;
+}
+
+export function resolveTerminalWorkspaceLayoutState(
+  options: TerminalWorkspaceLayoutOptions = {},
+): TerminalWorkspaceLayoutState {
+  const preset = normalizeTerminalWorkspaceLayoutPreset(options.layoutPreset);
+
+  if (preset === TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal) {
+    return {
+      preset,
+      inspector: resolveTerminalWorkspaceInspectorState(TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed),
+      navigation: resolveTerminalWorkspaceNavigationState(TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed),
+    };
+  }
+
+  return {
+    preset,
+    inspector: resolveTerminalWorkspaceInspectorState(options.inspectorMode),
+    navigation: resolveTerminalWorkspaceNavigationState(options.navigationMode),
+  };
 }
 
 export function resolveTerminalWorkspaceInspectorState(
@@ -88,4 +128,18 @@ function normalizeTerminalWorkspaceNavigationMode(
   }
 
   return TERMINAL_WORKSPACE_NAVIGATION_MODES.inline;
+}
+
+function normalizeTerminalWorkspaceLayoutPreset(
+  requestedPreset: string | null | undefined,
+): TerminalWorkspaceLayoutPreset {
+  const normalized = requestedPreset?.trim();
+  if (
+    normalized === TERMINAL_WORKSPACE_LAYOUT_PRESETS.classic
+    || normalized === TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal
+  ) {
+    return normalized;
+  }
+
+  return TERMINAL_WORKSPACE_LAYOUT_PRESETS.classic;
 }

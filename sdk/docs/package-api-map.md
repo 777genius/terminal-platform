@@ -172,6 +172,7 @@ Expected exports:
 - `defineTerminalPlatformElements()`
 - `TerminalCommandQuickCommand` and quick command defaults/resolvers for command dock customization
 - command composer events, action presentations with stable action IDs and keyboard hints, layout helpers, row defaults, and typed event details
+- workspace layout presets and pure layout resolvers for terminal-first and host-owned custom workspace chrome
 - documented style helpers only if necessary
 - command dock and command composer events and parts documented in feature model docs
 
@@ -188,6 +189,7 @@ Expected exports:
 - event typings
 - thin `TerminalCommandComposer` wrapper with typed custom-event props
 - command composer action presentations and layout helpers re-exported from `@terminal-platform/workspace-elements`
+- workspace layout presets and resolver types re-exported from `@terminal-platform/workspace-elements`
 
 ### `@terminal-platform/testing`
 

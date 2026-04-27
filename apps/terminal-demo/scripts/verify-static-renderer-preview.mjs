@@ -59,6 +59,10 @@ const terminalLayoutSourceContracts = [
         marker: "gap: 0;",
       },
       {
+        label: "collapsed navigation stretches terminal content before drawer rows",
+        marker: '.body[data-navigation-mode="collapsed"] .content',
+      },
+      {
         label: "terminal screen removes bottom padding before the dock",
         marker: "--tp-terminal-screen-panel-padding-bottom: 0;",
       },
@@ -115,12 +119,8 @@ const terminalLayoutSourceContracts = [
     ),
     includes: [
       {
-        label: "demo collapses inspector behind terminal-first workspace",
-        marker: 'inspectorMode="collapsed"',
-      },
-      {
-        label: "demo collapses session navigation behind terminal-first workspace",
-        marker: 'navigationMode="collapsed"',
+        label: "demo opts into the public terminal-first workspace preset",
+        marker: 'layoutPreset="terminal"',
       },
     ],
   },
