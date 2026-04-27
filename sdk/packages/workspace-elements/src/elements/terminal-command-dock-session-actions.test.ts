@@ -23,6 +23,7 @@ describe("terminal command dock session actions", () => {
       "tp-refresh-terminal",
       "tp-clear-command-history",
     ]);
+    expect(actions.map((action) => action.tone)).toEqual(["secondary", "secondary", "danger"]);
     expect(actions[0]?.title).toBe("Save the focused session layout");
     expect(actions[1]?.ariaLabel).toBe("Refresh the active terminal session");
   });

@@ -263,6 +263,7 @@ async function main() {
       || !result.afterCreate.terminalCommandActionsInsideComposer
       || result.afterCreate.terminalFooterActionCount !== 0
       || result.afterCreate.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
+      || result.afterCreate.terminalSessionActionTones.join("|") !== "secondary|secondary|danger"
       || result.afterCreate.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
       || result.afterCreate.terminalSessionActionAriaLabels.join("|") !== "Save the focused session layout|Refresh the active terminal session|Clear 0 command history entries"
       || result.afterCreate.terminalSessionActionTitles.join("|") !== "Save the focused session layout|Refresh the active terminal session|Clear 0 command history entries"
@@ -409,6 +410,7 @@ async function main() {
       || result.afterCreateMobileLayout.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
       || result.afterCreateMobileLayout.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.afterCreateMobileLayout.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
+      || result.afterCreateMobileLayout.terminalSessionActionTones.join("|") !== "secondary|secondary|danger"
       || result.afterCreateMobileLayout.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
       || result.afterCreateMobileLayout.terminalSessionActionAriaLabels.join("|") !== "Save the focused session layout|Refresh the active terminal session|Clear 0 command history entries"
       || result.afterCreateMobileLayout.commandInputRows !== 1
@@ -1123,6 +1125,9 @@ async function runSmokeScenario(browserUrl) {
         commandActionLabels: commandActionButtons.map((button) => button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null),
         commandActionAriaLabels: commandActionButtons.map((button) => button?.getAttribute('aria-label') ?? null),
         terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
+        terminalSessionActionTones: sessionActionButtons.map((button) =>
+          button.getAttribute('data-session-action-tone') ?? '',
+        ),
         terminalSessionActionLabels: sessionActionButtons.map((button) =>
           button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),
@@ -1400,6 +1405,9 @@ async function runSmokeScenario(browserUrl) {
         ),
         terminalScreenActionAriaLabels: screenActionButtons.map((button) => button?.getAttribute('aria-label') ?? null),
         terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
+        terminalSessionActionTones: sessionActionButtons.map((button) =>
+          button.getAttribute('data-session-action-tone') ?? '',
+        ),
         terminalSessionActionLabels: sessionActionButtons.map((button) =>
           button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),

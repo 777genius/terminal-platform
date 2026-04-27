@@ -204,6 +204,10 @@ const terminalLayoutSourceContracts = [
         label: "session actions expose stable action ids",
         marker: "data-session-action=${action.id}",
       },
+      {
+        label: "session actions expose action tone for theme adapters",
+        marker: "data-session-action-tone=${action.tone}",
+      },
     ],
     order: [
       {

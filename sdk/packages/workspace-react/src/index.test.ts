@@ -13,6 +13,7 @@ import type {
   TerminalCommandComposerShortcutDetail,
   TerminalCommandDockAccessoryMode,
   TerminalCommandDockAccessoryOptions,
+  TerminalCommandDockSessionActionTone,
   TerminalScreenActionTone,
   TerminalScreenChromeMode,
   TerminalScreenChromeState,
@@ -77,6 +78,7 @@ type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandComposerActionTone
   | TerminalCommandDockAccessoryMode
   | TerminalCommandDockAccessoryOptions
+  | TerminalCommandDockSessionActionTone
   | TerminalScreenActionTone
   | TerminalScreenChromeMode
   | TerminalScreenChromeState

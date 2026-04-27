@@ -111,6 +111,7 @@ async function main() {
       || result.navigationDrawerSummaryLabel !== "Sessions"
       || result.navigationDrawerClosedSummaryAction !== "Open"
       || result.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
+      || result.terminalSessionActionTones.join("|") !== "secondary|secondary|danger"
       || result.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
       || result.terminalSessionActionAriaLabels[0] !== "Save the focused session layout"
       || result.terminalSessionActionAriaLabels[1] !== "Refresh the active terminal session"
@@ -491,6 +492,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         navigationDrawerSummaryLabel: navigationDrawerSummaryClosed.label,
         navigationDrawerClosedSummaryAction: navigationDrawerSummaryClosed.action,
         terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
+        terminalSessionActionTones: sessionActionButtons.map((button) =>
+          button.getAttribute('data-session-action-tone') ?? '',
+        ),
         terminalSessionActionLabels: sessionActionButtons.map((button) =>
           button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),

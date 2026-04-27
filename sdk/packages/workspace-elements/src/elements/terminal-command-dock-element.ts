@@ -674,6 +674,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                 <button
                   data-testid=${action.testId}
                   data-session-action=${action.id}
+                  data-session-action-tone=${action.tone}
                   data-danger=${action.dangerous ? "true" : nothing}
                   data-confirming=${String(action.confirming)}
                   data-history-count=${action.historyCount == null ? nothing : String(action.historyCount)}

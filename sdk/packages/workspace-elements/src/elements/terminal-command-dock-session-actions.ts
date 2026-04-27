@@ -10,6 +10,7 @@ export type TerminalCommandDockSessionActionId =
   (typeof TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS)[keyof typeof TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS];
 
 export type TerminalCommandDockSessionActionPlacement = "panel" | "terminal";
+export type TerminalCommandDockSessionActionTone = "danger" | "secondary";
 
 export interface TerminalCommandDockSessionActionOptions {
   historyClearConfirmationArmed?: boolean;
@@ -27,6 +28,7 @@ export interface TerminalCommandDockSessionActionPresentation {
   readonly label: string;
   readonly testId: string;
   readonly title: string;
+  readonly tone: TerminalCommandDockSessionActionTone;
 }
 
 export function resolveTerminalCommandDockSessionActions(
@@ -55,6 +57,7 @@ export function resolveTerminalCommandDockSessionActions(
       dangerous: false,
       confirming: false,
       historyCount: null,
+      tone: "secondary",
     },
     {
       id: TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.refreshTerminal,
@@ -66,6 +69,7 @@ export function resolveTerminalCommandDockSessionActions(
       dangerous: false,
       confirming: false,
       historyCount: null,
+      tone: "secondary",
     },
     {
       id: TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.clearCommandHistory,
@@ -85,6 +89,7 @@ export function resolveTerminalCommandDockSessionActions(
       dangerous: true,
       confirming: confirmingHistoryClear,
       historyCount,
+      tone: "danger",
     },
   ];
 }

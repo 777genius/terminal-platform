@@ -76,6 +76,7 @@ export type {
   TerminalCommandDockAccessoryOptions,
   TerminalCommandDockCapabilityStatus,
   TerminalCommandDockControlState,
+  TerminalCommandDockSessionActionTone,
   TerminalCommandInputStatus,
   TerminalCommandQuickCommand,
   TerminalEntityIdLabel,

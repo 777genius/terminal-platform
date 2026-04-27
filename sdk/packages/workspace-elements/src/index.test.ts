@@ -75,6 +75,7 @@ import {
   type TerminalCommandDockSessionActionOptions,
   type TerminalCommandDockSessionActionPlacement,
   type TerminalCommandDockSessionActionPresentation,
+  type TerminalCommandDockSessionActionTone,
   type TerminalCommandDockStatusBadge,
   type TerminalCommandDockStatusBadgeId,
   type TerminalCommandDockStatusOptions,
@@ -167,6 +168,7 @@ type PublicControlTypes =
   | TerminalCommandDockSessionActionOptions
   | TerminalCommandDockSessionActionPlacement
   | TerminalCommandDockSessionActionPresentation
+  | TerminalCommandDockSessionActionTone
   | TerminalCommandDockStatusBadge
   | TerminalCommandDockStatusBadgeId
   | TerminalCommandDockStatusOptions

@@ -53,6 +53,7 @@ export {
   type TerminalCommandDockSessionActionOptions,
   type TerminalCommandDockSessionActionPlacement,
   type TerminalCommandDockSessionActionPresentation,
+  type TerminalCommandDockSessionActionTone,
 } from "./elements/terminal-command-dock-session-actions.js";
 export {
   TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS,
