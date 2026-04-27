@@ -829,8 +829,12 @@ const terminalLayoutSourceContracts = [
         marker: "dispatchStaticMuxCommand",
       },
       {
-        label: "static kernel renders accepted preview input",
-        marker: "preview runtime accepted input without native host",
+        label: "static kernel makes simulated output explicit",
+        marker: "static preview: simulated output, no native host is attached",
+      },
+      {
+        label: "static kernel simulates common demo commands",
+        marker: "On branch demo/static-preview",
       },
       {
         label: "static kernel models save layout locally",

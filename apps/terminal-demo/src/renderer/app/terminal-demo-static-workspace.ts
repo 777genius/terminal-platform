@@ -26,6 +26,9 @@ export const DEFAULT_TERMINAL_DEMO_DISPLAY = {
   lineWrap: true,
 } satisfies WorkspaceSnapshot["terminalDisplay"];
 
+const STATIC_PREVIEW_SIMULATED_OUTPUT_NOTICE =
+  "static preview: simulated output, no native host is attached";
+
 export function createStaticWorkspaceKernel(snapshot: WorkspaceSnapshot): WorkspaceKernel {
   let currentSnapshot: WorkspaceSnapshot = {
     ...snapshot,
@@ -226,11 +229,14 @@ function appendStaticPreviewInput(
     return snapshot;
   }
 
-  const commandText = formatStaticPreviewInput(data, kind);
+  const previewLines = formatStaticPreviewInputLines(data, kind);
+  if (previewLines.length === 0) {
+    return snapshot;
+  }
+
   const nextLines = [
     ...focusedScreen.surface.lines,
-    { text: commandText },
-    { text: "preview runtime accepted input without native host" },
+    ...previewLines.map((text) => ({ text })),
   ].slice(-focusedScreen.rows);
 
   return {
@@ -249,22 +255,108 @@ function appendStaticPreviewInput(
   };
 }
 
-function formatStaticPreviewInput(data: string, kind: "send_input" | "send_paste"): string {
+function formatStaticPreviewInputLines(
+  data: string,
+  kind: "send_input" | "send_paste",
+): string[] {
   if (data === "\u0003") {
-    return "^C";
+    return ["^C"];
   }
 
   if (data === "\r" || data === "\n") {
-    return "";
+    return [];
   }
 
   const normalizedData = data.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
   const prefix = kind === "send_paste" ? "paste" : "$";
-  return normalizedData
+  const commands = normalizedData
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => `${prefix} ${line}`)
-    .join("\n");
+    .map((line) => line.trimEnd());
+
+  return commands.flatMap((line) => [
+    `${prefix} ${line}`,
+    ...resolveStaticPreviewCommandOutput(line),
+  ]);
+}
+
+function resolveStaticPreviewCommandOutput(command: string): string[] {
+  const normalizedCommand = command.trim();
+  const normalizedLookup = normalizedCommand.toLowerCase();
+
+  if (!normalizedLookup) {
+    return [];
+  }
+
+  if (normalizedLookup === "git status") {
+    return [
+      STATIC_PREVIEW_SIMULATED_OUTPUT_NOTICE,
+      "On branch demo/static-preview",
+      "nothing to commit, working tree clean",
+    ];
+  }
+
+  if (normalizedLookup === "pwd") {
+    return [
+      STATIC_PREVIEW_SIMULATED_OUTPUT_NOTICE,
+      "/Users/demo/terminal-platform",
+    ];
+  }
+
+  if (normalizedLookup === "ls -la") {
+    return [
+      STATIC_PREVIEW_SIMULATED_OUTPUT_NOTICE,
+      "drwxr-xr-x  demo  apps",
+      "drwxr-xr-x  demo  sdk",
+      "-rw-r--r--  demo  README.md",
+    ];
+  }
+
+  if (normalizedLookup === "node -v") {
+    return [
+      STATIC_PREVIEW_SIMULATED_OUTPUT_NOTICE,
+      "v22.21.1",
+    ];
+  }
+
+  if (normalizedLookup === "hello") {
+    return [
+      STATIC_PREVIEW_SIMULATED_OUTPUT_NOTICE,
+      "hello from Terminal Platform static preview",
+    ];
+  }
+
+  const printfOutput = resolveStaticPreviewPrintfOutput(normalizedCommand);
+  if (printfOutput.length > 0) {
+    return [
+      ...printfOutput,
+      STATIC_PREVIEW_SIMULATED_OUTPUT_NOTICE,
+    ];
+  }
+
+  return [
+    "static preview: command was not executed because no native host is attached",
+    "run npm run dev:browser for a live local shell",
+  ];
+}
+
+function resolveStaticPreviewPrintfOutput(command: string): string[] {
+  const match = /^printf\s+(["'])(.*)\1$/u.exec(command);
+  if (!match) {
+    return [];
+  }
+
+  const rendered = (match[2] ?? "")
+    .replace(/\\n/gu, "\n")
+    .replace(/\\r/gu, "\r")
+    .replace(/\\t/gu, "\t")
+    .replace(/\\"/gu, "\"")
+    .replace(/\\'/gu, "'");
+
+  return rendered
+    .replace(/\s+$/u, "")
+    .split(/\r?\n/u)
+    .filter((line) => line.length > 0);
 }
 
 function createStaticSavedSessionSummary(snapshot: WorkspaceSnapshot): SavedSessionSummary {

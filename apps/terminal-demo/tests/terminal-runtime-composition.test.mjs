@@ -110,13 +110,31 @@ test("static preview kernel models command input without a native host", async (
   const updatedSnapshot = kernel.getSnapshot();
   const screen = updatedSnapshot.attachedSession?.focused_screen;
   assert.equal(screen?.sequence, 2n);
-  assert.match(screen?.surface.lines.at(-2)?.text ?? "", /preview-ok/);
-  assert.equal(screen?.surface.lines.at(-1)?.text, "preview runtime accepted input without native host");
+  assert.match(screen?.surface.lines.at(-3)?.text ?? "", /preview-ok/);
+  assert.equal(screen?.surface.lines.at(-2)?.text, "preview-ok");
+  assert.equal(screen?.surface.lines.at(-1)?.text, "static preview: simulated output, no native host is attached");
   assert.equal(updatedSnapshot.drafts["preview-pane-main"], undefined);
   assert.equal(updatedSnapshot.commandHistory.entries.at(-1), "printf \"preview-ok\\n\"");
   assert.ok(notifications >= 3);
 
   unsubscribe();
+});
+
+test("static preview kernel labels simulated git status output", async () => {
+  const kernel = createStaticWorkspaceKernel(createDemoPreviewWorkspaceSnapshot({ runtimeSlug: "terminal-demo" }));
+
+  await kernel.commands.dispatchMuxCommand("preview-session-native", {
+    kind: "send_input",
+    pane_id: "preview-pane-main",
+    data: "git status\n",
+  });
+
+  const screen = kernel.getSnapshot().attachedSession?.focused_screen;
+  assert.equal(screen?.sequence, 2n);
+  assert.equal(screen?.surface.lines.at(-4)?.text, "$ git status");
+  assert.equal(screen?.surface.lines.at(-3)?.text, "static preview: simulated output, no native host is attached");
+  assert.equal(screen?.surface.lines.at(-2)?.text, "On branch demo/static-preview");
+  assert.equal(screen?.surface.lines.at(-1)?.text, "nothing to commit, working tree clean");
 });
 
 test("static preview kernel models save layout as local demo state", async () => {

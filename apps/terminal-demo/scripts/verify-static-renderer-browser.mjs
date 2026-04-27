@@ -108,9 +108,9 @@ async function main() {
       || result.historyChipWhiteSpaces.some((value) => value !== "nowrap")
       || Math.max(0, ...result.historyChipHeights) > 38
       || result.historyChipCount > 2
-      || result.historyChipIds.join("|") !== "history-4|history-3"
-      || result.historyChipHistoryIndexes.join("|") !== "3|2"
-      || !result.historyChipAriaLabels[0]?.includes("static-browser-ok")
+      || result.historyChipIds.join("|") !== "history-3|history-2"
+      || result.historyChipHistoryIndexes.join("|") !== "2|1"
+      || !result.historyChipAriaLabels[0]?.includes("git status")
       || result.commandDockCanWrite !== "true"
       || result.commandDockInputCapability !== "known"
       || result.screenChromeMode !== "compact"
@@ -142,8 +142,8 @@ async function main() {
       || !result.terminalSearchInputDescribedByResolves
       || result.terminalSearchCountLive !== "polite"
       || result.terminalSearchCountAtomic !== "true"
-      || result.terminalSearchActiveHighlightText !== "static-browser-ok"
-      || result.terminalSearchHighlightTexts.some((text) => text !== "static-browser-ok")
+      || result.terminalSearchActiveHighlightText !== "git status"
+      || result.terminalSearchHighlightTexts.some((text) => text !== "git status")
       || result.workspaceLayoutPreset !== "terminal"
       || result.workspaceNavigationMode !== "collapsed"
       || result.workspaceInspectorMode !== "collapsed"
@@ -178,8 +178,12 @@ async function main() {
       || !result.pasteEnabled
       || !result.interruptEnabled
       || !result.enterEnabled
+      || !result.submittedStaticGitStatus
+      || !result.hasStaticGitStatusCommand
+      || !result.hasStaticGitStatusBranch
       || !result.hasSubmittedCommand
-      || !result.hasAcceptedPreviewLine
+      || !result.hasStaticPreviewNotice
+      || result.hasOldAcceptedPreviewLine
       || result.hasCommandFailure
       || result.documentHorizontalOverflow > 1
       || result.workspaceHostHeaderDisplay !== "none"
@@ -191,7 +195,7 @@ async function main() {
       || result.workspaceOuterPanelShadow !== "none"
       || result.workspacePanelShadow !== "none"
       || Math.abs(result.terminalComposerGapPx ?? 99) > 1
-      || result.commandHistoryLatest !== "printf \"static-browser-ok\\n\""
+      || result.commandHistoryLatest !== "git status"
     ) {
       throw new Error(`Static preview browser contract failed: ${JSON.stringify(result, null, 2)}`);
     }
@@ -424,24 +428,25 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const runEnabledBeforeSubmit = Boolean(run && !run.disabled);
 
       if (input && run) {
-        const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-        descriptor?.set?.call(input, 'printf "static-browser-ok\\\\n"');
-        input.dispatchEvent(new InputEvent('input', {
-          bubbles: true,
-          composed: true,
-          data: 'printf "static-browser-ok\\\\n"',
-          inputType: 'insertText',
-        }));
-        await waitFor(() => window.terminalDemoDebug?.getState?.()?.drafts?.['preview-pane-main']?.includes('static-browser-ok'));
-        run.click();
+        const submittedStaticGitStatus = !run.disabled;
+        if (submittedStaticGitStatus) {
+          run.click();
+          await waitFor(() => {
+            const lines = window.terminalDemoDebug?.getState?.()?.attachedSession?.focused_screen?.surface?.lines ?? [];
+            return lines.some((line) => line.text === '$ git status')
+              && lines.some((line) => line.text === 'On branch demo/static-preview');
+          });
+        }
+
         await waitFor(() => {
           const state = window.terminalDemoDebug?.getState?.();
           const lines = state?.attachedSession?.focused_screen?.surface?.lines ?? [];
           const status = commandRoot?.querySelector('[data-testid="tp-command-input-status"]')?.textContent?.trim();
           const dockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
-          return lines.some((line) => /static-browser-ok/.test(line.text))
-            && lines.some((line) => /preview runtime accepted input without native host/.test(line.text))
-            && state?.commandHistory?.entries?.at?.(-1) === 'printf "static-browser-ok\\\\n"'
+          return lines.some((line) => line.text === '$ git status')
+            && lines.some((line) => line.text === 'static preview: simulated output, no native host is attached')
+            && lines.some((line) => line.text === 'On branch demo/static-preview')
+            && state?.commandHistory?.entries?.at?.(-1) === 'git status'
             && status === 'Ready'
             && dockPanel?.getAttribute('data-command-input') === 'true';
         });
@@ -450,7 +455,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const searchInput = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
       if (searchInput) {
         const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-        descriptor?.set?.call(searchInput, 'static-browser-ok');
+        descriptor?.set?.call(searchInput, 'git status');
         searchInput.dispatchEvent(new Event('input', { bubbles: true }));
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       }
@@ -675,8 +680,12 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         pasteEnabled: Boolean(paste && !paste.disabled),
         interruptEnabled: Boolean(interrupt && !interrupt.disabled),
         enterEnabled: Boolean(enter && !enter.disabled),
-        hasSubmittedCommand: /static-browser-ok/.test(terminalText),
-        hasAcceptedPreviewLine: /preview runtime accepted input without native host/.test(terminalText),
+        submittedStaticGitStatus: Boolean(runEnabledBeforeSubmit),
+        hasStaticGitStatusCommand: /\\$ git status/.test(terminalText),
+        hasStaticGitStatusBranch: /On branch demo\\/static-preview/.test(terminalText),
+        hasSubmittedCommand: /\\$ git status/.test(terminalText),
+        hasStaticPreviewNotice: /static preview: simulated output, no native host is attached/.test(terminalText),
+        hasOldAcceptedPreviewLine: /preview runtime accepted input without native host/.test(terminalText),
         hasCommandFailure: Boolean(commandRoot?.textContent?.includes('Command failed')),
         commandHistoryLatest: state?.commandHistory?.entries?.at?.(-1) ?? null,
         documentHorizontalOverflow: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
