@@ -216,6 +216,18 @@ const terminalLayoutSourceContracts = [
         label: "composer primary tone drives terminal styling",
         marker: 'button[data-action-tone="primary"]',
       },
+      {
+        label: "quick commands expose stable ids",
+        marker: "data-quick-command=${command.id}",
+      },
+      {
+        label: "quick commands expose action tone",
+        marker: "data-quick-command-tone=${command.tone}",
+      },
+      {
+        label: "quick commands expose resolved accessible labels",
+        marker: "aria-label=${command.ariaLabel}",
+      },
     ],
     order: [
       {
@@ -226,6 +238,39 @@ const terminalLayoutSourceContracts = [
           "errorTemplate,",
           "headerTemplate,",
         ],
+      },
+    ],
+  },
+  {
+    name: "quick commands resolve presentation metadata",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-command-quick-commands.ts",
+    ),
+    includes: [
+      {
+        label: "quick command tones are exported as a public contract",
+        marker: "TERMINAL_COMMAND_QUICK_COMMAND_TONES",
+      },
+      {
+        label: "quick commands resolve to presentation state",
+        marker: "TerminalCommandQuickCommandPresentation",
+      },
+      {
+        label: "quick commands normalize stable ids",
+        marker: "resolveQuickCommandId",
+      },
+      {
+        label: "quick commands resolve accessible labels",
+        marker: "ariaLabel: explicitAriaLabel ?? fallbackLabel",
+      },
+      {
+        label: "quick commands resolve tones independently from rendering",
+        marker: "tone: resolveQuickCommandTone",
       },
     ],
   },

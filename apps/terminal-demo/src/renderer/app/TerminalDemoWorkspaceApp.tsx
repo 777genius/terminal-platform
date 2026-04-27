@@ -48,26 +48,33 @@ const ADVANCED_SAVED_LAYOUT_VISIBLE_COUNT = 6;
 const terminalDemoThemeIds = terminalPlatformThemeManifests.map((theme) => theme.id);
 const terminalDemoQuickCommands = [
   {
+    id: "pwd",
     label: "pwd",
     value: "pwd",
     description: "Show the current working directory",
   },
   {
+    id: "list-files",
     label: "ls -la",
     value: "ls -la",
     description: "List files with metadata",
   },
   {
+    id: "git-status",
     label: "git status",
     value: "git status",
     description: "Inspect the current git worktree",
   },
   {
+    id: "node-version",
     label: "node -v",
     value: "node -v",
     description: "Print the active Node.js version",
+    ariaLabel: "Insert node version command",
+    tone: "primary",
   },
   {
+    id: "hello",
     label: "hello",
     value: 'printf "hello from Terminal Platform\\n"',
     description: "Print a Terminal Platform greeting",

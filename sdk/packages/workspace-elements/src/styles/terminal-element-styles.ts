@@ -95,6 +95,7 @@ export const terminalElementStyles = css`
   }
 
   button[data-action-tone="primary"],
+  button[data-quick-command-tone="primary"],
   button[data-screen-action-tone="primary"] {
     border-color: color-mix(in srgb, var(--tp-color-accent) 52%, transparent);
     background: color-mix(in srgb, var(--tp-color-accent) 16%, var(--tp-color-panel-raised));

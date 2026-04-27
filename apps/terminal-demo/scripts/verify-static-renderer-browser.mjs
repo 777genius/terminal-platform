@@ -83,6 +83,9 @@ async function main() {
       || result.commandAccessoryBarMode !== "bar"
       || !result.hasCommandAccessoryBar
       || result.terminalCommandAccessoryBarHeight > 72
+      || result.quickCommandIds.join("|") !== "pwd|list-files|git-status|node-version|hello"
+      || result.quickCommandTones.join("|") !== "secondary|secondary|secondary|primary|secondary"
+      || result.quickCommandAriaLabels.join("|") !== "Show the current working directory|List files with metadata|Inspect the current git worktree|Insert node version command|Print a Terminal Platform greeting"
       || result.quickCommandWhiteSpaces.some((value) => value !== "nowrap")
       || Math.max(0, ...result.quickCommandHeights) > 38
       || result.quickCommandRowOverflowPx > 1
@@ -473,6 +476,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         commandAccessoryBarMode: commandAccessoryBar?.getAttribute('data-accessory-mode') ?? null,
         hasCommandAccessoryBar: Boolean(commandAccessoryBar),
         terminalCommandAccessoryBarHeight: Math.round(commandAccessoryBarRect?.height ?? 0),
+        quickCommandIds: quickCommands.map((button) => button.getAttribute('data-quick-command') ?? ''),
+        quickCommandTones: quickCommands.map((button) => button.getAttribute('data-quick-command-tone') ?? ''),
+        quickCommandAriaLabels: quickCommands.map((button) => button.getAttribute('aria-label') ?? ''),
         quickCommandHeights: quickCommands.map((button) => Math.round(button.getBoundingClientRect().height)),
         quickCommandWhiteSpaces: quickCommands.map((button) => getComputedStyle(button).whiteSpace),
         quickCommandRowOverflowPx: quickCommandRow

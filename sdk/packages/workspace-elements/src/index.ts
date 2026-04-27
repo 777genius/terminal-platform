@@ -71,9 +71,12 @@ export {
 } from "./elements/terminal-command-input-status.js";
 export {
   TERMINAL_COMMAND_QUICK_COMMAND_LIMIT,
+  TERMINAL_COMMAND_QUICK_COMMAND_TONES,
   defaultTerminalCommandQuickCommands,
   resolveTerminalCommandQuickCommands,
   type TerminalCommandQuickCommand,
+  type TerminalCommandQuickCommandPresentation,
+  type TerminalCommandQuickCommandTone,
 } from "./elements/terminal-command-quick-commands.js";
 export {
   canNavigateTerminalCommandHistory,

@@ -190,6 +190,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         padding: 0.3rem 0.5rem;
       }
 
+      .dock[data-placement="terminal"] .chip[data-quick-command-tone="primary"] {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 52%, transparent);
+        background: color-mix(in srgb, var(--tp-terminal-color-accent) 14%, var(--tp-terminal-color-bg-raised));
+        color: var(--tp-terminal-color-text);
+      }
+
       .history-row {
         display: grid;
         grid-template-columns: auto minmax(0, 1fr);
@@ -596,7 +602,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                   type="button"
                   part="quick-command"
                   data-testid="tp-quick-command"
-                  title=${command.description ?? `Insert ${command.label}`}
+                  data-quick-command=${command.id}
+                  data-quick-command-tone=${command.tone}
+                  title=${command.title}
+                  aria-label=${command.ariaLabel}
                   ?disabled=${!controls.canWriteInput}
                   @click=${() => this.setDraft(command.value, { focusInput: true })}
                 >

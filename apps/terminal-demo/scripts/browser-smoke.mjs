@@ -304,6 +304,9 @@ async function main() {
       )
       || !Array.isArray(result.afterCreate.quickCommandLabels)
       || result.afterCreate.quickCommandLabels.join("|") !== "pwd|ls -la|git status|node -v|hello"
+      || result.afterCreate.quickCommandIds.join("|") !== "pwd|list-files|git-status|node-version|hello"
+      || result.afterCreate.quickCommandTones.join("|") !== "secondary|secondary|secondary|primary|secondary"
+      || result.afterCreate.quickCommandAriaLabels.join("|") !== "Show the current working directory|List files with metadata|Inspect the current git worktree|Insert node version command|Print a Terminal Platform greeting"
       || !result.afterCreate.quickCommandTitles.includes("Print the active Node.js version")
       || result.afterCreate.quickCommandWhiteSpaces.some((value) => value !== "nowrap")
       || Math.max(0, ...result.afterCreate.quickCommandHeights) > 38
@@ -416,6 +419,8 @@ async function main() {
       || result.afterCreateMobileLayout.commandInputRows !== 1
       || result.afterCreateMobileLayout.commandInputRowCount !== "1"
       || result.afterCreateMobileLayout.commandInputMultiline !== "false"
+      || result.afterCreateMobileLayout.quickCommandIds.join("|") !== "pwd|list-files|git-status|node-version|hello"
+      || result.afterCreateMobileLayout.quickCommandTones.join("|") !== "secondary|secondary|secondary|primary|secondary"
       || result.afterCreateMobileLayout.quickCommandWhiteSpaces.some((value) => value !== "nowrap")
       || Math.max(0, ...result.afterCreateMobileLayout.quickCommandHeights) > 38
       || !result.afterCreateMobileLayout.terminalCommandActionsInsideComposer
@@ -1152,6 +1157,9 @@ async function runSmokeScenario(browserUrl) {
         activeSessionListIdTitle: activeSessionListId?.getAttribute('title') ?? null,
         commandInputStatus: commandInputStatus?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         commandInputStatusTitle: commandInputStatus?.getAttribute('title') ?? null,
+        quickCommandIds: quickCommands.map((button) => button.getAttribute('data-quick-command') ?? ''),
+        quickCommandTones: quickCommands.map((button) => button.getAttribute('data-quick-command-tone') ?? ''),
+        quickCommandAriaLabels: quickCommands.map((button) => button.getAttribute('aria-label') ?? ''),
         quickCommandLabels: quickCommands.map((button) => button.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
         quickCommandTitles: quickCommands.map((button) => button.getAttribute('title')),
         quickCommandHeights: quickCommands.map((button) => Math.round(button.getBoundingClientRect().height)),
@@ -1412,6 +1420,10 @@ async function runSmokeScenario(browserUrl) {
           button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),
         terminalSessionActionAriaLabels: sessionActionButtons.map((button) => button.getAttribute('aria-label')),
+        quickCommandIds: [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])]
+          .map((button) => button.getAttribute('data-quick-command') ?? ''),
+        quickCommandTones: [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])]
+          .map((button) => button.getAttribute('data-quick-command-tone') ?? ''),
         quickCommandHeights: [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])]
           .map((button) => Math.round(button.getBoundingClientRect().height)),
         quickCommandWhiteSpaces: [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])]
@@ -1452,8 +1464,7 @@ async function runSmokeScenario(browserUrl) {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
-      const quickCommand = [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])]
-        .find((button) => button.textContent?.trim() === 'node -v') ?? null;
+      const quickCommand = commandRoot?.querySelector('[data-quick-command="node-version"]') ?? null;
       if (!textarea || !quickCommand) {
         return {
           clicked: false,

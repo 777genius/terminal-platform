@@ -9,6 +9,7 @@ import {
   TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS,
   TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
   TERMINAL_COMMAND_QUICK_COMMAND_LIMIT,
+  TERMINAL_COMMAND_QUICK_COMMAND_TONES,
   TERMINAL_COMMAND_COMPOSER_EVENTS,
   TERMINAL_SCREEN_ACTION_IDS,
   TERMINAL_SCREEN_CHROME_MODES,
@@ -95,6 +96,8 @@ import {
   type TerminalCommandHistoryNavigationState,
   type TerminalCommandInputStatus,
   type TerminalCommandQuickCommand,
+  type TerminalCommandQuickCommandPresentation,
+  type TerminalCommandQuickCommandTone,
   type TerminalEntityIdLabel,
   type TerminalEntityIdLabelOptions,
   type TerminalPaneResizeDelta,
@@ -188,6 +191,8 @@ type PublicControlTypes =
   | TerminalCommandHistoryNavigationState
   | TerminalCommandInputStatus
   | TerminalCommandQuickCommand
+  | TerminalCommandQuickCommandPresentation
+  | TerminalCommandQuickCommandTone
   | TerminalEntityIdLabel
   | TerminalEntityIdLabelOptions
   | TerminalPaneResizeDelta
@@ -304,6 +309,7 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT).toBe(2);
     expect(TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe("save-layout");
     expect(TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.historyCount).toBe("history-count");
+    expect(TERMINAL_COMMAND_QUICK_COMMAND_TONES.primary).toBe("primary");
     expect(TERMINAL_SCREEN_ACTION_IDS.copyVisible).toBe("copy-visible");
     expect(TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
     expect(TERMINAL_SCREEN_EVENTS.inputSubmitted).toBe("tp-terminal-screen-input-submitted");
