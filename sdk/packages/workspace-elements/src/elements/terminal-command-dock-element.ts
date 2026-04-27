@@ -483,13 +483,39 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           scrollbar-width: none;
         }
 
-        .dock[data-placement="terminal"] .history-row,
+        .dock[data-placement="terminal"] .history-row {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .dock[data-placement="terminal"] .history-label {
+          display: none;
+        }
+
+        .dock[data-placement="terminal"] .history-chip {
+          max-width: min(18rem, 82vw);
+        }
+
         .dock[data-placement="terminal"] details {
           display: none;
         }
 
         .dock-accessory-bar {
-          grid-template-columns: 1fr;
+          grid-template-areas:
+            "status status"
+            "quick history";
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+
+        .dock-accessory-bar .dock-header {
+          grid-area: status;
+        }
+
+        .dock-accessory-bar .chip-row {
+          grid-area: quick;
+        }
+
+        .dock-accessory-bar .history-row {
+          grid-area: history;
         }
 
         .dock-accessory-bar .session-actions {

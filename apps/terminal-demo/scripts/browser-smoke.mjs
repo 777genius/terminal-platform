@@ -635,6 +635,25 @@ async function main() {
     }
 
     if (
+      !result.afterCommandCompactHistoryLayout.checked
+      || result.afterCommandCompactHistoryLayout.commandDockAccessoryMode !== "bar"
+      || !result.afterCommandCompactHistoryLayout.historyRowVisible
+      || result.afterCommandCompactHistoryLayout.historyChipCount < 1
+      || result.afterCommandCompactHistoryLayout.historyChipVisibleCount
+        !== result.afterCommandCompactHistoryLayout.historyChipCount
+      || result.afterCommandCompactHistoryLayout.historyChipWhiteSpaces.some((value) => value !== "nowrap")
+      || Math.max(0, ...result.afterCommandCompactHistoryLayout.historyChipHeights) > 38
+      || !result.afterCommandCompactHistoryLayout.historyChipIds.every((id) => /^history-\d+$/.test(id))
+      || result.afterCommandCompactHistoryLayout.commandAccessoryBarHeight > 130
+    ) {
+      throw new Error(
+        `Compact command history layout did not preserve usable recent commands: ${
+          JSON.stringify(result.afterCommandCompactHistoryLayout)
+        }`,
+      );
+    }
+
+    if (
       !result.afterCommandActionFocus.tested
       || !result.afterCommandActionFocus.enterFocused
       || !result.afterCommandActionFocus.enterCursorAtEnd
@@ -2317,6 +2336,58 @@ async function runSmokeScenario(browserUrl) {
     })()`);
     const replayInitialSequence = afterCommand.focusedSequence;
 
+    await send("Emulation.setDeviceMetricsOverride", {
+      width: 500,
+      height: 900,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await sleep(300);
+    const afterCommandCompactHistoryLayout = await evaluate(send, `(() => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
+      const commandAccessoryBar = commandRoot?.querySelector('[data-testid="tp-command-accessory-bar"]') ?? null;
+      const historyRow = commandRoot?.querySelector('[part="command-history"]') ?? null;
+      const historyEntries = [...(commandRoot?.querySelectorAll('[data-testid="tp-command-history-entry"]') ?? [])];
+      const commandDockPanelRect = commandDockPanel?.getBoundingClientRect() ?? null;
+      const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect() ?? null;
+      const isVisible = (element) => {
+        if (!element) {
+          return false;
+        }
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== 'none'
+          && style.visibility !== 'hidden'
+          && rect.width > 0
+          && rect.height > 0;
+      };
+      return {
+        checked: Boolean(commandRoot && commandDockPanel && commandAccessoryBar),
+        commandDockAccessoryMode: commandDockPanel?.getAttribute('data-accessory-mode') ?? null,
+        historyRowVisible: isVisible(historyRow),
+        historyChipCount: historyEntries.length,
+        historyChipVisibleCount: historyEntries.filter((button) => isVisible(button)).length,
+        historyChipHeights: historyEntries.map((button) => Math.round(button.getBoundingClientRect().height)),
+        historyChipWhiteSpaces: historyEntries.map((button) => getComputedStyle(button).whiteSpace),
+        historyChipIds: historyEntries.map((button) => button.getAttribute('data-command-history-entry') ?? ''),
+        historyChipHistoryIndexes: historyEntries.map((button) => button.getAttribute('data-history-index') ?? ''),
+        historyChipAriaLabels: historyEntries.map((button) => button.getAttribute('aria-label') ?? ''),
+        commandAccessoryBarHeight: Math.round(commandAccessoryBarRect?.height ?? 0),
+        commandDockBottomOverflowPx: commandDockPanelRect
+          ? Math.max(0, Math.round(commandDockPanelRect.bottom - window.innerHeight))
+          : null,
+      };
+    })()`);
+    await send("Emulation.setDeviceMetricsOverride", {
+      width: 1440,
+      height: 1100,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await sleep(300);
+
     const afterCommandActionFocus = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
@@ -3029,6 +3100,7 @@ async function runSmokeScenario(browserUrl) {
           ? afterCommand.focusedSequence !== initialSequence
           : false,
       },
+      afterCommandCompactHistoryLayout,
       afterCommandActionFocus,
       afterScreenCopy,
       afterRecentCommandRecall,

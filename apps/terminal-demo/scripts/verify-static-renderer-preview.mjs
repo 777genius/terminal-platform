@@ -240,6 +240,18 @@ const terminalLayoutSourceContracts = [
         label: "recent command chips expose resolved accessible labels",
         marker: "aria-label=${command.ariaLabel}",
       },
+      {
+        label: "compact terminal placement keeps recent history addressable",
+        marker: '.dock[data-placement="terminal"] .history-row',
+      },
+      {
+        label: "compact terminal placement condenses recent history label",
+        marker: '.dock[data-placement="terminal"] .history-label',
+      },
+      {
+        label: "compact terminal placement keeps quick and recent commands on one accessory row",
+        marker: '"quick history"',
+      },
     ],
     order: [
       {
