@@ -10,6 +10,7 @@ export type TerminalScreenActionId =
 export type TerminalScreenActionPlacement = "panel" | "terminal";
 export type TerminalScreenCopyState = "idle" | "copied" | "failed";
 export type TerminalScreenActionTone = "danger" | "primary" | "secondary" | "success";
+export type TerminalScreenActionLabelMode = "glyph" | "label";
 
 export interface TerminalScreenActionOptions {
   canCopyVisibleOutput?: boolean;
@@ -24,6 +25,8 @@ export interface TerminalScreenActionPresentation {
   readonly disabled: boolean;
   readonly id: TerminalScreenActionId;
   readonly label: string;
+  readonly labelMode: TerminalScreenActionLabelMode;
+  readonly placement: TerminalScreenActionPlacement;
   readonly testId: string;
   readonly title: string;
   readonly tone: TerminalScreenActionTone;
@@ -43,6 +46,8 @@ export function resolveTerminalScreenActions(
       id: TERMINAL_SCREEN_ACTION_IDS.followOutput,
       testId: "tp-screen-follow",
       label: resolveFollowOutputLabel(followOutput, compact),
+      labelMode: resolveTerminalScreenActionLabelMode(compact),
+      placement,
       title: followOutput ? "Pause automatic terminal output follow" : "Follow terminal output",
       ariaLabel: followOutput ? "Pause automatic terminal output follow" : "Follow terminal output",
       ariaPressed: followOutput,
@@ -52,7 +57,9 @@ export function resolveTerminalScreenActions(
     {
       id: TERMINAL_SCREEN_ACTION_IDS.scrollLatest,
       testId: "tp-screen-scroll-latest",
-      label: compact ? "Latest" : "Scroll latest",
+      label: compact ? "\u2193" : "Scroll latest",
+      labelMode: resolveTerminalScreenActionLabelMode(compact),
+      placement,
       title: "Scroll to latest terminal output",
       ariaLabel: "Scroll to latest terminal output",
       disabled: false,
@@ -62,6 +69,8 @@ export function resolveTerminalScreenActions(
       id: TERMINAL_SCREEN_ACTION_IDS.copyVisible,
       testId: "tp-screen-copy",
       label: resolveCopyVisibleLabel(copyState, compact),
+      labelMode: resolveTerminalScreenActionLabelMode(compact),
+      placement,
       title: resolveCopyVisibleTitle(copyState),
       ariaLabel: resolveCopyVisibleAriaLabel(copyState),
       disabled: !canCopyVisibleOutput,
@@ -84,22 +93,22 @@ function normalizeTerminalScreenCopyState(
 
 function resolveFollowOutputLabel(followOutput: boolean, compact: boolean): string {
   if (!followOutput) {
-    return "Paused";
+    return compact ? "\u25b6" : "Paused";
   }
 
-  return compact ? "Live" : "Following";
+  return compact ? "\u23f8" : "Following";
 }
 
 function resolveCopyVisibleLabel(copyState: TerminalScreenCopyState, compact: boolean): string {
   if (copyState === "copied") {
-    return "Copied";
+    return compact ? "\u2713" : "Copied";
   }
 
   if (copyState === "failed") {
-    return compact ? "Failed" : "Copy failed";
+    return compact ? "!" : "Copy failed";
   }
 
-  return compact ? "Copy" : "Copy visible";
+  return compact ? "\u2398" : "Copy visible";
 }
 
 function resolveCopyVisibleTitle(copyState: TerminalScreenCopyState): string {
@@ -136,4 +145,8 @@ function resolveCopyVisibleTone(copyState: TerminalScreenCopyState): TerminalScr
   }
 
   return "secondary";
+}
+
+function resolveTerminalScreenActionLabelMode(compact: boolean): TerminalScreenActionLabelMode {
+  return compact ? "glyph" : "label";
 }

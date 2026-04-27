@@ -181,12 +181,25 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .screen-actions button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
         border-radius: 0.45rem;
         background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 84%, transparent);
         color: var(--tp-terminal-color-text);
         font-size: 0.82rem;
         padding: 0.32rem 0.55rem;
+      }
+
+      .screen[data-placement="terminal"] .screen-actions button[data-screen-action-label-mode="glyph"] {
+        inline-size: 2.25rem;
+        min-width: 2.25rem;
+        aspect-ratio: 1;
+        padding: 0;
+        font-family: var(--tp-font-family-mono);
+        font-size: 0.9rem;
+        line-height: 1;
       }
 
       .screen[data-placement="terminal"] .screen-actions button[data-screen-action-tone="primary"] {
@@ -747,6 +760,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
             type="button"
             data-testid=${action.testId}
             data-screen-action=${action.id}
+            data-screen-action-label-mode=${action.labelMode}
+            data-screen-action-placement=${action.placement}
             data-screen-action-tone=${action.tone}
             aria-label=${action.ariaLabel}
             aria-pressed=${action.ariaPressed == null ? nothing : String(action.ariaPressed)}

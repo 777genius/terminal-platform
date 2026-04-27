@@ -438,8 +438,20 @@ const terminalLayoutSourceContracts = [
         marker: "data-screen-action-tone=${action.tone}",
       },
       {
+        label: "screen actions expose compact label mode",
+        marker: "data-screen-action-label-mode=${action.labelMode}",
+      },
+      {
+        label: "screen actions expose placement metadata",
+        marker: "data-screen-action-placement=${action.placement}",
+      },
+      {
         label: "screen action tone drives visual state",
         marker: 'button[data-screen-action-tone="primary"]',
+      },
+      {
+        label: "screen action label mode drives terminal styling",
+        marker: 'button[data-screen-action-label-mode="glyph"]',
       },
       {
         label: "screen actions route through action ids",
@@ -467,16 +479,24 @@ const terminalLayoutSourceContracts = [
         marker: "export function resolveTerminalScreenActions",
       },
       {
-        label: "terminal placement uses compact live label",
-        marker: 'return compact ? "Live" : "Following";',
+        label: "screen action label mode is a public presentation contract",
+        marker: "TerminalScreenActionLabelMode",
       },
       {
-        label: "terminal placement uses compact latest label",
-        marker: 'label: compact ? "Latest" : "Scroll latest"',
+        label: "terminal placement uses compact pause glyph",
+        marker: 'return compact ? "\\u23f8" : "Following";',
+      },
+      {
+        label: "terminal placement uses compact latest glyph",
+        marker: 'label: compact ? "\\u2193" : "Scroll latest"',
       },
       {
         label: "copy failure state remains explicit",
-        marker: 'return compact ? "Failed" : "Copy failed";',
+        marker: 'return compact ? "!" : "Copy failed";',
+      },
+      {
+        label: "label mode is resolved outside rendering",
+        marker: "resolveTerminalScreenActionLabelMode",
       },
     ],
   },

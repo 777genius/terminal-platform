@@ -18,7 +18,9 @@ describe("terminal screen actions", () => {
       TERMINAL_SCREEN_ACTION_IDS.scrollLatest,
       TERMINAL_SCREEN_ACTION_IDS.copyVisible,
     ]);
-    expect(actions.map((action) => action.label)).toEqual(["Live", "Latest", "Copy"]);
+    expect(actions.map((action) => action.label)).toEqual(["\u23f8", "\u2193", "\u2398"]);
+    expect(actions.map((action) => action.labelMode)).toEqual(["glyph", "glyph", "glyph"]);
+    expect(actions.map((action) => action.placement)).toEqual(["terminal", "terminal", "terminal"]);
     expect(actions.map((action) => action.testId)).toEqual([
       "tp-screen-follow",
       "tp-screen-scroll-latest",
@@ -44,6 +46,8 @@ describe("terminal screen actions", () => {
     });
 
     expect(actions.map((action) => action.label)).toEqual(["Following", "Scroll latest", "Copy visible"]);
+    expect(actions.map((action) => action.labelMode)).toEqual(["label", "label", "label"]);
+    expect(actions.map((action) => action.placement)).toEqual(["panel", "panel", "panel"]);
   });
 
   it("models paused follow state without disabling manual scroll", () => {
@@ -57,11 +61,12 @@ describe("terminal screen actions", () => {
       ariaLabel: "Follow terminal output",
       ariaPressed: false,
       disabled: false,
-      label: "Paused",
+      label: "\u25b6",
+      labelMode: "glyph",
       title: "Follow terminal output",
       tone: "secondary",
     });
-    expect(actions[1]).toMatchObject({ disabled: false, label: "Latest" });
+    expect(actions[1]).toMatchObject({ disabled: false, label: "\u2193" });
   });
 
   it("keeps visible-output copy state explicit", () => {
@@ -72,7 +77,8 @@ describe("terminal screen actions", () => {
     })[2]).toMatchObject({
       ariaLabel: "Visible terminal output copied",
       disabled: false,
-      label: "Copied",
+      label: "\u2713",
+      labelMode: "glyph",
       title: "Visible terminal output copied",
       tone: "success",
     });
@@ -84,7 +90,8 @@ describe("terminal screen actions", () => {
     })[2]).toMatchObject({
       ariaLabel: "Copy visible terminal output failed",
       disabled: false,
-      label: "Failed",
+      label: "!",
+      labelMode: "glyph",
       title: "Visible terminal output could not be copied",
       tone: "danger",
     });
@@ -105,7 +112,7 @@ describe("terminal screen actions", () => {
     expect(copyAction).toMatchObject({
       ariaLabel: "Copy visible terminal output",
       disabled: true,
-      label: "Copy",
+      label: "\u2398",
       title: "Copy visible terminal output",
     });
   });

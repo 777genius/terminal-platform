@@ -17,6 +17,11 @@ import type {
   TerminalCommandDockAccessoryState,
   TerminalCommandDockAccessoryStateOptions,
   TerminalCommandDockSessionActionTone,
+  TerminalScreenActionId,
+  TerminalScreenActionLabelMode,
+  TerminalScreenActionOptions,
+  TerminalScreenActionPlacement,
+  TerminalScreenActionPresentation,
   TerminalScreenActionTone,
   TerminalScreenChromeMode,
   TerminalScreenChromeState,
@@ -85,6 +90,11 @@ type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandDockAccessoryState
   | TerminalCommandDockAccessoryStateOptions
   | TerminalCommandDockSessionActionTone
+  | TerminalScreenActionId
+  | TerminalScreenActionLabelMode
+  | TerminalScreenActionOptions
+  | TerminalScreenActionPlacement
+  | TerminalScreenActionPresentation
   | TerminalScreenActionTone
   | TerminalScreenChromeMode
   | TerminalScreenChromeState
@@ -117,6 +127,10 @@ describe("workspace react public api", () => {
       .join("|")).toBe("glyph|glyph|glyph|glyph");
     expect(workspaceReact.resolveTerminalCommandComposerActions()[0]?.keyHint).toBe("Enter");
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
+    expect(workspaceReact.TERMINAL_SCREEN_ACTION_IDS.followOutput).toBe("follow-output");
+    expect(workspaceReact.resolveTerminalScreenActions({ placement: "terminal", followOutput: true })
+      .map((action) => action.labelMode)
+      .join("|")).toBe("glyph|glyph|glyph");
     expect(workspaceReact.TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");
     expect(workspaceReact.resolveTerminalCommandDockAccessoryMode({ placement: "terminal" })).toBe("bar");
     expect(workspaceReact.resolveTerminalCommandDockAccessoryState({

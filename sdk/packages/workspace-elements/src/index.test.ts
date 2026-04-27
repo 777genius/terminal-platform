@@ -117,6 +117,7 @@ import {
   type TerminalSavedSessionsControlOptions,
   type TerminalSavedSessionsControlState,
   type TerminalScreenActionId,
+  type TerminalScreenActionLabelMode,
   type TerminalScreenActionOptions,
   type TerminalScreenActionPlacement,
   type TerminalScreenActionPresentation,
@@ -216,6 +217,7 @@ type PublicControlTypes =
   | TerminalSavedSessionsControlOptions
   | TerminalSavedSessionsControlState
   | TerminalScreenActionId
+  | TerminalScreenActionLabelMode
   | TerminalScreenActionOptions
   | TerminalScreenActionPlacement
   | TerminalScreenActionPresentation

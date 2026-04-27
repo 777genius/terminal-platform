@@ -137,6 +137,7 @@ export {
   TERMINAL_SCREEN_ACTION_IDS,
   resolveTerminalScreenActions,
   type TerminalScreenActionId,
+  type TerminalScreenActionLabelMode,
   type TerminalScreenActionOptions,
   type TerminalScreenActionPlacement,
   type TerminalScreenActionPresentation,

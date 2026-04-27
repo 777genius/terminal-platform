@@ -208,7 +208,9 @@ async function main() {
       || !result.afterCreate.hasScreenCopyControl
       || result.afterCreate.terminalScreenActionIds.join("|") !== "follow-output|scroll-latest|copy-visible"
       || result.afterCreate.terminalScreenActionTones.join("|") !== "primary|secondary|secondary"
-      || result.afterCreate.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
+      || result.afterCreate.terminalScreenActionLabelModes.join("|") !== "glyph|glyph|glyph"
+      || result.afterCreate.terminalScreenActionPlacements.join("|") !== "terminal|terminal|terminal"
+      || result.afterCreate.terminalScreenActionLabels.join("|") !== "\u23f8|\u2193|\u2398"
       || result.afterCreate.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.afterCreate.terminalScreenActionTitles.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.afterCreate.terminalScreenActionPressedFlags.join("|") !== "true||"
@@ -417,7 +419,9 @@ async function main() {
       || result.afterCreateMobileLayout.commandActionLabels.join("|") !== "\u25b6|\u2398|^C|\u21b5"
       || result.afterCreateMobileLayout.terminalScreenActionIds.join("|") !== "follow-output|scroll-latest|copy-visible"
       || result.afterCreateMobileLayout.terminalScreenActionTones.join("|") !== "primary|secondary|secondary"
-      || result.afterCreateMobileLayout.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
+      || result.afterCreateMobileLayout.terminalScreenActionLabelModes.join("|") !== "glyph|glyph|glyph"
+      || result.afterCreateMobileLayout.terminalScreenActionPlacements.join("|") !== "terminal|terminal|terminal"
+      || result.afterCreateMobileLayout.terminalScreenActionLabels.join("|") !== "\u23f8|\u2193|\u2398"
       || result.afterCreateMobileLayout.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.afterCreateMobileLayout.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
       || result.afterCreateMobileLayout.terminalSessionActionTones.join("|") !== "secondary|secondary|danger"
@@ -678,7 +682,7 @@ async function main() {
       || result.afterScreenCopy.copiedEvents !== 1
       || result.afterScreenCopy.failedEvents !== 0
       || !result.afterScreenCopy.containsCopiedCommandOutput
-      || result.afterScreenCopy.buttonText !== "Copied"
+      || result.afterScreenCopy.buttonText !== "\u2713"
       || result.afterScreenCopy.eventDetail?.lineCount < 1
     ) {
       throw new Error(`Terminal screen copy did not write visible output: ${JSON.stringify(result.afterScreenCopy)}`);
@@ -1056,6 +1060,12 @@ async function runSmokeScenario(browserUrl) {
         terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
         terminalScreenActionTones: screenActionButtons.map((button) =>
           button?.getAttribute('data-screen-action-tone') ?? '',
+        ),
+        terminalScreenActionLabelModes: screenActionButtons.map((button) =>
+          button?.getAttribute('data-screen-action-label-mode') ?? '',
+        ),
+        terminalScreenActionPlacements: screenActionButtons.map((button) =>
+          button?.getAttribute('data-screen-action-placement') ?? '',
         ),
         terminalScreenActionLabels: screenActionButtons.map((button) =>
           button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
@@ -1454,6 +1464,12 @@ async function runSmokeScenario(browserUrl) {
         terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
         terminalScreenActionTones: screenActionButtons.map((button) =>
           button?.getAttribute('data-screen-action-tone') ?? '',
+        ),
+        terminalScreenActionLabelModes: screenActionButtons.map((button) =>
+          button?.getAttribute('data-screen-action-label-mode') ?? '',
+        ),
+        terminalScreenActionPlacements: screenActionButtons.map((button) =>
+          button?.getAttribute('data-screen-action-placement') ?? '',
         ),
         terminalScreenActionLabels: screenActionButtons.map((button) =>
           button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
@@ -2779,15 +2795,15 @@ async function runSmokeScenario(browserUrl) {
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       }
       const startedFollowing =
-        followButton.getAttribute('aria-pressed') === 'true' && followButton.textContent?.trim() === 'Live';
+        followButton.getAttribute('aria-pressed') === 'true' && followButton.textContent?.trim() === '\u23f8';
 
       followButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const paused = followButton.getAttribute('aria-pressed') === 'false' && followButton.textContent?.trim() === 'Paused';
+      const paused = followButton.getAttribute('aria-pressed') === 'false' && followButton.textContent?.trim() === '\u25b6';
 
       scrollLatestButton.click();
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const resumed = followButton.getAttribute('aria-pressed') === 'true' && followButton.textContent?.trim() === 'Live';
+      const resumed = followButton.getAttribute('aria-pressed') === 'true' && followButton.textContent?.trim() === '\u23f8';
 
       return {
         paused,

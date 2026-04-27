@@ -107,7 +107,9 @@ async function main() {
       || Math.abs(result.terminalScreenChromeViewportGapPx ?? 99) > 1
       || result.terminalScreenCompactSizeLabel !== "96x24"
       || result.terminalScreenActionIds.join("|") !== "follow-output|scroll-latest|copy-visible"
-      || result.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
+      || result.terminalScreenActionLabelModes.join("|") !== "glyph|glyph|glyph"
+      || result.terminalScreenActionPlacements.join("|") !== "terminal|terminal|terminal"
+      || result.terminalScreenActionLabels.join("|") !== "\u23f8|\u2193|\u2398"
       || result.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.terminalScreenActionTitles.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.terminalScreenActionPressedFlags.join("|") !== "true||"
@@ -515,6 +517,12 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
         terminalScreenActionTones: screenActionButtons.map((button) =>
           button?.getAttribute('data-screen-action-tone') ?? '',
+        ),
+        terminalScreenActionLabelModes: screenActionButtons.map((button) =>
+          button?.getAttribute('data-screen-action-label-mode') ?? '',
+        ),
+        terminalScreenActionPlacements: screenActionButtons.map((button) =>
+          button?.getAttribute('data-screen-action-placement') ?? '',
         ),
         terminalScreenPrimaryToneStyle: readActionToneStyle(screenActionButtons[0]),
         terminalScreenSecondaryToneStyle: readActionToneStyle(screenActionButtons[1]),
