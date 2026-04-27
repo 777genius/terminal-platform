@@ -138,6 +138,10 @@ async function main() {
       || result.terminalSearchInputEnterKeyHint !== "search"
       || result.terminalSearchInputInputMode !== "search"
       || result.terminalSearchInputSpellcheck !== "false"
+      || result.terminalSearchInputDescribedBy !== "tp-screen-search-count"
+      || !result.terminalSearchInputDescribedByResolves
+      || result.terminalSearchCountLive !== "polite"
+      || result.terminalSearchCountAtomic !== "true"
       || result.workspaceLayoutPreset !== "terminal"
       || result.workspaceNavigationMode !== "collapsed"
       || result.workspaceInspectorMode !== "collapsed"
@@ -616,6 +620,15 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         terminalSearchInputEnterKeyHint: searchInput?.getAttribute('enterkeyhint') ?? null,
         terminalSearchInputInputMode: searchInput?.getAttribute('inputmode') ?? null,
         terminalSearchInputSpellcheck: searchInput?.getAttribute('spellcheck') ?? null,
+        terminalSearchInputDescribedBy: searchInput?.getAttribute('aria-describedby') ?? null,
+        terminalSearchInputDescribedByResolves: Boolean(
+          searchInput?.getAttribute('aria-describedby')
+          && screenRoot?.getElementById(searchInput.getAttribute('aria-describedby') ?? ''),
+        ),
+        terminalSearchCountLive:
+          screenRoot?.querySelector('[part="search-count"]')?.getAttribute('aria-live') ?? null,
+        terminalSearchCountAtomic:
+          screenRoot?.querySelector('[part="search-count"]')?.getAttribute('aria-atomic') ?? null,
         workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,

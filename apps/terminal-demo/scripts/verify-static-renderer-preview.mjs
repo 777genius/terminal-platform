@@ -537,6 +537,18 @@ const terminalLayoutSourceContracts = [
         label: "screen search disables spellcheck",
         marker: 'spellcheck="false"',
       },
+      {
+        label: "screen search describes current match count",
+        marker: "aria-describedby=${TERMINAL_SCREEN_SEARCH_COUNT_ID}",
+      },
+      {
+        label: "screen search count has a stable description id",
+        marker: "id=${TERMINAL_SCREEN_SEARCH_COUNT_ID}",
+      },
+      {
+        label: "screen search count announces complete labels",
+        marker: 'aria-atomic="true"',
+      },
     ],
   },
   {

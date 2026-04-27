@@ -221,6 +221,10 @@ async function main() {
       || result.afterCreate.terminalSearchInputEnterKeyHint !== "search"
       || result.afterCreate.terminalSearchInputInputMode !== "search"
       || result.afterCreate.terminalSearchInputSpellcheck !== "false"
+      || result.afterCreate.terminalSearchInputDescribedBy !== "tp-screen-search-count"
+      || !result.afterCreate.terminalSearchInputDescribedByResolves
+      || result.afterCreate.terminalSearchCountLive !== "polite"
+      || result.afterCreate.terminalSearchCountAtomic !== "true"
       || !result.afterCreate.hasScreenDirectInput
       || result.afterCreate.screenPlacement !== "terminal"
       || result.afterCreate.screenChromeMode !== "compact"
@@ -1094,6 +1098,15 @@ async function runSmokeScenario(browserUrl) {
         terminalSearchInputEnterKeyHint: screenSearch?.getAttribute('enterkeyhint') ?? null,
         terminalSearchInputInputMode: screenSearch?.getAttribute('inputmode') ?? null,
         terminalSearchInputSpellcheck: screenSearch?.getAttribute('spellcheck') ?? null,
+        terminalSearchInputDescribedBy: screenSearch?.getAttribute('aria-describedby') ?? null,
+        terminalSearchInputDescribedByResolves: Boolean(
+          screenSearch?.getAttribute('aria-describedby')
+          && screenRoot?.getElementById(screenSearch.getAttribute('aria-describedby') ?? ''),
+        ),
+        terminalSearchCountLive:
+          screenRoot?.querySelector('[part="search-count"]')?.getAttribute('aria-live') ?? null,
+        terminalSearchCountAtomic:
+          screenRoot?.querySelector('[part="search-count"]')?.getAttribute('aria-atomic') ?? null,
         hasScreenCopyControl: Boolean(screenCopy && !screenCopy.disabled),
         terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
         terminalScreenActionTones: screenActionButtons.map((button) =>

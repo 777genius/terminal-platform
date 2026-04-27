@@ -53,6 +53,8 @@ import {
 
 type TerminalScreenPlacement = "panel" | "terminal";
 
+const TERMINAL_SCREEN_SEARCH_COUNT_ID = "tp-screen-search-count";
+
 export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
@@ -841,14 +843,17 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           inputmode="search"
           placeholder="Find output"
           spellcheck="false"
+          aria-describedby=${TERMINAL_SCREEN_SEARCH_COUNT_ID}
           aria-label="Find terminal output"
           aria-keyshortcuts="Control+F Meta+F"
           @input=${(event: Event) => this.handleSearchInput(event)}
           @keydown=${(event: KeyboardEvent) => this.handleSearchKeydown(event)}
         />
         <span
+          id=${TERMINAL_SCREEN_SEARCH_COUNT_ID}
           class="search-count"
           part="search-count"
+          aria-atomic="true"
           aria-live="polite"
           data-search-active=${String(Boolean(searchResult.query))}
         >
