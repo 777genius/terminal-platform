@@ -613,7 +613,7 @@ async function main() {
       || !result.afterCommand.commandCursorAtEnd
       || result.afterCommand.commandHistoryCount < 1
       || !result.afterCommand.commandHistoryLatest?.includes("browser-smoke-ok")
-      || !result.afterCommand.historyBadgeText?.includes("history")
+      || !isCompactCommandHistoryBadge(result.afterCommand.historyBadgeText)
       || result.afterCommand.historyChipWhiteSpaces.some((value) => value !== "nowrap")
       || Math.max(0, ...result.afterCommand.historyChipHeights) > 38
       || (!result.afterCommand.sequenceAdvanced && !result.afterCommand.containsCommandOutput)
@@ -648,7 +648,7 @@ async function main() {
       || !result.afterRecentCommandRecall.sendEnabled
       || !result.afterRecentCommandRecall.inputFocused
       || !result.afterRecentCommandRecall.cursorAtEnd
-      || !result.afterRecentCommandRecall.historyBadgeText?.includes("history")
+      || !isCompactCommandHistoryBadge(result.afterRecentCommandRecall.historyBadgeText)
     ) {
       throw new Error(`Recent command recall did not update the draft correctly: ${JSON.stringify(result.afterRecentCommandRecall)}`);
     }
@@ -3271,6 +3271,10 @@ function closeWebSocket(socket) {
       settle();
     }
   });
+}
+
+function isCompactCommandHistoryBadge(value) {
+  return typeof value === "string" && /^\d+ (?:cmd|history)$/.test(value);
 }
 
 function sleep(ms) {

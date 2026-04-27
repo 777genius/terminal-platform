@@ -10,6 +10,7 @@ import {
   type TerminalCommandComposerShortcutDetail,
 } from "./terminal-command-composer-element.js";
 import { resolveTerminalCommandInputStatus } from "./terminal-command-input-status.js";
+import { resolveTerminalCommandDockStatusBadges } from "./terminal-command-dock-status.js";
 import {
   createTerminalCommandHistoryNavigationState,
   resolveTerminalCommandHistoryNavigation,
@@ -33,7 +34,6 @@ import {
   resolveTerminalCommandDockSessionActions,
   type TerminalCommandDockSessionActionId,
 } from "./terminal-command-dock-session-actions.js";
-import { resolveTerminalEntityIdLabel } from "./terminal-identity.js";
 
 type TerminalCommandInputFocusOptions = {
   focusInput?: boolean;
@@ -536,12 +536,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     });
     const quickCommands = resolveTerminalCommandQuickCommands(this.quickCommands);
     const inputStatus = resolveTerminalCommandInputStatus(controls);
+    const statusBadges = resolveTerminalCommandDockStatusBadges(controls, inputStatus, {
+      placement: this.placement,
+    });
     const pasteTitle = controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
       ? "Paste is not supported by the active backend"
       : "Paste clipboard into the focused pane";
-    const activePaneIdentity = controls.activePaneId
-      ? resolveTerminalEntityIdLabel(controls.activePaneId, { prefix: "Pane" })
-      : null;
     const accessoryMode = resolveTerminalCommandDockAccessoryMode({ placement: this.placement });
     const sessionActions = resolveTerminalCommandDockSessionActions(controls, {
       historyClearConfirmationArmed: this.historyClearConfirmationArmed,
@@ -562,25 +562,19 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             `}
 
         <div class="dock-status" part="status">
-          <span
-            class="badge"
-            data-testid="tp-command-active-pane"
-            data-tone=${controls.activePaneId ? "ready" : "idle"}
-            title=${activePaneIdentity?.title ?? ""}
-          >
-            ${activePaneIdentity?.label ?? "No pane"}
-          </span>
-          <span
-            class="badge"
-            data-testid="tp-command-input-status"
-            data-tone=${inputStatus.tone}
-            title=${inputStatus.title}
-          >
-            ${inputStatus.label}
-          </span>
-          <span class="badge" data-testid="tp-command-history-count">
-            ${controls.commandHistory.length} history
-          </span>
+          ${statusBadges.map(
+            (badge) => html`
+              <span
+                class="badge"
+                data-status-badge=${badge.id}
+                data-testid=${badge.testId}
+                data-tone=${badge.tone}
+                title=${badge.title}
+              >
+                ${badge.label}
+              </span>
+            `,
+          )}
         </div>
       </div>
     `;

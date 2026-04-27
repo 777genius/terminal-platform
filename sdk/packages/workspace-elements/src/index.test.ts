@@ -6,6 +6,7 @@ import {
   TERMINAL_COMMAND_DOCK_ACCESSORY_MODES,
   TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT,
   TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS,
+  TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS,
   TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
   TERMINAL_COMMAND_QUICK_COMMAND_LIMIT,
   TERMINAL_COMMAND_COMPOSER_EVENTS,
@@ -38,6 +39,8 @@ import {
   resolveTerminalCommandDockAccessoryMode,
   resolveTerminalCommandDockControlState,
   resolveTerminalCommandDockSessionActions,
+  resolveTerminalCommandDockStatusBadges,
+  resolveTerminalCommandDockStatusPlacement,
   resolveTerminalCommandHistoryNavigation,
   resolveTerminalCommandInputStatus,
   resolveTerminalCommandQuickCommands,
@@ -71,6 +74,11 @@ import {
   type TerminalCommandDockSessionActionOptions,
   type TerminalCommandDockSessionActionPlacement,
   type TerminalCommandDockSessionActionPresentation,
+  type TerminalCommandDockStatusBadge,
+  type TerminalCommandDockStatusBadgeId,
+  type TerminalCommandDockStatusOptions,
+  type TerminalCommandDockStatusPlacement,
+  type TerminalCommandDockStatusTone,
   type TerminalCommandComposerDraftChangeDetail,
   type TerminalCommandComposerEventMap,
   type TerminalCommandComposerEventType,
@@ -156,6 +164,11 @@ type PublicControlTypes =
   | TerminalCommandDockSessionActionOptions
   | TerminalCommandDockSessionActionPlacement
   | TerminalCommandDockSessionActionPresentation
+  | TerminalCommandDockStatusBadge
+  | TerminalCommandDockStatusBadgeId
+  | TerminalCommandDockStatusOptions
+  | TerminalCommandDockStatusPlacement
+  | TerminalCommandDockStatusTone
   | TerminalCommandComposerDraftChangeDetail
   | TerminalCommandComposerEventMap
   | TerminalCommandComposerEventType
@@ -243,6 +256,8 @@ describe("workspace elements public api", () => {
       resolveTerminalCommandDockAccessoryMode,
       resolveTerminalCommandDockControlState,
       resolveTerminalCommandDockSessionActions,
+      resolveTerminalCommandDockStatusBadges,
+      resolveTerminalCommandDockStatusPlacement,
       resolveTerminalCommandHistoryNavigation,
       resolveTerminalCommandInputStatus,
       resolveTerminalCommandQuickCommands,
@@ -282,6 +297,7 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT).toBe(5);
     expect(TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT).toBe(2);
     expect(TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe("save-layout");
+    expect(TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.historyCount).toBe("history-count");
     expect(TERMINAL_SCREEN_ACTION_IDS.copyVisible).toBe("copy-visible");
     expect(TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
     expect(TERMINAL_SCREEN_EVENTS.inputSubmitted).toBe("tp-terminal-screen-input-submitted");

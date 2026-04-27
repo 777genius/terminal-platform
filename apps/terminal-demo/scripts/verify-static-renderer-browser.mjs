@@ -64,6 +64,7 @@ async function main() {
       || result.commandInputRows !== 1
       || result.commandInputPlaceholder !== "Type shell input for the focused pane"
       || result.commandInputStatus !== "Ready"
+      || !/^\d+ cmd$/.test(result.commandHistoryBadgeText ?? "")
       || result.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
       || result.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.commandDockPlacement !== "terminal"
@@ -339,6 +340,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
       const commandAccessoryBar = commandRoot?.querySelector('[data-testid="tp-command-accessory-bar"]') ?? null;
       const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
+      const commandHistoryBadge = commandRoot?.querySelector('[data-testid="tp-command-history-count"]') ?? null;
       const composer = commandRoot?.querySelector('tp-terminal-command-composer') ?? null;
       const quickCommands = [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])];
       const quickCommandRow = commandRoot?.querySelector('[part="quick-commands"]') ?? null;
@@ -428,6 +430,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         commandInputRows: input?.rows ?? null,
         commandInputPlaceholder: input?.placeholder ?? null,
         commandInputStatus: commandInputStatus?.textContent?.trim() ?? null,
+        commandHistoryBadgeText: commandHistoryBadge?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
         commandActionLabels: commandActionButtons.map((button) =>
           button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),

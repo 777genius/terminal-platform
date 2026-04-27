@@ -52,6 +52,16 @@ export {
   type TerminalCommandDockSessionActionPresentation,
 } from "./elements/terminal-command-dock-session-actions.js";
 export {
+  TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS,
+  resolveTerminalCommandDockStatusBadges,
+  resolveTerminalCommandDockStatusPlacement,
+  type TerminalCommandDockStatusBadge,
+  type TerminalCommandDockStatusBadgeId,
+  type TerminalCommandDockStatusOptions,
+  type TerminalCommandDockStatusPlacement,
+  type TerminalCommandDockStatusTone,
+} from "./elements/terminal-command-dock-status.js";
+export {
   resolveTerminalCommandInputStatus,
   type TerminalCommandInputStatus,
 } from "./elements/terminal-command-input-status.js";
