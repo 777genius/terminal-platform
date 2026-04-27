@@ -3,12 +3,12 @@ import { css, html, nothing, type PropertyValues } from "lit";
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import { readClipboardText } from "./terminal-clipboard.js";
-import {
-  type TerminalCommandComposerDraftChangeDetail,
-  type TerminalCommandComposerElement,
-  type TerminalCommandComposerHistoryNavigateDetail,
-  type TerminalCommandComposerShortcutDetail,
-} from "./terminal-command-composer-element.js";
+import type { TerminalCommandComposerElement } from "./terminal-command-composer-element.js";
+import type {
+  TerminalCommandComposerDraftChangeDetail,
+  TerminalCommandComposerHistoryNavigateDetail,
+  TerminalCommandComposerShortcutDetail,
+} from "./terminal-command-composer-events.js";
 import { resolveTerminalCommandInputStatus } from "./terminal-command-input-status.js";
 import { resolveTerminalCommandDockStatusBadges } from "./terminal-command-dock-status.js";
 import {

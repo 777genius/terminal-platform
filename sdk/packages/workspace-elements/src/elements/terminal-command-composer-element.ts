@@ -1,9 +1,5 @@
 import { html, LitElement, nothing, type PropertyValues } from "lit";
 
-import type {
-  TerminalCommandHistoryInputState,
-  TerminalCommandHistoryNavigationDirection,
-} from "./terminal-command-history-navigation.js";
 import {
   TERMINAL_COMMAND_COMPOSER_ACTION_IDS,
   TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE,
@@ -15,44 +11,26 @@ import {
   type TerminalCommandComposerShortcut,
 } from "./terminal-command-composer-actions.js";
 import {
+  TERMINAL_COMMAND_COMPOSER_EVENTS,
+  type TerminalCommandComposerDraftChangeDetail,
+  type TerminalCommandComposerHistoryNavigateDetail,
+  type TerminalCommandComposerShortcutDetail,
+} from "./terminal-command-composer-events.js";
+import {
   TERMINAL_COMMAND_COMPOSER_DEFAULT_MAX_ROWS,
   TERMINAL_COMMAND_COMPOSER_DEFAULT_MIN_ROWS,
   resolveTerminalCommandComposerRows,
 } from "./terminal-command-composer-layout.js";
 
 export type { TerminalCommandComposerShortcut } from "./terminal-command-composer-actions.js";
-
-export const TERMINAL_COMMAND_COMPOSER_EVENTS = {
-  draftChange: "tp-terminal-command-draft-change",
-  historyNavigate: "tp-terminal-command-history-navigate",
-  paste: "tp-terminal-command-paste",
-  shortcut: "tp-terminal-command-shortcut",
-  submit: "tp-terminal-command-submit",
-} as const;
-
-export type TerminalCommandComposerDraftChangeDetail = {
-  value: string;
-};
-
-export type TerminalCommandComposerHistoryNavigateDetail = {
-  direction: TerminalCommandHistoryNavigationDirection;
-  input: TerminalCommandHistoryInputState;
-};
-
-export type TerminalCommandComposerShortcutDetail = {
-  data: TerminalCommandComposerShortcut;
-};
-
-export type TerminalCommandComposerEventType =
-  (typeof TERMINAL_COMMAND_COMPOSER_EVENTS)[keyof typeof TERMINAL_COMMAND_COMPOSER_EVENTS];
-
-export type TerminalCommandComposerEventMap = {
-  [TERMINAL_COMMAND_COMPOSER_EVENTS.draftChange]: CustomEvent<TerminalCommandComposerDraftChangeDetail>;
-  [TERMINAL_COMMAND_COMPOSER_EVENTS.historyNavigate]: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>;
-  [TERMINAL_COMMAND_COMPOSER_EVENTS.paste]: CustomEvent<void>;
-  [TERMINAL_COMMAND_COMPOSER_EVENTS.shortcut]: CustomEvent<TerminalCommandComposerShortcutDetail>;
-  [TERMINAL_COMMAND_COMPOSER_EVENTS.submit]: CustomEvent<void>;
-};
+export { TERMINAL_COMMAND_COMPOSER_EVENTS } from "./terminal-command-composer-events.js";
+export type {
+  TerminalCommandComposerDraftChangeDetail,
+  TerminalCommandComposerEventMap,
+  TerminalCommandComposerEventType,
+  TerminalCommandComposerHistoryNavigateDetail,
+  TerminalCommandComposerShortcutDetail,
+} from "./terminal-command-composer-events.js";
 
 export class TerminalCommandComposerElement extends LitElement {
   static override properties = {

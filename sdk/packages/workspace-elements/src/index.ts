@@ -12,15 +12,17 @@ export {
   type TerminalCommandComposerActionPresentation,
 } from "./elements/terminal-command-composer-actions.js";
 export {
-  TERMINAL_COMMAND_COMPOSER_EVENTS,
   TerminalCommandComposerElement,
+} from "./elements/terminal-command-composer-element.js";
+export {
+  TERMINAL_COMMAND_COMPOSER_EVENTS,
   type TerminalCommandComposerDraftChangeDetail,
   type TerminalCommandComposerEventMap,
   type TerminalCommandComposerEventType,
   type TerminalCommandComposerHistoryNavigateDetail,
   type TerminalCommandComposerShortcut,
   type TerminalCommandComposerShortcutDetail,
-} from "./elements/terminal-command-composer-element.js";
+} from "./elements/terminal-command-composer-events.js";
 export {
   TERMINAL_COMMAND_COMPOSER_DEFAULT_MAX_ROWS,
   TERMINAL_COMMAND_COMPOSER_DEFAULT_MIN_ROWS,
