@@ -63,6 +63,10 @@ async function main() {
       || result.commandInputPlaceholder !== "Type shell input for the focused pane"
       || result.commandInputStatus !== "Ready"
       || result.commandDockPlacement !== "terminal"
+      || result.commandDockAccessoryMode !== "bar"
+      || result.commandAccessoryBarMode !== "bar"
+      || !result.hasCommandAccessoryBar
+      || result.terminalCommandAccessoryBarHeight > 72
       || result.commandDockCanWrite !== "true"
       || result.commandDockInputCapability !== "known"
       || result.screenChromeMode !== "compact"
@@ -291,6 +295,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const commandRoot = commandDockElement?.shadowRoot ?? null;
       const screenRoot = screenElement?.shadowRoot ?? null;
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
+      const commandAccessoryBar = commandRoot?.querySelector('[data-testid="tp-command-accessory-bar"]') ?? null;
       const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
       const composer = commandRoot?.querySelector('tp-terminal-command-composer') ?? null;
       const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
@@ -335,6 +340,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const screenChromeRect = screenChrome?.getBoundingClientRect();
       const viewportRect = viewport?.getBoundingClientRect();
       const composerRect = composer?.getBoundingClientRect();
+      const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect();
 
       return {
         hasReadyState: state?.connection?.state === 'ready',
@@ -346,6 +352,10 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         commandInputPlaceholder: input?.placeholder ?? null,
         commandInputStatus: commandInputStatus?.textContent?.trim() ?? null,
         commandDockPlacement: commandDockPanel?.getAttribute('data-placement') ?? null,
+        commandDockAccessoryMode: commandDockPanel?.getAttribute('data-accessory-mode') ?? null,
+        commandAccessoryBarMode: commandAccessoryBar?.getAttribute('data-accessory-mode') ?? null,
+        hasCommandAccessoryBar: Boolean(commandAccessoryBar),
+        terminalCommandAccessoryBarHeight: Math.round(commandAccessoryBarRect?.height ?? 0),
         commandDockCanWrite: commandDockPanel?.getAttribute('data-command-input') ?? null,
         commandDockInputCapability: commandDockPanel?.getAttribute('data-input-capability') ?? null,
         screenChromeMode: screenPanel?.getAttribute('data-chrome-mode') ?? null,

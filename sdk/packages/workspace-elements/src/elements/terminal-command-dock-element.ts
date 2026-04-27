@@ -23,6 +23,7 @@ import {
   resolveTerminalCommandQuickCommands,
   type TerminalCommandQuickCommand,
 } from "./terminal-command-quick-commands.js";
+import { resolveTerminalCommandDockAccessoryMode } from "./terminal-command-dock-accessories.js";
 import { resolveTerminalCommandDockControlState } from "./terminal-command-dock-controls.js";
 import { resolveTerminalEntityIdLabel } from "./terminal-identity.js";
 
@@ -72,6 +73,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         padding: 0 var(--tp-space-4) var(--tp-space-3);
       }
 
+      .dock[data-accessory-mode="bar"] {
+        gap: 0.42rem;
+      }
+
       .dock .panel-header {
         margin-bottom: 0;
       }
@@ -105,6 +110,43 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
       .dock[data-placement="terminal"] .dock-status {
         justify-content: flex-start;
+      }
+
+      .dock-accessory-bar {
+        display: grid;
+        grid-template-columns: auto minmax(10rem, 0.62fr) minmax(11rem, 0.72fr) auto;
+        gap: 0.42rem;
+        align-items: center;
+        min-width: 0;
+        border-top: 1px solid color-mix(in srgb, var(--tp-terminal-color-border) 58%, transparent);
+        padding-top: 0.45rem;
+      }
+
+      .dock-accessory-bar .dock-header,
+      .dock-accessory-bar .history-row,
+      .dock-accessory-bar .chip-row,
+      .dock-accessory-bar .session-actions {
+        min-width: 0;
+      }
+
+      .dock-accessory-bar .dock-status,
+      .dock-accessory-bar .chip-row,
+      .dock-accessory-bar .history-actions,
+      .dock-accessory-bar .session-actions {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .dock-accessory-bar .dock-status::-webkit-scrollbar,
+      .dock-accessory-bar .chip-row::-webkit-scrollbar,
+      .dock-accessory-bar .history-actions::-webkit-scrollbar,
+      .dock-accessory-bar .session-actions::-webkit-scrollbar {
+        display: none;
+      }
+
+      .dock-accessory-bar .badge {
+        white-space: nowrap;
       }
 
       .chip-row,
@@ -165,6 +207,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 78%, transparent);
         color: var(--tp-terminal-color-text);
         padding: 0.3rem 0.5rem;
+      }
+
+      .dock[data-accessory-mode="bar"] .history-row {
+        gap: 0.42rem;
+        grid-template-columns: auto minmax(0, 1fr);
       }
 
       .history-command {
@@ -301,6 +348,19 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         color: var(--tp-terminal-color-text);
       }
 
+      .dock[data-placement="terminal"] .session-actions {
+        justify-content: flex-end;
+      }
+
+      .dock[data-placement="terminal"] .session-actions button {
+        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-radius: 0.45rem;
+        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
+        color: var(--tp-terminal-color-text);
+        padding: 0.3rem 0.48rem;
+        white-space: nowrap;
+      }
+
       .primary {
         border-color: color-mix(in srgb, var(--tp-color-accent) 52%, transparent);
         background: color-mix(in srgb, var(--tp-color-accent) 18%, var(--tp-color-panel-raised));
@@ -394,6 +454,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         .dock[data-placement="terminal"] details {
           display: none;
         }
+
+        .dock-accessory-bar {
+          grid-template-columns: 1fr;
+        }
+
+        .dock-accessory-bar .session-actions {
+          display: none;
+        }
       }
 
       @media (max-width: 720px) {
@@ -462,6 +530,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       ? `Confirm clearing ${historyCountLabel}`
       : `Clear ${historyCountLabel}`;
     const isTerminalPlacement = this.placement === "terminal";
+    const accessoryMode = resolveTerminalCommandDockAccessoryMode({ placement: this.placement });
 
     const headerTemplate = html`
       <div class="dock-header">
@@ -586,10 +655,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           </div>
         `;
 
-    const sessionToolsTemplate = html`
-      <details part="session-tools" data-testid="tp-session-tools">
-          <summary>Session tools</summary>
-          <div class="actions">
+    const sessionActionsTemplate = html`
+      <div class="actions session-actions" part="session-actions" data-testid="tp-session-actions">
             <button
               data-testid="tp-save-layout"
               title=${saveLayoutTitle}
@@ -618,18 +685,35 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
               ${isHistoryClearConfirming ? `Confirm clear ${controls.commandHistory.length}` : "Clear history"}
             </button>
           </div>
+    `;
+
+    const sessionToolsTemplate = html`
+      <details part="session-tools" data-testid="tp-session-tools">
+          <summary>Session tools</summary>
+          ${sessionActionsTemplate}
         </details>
+    `;
+
+    const accessoryBarTemplate = html`
+      <div
+        class="dock-accessory-bar"
+        part="terminal-accessories"
+        data-testid="tp-command-accessory-bar"
+        data-accessory-mode=${accessoryMode}
+        aria-label="Terminal command accessories"
+      >
+        ${headerTemplate}
+        ${quickCommandsTemplate}
+        ${commandHistoryTemplate}
+        ${sessionActionsTemplate}
+      </div>
     `;
 
     const orderedDockContent = isTerminalPlacement
       ? [
           composerTemplate,
           errorTemplate,
-          headerTemplate,
-          quickCommandsTemplate,
-          commandHistoryTemplate,
-          footerTemplate,
-          sessionToolsTemplate,
+          accessoryBarTemplate,
         ]
       : [
           headerTemplate,
@@ -651,6 +735,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         data-input-capability=${controls.inputCapabilityStatus}
         data-save-capability=${controls.saveCapabilityStatus}
         data-save-layout=${String(controls.canSaveLayout)}
+        data-accessory-mode=${accessoryMode}
       >
         ${orderedDockContent}
       </div>

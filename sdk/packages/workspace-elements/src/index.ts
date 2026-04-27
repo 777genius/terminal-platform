@@ -29,6 +29,12 @@ export {
 } from "./elements/terminal-command-composer-layout.js";
 export { TerminalCommandDockElement } from "./elements/terminal-command-dock-element.js";
 export {
+  TERMINAL_COMMAND_DOCK_ACCESSORY_MODES,
+  resolveTerminalCommandDockAccessoryMode,
+  type TerminalCommandDockAccessoryMode,
+  type TerminalCommandDockAccessoryOptions,
+} from "./elements/terminal-command-dock-accessories.js";
+export {
   resolveTerminalCommandDockControlState,
   type TerminalCommandDockCapabilityStatus,
   type TerminalCommandDockControlState,

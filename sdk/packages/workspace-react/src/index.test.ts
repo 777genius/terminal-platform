@@ -10,6 +10,8 @@ import type {
   TerminalCommandComposerDraftChangeDetail,
   TerminalCommandComposerHistoryNavigateDetail,
   TerminalCommandComposerShortcutDetail,
+  TerminalCommandDockAccessoryMode,
+  TerminalCommandDockAccessoryOptions,
   TerminalScreenChromeMode,
   TerminalScreenChromeState,
   TerminalWorkspaceInspectorMode,
@@ -67,6 +69,8 @@ type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandComposerActionId
   | TerminalCommandComposerActionOptions
   | TerminalCommandComposerActionPresentation
+  | TerminalCommandDockAccessoryMode
+  | TerminalCommandDockAccessoryOptions
   | TerminalScreenChromeMode
   | TerminalScreenChromeState
   | TerminalWorkspaceInspectorMode
@@ -89,6 +93,8 @@ describe("workspace react public api", () => {
     );
     expect(workspaceReact.resolveTerminalCommandComposerActions()[0]?.keyHint).toBe("Enter");
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
+    expect(workspaceReact.TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");
+    expect(workspaceReact.resolveTerminalCommandDockAccessoryMode({ placement: "terminal" })).toBe("bar");
     expect(workspaceReact.TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
     expect(typeof workspaceReact.resolveTerminalScreenChromeState).toBe("function");
     expect(workspaceReact.resolveTerminalCommandComposerRows("echo one\necho two")).toBe(2);

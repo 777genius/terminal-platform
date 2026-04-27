@@ -207,6 +207,10 @@ async function main() {
       || result.afterCreate.commandDockCanWrite !== "true"
       || result.afterCreate.commandDockInputCapability !== "known"
       || result.afterCreate.commandDockPlacement !== "terminal"
+      || result.afterCreate.commandDockAccessoryMode !== "bar"
+      || result.afterCreate.commandAccessoryBarMode !== "bar"
+      || !result.afterCreate.hasCommandAccessoryBar
+      || result.afterCreate.terminalCommandAccessoryBarHeight > 72
       || Math.abs(result.afterCreate.terminalComposerGapPx ?? 99) > 1
       || Math.abs(result.afterCreate.terminalInputGapPx ?? 99) > 1
       || result.afterCreate.terminalDockBottomOverflowPx !== 0
@@ -326,6 +330,10 @@ async function main() {
       || result.afterCreateMobileLayout.commandRegionTop > 900
       || Math.abs(result.afterCreateMobileLayout.terminalComposerGapPx ?? 99) > 1
       || Math.abs(result.afterCreateMobileLayout.terminalInputGapPx ?? 99) > 12
+      || result.afterCreateMobileLayout.commandDockAccessoryMode !== "bar"
+      || result.afterCreateMobileLayout.commandAccessoryBarMode !== "bar"
+      || !result.afterCreateMobileLayout.hasCommandAccessoryBar
+      || result.afterCreateMobileLayout.terminalCommandAccessoryBarHeight > 130
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatus
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatusDom
       || !result.afterCreateMobileLayout.terminalComposerFirstInDockDom
@@ -467,6 +475,7 @@ async function main() {
       || !result.afterSaveLayout.deletePrompted
       || result.afterSaveLayout.savedSessionCountAfterDeletePrompt !== result.afterSaveLayout.savedSessionCount
       || result.afterSaveLayout.saveEventDetail?.savedSessionCount !== result.afterSaveLayout.savedSessionCount
+      || !result.afterSaveLayout.saveLayoutInsideAccessoryBar
     ) {
       throw new Error(`Save layout workflow did not complete: ${JSON.stringify(result.afterSaveLayout)}`);
     }
@@ -777,6 +786,7 @@ async function runSmokeScenario(browserUrl) {
       const pasteClipboard = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
       const quickCommands = [...(commandRoot?.querySelectorAll('[data-testid="tp-quick-command"]') ?? [])];
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
+      const commandAccessoryBar = commandRoot?.querySelector('[data-testid="tp-command-accessory-bar"]') ?? null;
       const commandActivePane = commandRoot?.querySelector('[data-testid="tp-command-active-pane"]') ?? null;
       const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
       const commandActionButtons = [
@@ -814,6 +824,7 @@ async function runSmokeScenario(browserUrl) {
       const commandComposerInput = commandComposer?.querySelector('[part="input"]') ?? null;
       const commandComposerRect = commandComposer?.getBoundingClientRect() ?? null;
       const commandDockPanelRect = commandDockPanel?.getBoundingClientRect() ?? null;
+      const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect() ?? null;
       const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
       const inspectorDrawerSummary = inspectorDrawer?.querySelector('summary') ?? null;
       inspectorDrawerSummary?.click();
@@ -927,6 +938,9 @@ async function runSmokeScenario(browserUrl) {
         commandDockCanSave: commandDockPanel?.getAttribute('data-save-layout') ?? null,
         commandDockSaveCapability: commandDockPanel?.getAttribute('data-save-capability') ?? null,
         commandDockPlacement: commandDockPanel?.getAttribute('data-placement') ?? null,
+        commandDockAccessoryMode: commandDockPanel?.getAttribute('data-accessory-mode') ?? null,
+        commandAccessoryBarMode: commandAccessoryBar?.getAttribute('data-accessory-mode') ?? null,
+        hasCommandAccessoryBar: Boolean(commandAccessoryBar),
         terminalComposerGapPx: screenRect && commandRegionRect
           ? Math.round(commandRegionRect.top - screenRect.bottom)
           : null,
@@ -936,6 +950,7 @@ async function runSmokeScenario(browserUrl) {
         terminalDockBottomOverflowPx: commandDockPanelRect
           ? Math.max(0, Math.round(commandDockPanelRect.bottom - window.innerHeight))
           : null,
+        terminalCommandAccessoryBarHeight: Math.round(commandAccessoryBarRect?.height ?? 0),
         terminalComposerBeforeDockStatus: commandComposerRect && dockHeaderRect
           ? commandComposerRect.top <= dockHeaderRect.top
           : false,
@@ -1072,6 +1087,7 @@ async function runSmokeScenario(browserUrl) {
       const commandRegion = workspaceRoot?.querySelector('[data-testid="tp-workspace-command-region"]') ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
+      const commandAccessoryBar = commandRoot?.querySelector('[data-testid="tp-command-accessory-bar"]') ?? null;
       const commandComposer = commandRoot?.querySelector('[part="composer"]') ?? null;
       const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
       const commandActionButtons = [
@@ -1085,6 +1101,7 @@ async function runSmokeScenario(browserUrl) {
       const screenViewportRect = screenViewport?.getBoundingClientRect() ?? null;
       const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
       const commandDockPanelRect = commandDockPanel?.getBoundingClientRect() ?? null;
+      const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect() ?? null;
       const commandComposerRect = commandComposer?.getBoundingClientRect() ?? null;
       const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
       return {
@@ -1127,6 +1144,10 @@ async function runSmokeScenario(browserUrl) {
         terminalDockBottomOverflowPx: commandDockPanelRect
           ? Math.max(0, Math.round(commandDockPanelRect.bottom - window.innerHeight))
           : null,
+        commandDockAccessoryMode: commandDockPanel?.getAttribute('data-accessory-mode') ?? null,
+        commandAccessoryBarMode: commandAccessoryBar?.getAttribute('data-accessory-mode') ?? null,
+        hasCommandAccessoryBar: Boolean(commandAccessoryBar),
+        terminalCommandAccessoryBarHeight: Math.round(commandAccessoryBarRect?.height ?? 0),
         terminalComposerBeforeDockStatus: commandComposerRect && dockHeaderRect
           ? commandComposerRect.top <= dockHeaderRect.top
           : false,
@@ -1643,18 +1664,21 @@ async function runSmokeScenario(browserUrl) {
       const savedRoot = workspaceRoot?.querySelector('tp-terminal-saved-sessions')?.shadowRoot ?? null;
       const savedPanel = savedRoot?.querySelector('[data-testid="tp-saved-sessions"]') ?? null;
       const sessionTools = commandRoot?.querySelector('[data-testid="tp-session-tools"]') ?? null;
+      const commandAccessoryBar = commandRoot?.querySelector('[data-testid="tp-command-accessory-bar"]') ?? null;
       const saveLayoutButton = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
-      if (!sessionTools || !saveLayoutButton) {
+      if (!saveLayoutButton) {
         return {
           clicked: false,
-          reason: sessionTools ? 'save layout button missing' : 'session tools missing',
+          reason: 'save layout button missing',
           beforeSavedSessionCount,
           savedSessionCount: beforeSavedSessionCount,
           savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
         };
       }
 
-      sessionTools.open = true;
+      if (sessionTools) {
+        sessionTools.open = true;
+      }
       let saveEventDetail = null;
       workspaceHost?.addEventListener('tp-terminal-layout-saved', (event) => {
         saveEventDetail = event.detail ?? null;
@@ -1710,6 +1734,7 @@ async function runSmokeScenario(browserUrl) {
         firstSavedSemanticsCodes: restoreSemantics.map((note) => note.getAttribute('data-semantics-code')),
         firstSavedSemanticsLabels: restoreSemantics.map((note) => note.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
         saveEventDetail,
+        saveLayoutInsideAccessoryBar: Boolean(commandAccessoryBar && commandAccessoryBar.contains(saveLayoutButton)),
         ...deletePromptResult,
       };
     })()`);
@@ -1791,7 +1816,7 @@ async function runSmokeScenario(browserUrl) {
       const sessionTools = commandRoot?.querySelector('[data-testid="tp-session-tools"]') ?? null;
       const kernelCommands = window.terminalDemoDebug?.controller?.commands ?? null;
       const defaultProgram = new URL(window.location.href).searchParams.get('demoDefaultShellProgram') || 'zsh';
-      if (!workspaceHost || !commandRoot || !savedRoot || !sessionTools || !kernelCommands?.createSession) {
+      if (!workspaceHost || !commandRoot || !savedRoot || !kernelCommands?.createSession) {
         return {
           prompted: false,
           confirmed: false,
@@ -1805,7 +1830,9 @@ async function runSmokeScenario(browserUrl) {
         };
       }
 
-      sessionTools.open = true;
+      if (sessionTools) {
+        sessionTools.open = true;
+      }
       let savedCount = window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
       let setupAttempts = 0;
       while (savedCount < 5 && setupAttempts < 8) {
@@ -2481,7 +2508,7 @@ async function runSmokeScenario(browserUrl) {
       const sessionTools = commandRoot?.querySelector('[data-testid="tp-session-tools"]') ?? null;
       const clearButton = commandRoot?.querySelector('[data-testid="tp-clear-command-history"]') ?? null;
       const beforeCount = window.terminalDemoDebug?.getState?.()?.commandHistory?.entries?.length ?? 0;
-      if (!workspaceHost || !sessionTools || !clearButton) {
+      if (!workspaceHost || !clearButton) {
         return {
           clicked: false,
           reason: 'clear history controls missing',
@@ -2504,7 +2531,9 @@ async function runSmokeScenario(browserUrl) {
         clearedEvents += 1;
       }, { once: true });
 
-      sessionTools.open = true;
+      if (sessionTools) {
+        sessionTools.open = true;
+      }
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       if (clearButton.disabled) {
         return {
