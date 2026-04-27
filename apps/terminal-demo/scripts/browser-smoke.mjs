@@ -264,6 +264,11 @@ async function main() {
       || result.afterCreate.commandInputRows !== 1
       || result.afterCreate.commandInputRowCount !== "1"
       || result.afterCreate.commandInputMultiline !== "false"
+      || result.afterCreate.commandInputAutocomplete !== "off"
+      || result.afterCreate.commandInputAutocapitalize !== "off"
+      || result.afterCreate.commandInputAutocorrect !== "off"
+      || result.afterCreate.commandInputEnterKeyHint !== "send"
+      || result.afterCreate.commandInputSpellcheck !== "false"
       || result.afterCreate.commandInputDescribedBy !== "tp-command-input-status"
       || !result.afterCreate.commandInputDescribedByResolves
       || result.afterCreate.commandInputStatusLive !== "polite"
@@ -1187,6 +1192,11 @@ async function runSmokeScenario(browserUrl) {
         commandInputRows: input?.rows ?? null,
         commandInputRowCount: input?.getAttribute('data-row-count') ?? null,
         commandInputMultiline: input?.getAttribute('data-multiline') ?? null,
+        commandInputAutocomplete: input?.getAttribute('autocomplete') ?? null,
+        commandInputAutocapitalize: input?.getAttribute('autocapitalize') ?? null,
+        commandInputAutocorrect: input?.getAttribute('autocorrect') ?? null,
+        commandInputEnterKeyHint: input?.getAttribute('enterkeyhint') ?? null,
+        commandInputSpellcheck: input?.getAttribute('spellcheck') ?? null,
         commandInputDescribedBy: input?.getAttribute('aria-describedby') ?? null,
         commandInputDescribedByResolves: Boolean(
           input?.getAttribute('aria-describedby')

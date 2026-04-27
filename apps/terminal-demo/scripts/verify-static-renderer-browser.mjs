@@ -63,6 +63,11 @@ async function main() {
       || !result.hasTerminalScreen
       || result.commandInputRows !== 1
       || result.commandInputPlaceholder !== "Type shell input for the focused pane"
+      || result.commandInputAutocomplete !== "off"
+      || result.commandInputAutocapitalize !== "off"
+      || result.commandInputAutocorrect !== "off"
+      || result.commandInputEnterKeyHint !== "send"
+      || result.commandInputSpellcheck !== "false"
       || result.commandInputStatus !== "Ready"
       || result.commandInputDescribedBy !== "tp-command-input-status"
       || !result.commandInputDescribedByResolves
@@ -511,6 +516,11 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         hasTerminalScreen: Boolean(screenRoot),
         commandInputRows: input?.rows ?? null,
         commandInputPlaceholder: input?.placeholder ?? null,
+        commandInputAutocomplete: input?.getAttribute('autocomplete') ?? null,
+        commandInputAutocapitalize: input?.getAttribute('autocapitalize') ?? null,
+        commandInputAutocorrect: input?.getAttribute('autocorrect') ?? null,
+        commandInputEnterKeyHint: input?.getAttribute('enterkeyhint') ?? null,
+        commandInputSpellcheck: input?.getAttribute('spellcheck') ?? null,
         commandInputStatus: commandInputStatus?.textContent?.trim() ?? null,
         commandInputDescribedBy: input?.getAttribute('aria-describedby') ?? null,
         commandInputDescribedByResolves: Boolean(

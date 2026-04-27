@@ -814,6 +814,26 @@ const terminalLayoutSourceContracts = [
         marker: "data-row-count",
       },
       {
+        label: "composer disables browser autocomplete for shell input",
+        marker: 'autocomplete="off"',
+      },
+      {
+        label: "composer disables browser autocapitalize for shell input",
+        marker: 'autocapitalize="off"',
+      },
+      {
+        label: "composer disables browser autocorrect for shell input",
+        marker: 'autocorrect="off"',
+      },
+      {
+        label: "composer presents terminal submit semantics to mobile keyboards",
+        marker: 'enterkeyhint="send"',
+      },
+      {
+        label: "composer disables spellcheck for shell input",
+        marker: 'spellcheck="false"',
+      },
+      {
         label: "composer can describe the input from host status text",
         marker: "aria-describedby=${this.inputDescriptionId || nothing}",
       },

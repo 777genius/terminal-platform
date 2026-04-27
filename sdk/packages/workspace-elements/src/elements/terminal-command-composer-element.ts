@@ -95,7 +95,12 @@ export class TerminalCommandComposerElement extends LitElement {
         name="tp-command-input"
         .value=${this.draft}
         ?disabled=${!this.canWriteInput}
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
+        enterkeyhint="send"
         placeholder=${this.placeholder}
+        spellcheck="false"
         aria-label="Focused pane command input"
         aria-describedby=${this.inputDescriptionId || nothing}
         rows=${rowCount}
