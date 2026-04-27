@@ -16,6 +16,11 @@ import type {
   TerminalCommandDockAccessoryOptions,
   TerminalCommandDockAccessoryState,
   TerminalCommandDockAccessoryStateOptions,
+  TerminalCommandDockSessionActionId,
+  TerminalCommandDockSessionActionLabelMode,
+  TerminalCommandDockSessionActionOptions,
+  TerminalCommandDockSessionActionPlacement,
+  TerminalCommandDockSessionActionPresentation,
   TerminalCommandDockSessionActionTone,
   TerminalScreenActionId,
   TerminalScreenActionLabelMode,
@@ -89,6 +94,11 @@ type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandDockAccessoryOptions
   | TerminalCommandDockAccessoryState
   | TerminalCommandDockAccessoryStateOptions
+  | TerminalCommandDockSessionActionId
+  | TerminalCommandDockSessionActionLabelMode
+  | TerminalCommandDockSessionActionOptions
+  | TerminalCommandDockSessionActionPlacement
+  | TerminalCommandDockSessionActionPresentation
   | TerminalCommandDockSessionActionTone
   | TerminalScreenActionId
   | TerminalScreenActionLabelMode
@@ -133,6 +143,31 @@ describe("workspace react public api", () => {
       .join("|")).toBe("glyph|glyph|glyph");
     expect(workspaceReact.TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");
     expect(workspaceReact.resolveTerminalCommandDockAccessoryMode({ placement: "terminal" })).toBe("bar");
+    expect(workspaceReact.TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe("save-layout");
+    expect(workspaceReact.resolveTerminalCommandDockSessionActions({
+      activePaneId: "pane-1",
+      activeSessionId: "session-1",
+      canPasteClipboard: true,
+      canSaveLayout: true,
+      canSend: true,
+      canUsePane: true,
+      canWriteInput: true,
+      commandHistory: ["pwd"],
+      draft: "pwd",
+      inputCapabilityStatus: "known",
+      pasteCapabilityStatus: "known",
+      recentCommandEntries: [{
+        ariaLabel: "Use recent command pwd",
+        historyIndex: 0,
+        id: "history-1",
+        index: 0,
+        label: "pwd",
+        title: "pwd",
+        value: "pwd",
+      }],
+      recentCommands: ["pwd"],
+      saveCapabilityStatus: "known",
+    }, { placement: "terminal" }).map((action) => action.labelMode).join("|")).toBe("glyph|glyph|glyph");
     expect(workspaceReact.resolveTerminalCommandDockAccessoryState({
       placement: "terminal",
       quickCommandCount: 5,

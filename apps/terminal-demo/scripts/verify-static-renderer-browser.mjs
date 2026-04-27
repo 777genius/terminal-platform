@@ -133,10 +133,12 @@ async function main() {
       || result.navigationDrawerClosedSummaryAction !== "Open"
       || result.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
       || result.terminalSessionActionTones.join("|") !== "secondary|secondary|danger"
+      || result.terminalSessionActionLabelModes.join("|") !== "glyph|glyph|glyph"
+      || result.terminalSessionActionPlacements.join("|") !== "terminal|terminal|terminal"
       || !result.terminalSessionSecondaryToneStyle
       || !result.terminalSessionDangerToneStyle
       || result.terminalSessionDangerToneStyle.color === result.terminalSessionSecondaryToneStyle.color
-      || result.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
+      || result.terminalSessionActionLabels.join("|") !== "\u21e9|\u21bb|\u232b"
       || result.terminalSessionActionAriaLabels[0] !== "Save the focused session layout"
       || result.terminalSessionActionAriaLabels[1] !== "Refresh the active terminal session"
       || !/^Clear \d+ command history entr(?:y|ies)$/.test(result.terminalSessionActionAriaLabels[2] ?? "")
@@ -551,6 +553,12 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
         terminalSessionActionTones: sessionActionButtons.map((button) =>
           button.getAttribute('data-session-action-tone') ?? '',
+        ),
+        terminalSessionActionLabelModes: sessionActionButtons.map((button) =>
+          button.getAttribute('data-session-action-label-mode') ?? '',
+        ),
+        terminalSessionActionPlacements: sessionActionButtons.map((button) =>
+          button.getAttribute('data-session-action-placement') ?? '',
         ),
         terminalSessionSecondaryToneStyle: readActionToneStyle(sessionActionButtons[0]),
         terminalSessionDangerToneStyle: readActionToneStyle(

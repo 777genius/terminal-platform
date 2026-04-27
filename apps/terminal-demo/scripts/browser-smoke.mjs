@@ -267,12 +267,14 @@ async function main() {
       || result.afterCreate.terminalFooterActionCount !== 0
       || result.afterCreate.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
       || result.afterCreate.terminalSessionActionTones.join("|") !== "secondary|secondary|danger"
-      || result.afterCreate.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
+      || result.afterCreate.terminalSessionActionLabelModes.join("|") !== "glyph|glyph|glyph"
+      || result.afterCreate.terminalSessionActionPlacements.join("|") !== "terminal|terminal|terminal"
+      || result.afterCreate.terminalSessionActionLabels.join("|") !== "\u21e9|\u21bb|\u232b"
       || result.afterCreate.terminalSessionActionAriaLabels.join("|") !== "Save the focused session layout|Refresh the active terminal session|Clear 0 command history entries"
       || result.afterCreate.terminalSessionActionTitles.join("|") !== "Save the focused session layout|Refresh the active terminal session|Clear 0 command history entries"
       || result.afterCreate.terminalSessionActionDangerFlags.join("|") !== "||true"
       || result.afterCreate.terminalSessionActionConfirmingFlags.join("|") !== "false|false|false"
-      || /Command Input|Focused pane command lane|Save layout|Refresh terminal|Clear history/.test(result.afterCreate.commandDockVisibleText ?? "")
+      || /Command Input|Focused pane command lane|Save layout|Refresh terminal|Clear history|Save|Refresh|Clear/.test(result.afterCreate.commandDockVisibleText ?? "")
       || result.afterCreate.commandInputStatus !== "Ready"
       || !result.afterCreate.commandInputFocused
       || !result.afterCreate.focusedPaneBadgeText?.includes("Focused pane")
@@ -425,7 +427,9 @@ async function main() {
       || result.afterCreateMobileLayout.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
       || result.afterCreateMobileLayout.terminalSessionActionIds.join("|") !== "save-layout|refresh-terminal|clear-command-history"
       || result.afterCreateMobileLayout.terminalSessionActionTones.join("|") !== "secondary|secondary|danger"
-      || result.afterCreateMobileLayout.terminalSessionActionLabels.join("|") !== "Save|Refresh|Clear"
+      || result.afterCreateMobileLayout.terminalSessionActionLabelModes.join("|") !== "glyph|glyph|glyph"
+      || result.afterCreateMobileLayout.terminalSessionActionPlacements.join("|") !== "terminal|terminal|terminal"
+      || result.afterCreateMobileLayout.terminalSessionActionLabels.join("|") !== "\u21e9|\u21bb|\u232b"
       || result.afterCreateMobileLayout.terminalSessionActionAriaLabels.join("|") !== "Save the focused session layout|Refresh the active terminal session|Clear 0 command history entries"
       || result.afterCreateMobileLayout.commandInputRows !== 1
       || result.afterCreateMobileLayout.commandInputRowCount !== "1"
@@ -1177,6 +1181,12 @@ async function runSmokeScenario(browserUrl) {
         terminalSessionActionTones: sessionActionButtons.map((button) =>
           button.getAttribute('data-session-action-tone') ?? '',
         ),
+        terminalSessionActionLabelModes: sessionActionButtons.map((button) =>
+          button.getAttribute('data-session-action-label-mode') ?? '',
+        ),
+        terminalSessionActionPlacements: sessionActionButtons.map((button) =>
+          button.getAttribute('data-session-action-placement') ?? '',
+        ),
         terminalSessionActionLabels: sessionActionButtons.map((button) =>
           button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),
@@ -1478,6 +1488,12 @@ async function runSmokeScenario(browserUrl) {
         terminalSessionActionIds: sessionActionButtons.map((button) => button.getAttribute('data-session-action')),
         terminalSessionActionTones: sessionActionButtons.map((button) =>
           button.getAttribute('data-session-action-tone') ?? '',
+        ),
+        terminalSessionActionLabelModes: sessionActionButtons.map((button) =>
+          button.getAttribute('data-session-action-label-mode') ?? '',
+        ),
+        terminalSessionActionPlacements: sessionActionButtons.map((button) =>
+          button.getAttribute('data-session-action-placement') ?? '',
         ),
         terminalSessionActionLabels: sessionActionButtons.map((button) =>
           button.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
@@ -3164,6 +3180,7 @@ async function runSmokeScenario(browserUrl) {
     };
   } finally {
     await closeWebSocket(socket);
+    await closePageTarget(target.id);
   }
 }
 

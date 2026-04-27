@@ -11,6 +11,7 @@ export type TerminalCommandDockSessionActionId =
 
 export type TerminalCommandDockSessionActionPlacement = "panel" | "terminal";
 export type TerminalCommandDockSessionActionTone = "danger" | "secondary";
+export type TerminalCommandDockSessionActionLabelMode = "glyph" | "label";
 
 export interface TerminalCommandDockSessionActionOptions {
   historyClearConfirmationArmed?: boolean;
@@ -26,6 +27,8 @@ export interface TerminalCommandDockSessionActionPresentation {
   readonly historyCount: number | null;
   readonly id: TerminalCommandDockSessionActionId;
   readonly label: string;
+  readonly labelMode: TerminalCommandDockSessionActionLabelMode;
+  readonly placement: TerminalCommandDockSessionActionPlacement;
   readonly testId: string;
   readonly title: string;
   readonly tone: TerminalCommandDockSessionActionTone;
@@ -50,7 +53,9 @@ export function resolveTerminalCommandDockSessionActions(
     {
       id: TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout,
       testId: "tp-save-layout",
-      label: compact ? "Save" : "Save layout",
+      label: compact ? "\u21e9" : "Save layout",
+      labelMode: resolveTerminalCommandDockSessionActionLabelMode(compact),
+      placement,
       title: resolveSaveLayoutTitle(controls),
       ariaLabel: "Save the focused session layout",
       disabled: !controls.canSaveLayout,
@@ -62,7 +67,9 @@ export function resolveTerminalCommandDockSessionActions(
     {
       id: TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.refreshTerminal,
       testId: "tp-refresh-terminal",
-      label: compact ? "Refresh" : "Refresh terminal",
+      label: compact ? "\u21bb" : "Refresh terminal",
+      labelMode: resolveTerminalCommandDockSessionActionLabelMode(compact),
+      placement,
       title: "Refresh the active terminal session",
       ariaLabel: "Refresh the active terminal session",
       disabled: !controls.activeSessionId || pending,
@@ -77,8 +84,12 @@ export function resolveTerminalCommandDockSessionActions(
       label: confirmingHistoryClear
         ? `Confirm clear ${historyCount}`
         : compact
-          ? "Clear"
+          ? "\u232b"
           : "Clear history",
+      labelMode: confirmingHistoryClear
+        ? "label"
+        : resolveTerminalCommandDockSessionActionLabelMode(compact),
+      placement,
       title: confirmingHistoryClear
         ? `Confirm clearing ${historyCountLabel}`
         : `Clear ${historyCountLabel}`,
@@ -114,4 +125,10 @@ function normalizeTerminalCommandDockSessionActionPlacement(
 
 function formatCommandHistoryCount(count: number): string {
   return `${count} command history ${count === 1 ? "entry" : "entries"}`;
+}
+
+function resolveTerminalCommandDockSessionActionLabelMode(
+  compact: boolean,
+): TerminalCommandDockSessionActionLabelMode {
+  return compact ? "glyph" : "label";
 }

@@ -76,6 +76,7 @@ import {
   type TerminalCommandDockCapabilityStatus,
   type TerminalCommandDockControlState,
   type TerminalCommandDockSessionActionId,
+  type TerminalCommandDockSessionActionLabelMode,
   type TerminalCommandDockSessionActionOptions,
   type TerminalCommandDockSessionActionPlacement,
   type TerminalCommandDockSessionActionPresentation,
@@ -176,6 +177,7 @@ type PublicControlTypes =
   | TerminalCommandDockCapabilityStatus
   | TerminalCommandDockControlState
   | TerminalCommandDockSessionActionId
+  | TerminalCommandDockSessionActionLabelMode
   | TerminalCommandDockSessionActionOptions
   | TerminalCommandDockSessionActionPlacement
   | TerminalCommandDockSessionActionPresentation

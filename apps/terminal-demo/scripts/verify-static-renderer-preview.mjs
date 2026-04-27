@@ -205,12 +205,24 @@ const terminalLayoutSourceContracts = [
         marker: "data-session-action=${action.id}",
       },
       {
+        label: "session actions expose label mode for compact adapters",
+        marker: "data-session-action-label-mode=${action.labelMode}",
+      },
+      {
+        label: "session actions expose placement for layout adapters",
+        marker: "data-session-action-placement=${action.placement}",
+      },
+      {
         label: "session actions expose action tone for theme adapters",
         marker: "data-session-action-tone=${action.tone}",
       },
       {
         label: "session danger tone drives visual state",
         marker: 'button[data-session-action-tone="danger"]',
+      },
+      {
+        label: "session compact glyph mode drives terminal styling",
+        marker: 'button[data-session-action-label-mode="glyph"]',
       },
       {
         label: "composer primary tone drives terminal styling",
@@ -520,12 +532,20 @@ const terminalLayoutSourceContracts = [
         marker: "export function resolveTerminalCommandDockSessionActions",
       },
       {
-        label: "terminal placement uses compact save label",
-        marker: 'label: compact ? "Save" : "Save layout"',
+        label: "session action label mode is a public presentation contract",
+        marker: "TerminalCommandDockSessionActionLabelMode",
       },
       {
-        label: "terminal placement uses compact refresh label",
-        marker: 'label: compact ? "Refresh" : "Refresh terminal"',
+        label: "terminal placement uses compact save glyph",
+        marker: 'label: compact ? "\\u21e9" : "Save layout"',
+      },
+      {
+        label: "terminal placement uses compact refresh glyph",
+        marker: 'label: compact ? "\\u21bb" : "Refresh terminal"',
+      },
+      {
+        label: "terminal placement uses compact clear glyph",
+        marker: '? "\\u232b"',
       },
       {
         label: "clear history still requires explicit confirmation",

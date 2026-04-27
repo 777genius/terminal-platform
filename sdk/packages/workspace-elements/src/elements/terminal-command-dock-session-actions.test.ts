@@ -7,7 +7,7 @@ import {
 } from "./terminal-command-dock-session-actions.js";
 
 describe("terminal command dock session actions", () => {
-  it("uses compact command labels for terminal placement", () => {
+  it("uses compact command glyphs for terminal placement", () => {
     const actions = resolveTerminalCommandDockSessionActions(createControls(), {
       placement: "terminal",
     });
@@ -17,7 +17,9 @@ describe("terminal command dock session actions", () => {
       TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.refreshTerminal,
       TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.clearCommandHistory,
     ]);
-    expect(actions.map((action) => action.label)).toEqual(["Save", "Refresh", "Clear"]);
+    expect(actions.map((action) => action.label)).toEqual(["\u21e9", "\u21bb", "\u232b"]);
+    expect(actions.map((action) => action.labelMode)).toEqual(["glyph", "glyph", "glyph"]);
+    expect(actions.map((action) => action.placement)).toEqual(["terminal", "terminal", "terminal"]);
     expect(actions.map((action) => action.testId)).toEqual([
       "tp-save-layout",
       "tp-refresh-terminal",
@@ -38,6 +40,8 @@ describe("terminal command dock session actions", () => {
       "Refresh terminal",
       "Clear history",
     ]);
+    expect(actions.map((action) => action.labelMode)).toEqual(["label", "label", "label"]);
+    expect(actions.map((action) => action.placement)).toEqual(["panel", "panel", "panel"]);
   });
 
   it("models degraded save-layout capability in presentation state", () => {
@@ -70,6 +74,8 @@ describe("terminal command dock session actions", () => {
       disabled: false,
       historyCount: 2,
       label: "Confirm clear 2",
+      labelMode: "label",
+      placement: "terminal",
       title: "Confirm clearing 2 command history entries",
     });
   });
@@ -81,8 +87,8 @@ describe("terminal command dock session actions", () => {
       placement: "terminal",
     });
 
-    expect(pendingActions[1]).toMatchObject({ disabled: true, label: "Refresh" });
-    expect(pendingActions[2]).toMatchObject({ confirming: false, disabled: true, label: "Clear" });
+    expect(pendingActions[1]).toMatchObject({ disabled: true, label: "\u21bb" });
+    expect(pendingActions[2]).toMatchObject({ confirming: false, disabled: true, label: "\u232b" });
 
     const idleActions = resolveTerminalCommandDockSessionActions(createControls({
       activeSessionId: null,

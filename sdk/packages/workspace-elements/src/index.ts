@@ -54,6 +54,7 @@ export {
   TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS,
   resolveTerminalCommandDockSessionActions,
   type TerminalCommandDockSessionActionId,
+  type TerminalCommandDockSessionActionLabelMode,
   type TerminalCommandDockSessionActionOptions,
   type TerminalCommandDockSessionActionPlacement,
   type TerminalCommandDockSessionActionPresentation,

@@ -397,12 +397,26 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .session-actions button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
         border-radius: 0.45rem;
         background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
         color: var(--tp-terminal-color-text);
+        min-width: 2.15rem;
         padding: 0.3rem 0.48rem;
         white-space: nowrap;
+      }
+
+      .dock[data-placement="terminal"] .session-actions button[data-session-action-label-mode="glyph"] {
+        inline-size: 2.2rem;
+        min-width: 2.2rem;
+        aspect-ratio: 1;
+        padding: 0;
+        font-family: var(--tp-font-family-mono);
+        font-size: 0.92rem;
+        line-height: 1;
       }
 
       .primary {
@@ -747,6 +761,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                 <button
                   data-testid=${action.testId}
                   data-session-action=${action.id}
+                  data-session-action-label-mode=${action.labelMode}
+                  data-session-action-placement=${action.placement}
                   data-session-action-tone=${action.tone}
                   data-danger=${action.dangerous ? "true" : nothing}
                   data-confirming=${String(action.confirming)}
