@@ -136,7 +136,7 @@ function createRuntime(overrides = {}) {
     }),
     listSessions: async () => overrides.listSessions ?? [],
     listSavedSessions: async () => [],
-    discoverSessions: async () => [
+    discoverSessions: async (backend) => overrides.discoverSessions?.(backend) ?? [
       {
         route: {
           backend: "tmux",
@@ -313,6 +313,80 @@ test("gateway exposes raw workspace handshake for SDK clients", loopbackTestOpti
     assert.deepEqual(handshake.available_backends, ["native", "tmux"]);
     assert.equal(capabilities.backend, "native");
     assert.equal(capabilities.capabilities.pane_split, true);
+  } finally {
+    await client.close();
+    await gateway.dispose();
+  }
+});
+
+test("gateway rejects malformed control payloads before application ports", loopbackTestOptions, async () => {
+  let discoverCalls = 0;
+  const runtime = createRuntime({
+    discoverSessions: async () => {
+      discoverCalls += 1;
+      return [];
+    },
+  });
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(runtime),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(runtime),
+  });
+
+  const client = createControlClient(gateway.controlPlaneUrl);
+  try {
+    await client.connect();
+
+    await assert.rejects(
+      () => client.request("discover_sessions", { backend: "screen" }),
+      /Gateway payload backend must be one of: native, tmux, zellij/,
+    );
+    await assert.rejects(
+      () => client.request("restore_saved_session", { sessionId: 42 }),
+      /Gateway payload sessionId must be a non-empty string/,
+    );
+    await assert.rejects(
+      () => client.request("dispatch_mux_command", {
+        sessionId: "session-1",
+        command: { kind: "shell_escape" },
+      }),
+      /Gateway payload command.kind is unsupported/,
+    );
+    await assert.rejects(
+      () => client.request("dispatch_mux_command", {
+        sessionId: "session-1",
+        command: {
+          kind: "send_input",
+          pane_id: "pane-1",
+        },
+      }),
+      /Gateway payload data must be a non-empty string/,
+    );
+    await assert.rejects(
+      () => client.request("dispatch_mux_command", {
+        sessionId: "session-1",
+        command: {
+          kind: "split_pane",
+          pane_id: "pane-1",
+          direction: "diagonal",
+        },
+      }),
+      /Gateway payload command.direction is unsupported/,
+    );
+    await assert.rejects(
+      () => client.request("dispatch_mux_command", {
+        sessionId: "session-1",
+        command: {
+          kind: "resize_pane",
+          pane_id: "pane-1",
+          rows: 24.5,
+          cols: 80,
+        },
+      }),
+      /Gateway payload rows must be an integer/,
+    );
+
+    assert.equal(discoverCalls, 0);
   } finally {
     await client.close();
     await gateway.dispose();

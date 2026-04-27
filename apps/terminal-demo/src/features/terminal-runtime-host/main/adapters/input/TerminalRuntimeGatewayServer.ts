@@ -2,7 +2,15 @@ import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import type { TerminalDiscoveredSession } from "@features/terminal-workspace-kernel/contracts";
+import type {
+  TerminalBackendKind,
+  TerminalCreateNativeSessionInput,
+  TerminalDiscoveredSession,
+  TerminalImportSessionInput,
+  TerminalMuxCommand,
+  TerminalShellLaunchSpec,
+  TerminalSplitDirection,
+} from "@features/terminal-workspace-kernel/contracts";
 import { buildDiscoveredSessionDegradedSemantics } from "@features/terminal-workspace-kernel/contracts";
 import type {
   TerminalGatewayControlClientMessage,
@@ -66,6 +74,30 @@ type GatewayControlResponseMessage =
       ok: false;
       error: TerminalGatewayErrorEnvelope;
     };
+
+type GatewayPayloadRecord = Record<string, unknown>;
+type TerminalPlatformClient = Awaited<ReturnType<TerminalPlatformClientProvider["getClient"]>>;
+type TerminalPlatformCreateSessionRequest = Parameters<TerminalPlatformClient["createNativeSession"]>[0];
+type TerminalPlatformSessionRoute = Parameters<TerminalPlatformClient["importSession"]>[0];
+type TerminalPlatformMuxCommand = Parameters<TerminalPlatformClient["dispatchMuxCommand"]>[1];
+
+const TERMINAL_BACKEND_KINDS = new Set<TerminalBackendKind>(["native", "tmux", "zellij"]);
+const TERMINAL_MUX_COMMAND_KINDS = new Set<TerminalMuxCommand["kind"]>([
+  "split_pane",
+  "close_pane",
+  "focus_pane",
+  "resize_pane",
+  "new_tab",
+  "close_tab",
+  "focus_tab",
+  "rename_tab",
+  "send_input",
+  "send_paste",
+  "detach",
+  "save_session",
+  "override_layout",
+]);
+const TERMINAL_SPLIT_DIRECTIONS = new Set<TerminalSplitDirection>(["horizontal", "vertical"]);
 
 export class TerminalRuntimeGatewayServer {
   readonly #runtimeSlug: string;
@@ -249,25 +281,27 @@ export class TerminalRuntimeGatewayServer {
       case "list_saved_sessions":
         return this.#controlService.listSavedSessions();
       case "discover_sessions": {
-        this.clearImportHandlesForBackend(connection, payload.backend);
-        const discovered = await this.#controlService.discoverSessions(payload.backend);
+        const backend = readBackendPayload(payload);
+        this.clearImportHandlesForBackend(connection, backend);
+        const discovered = await this.#controlService.discoverSessions(backend);
         return discovered.map((session) => this.registerImportHandle(connection, session));
       }
       case "backend_capabilities":
-        return this.#controlService.backendCapabilities(payload.backend);
+        return this.#controlService.backendCapabilities(readBackendPayload(payload));
       case "create_native_session":
-        return this.#controlService.createNativeSession(payload);
+        return this.#controlService.createNativeSession(readCreateNativeSessionPayload(payload));
       case "import_session": {
-        const discovered = connection.importHandles.get(payload.importHandle);
+        const importPayload = readImportSessionPayload(payload);
+        const discovered = connection.importHandles.get(importPayload.importHandle);
         if (!discovered) {
-          throw new Error(`Unknown import handle ${payload.importHandle}`);
+          throw new Error(`Unknown import handle ${importPayload.importHandle}`);
         }
 
         return this.#controlService.importSession(
-          payload.title
+          importPayload.title
             ? {
                 route: discovered.route,
-                title: payload.title,
+                title: importPayload.title,
               }
             : {
                 route: discovered.route,
@@ -275,13 +309,13 @@ export class TerminalRuntimeGatewayServer {
         );
       }
       case "restore_saved_session":
-        return this.#controlService.restoreSavedSession(payload.sessionId);
+        return this.#controlService.restoreSavedSession(readStringPayload(payload, "sessionId"));
       case "delete_saved_session":
-        return this.#controlService.deleteSavedSession(payload.sessionId);
+        return this.#controlService.deleteSavedSession(readStringPayload(payload, "sessionId"));
       case "dispatch_mux_command":
         return this.#controlService.dispatchMuxCommand(
-          payload.sessionId,
-          payload.command,
+          readStringPayload(payload, "sessionId"),
+          readMuxCommandPayload(payload),
         );
       case "workspace_handshake": {
         const client = await this.#clientProvider.getClient();
@@ -297,63 +331,76 @@ export class TerminalRuntimeGatewayServer {
       }
       case "workspace_discover_sessions": {
         const client = await this.#clientProvider.getClient();
-        return client.discoverSessions(payload.backend);
+        return client.discoverSessions(readBackendPayload(payload));
       }
       case "workspace_backend_capabilities": {
         const client = await this.#clientProvider.getClient();
-        return client.backendCapabilities(payload.backend);
+        return client.backendCapabilities(readBackendPayload(payload));
       }
       case "workspace_create_session": {
-        if (payload.backend !== "native") {
-          throw new Error(`Unsupported backend ${payload.backend}`);
+        const backend = readBackendPayload(payload);
+        if (backend !== "native") {
+          throw new Error(`Unsupported backend ${backend}`);
         }
 
         const client = await this.#clientProvider.getClient();
-        return client.createNativeSession(payload.request ?? undefined);
+        return client.createNativeSession(readOptionalObjectPayload<TerminalPlatformCreateSessionRequest>(
+          payload,
+          "request",
+        ));
       }
       case "workspace_import_session": {
         const client = await this.#clientProvider.getClient();
-        return client.importSession(payload.route, payload.title ?? null);
+        return client.importSession(
+          readObjectPayload<TerminalPlatformSessionRoute>(payload, "route"),
+          readOptionalStringPayload(payload, "title") ?? null,
+        );
       }
       case "workspace_saved_session": {
         const client = await this.#clientProvider.getClient();
-        return client.savedSession(payload.sessionId);
+        return client.savedSession(readStringPayload(payload, "sessionId"));
       }
       case "workspace_prune_saved_sessions": {
         const client = await this.#clientProvider.getClient();
-        return client.pruneSavedSessions(payload.keepLatest);
+        return client.pruneSavedSessions(readNumberPayload(payload, "keepLatest"));
       }
       case "workspace_restore_saved_session": {
         const client = await this.#clientProvider.getClient();
-        return client.restoreSavedSession(payload.sessionId);
+        return client.restoreSavedSession(readStringPayload(payload, "sessionId"));
       }
       case "workspace_delete_saved_session": {
         const client = await this.#clientProvider.getClient();
-        return client.deleteSavedSession(payload.sessionId);
+        return client.deleteSavedSession(readStringPayload(payload, "sessionId"));
       }
       case "workspace_attach_session": {
         const client = await this.#clientProvider.getClient();
-        return client.attachSession(payload.sessionId);
+        return client.attachSession(readStringPayload(payload, "sessionId"));
       }
       case "workspace_topology_snapshot": {
         const client = await this.#clientProvider.getClient();
-        return client.topologySnapshot(payload.sessionId);
+        return client.topologySnapshot(readStringPayload(payload, "sessionId"));
       }
       case "workspace_screen_snapshot": {
         const client = await this.#clientProvider.getClient();
-        return client.screenSnapshot(payload.sessionId, payload.paneId);
+        return client.screenSnapshot(
+          readStringPayload(payload, "sessionId"),
+          readStringPayload(payload, "paneId"),
+        );
       }
       case "workspace_screen_delta": {
         const client = await this.#clientProvider.getClient();
         return client.screenDelta(
-          payload.sessionId,
-          payload.paneId,
-          Number(payload.fromSequence),
+          readStringPayload(payload, "sessionId"),
+          readStringPayload(payload, "paneId"),
+          readNumberPayload(payload, "fromSequence"),
         );
       }
       case "workspace_dispatch_mux_command": {
         const client = await this.#clientProvider.getClient();
-        return client.dispatchMuxCommand(payload.sessionId, payload.command);
+        return client.dispatchMuxCommand(
+          readStringPayload(payload, "sessionId"),
+          readObjectPayload<TerminalPlatformMuxCommand>(payload, "command"),
+        );
       }
       default:
         throw new Error("Unsupported gateway control method");
@@ -543,9 +590,9 @@ function parseGatewayPlane(pathname: string): "control" | "stream" | null {
 }
 
 function parseControlClientMessage(payload: string): GatewayControlRequestMessage {
-  const parsed = decodeGatewayPayload<Partial<GatewayControlRequestMessage>>(payload);
+  const parsed = decodeGatewayPayload(payload);
 
-  if (parsed.type !== "request") {
+  if (!isGatewayPayloadRecord(parsed) || parsed.type !== "request") {
     throw new Error("Gateway control payload must be a request envelope");
   }
 
@@ -557,11 +604,20 @@ function parseControlClientMessage(payload: string): GatewayControlRequestMessag
     throw new Error("Gateway control method must be a non-empty string");
   }
 
-  return parsed as GatewayControlRequestMessage;
+  return {
+    type: "request",
+    requestId: parsed.requestId,
+    method: parsed.method,
+    payload: parsed.payload,
+  };
 }
 
 function parseStreamClientMessage(payload: string): TerminalGatewayStreamClientMessage {
-  const parsed = decodeGatewayPayload<Partial<TerminalGatewayStreamClientMessage>>(payload);
+  const parsed = decodeGatewayPayload(payload);
+  if (!isGatewayPayloadRecord(parsed)) {
+    throw new Error("Gateway stream message must be an object");
+  }
+
   if (typeof parsed.type !== "string" || parsed.type.length === 0) {
     throw new Error("Gateway stream message type must be a non-empty string");
   }
@@ -581,7 +637,11 @@ function parseStreamClientMessage(payload: string): TerminalGatewayStreamClientM
     throw new Error("Unsupported gateway stream message");
   }
 
-  return parsed as TerminalGatewayStreamClientMessage;
+  return {
+    type: parsed.type,
+    subscriptionId: parsed.subscriptionId,
+    sessionId: parsed.sessionId,
+  };
 }
 
 function serializeError(error: unknown): TerminalGatewayErrorEnvelope {
@@ -605,12 +665,240 @@ function serializeError(error: unknown): TerminalGatewayErrorEnvelope {
   };
 }
 
-function asGatewayPayload(value: unknown): Record<string, any> {
-  if (!value || typeof value !== "object") {
+function asGatewayPayload(value: unknown): GatewayPayloadRecord {
+  if (!isGatewayPayloadRecord(value)) {
     return {};
   }
 
-  return value as Record<string, any>;
+  return value;
+}
+
+function readBackendPayload(payload: GatewayPayloadRecord, key = "backend"): TerminalBackendKind {
+  const value = readStringPayload(payload, key);
+  if (!TERMINAL_BACKEND_KINDS.has(value as TerminalBackendKind)) {
+    throw new Error(`Gateway payload ${key} must be one of: native, tmux, zellij`);
+  }
+
+  return value as TerminalBackendKind;
+}
+
+function readStringPayload(payload: GatewayPayloadRecord, key: string): string {
+  const value = payload[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Gateway payload ${key} must be a non-empty string`);
+  }
+
+  return value;
+}
+
+function readOptionalStringPayload(payload: GatewayPayloadRecord, key: string): string | undefined {
+  const value = payload[key];
+  if (value == null) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`Gateway payload ${key} must be a string when provided`);
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? value : undefined;
+}
+
+function readNullableStringPayload(payload: GatewayPayloadRecord, key: string): string | null {
+  const value = payload[key];
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`Gateway payload ${key} must be a string or null`);
+  }
+
+  return value;
+}
+
+function readNumberPayload(payload: GatewayPayloadRecord, key: string): number {
+  const value = payload[key];
+  const parsed = typeof value === "bigint"
+    ? Number(value)
+    : typeof value === "string" || typeof value === "number"
+      ? Number(value)
+      : Number.NaN;
+
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Gateway payload ${key} must be a finite number`);
+  }
+
+  return parsed;
+}
+
+function readIntegerPayload(payload: GatewayPayloadRecord, key: string): number {
+  const value = readNumberPayload(payload, key);
+  if (!Number.isInteger(value)) {
+    throw new Error(`Gateway payload ${key} must be an integer`);
+  }
+
+  return value;
+}
+
+function readObjectPayload<T extends object>(payload: GatewayPayloadRecord, key: string): T {
+  const value = payload[key];
+  if (!isGatewayPayloadRecord(value)) {
+    throw new Error(`Gateway payload ${key} must be an object`);
+  }
+
+  return value as T;
+}
+
+function readOptionalObjectPayload<T extends object>(
+  payload: GatewayPayloadRecord,
+  key: string,
+): T | undefined {
+  const value = payload[key];
+  if (value == null) {
+    return undefined;
+  }
+
+  if (!isGatewayPayloadRecord(value)) {
+    throw new Error(`Gateway payload ${key} must be an object when provided`);
+  }
+
+  return value as T;
+}
+
+function readCreateNativeSessionPayload(payload: GatewayPayloadRecord): TerminalCreateNativeSessionInput {
+  const title = readOptionalStringPayload(payload, "title");
+  const launch = readOptionalLaunchSpecPayload(payload, "launch");
+
+  return {
+    ...(title ? { title } : {}),
+    ...(launch ? { launch } : {}),
+  };
+}
+
+function readImportSessionPayload(payload: GatewayPayloadRecord): TerminalImportSessionInput {
+  const importHandle = readStringPayload(payload, "importHandle");
+  const title = readOptionalStringPayload(payload, "title");
+
+  return {
+    importHandle,
+    ...(title ? { title } : {}),
+  };
+}
+
+function readOptionalLaunchSpecPayload(
+  payload: GatewayPayloadRecord,
+  key: string,
+): TerminalShellLaunchSpec | undefined {
+  const value = payload[key];
+  if (value == null) {
+    return undefined;
+  }
+
+  if (!isGatewayPayloadRecord(value)) {
+    throw new Error(`Gateway payload ${key} must be an object when provided`);
+  }
+
+  const program = readStringPayload(value, "program");
+  const args = value.args;
+  if (!Array.isArray(args) || args.some((entry) => typeof entry !== "string")) {
+    throw new Error(`Gateway payload ${key}.args must be a string array`);
+  }
+
+  const cwd = readOptionalStringPayload(value, "cwd");
+  return {
+    program,
+    args,
+    ...(cwd ? { cwd } : {}),
+  };
+}
+
+function readMuxCommandPayload(payload: GatewayPayloadRecord): TerminalMuxCommand {
+  const command = readObjectPayload<GatewayPayloadRecord>(payload, "command");
+  const kind = readMuxCommandKind(command);
+
+  switch (kind) {
+    case "split_pane":
+      return {
+        kind,
+        pane_id: readStringPayload(command, "pane_id"),
+        direction: readSplitDirectionPayload(command),
+      };
+    case "close_pane":
+    case "focus_pane":
+      return {
+        kind,
+        pane_id: readStringPayload(command, "pane_id"),
+      };
+    case "resize_pane":
+      return {
+        kind,
+        pane_id: readStringPayload(command, "pane_id"),
+        rows: readIntegerPayload(command, "rows"),
+        cols: readIntegerPayload(command, "cols"),
+      };
+    case "new_tab":
+      return {
+        kind,
+        title: readNullableStringPayload(command, "title"),
+      };
+    case "close_tab":
+    case "focus_tab":
+      return {
+        kind,
+        tab_id: readStringPayload(command, "tab_id"),
+      };
+    case "rename_tab":
+      return {
+        kind,
+        tab_id: readStringPayload(command, "tab_id"),
+        title: readStringPayload(command, "title"),
+      };
+    case "send_input":
+    case "send_paste":
+      return {
+        kind,
+        pane_id: readStringPayload(command, "pane_id"),
+        data: readStringPayload(command, "data"),
+      };
+    case "detach":
+    case "save_session":
+      return { kind };
+    case "override_layout":
+      return {
+        kind,
+        tab_id: readStringPayload(command, "tab_id"),
+        root: readObjectPayload<Extract<TerminalMuxCommand, { kind: "override_layout" }>["root"]>(
+          command,
+          "root",
+        ),
+      };
+  }
+}
+
+function readMuxCommandKind(payload: GatewayPayloadRecord): TerminalMuxCommand["kind"] {
+  const kind = readStringPayload(payload, "kind");
+  if (!TERMINAL_MUX_COMMAND_KINDS.has(kind as TerminalMuxCommand["kind"])) {
+    throw new Error("Gateway payload command.kind is unsupported");
+  }
+
+  return kind as TerminalMuxCommand["kind"];
+}
+
+function readSplitDirectionPayload(payload: GatewayPayloadRecord): TerminalSplitDirection {
+  const direction = readStringPayload(payload, "direction");
+  if (!TERMINAL_SPLIT_DIRECTIONS.has(direction as TerminalSplitDirection)) {
+    throw new Error("Gateway payload command.direction is unsupported");
+  }
+
+  return direction as TerminalSplitDirection;
+}
+
+function isGatewayPayloadRecord(value: unknown): value is GatewayPayloadRecord {
+  return Boolean(value)
+    && typeof value === "object"
+    && !Array.isArray(value);
 }
 
 function encodeGatewayPayload(value: unknown): string {
@@ -625,7 +913,7 @@ function encodeGatewayPayload(value: unknown): string {
   });
 }
 
-function decodeGatewayPayload<T>(raw: string): T {
+function decodeGatewayPayload(raw: string): unknown {
   return JSON.parse(raw, (_key, candidate) => {
     if (
       candidate
@@ -637,5 +925,5 @@ function decodeGatewayPayload<T>(raw: string): T {
     }
 
     return candidate;
-  }) as T;
+  }) as unknown;
 }
