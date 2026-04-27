@@ -6,6 +6,7 @@ import {
   TERMINAL_WORKSPACE_INSPECTOR_MODES,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
   TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES,
+  TERMINAL_WORKSPACE_SECONDARY_DENSITIES,
   resolveTerminalWorkspaceChromeState,
   resolveTerminalWorkspaceLayoutState,
   resolveTerminalWorkspaceInspectorState,
@@ -116,6 +117,7 @@ describe("terminal workspace layout", () => {
       chrome: {
         tone: TERMINAL_WORKSPACE_CHROME_TONES.terminal,
         secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal,
+        secondaryDensity: TERMINAL_WORKSPACE_SECONDARY_DENSITIES.compact,
       },
       inspector: {
         mode: TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed,
@@ -132,10 +134,12 @@ describe("terminal workspace layout", () => {
     expect(resolveTerminalWorkspaceChromeState("terminal")).toEqual({
       tone: TERMINAL_WORKSPACE_CHROME_TONES.terminal,
       secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal,
+      secondaryDensity: TERMINAL_WORKSPACE_SECONDARY_DENSITIES.compact,
     });
     expect(resolveTerminalWorkspaceChromeState("classic")).toEqual({
       tone: TERMINAL_WORKSPACE_CHROME_TONES.workspace,
       secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.panel,
+      secondaryDensity: TERMINAL_WORKSPACE_SECONDARY_DENSITIES.regular,
     });
   });
 
@@ -145,6 +149,7 @@ describe("terminal workspace layout", () => {
       chrome: {
         tone: TERMINAL_WORKSPACE_CHROME_TONES.workspace,
         secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.panel,
+        secondaryDensity: TERMINAL_WORKSPACE_SECONDARY_DENSITIES.regular,
       },
       inspector: {
         mode: TERMINAL_WORKSPACE_INSPECTOR_MODES.inline,

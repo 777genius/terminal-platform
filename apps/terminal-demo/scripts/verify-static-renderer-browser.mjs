@@ -86,8 +86,15 @@ async function main() {
       || result.workspaceInspectorMode !== "collapsed"
       || result.workspaceChromeTone !== "terminal"
       || result.workspaceSecondaryChrome !== "terminal"
+      || result.workspaceSecondaryDensity !== "compact"
       || result.inspectorDrawerSecondaryChrome !== "terminal"
+      || result.inspectorDrawerSecondaryDensity !== "compact"
+      || result.inspectorDrawerSummaryHeight < 24
+      || result.inspectorDrawerSummaryHeight > 34
       || result.navigationDrawerSecondaryChrome !== "terminal"
+      || result.navigationDrawerSecondaryDensity !== "compact"
+      || result.navigationDrawerSummaryHeight < 24
+      || result.navigationDrawerSummaryHeight > 34
       || !result.runEnabledBeforeSubmit
       || result.runEnabledAfterSubmit
       || !result.pasteEnabled
@@ -361,6 +368,8 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const viewportRect = viewport?.getBoundingClientRect();
       const composerRect = composer?.getBoundingClientRect();
       const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect();
+      const inspectorDrawerSummary = inspectorDrawer?.querySelector('summary') ?? null;
+      const navigationDrawerSummary = navigationDrawer?.querySelector('summary') ?? null;
       const historyEntries = [...(commandRoot?.querySelectorAll('[data-testid="tp-command-history-entry"]') ?? [])];
       const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
       const workspaceOuterPanelStyle = workspaceOuterPanel ? getComputedStyle(workspaceOuterPanel) : null;
@@ -402,8 +411,13 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
         workspaceChromeTone: workspaceFrame?.getAttribute('data-chrome-tone') ?? null,
         workspaceSecondaryChrome: layoutRoot?.getAttribute('data-secondary-chrome') ?? null,
+        workspaceSecondaryDensity: layoutRoot?.getAttribute('data-secondary-density') ?? null,
         inspectorDrawerSecondaryChrome: inspectorDrawer?.getAttribute('data-secondary-chrome') ?? null,
+        inspectorDrawerSecondaryDensity: inspectorDrawer?.getAttribute('data-secondary-density') ?? null,
+        inspectorDrawerSummaryHeight: Math.round(inspectorDrawerSummary?.getBoundingClientRect().height ?? 0),
         navigationDrawerSecondaryChrome: navigationDrawer?.getAttribute('data-secondary-chrome') ?? null,
+        navigationDrawerSecondaryDensity: navigationDrawer?.getAttribute('data-secondary-density') ?? null,
+        navigationDrawerSummaryHeight: Math.round(navigationDrawerSummary?.getBoundingClientRect().height ?? 0),
         runEnabledBeforeSubmit,
         runEnabledAfterSubmit: Boolean(run && !run.disabled),
         pasteEnabled: Boolean(paste && !paste.disabled),

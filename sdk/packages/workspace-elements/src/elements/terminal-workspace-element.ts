@@ -52,7 +52,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
       }
 
       .workspace[data-chrome-tone="terminal"] {
-        --tp-workspace-gap: 0.55rem;
+        --tp-workspace-gap: 0.42rem;
       }
 
       .workspace[data-chrome-tone="terminal"] tp-terminal-status-bar {
@@ -285,6 +285,10 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         color: var(--tp-terminal-color-text);
       }
 
+      .secondary-toggle[data-secondary-density="compact"] {
+        border-radius: 0.42rem;
+      }
+
       .secondary-toggle summary {
         cursor: pointer;
         list-style: none;
@@ -297,6 +301,18 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         align-items: center;
         color: var(--tp-terminal-color-text);
         padding: 0.5rem 0.7rem;
+      }
+
+      .secondary-toggle[data-secondary-density="compact"] summary {
+        min-height: 1.7rem;
+        padding: 0.32rem 0.56rem;
+        font-size: 0.86rem;
+        line-height: 1.2;
+      }
+
+      .secondary-toggle[data-secondary-density="compact"] summary::after {
+        font-size: 0.68rem;
+        padding: 0.1rem 0.34rem;
       }
 
       .secondary-toggle summary::-webkit-details-marker {
@@ -406,6 +422,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
           data-layout-preset=${layoutState.preset}
           data-navigation-mode=${navigationState.mode}
           data-secondary-chrome=${chromeState.secondaryChrome}
+          data-secondary-density=${chromeState.secondaryDensity}
         >
           ${navigationState.renderInlineNavigation
             ? html`
@@ -449,6 +466,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                       part="inspector-drawer"
                       data-testid="tp-workspace-inspector-drawer"
                       data-secondary-chrome=${chromeState.secondaryChrome}
+                      data-secondary-density=${chromeState.secondaryDensity}
                     >
                       <summary>${inspectorState.summaryLabel}</summary>
                       <div class="inspector-drawer__content">
@@ -469,6 +487,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                   part="navigation-drawer"
                   data-testid="tp-workspace-navigation-drawer"
                   data-secondary-chrome=${chromeState.secondaryChrome}
+                  data-secondary-density=${chromeState.secondaryDensity}
                 >
                   <summary>${navigationState.summaryLabel}</summary>
                   <div class="navigation-drawer__content">

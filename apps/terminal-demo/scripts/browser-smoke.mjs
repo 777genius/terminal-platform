@@ -161,9 +161,13 @@ async function main() {
       || result.afterCreate.workspaceNavigationMode !== "collapsed"
       || result.afterCreate.workspaceChromeTone !== "terminal"
       || result.afterCreate.workspaceSecondaryChrome !== "terminal"
+      || result.afterCreate.workspaceSecondaryDensity !== "compact"
       || !result.afterCreate.hasOperationsDeck
       || !result.afterCreate.hasNavigationDrawer
       || result.afterCreate.navigationDrawerSecondaryChrome !== "terminal"
+      || result.afterCreate.navigationDrawerSecondaryDensity !== "compact"
+      || result.afterCreate.navigationDrawerSummaryHeight < 24
+      || result.afterCreate.navigationDrawerSummaryHeight > 34
       || result.afterCreate.navigationDrawerOpen !== false
       || !result.afterCreate.navigationDrawerOpenedAfterClick
       || !result.afterCreate.navigationDrawerClosedAfterToggle
@@ -171,6 +175,9 @@ async function main() {
       || result.afterCreate.workspaceInspectorMode !== "collapsed"
       || !result.afterCreate.hasInspectorDrawer
       || result.afterCreate.inspectorDrawerSecondaryChrome !== "terminal"
+      || result.afterCreate.inspectorDrawerSecondaryDensity !== "compact"
+      || result.afterCreate.inspectorDrawerSummaryHeight < 24
+      || result.afterCreate.inspectorDrawerSummaryHeight > 34
       || result.afterCreate.inspectorDrawerOpen !== false
       || !result.afterCreate.inspectorDrawerOpenedAfterClick
       || !result.afterCreate.inspectorDrawerClosedAfterToggle
@@ -332,10 +339,17 @@ async function main() {
       || result.afterCreateMobileLayout.workspaceInspectorMode !== "collapsed"
       || result.afterCreateMobileLayout.workspaceChromeTone !== "terminal"
       || result.afterCreateMobileLayout.workspaceSecondaryChrome !== "terminal"
+      || result.afterCreateMobileLayout.workspaceSecondaryDensity !== "compact"
       || !result.afterCreateMobileLayout.hasNavigationDrawer
       || result.afterCreateMobileLayout.navigationDrawerSecondaryChrome !== "terminal"
+      || result.afterCreateMobileLayout.navigationDrawerSecondaryDensity !== "compact"
+      || result.afterCreateMobileLayout.navigationDrawerSummaryHeight < 24
+      || result.afterCreateMobileLayout.navigationDrawerSummaryHeight > 34
       || !result.afterCreateMobileLayout.hasInspectorDrawer
       || result.afterCreateMobileLayout.inspectorDrawerSecondaryChrome !== "terminal"
+      || result.afterCreateMobileLayout.inspectorDrawerSecondaryDensity !== "compact"
+      || result.afterCreateMobileLayout.inspectorDrawerSummaryHeight < 24
+      || result.afterCreateMobileLayout.inspectorDrawerSummaryHeight > 34
       || result.afterCreateMobileLayout.inspectorDrawerOpen !== false
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
       || result.afterCreateMobileLayout.workspaceOuterPanelBorderTopWidthPx !== 0
@@ -857,6 +871,7 @@ async function runSmokeScenario(browserUrl) {
       const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect() ?? null;
       const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
       const inspectorDrawerSummary = inspectorDrawer?.querySelector('summary') ?? null;
+      const inspectorDrawerSummaryHeight = Math.round(inspectorDrawerSummary?.getBoundingClientRect().height ?? 0);
       inspectorDrawerSummary?.click();
       const inspectorDrawerOpenedAfterClick = inspectorDrawer?.hasAttribute('open') ?? false;
       const paneTreeVisibleAfterDrawerOpen = Boolean(
@@ -867,6 +882,7 @@ async function runSmokeScenario(browserUrl) {
       inspectorDrawerSummary?.click();
       const inspectorDrawerClosedAfterToggle = inspectorDrawer ? !inspectorDrawer.hasAttribute('open') : false;
       const navigationDrawerSummary = navigationDrawer?.querySelector('summary') ?? null;
+      const navigationDrawerSummaryHeight = Math.round(navigationDrawerSummary?.getBoundingClientRect().height ?? 0);
       navigationDrawerSummary?.click();
       const navigationDrawerOpenedAfterClick = navigationDrawer?.hasAttribute('open') ?? false;
       const navigationVisibleAfterDrawerOpen = Boolean(
@@ -1048,9 +1064,12 @@ async function runSmokeScenario(browserUrl) {
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceChromeTone: workspaceFrame?.getAttribute('data-chrome-tone') ?? null,
         workspaceSecondaryChrome: layoutRoot?.getAttribute('data-secondary-chrome') ?? null,
+        workspaceSecondaryDensity: layoutRoot?.getAttribute('data-secondary-density') ?? null,
         hasOperationsDeck: Boolean(layoutRoot && operationsDeck),
         hasNavigationDrawer: Boolean(navigationDrawer),
         navigationDrawerSecondaryChrome: navigationDrawer?.getAttribute('data-secondary-chrome') ?? null,
+        navigationDrawerSecondaryDensity: navigationDrawer?.getAttribute('data-secondary-density') ?? null,
+        navigationDrawerSummaryHeight,
         navigationDrawerOpen: navigationDrawer?.hasAttribute('open') ?? null,
         navigationDrawerOpenedAfterClick,
         navigationDrawerClosedAfterToggle,
@@ -1058,6 +1077,8 @@ async function runSmokeScenario(browserUrl) {
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
         hasInspectorDrawer: Boolean(inspectorDrawer),
         inspectorDrawerSecondaryChrome: inspectorDrawer?.getAttribute('data-secondary-chrome') ?? null,
+        inspectorDrawerSecondaryDensity: inspectorDrawer?.getAttribute('data-secondary-density') ?? null,
+        inspectorDrawerSummaryHeight,
         inspectorDrawerOpen: inspectorDrawer?.hasAttribute('open') ?? null,
         inspectorDrawerOpenedAfterClick,
         inspectorDrawerClosedAfterToggle,
@@ -1152,6 +1173,8 @@ async function runSmokeScenario(browserUrl) {
       const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
       const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
       const workspaceOuterPanelStyle = workspaceOuterPanel ? getComputedStyle(workspaceOuterPanel) : null;
+      const navigationDrawerSummary = navigationDrawer?.querySelector('summary') ?? null;
+      const inspectorDrawerSummary = inspectorDrawer?.querySelector('summary') ?? null;
       return {
         checked: Boolean(demoShell && demoMain && operationsDeck),
         demoShellActive: demoShell?.getAttribute('data-has-active-session') ?? null,
@@ -1170,10 +1193,15 @@ async function runSmokeScenario(browserUrl) {
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,
         workspaceChromeTone: workspaceFrame?.getAttribute('data-chrome-tone') ?? null,
         workspaceSecondaryChrome: layoutRoot?.getAttribute('data-secondary-chrome') ?? null,
+        workspaceSecondaryDensity: layoutRoot?.getAttribute('data-secondary-density') ?? null,
         hasNavigationDrawer: Boolean(navigationDrawer),
         navigationDrawerSecondaryChrome: navigationDrawer?.getAttribute('data-secondary-chrome') ?? null,
+        navigationDrawerSecondaryDensity: navigationDrawer?.getAttribute('data-secondary-density') ?? null,
+        navigationDrawerSummaryHeight: Math.round(navigationDrawerSummary?.getBoundingClientRect().height ?? 0),
         hasInspectorDrawer: Boolean(inspectorDrawer),
         inspectorDrawerSecondaryChrome: inspectorDrawer?.getAttribute('data-secondary-chrome') ?? null,
+        inspectorDrawerSecondaryDensity: inspectorDrawer?.getAttribute('data-secondary-density') ?? null,
+        inspectorDrawerSummaryHeight: Math.round(inspectorDrawerSummary?.getBoundingClientRect().height ?? 0),
         inspectorDrawerOpen: inspectorDrawer?.hasAttribute('open') ?? null,
         demoMainWidth: Math.round(demoMain?.getBoundingClientRect().width ?? 0),
         documentHorizontalOverflow: Math.max(

@@ -153,6 +153,7 @@ export {
   TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
   TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES,
+  TERMINAL_WORKSPACE_SECONDARY_DENSITIES,
   resolveTerminalWorkspaceChromeState,
   resolveTerminalWorkspaceInspectorState,
   resolveTerminalWorkspaceLayoutState,
@@ -167,4 +168,5 @@ export {
   type TerminalWorkspaceNavigationMode,
   type TerminalWorkspaceNavigationState,
   type TerminalWorkspaceSecondaryChromeMode,
+  type TerminalWorkspaceSecondaryDensity,
 } from "./elements/terminal-workspace-layout.js";

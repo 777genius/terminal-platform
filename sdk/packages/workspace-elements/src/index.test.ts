@@ -17,6 +17,7 @@ import {
   TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
   TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES,
+  TERMINAL_WORKSPACE_SECONDARY_DENSITIES,
   canRunTerminalTopologyCommand,
   canNavigateTerminalCommandHistory,
   compactTerminalId,
@@ -114,6 +115,7 @@ import {
   type TerminalWorkspaceNavigationMode,
   type TerminalWorkspaceNavigationState,
   type TerminalWorkspaceSecondaryChromeMode,
+  type TerminalWorkspaceSecondaryDensity,
 } from "./index.js";
 
 type PublicControlTypes =
@@ -178,7 +180,8 @@ type PublicControlTypes =
   | TerminalWorkspaceLayoutState
   | TerminalWorkspaceNavigationMode
   | TerminalWorkspaceNavigationState
-  | TerminalWorkspaceSecondaryChromeMode;
+  | TerminalWorkspaceSecondaryChromeMode
+  | TerminalWorkspaceSecondaryDensity;
 
 describe("workspace elements public api", () => {
   it("exports reusable control resolvers for custom UI surfaces", () => {
@@ -237,6 +240,7 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal).toBe("terminal");
     expect(TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed).toBe("collapsed");
     expect(TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal).toBe("terminal");
+    expect(TERMINAL_WORKSPACE_SECONDARY_DENSITIES.compact).toBe("compact");
   });
 });
 

@@ -25,6 +25,11 @@ export const TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES = {
   terminal: "terminal",
 } as const;
 
+export const TERMINAL_WORKSPACE_SECONDARY_DENSITIES = {
+  compact: "compact",
+  regular: "regular",
+} as const;
+
 export type TerminalWorkspaceInspectorMode =
   (typeof TERMINAL_WORKSPACE_INSPECTOR_MODES)[keyof typeof TERMINAL_WORKSPACE_INSPECTOR_MODES];
 
@@ -39,6 +44,9 @@ export type TerminalWorkspaceChromeTone =
 
 export type TerminalWorkspaceSecondaryChromeMode =
   (typeof TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES)[keyof typeof TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES];
+
+export type TerminalWorkspaceSecondaryDensity =
+  (typeof TERMINAL_WORKSPACE_SECONDARY_DENSITIES)[keyof typeof TERMINAL_WORKSPACE_SECONDARY_DENSITIES];
 
 export interface TerminalWorkspaceInspectorState {
   mode: TerminalWorkspaceInspectorMode;
@@ -59,6 +67,7 @@ export interface TerminalWorkspaceNavigationState {
 export interface TerminalWorkspaceChromeState {
   tone: TerminalWorkspaceChromeTone;
   secondaryChrome: TerminalWorkspaceSecondaryChromeMode;
+  secondaryDensity: TerminalWorkspaceSecondaryDensity;
 }
 
 export interface TerminalWorkspaceLayoutState {
@@ -105,12 +114,14 @@ export function resolveTerminalWorkspaceChromeState(
     return {
       tone: TERMINAL_WORKSPACE_CHROME_TONES.terminal,
       secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal,
+      secondaryDensity: TERMINAL_WORKSPACE_SECONDARY_DENSITIES.compact,
     };
   }
 
   return {
     tone: TERMINAL_WORKSPACE_CHROME_TONES.workspace,
     secondaryChrome: TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.panel,
+    secondaryDensity: TERMINAL_WORKSPACE_SECONDARY_DENSITIES.regular,
   };
 }
 
