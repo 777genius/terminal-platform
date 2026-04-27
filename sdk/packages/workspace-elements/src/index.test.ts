@@ -4,7 +4,9 @@ import {
   TERMINAL_COMMAND_COMPOSER_ACTIONS,
   TERMINAL_COMMAND_COMPOSER_ACTION_IDS,
   TERMINAL_COMMAND_DOCK_ACCESSORY_MODES,
+  TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT,
   TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS,
+  TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
   TERMINAL_COMMAND_QUICK_COMMAND_LIMIT,
   TERMINAL_COMMAND_COMPOSER_EVENTS,
   TERMINAL_SCREEN_ACTION_IDS,
@@ -29,6 +31,7 @@ import {
   findRestorableSavedSession,
   hasSavedSession,
   resolveTerminalCommandComposerActions,
+  resolveTerminalCommandComposerActionPlacement,
   resolveActiveBackendCapabilities,
   resolvePaneResizeCommand,
   resolveTerminalCommandDockAccessoryMode,
@@ -59,6 +62,7 @@ import {
   TerminalCommandComposerElement,
   type TerminalCommandComposerActionId,
   type TerminalCommandComposerActionOptions,
+  type TerminalCommandComposerActionPlacement,
   type TerminalCommandComposerActionPresentation,
   type TerminalCommandDockCapabilityStatus,
   type TerminalCommandDockControlState,
@@ -135,6 +139,7 @@ import {
 type PublicControlTypes =
   | TerminalCommandComposerActionId
   | TerminalCommandComposerActionOptions
+  | TerminalCommandComposerActionPlacement
   | TerminalCommandComposerActionPresentation
   | TerminalCommandDockCapabilityStatus
   | TerminalCommandDockControlState
@@ -213,6 +218,7 @@ describe("workspace elements public api", () => {
       TerminalCommandComposerElement,
       TerminalTabStripElement,
       resolveTerminalCommandComposerActions,
+      resolveTerminalCommandComposerActionPlacement,
       findRestorableSavedSession,
       hasSavedSession,
       resolveActiveBackendCapabilities,
@@ -256,6 +262,8 @@ describe("workspace elements public api", () => {
     expect(TERMINAL_COMMAND_COMPOSER_ACTIONS[0]?.id).toBe(TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit);
     expect(TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
     expect(TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");
+    expect(TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT).toBe(5);
+    expect(TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT).toBe(2);
     expect(TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe("save-layout");
     expect(TERMINAL_SCREEN_ACTION_IDS.copyVisible).toBe("copy-visible");
     expect(TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");

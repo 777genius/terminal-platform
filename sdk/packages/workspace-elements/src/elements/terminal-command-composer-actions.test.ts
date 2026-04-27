@@ -4,6 +4,7 @@ import {
   TERMINAL_COMMAND_COMPOSER_ACTIONS,
   TERMINAL_COMMAND_COMPOSER_ACTION_IDS,
   TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE,
+  resolveTerminalCommandComposerActionPlacement,
   resolveTerminalCommandComposerActions,
 } from "./terminal-command-composer-actions.js";
 
@@ -32,6 +33,12 @@ describe("terminal command composer actions", () => {
       null,
       "Ctrl+C",
       "Enter",
+    ]);
+    expect(TERMINAL_COMMAND_COMPOSER_ACTIONS.map((action) => action.placement)).toEqual([
+      "panel",
+      "panel",
+      "panel",
+      "panel",
     ]);
   });
 
@@ -63,5 +70,31 @@ describe("terminal command composer actions", () => {
       .map((action) => [action.id, action.ariaKeyShortcuts]);
 
     expect(ariaShortcuts).toEqual([[TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit, "Enter"]]);
+  });
+
+  it("resolves compact terminal-placement action labels without changing accessible names", () => {
+    const actions = resolveTerminalCommandComposerActions({ placement: "terminal" });
+
+    expect(actions.map((action) => action.placement)).toEqual([
+      "terminal",
+      "terminal",
+      "terminal",
+      "terminal",
+    ]);
+    expect(actions.map((action) => action.label)).toEqual(["Run", "Paste", "^C", "\u21b5"]);
+    expect(actions.at(-1)?.ariaLabel).toBe("Send Enter to the focused pane");
+    expect(actions.at(-1)?.title).toBe("Send Enter to the focused pane");
+  });
+
+  it("normalizes unknown action placement to the panel contract", () => {
+    expect(resolveTerminalCommandComposerActionPlacement("terminal")).toBe("terminal");
+    expect(resolveTerminalCommandComposerActionPlacement("panel")).toBe("panel");
+    expect(resolveTerminalCommandComposerActionPlacement("unknown")).toBe("panel");
+    expect(resolveTerminalCommandComposerActions({ placement: "unknown" }).map((action) => action.label)).toEqual([
+      "Run",
+      "Paste",
+      "^C",
+      "Enter",
+    ]);
   });
 });

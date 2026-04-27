@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { BackendCapabilitiesInfo } from "@terminal-platform/runtime-types";
 import { createInitialWorkspaceSnapshot, type WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
-import { resolveTerminalCommandDockControlState } from "./terminal-command-dock-controls.js";
+import {
+  TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT,
+  TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
+  resolveTerminalCommandDockControlState,
+} from "./terminal-command-dock-controls.js";
 
 describe("terminal command dock controls", () => {
   it("resolves command lane controls from focused workspace state", () => {
@@ -37,6 +41,42 @@ describe("terminal command dock controls", () => {
       "git status",
       "ls -la",
     ]);
+    expect(controls.recentCommands).toHaveLength(TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT);
+  });
+
+  it("caps recent command chips for terminal placement without changing command history", () => {
+    const controls = resolveTerminalCommandDockControlState(
+      createWorkspaceSnapshot({
+        commandHistory: {
+          entries: ["pwd", "ls -la", "git status", "npm test"],
+          limit: 50,
+        },
+      }),
+      {
+        pending: false,
+        recentCommandLimit: TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
+      },
+    );
+
+    expect(controls.commandHistory).toEqual(["pwd", "ls -la", "git status", "npm test"]);
+    expect(controls.recentCommands).toEqual(["npm test", "git status"]);
+  });
+
+  it("allows hosts to hide recent command chips for constrained placements", () => {
+    const controls = resolveTerminalCommandDockControlState(
+      createWorkspaceSnapshot({
+        commandHistory: {
+          entries: ["pwd", "ls -la"],
+          limit: 50,
+        },
+      }),
+      {
+        pending: false,
+        recentCommandLimit: 0,
+      },
+    );
+
+    expect(controls.recentCommands).toEqual([]);
   });
 
   it("disables command input when loaded backend capabilities reject pane input writes", () => {

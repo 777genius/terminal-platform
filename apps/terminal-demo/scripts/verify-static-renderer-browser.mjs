@@ -64,6 +64,8 @@ async function main() {
       || result.commandInputRows !== 1
       || result.commandInputPlaceholder !== "Type shell input for the focused pane"
       || result.commandInputStatus !== "Ready"
+      || result.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
+      || result.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.commandDockPlacement !== "terminal"
       || result.commandDockAccessoryMode !== "bar"
       || result.commandAccessoryBarMode !== "bar"
@@ -74,6 +76,7 @@ async function main() {
       || result.quickCommandRowOverflowPx > 1
       || result.historyChipWhiteSpaces.some((value) => value !== "nowrap")
       || Math.max(0, ...result.historyChipHeights) > 38
+      || result.historyChipCount > 2
       || result.commandDockCanWrite !== "true"
       || result.commandDockInputCapability !== "known"
       || result.screenChromeMode !== "compact"
@@ -344,6 +347,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const paste = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
       const interrupt = commandRoot?.querySelector('[data-testid="tp-send-interrupt"]') ?? null;
       const enter = commandRoot?.querySelector('[data-testid="tp-send-enter"]') ?? null;
+      const commandActionButtons = [run, paste, interrupt, enter];
       const sessionActionButtons = [
         ...(commandRoot?.querySelectorAll('[data-testid="tp-session-actions"] button') ?? []),
       ];
@@ -424,6 +428,12 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         commandInputRows: input?.rows ?? null,
         commandInputPlaceholder: input?.placeholder ?? null,
         commandInputStatus: commandInputStatus?.textContent?.trim() ?? null,
+        commandActionLabels: commandActionButtons.map((button) =>
+          button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        ),
+        terminalComposerActionPlacements: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-placement') ?? '',
+        ),
         commandDockPlacement: commandDockPanel?.getAttribute('data-placement') ?? null,
         commandDockAccessoryMode: commandDockPanel?.getAttribute('data-accessory-mode') ?? null,
         commandAccessoryBarMode: commandAccessoryBar?.getAttribute('data-accessory-mode') ?? null,
@@ -436,6 +446,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
           : null,
         historyChipHeights: historyEntries.map((button) => Math.round(button.getBoundingClientRect().height)),
         historyChipWhiteSpaces: historyEntries.map((button) => getComputedStyle(button).whiteSpace),
+        historyChipCount: historyEntries.length,
         commandDockCanWrite: commandDockPanel?.getAttribute('data-command-input') ?? null,
         commandDockInputCapability: commandDockPanel?.getAttribute('data-input-capability') ?? null,
         screenChromeMode: screenPanel?.getAttribute('data-chrome-mode') ?? null,

@@ -24,7 +24,7 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run --passWithNoTests",
-    "test:public-api": "vitest run packages/workspace-elements/src/index.test.ts packages/workspace-elements/src/elements/terminal-command-composer-actions.test.ts packages/workspace-elements/src/elements/terminal-command-composer-layout.test.ts packages/workspace-elements/src/elements/terminal-command-dock-accessories.test.ts packages/workspace-elements/src/elements/terminal-command-dock-session-actions.test.ts packages/workspace-elements/src/elements/terminal-screen-actions.test.ts packages/workspace-elements/src/elements/terminal-screen-chrome.test.ts packages/workspace-elements/src/elements/terminal-workspace-layout.test.ts packages/workspace-react/src/index.test.ts",
+    "test:public-api": "vitest run packages/workspace-elements/src/index.test.ts packages/workspace-elements/src/elements/terminal-command-composer-actions.test.ts packages/workspace-elements/src/elements/terminal-command-composer-layout.test.ts packages/workspace-elements/src/elements/terminal-command-dock-accessories.test.ts packages/workspace-elements/src/elements/terminal-command-dock-controls.test.ts packages/workspace-elements/src/elements/terminal-command-dock-session-actions.test.ts packages/workspace-elements/src/elements/terminal-screen-actions.test.ts packages/workspace-elements/src/elements/terminal-screen-chrome.test.ts packages/workspace-elements/src/elements/terminal-workspace-layout.test.ts packages/workspace-react/src/index.test.ts",
     "check": "npm run typecheck && npm run build && npm run test",
     "changeset": "changeset"
   },

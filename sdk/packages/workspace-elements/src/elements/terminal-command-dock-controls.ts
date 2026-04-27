@@ -2,6 +2,9 @@ import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
 import { resolveWorkspaceCapability, type TerminalWorkspaceCapabilityStatus } from "./terminal-workspace-capabilities.js";
 
+export const TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT = 5;
+export const TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT = 2;
+
 export type TerminalCommandDockCapabilityStatus = TerminalWorkspaceCapabilityStatus;
 
 export interface TerminalCommandDockControlState {
@@ -22,7 +25,7 @@ export interface TerminalCommandDockControlState {
 
 export function resolveTerminalCommandDockControlState(
   snapshot: WorkspaceSnapshot,
-  options: { pending: boolean },
+  options: { pending: boolean; recentCommandLimit?: number | null },
 ): TerminalCommandDockControlState {
   const activeSessionId =
     snapshot.selection.activeSessionId ?? snapshot.attachedSession?.session.session_id ?? null;
@@ -34,13 +37,14 @@ export function resolveTerminalCommandDockControlState(
   const pasteCapability = resolvePasteCapability(snapshot);
   const saveCapability = resolveSaveCapability(snapshot);
   const canWriteInput = Boolean(canUsePane && inputCapability.canWrite);
+  const recentCommandLimit = normalizeRecentCommandLimit(options.recentCommandLimit);
 
   return {
     activeSessionId,
     activePaneId,
     draft,
     commandHistory: snapshot.commandHistory.entries,
-    recentCommands: [...snapshot.commandHistory.entries].slice(-5).reverse(),
+    recentCommands: resolveRecentCommands(snapshot.commandHistory.entries, recentCommandLimit),
     canSend: Boolean(canWriteInput && draft.trim().length > 0),
     canUsePane,
     canWriteInput,
@@ -50,6 +54,22 @@ export function resolveTerminalCommandDockControlState(
     pasteCapabilityStatus: pasteCapability.status,
     saveCapabilityStatus: saveCapability.status,
   };
+}
+
+function resolveRecentCommands(commandHistory: readonly string[], limit: number): string[] {
+  if (limit <= 0) {
+    return [];
+  }
+
+  return [...commandHistory].slice(-limit).reverse();
+}
+
+function normalizeRecentCommandLimit(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT;
+  }
+
+  return Math.max(0, Math.trunc(value));
 }
 
 function resolveInputCapability(

@@ -4,9 +4,11 @@ export {
   TERMINAL_COMMAND_COMPOSER_ACTIONS,
   TERMINAL_COMMAND_COMPOSER_ACTION_IDS,
   TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE,
+  resolveTerminalCommandComposerActionPlacement,
   resolveTerminalCommandComposerActions,
   type TerminalCommandComposerActionId,
   type TerminalCommandComposerActionOptions,
+  type TerminalCommandComposerActionPlacement,
   type TerminalCommandComposerActionPresentation,
 } from "./elements/terminal-command-composer-actions.js";
 export {
@@ -35,6 +37,8 @@ export {
   type TerminalCommandDockAccessoryOptions,
 } from "./elements/terminal-command-dock-accessories.js";
 export {
+  TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT,
+  TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
   resolveTerminalCommandDockControlState,
   type TerminalCommandDockCapabilityStatus,
   type TerminalCommandDockControlState,

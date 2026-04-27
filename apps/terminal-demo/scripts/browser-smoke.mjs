@@ -249,8 +249,10 @@ async function main() {
       || result.afterCreate.terminalComposerInputPart !== "input"
       || result.afterCreate.terminalComposerActionParts.join("|") !== "send-command|paste-clipboard|send-interrupt|send-enter"
       || result.afterCreate.terminalComposerActionIds.join("|") !== "submit|paste|interrupt|enter"
+      || result.afterCreate.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.afterCreate.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
       || result.afterCreate.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
+      || result.afterCreate.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
       || result.afterCreate.commandInputRows !== 1
       || result.afterCreate.commandInputRowCount !== "1"
       || result.afterCreate.commandInputMultiline !== "false"
@@ -395,8 +397,10 @@ async function main() {
       || !result.afterCreateMobileLayout.terminalComposerFirstInDockDom
       || result.afterCreateMobileLayout.terminalComposerTagName !== "TP-TERMINAL-COMMAND-COMPOSER"
       || result.afterCreateMobileLayout.terminalComposerActionIds.join("|") !== "submit|paste|interrupt|enter"
+      || result.afterCreateMobileLayout.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.afterCreateMobileLayout.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
       || result.afterCreateMobileLayout.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
+      || result.afterCreateMobileLayout.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
       || result.afterCreateMobileLayout.terminalScreenActionIds.join("|") !== "follow-output|scroll-latest|copy-visible"
       || result.afterCreateMobileLayout.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
       || result.afterCreateMobileLayout.terminalScreenActionAriaLabels.join("|") !== "Pause automatic terminal output follow|Scroll to latest terminal output|Copy visible terminal output"
@@ -1077,6 +1081,9 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerInputPart: commandComposerInput?.getAttribute('part') ?? null,
         terminalComposerActionParts: commandActionButtons.map((button) => button?.getAttribute('part') ?? null),
         terminalComposerActionIds: commandActionButtons.map((button) => button?.getAttribute('data-action') ?? ''),
+        terminalComposerActionPlacements: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-placement') ?? '',
+        ),
         terminalComposerActionKeyHints: commandActionButtons.map((button) => button?.getAttribute('data-key-hint') ?? ''),
         terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>
           button?.getAttribute('aria-keyshortcuts') ?? '',
@@ -1350,9 +1357,15 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerFirstInDockDom: commandDockPanel?.firstElementChild === commandComposer,
         terminalComposerTagName: commandComposer?.tagName ?? null,
         terminalComposerActionIds: commandActionButtons.map((button) => button?.getAttribute('data-action') ?? ''),
+        terminalComposerActionPlacements: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-placement') ?? '',
+        ),
         terminalComposerActionKeyHints: commandActionButtons.map((button) => button?.getAttribute('data-key-hint') ?? ''),
         terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>
           button?.getAttribute('aria-keyshortcuts') ?? '',
+        ),
+        commandActionLabels: commandActionButtons.map((button) =>
+          button?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         ),
         terminalScreenActionIds: screenActionButtons.map((button) => button?.getAttribute('data-screen-action') ?? ''),
         terminalScreenActionLabels: screenActionButtons.map((button) =>

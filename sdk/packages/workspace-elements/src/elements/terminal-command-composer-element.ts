@@ -7,8 +7,10 @@ import type {
 import {
   TERMINAL_COMMAND_COMPOSER_ACTION_IDS,
   TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE,
+  resolveTerminalCommandComposerActionPlacement,
   resolveTerminalCommandComposerActions,
   type TerminalCommandComposerActionId,
+  type TerminalCommandComposerActionPlacement,
   type TerminalCommandComposerActionPresentation,
   type TerminalCommandComposerShortcut,
 } from "./terminal-command-composer-actions.js";
@@ -62,6 +64,7 @@ export class TerminalCommandComposerElement extends LitElement {
     minRows: { attribute: "min-rows", type: Number },
     placeholder: { type: String },
     pasteTitle: { attribute: "paste-title", type: String },
+    placement: { type: String },
   };
 
   declare draft: string;
@@ -72,6 +75,7 @@ export class TerminalCommandComposerElement extends LitElement {
   declare minRows: number;
   declare placeholder: string;
   declare pasteTitle: string;
+  declare placement: TerminalCommandComposerActionPlacement;
 
   #pendingFocus = false;
 
@@ -85,6 +89,7 @@ export class TerminalCommandComposerElement extends LitElement {
     this.minRows = TERMINAL_COMMAND_COMPOSER_DEFAULT_MIN_ROWS;
     this.placeholder = "";
     this.pasteTitle = TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE;
+    this.placement = "panel";
   }
 
   protected override createRenderRoot(): HTMLElement {
@@ -93,8 +98,10 @@ export class TerminalCommandComposerElement extends LitElement {
 
   override render() {
     const rowCount = this.resolveRowCount(this.draft);
+    const placement = resolveTerminalCommandComposerActionPlacement(this.placement);
     const actions = resolveTerminalCommandComposerActions({
       pasteTitle: this.pasteTitle,
+      placement,
     });
 
     return html`
@@ -116,6 +123,7 @@ export class TerminalCommandComposerElement extends LitElement {
       <div
         class="composer-actions"
         part="composer-actions"
+        data-action-placement=${placement}
         data-testid="tp-command-composer-actions"
         aria-label="Command actions"
       >
@@ -262,6 +270,7 @@ export class TerminalCommandComposerElement extends LitElement {
         part=${action.part}
         type="button"
         data-action=${action.id}
+        data-action-placement=${action.placement}
         data-key-hint=${action.keyHint ?? nothing}
         data-testid=${action.testId}
         title=${action.title}

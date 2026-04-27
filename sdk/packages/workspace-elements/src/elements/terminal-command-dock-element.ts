@@ -24,7 +24,10 @@ import {
   type TerminalCommandQuickCommand,
 } from "./terminal-command-quick-commands.js";
 import { resolveTerminalCommandDockAccessoryMode } from "./terminal-command-dock-accessories.js";
-import { resolveTerminalCommandDockControlState } from "./terminal-command-dock-controls.js";
+import {
+  TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
+  resolveTerminalCommandDockControlState,
+} from "./terminal-command-dock-controls.js";
 import {
   TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS,
   resolveTerminalCommandDockSessionActions,
@@ -281,6 +284,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
       .dock[data-placement="terminal"] .composer-actions {
         gap: 0.35rem;
+        flex-wrap: nowrap;
       }
 
       .dock[data-placement="terminal"] .composer-actions button {
@@ -289,6 +293,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
         color: var(--tp-terminal-color-text);
         font-size: 0.8rem;
+        min-width: 2.15rem;
         padding: 0.3rem 0.48rem;
       }
 
@@ -299,6 +304,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           var(--tp-terminal-color-accent) 16%,
           var(--tp-terminal-color-bg-raised)
         );
+        min-width: 3rem;
       }
 
       .prompt {
@@ -523,7 +529,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   override render() {
-    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    const isTerminalPlacement = this.placement === "terminal";
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, {
+      pending: this.pending,
+      recentCommandLimit: isTerminalPlacement ? TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT : null,
+    });
     const quickCommands = resolveTerminalCommandQuickCommands(this.quickCommands);
     const inputStatus = resolveTerminalCommandInputStatus(controls);
     const pasteTitle = controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
@@ -532,7 +542,6 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     const activePaneIdentity = controls.activePaneId
       ? resolveTerminalEntityIdLabel(controls.activePaneId, { prefix: "Pane" })
       : null;
-    const isTerminalPlacement = this.placement === "terminal";
     const accessoryMode = resolveTerminalCommandDockAccessoryMode({ placement: this.placement });
     const sessionActions = resolveTerminalCommandDockSessionActions(controls, {
       historyClearConfirmationArmed: this.historyClearConfirmationArmed,
@@ -633,6 +642,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         .canPasteClipboard=${controls.canPasteClipboard}
         .placeholder=${inputStatus.placeholder}
         .pasteTitle=${pasteTitle}
+        .placement=${this.placement}
         @tp-terminal-command-draft-change=${(event: CustomEvent<TerminalCommandComposerDraftChangeDetail>) =>
           this.handleComposerDraftChange(event)}
         @tp-terminal-command-history-navigate=${(event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>) =>
