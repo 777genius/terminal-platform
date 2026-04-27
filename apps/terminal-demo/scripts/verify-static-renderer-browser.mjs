@@ -65,6 +65,11 @@ async function main() {
       || result.commandDockPlacement !== "terminal"
       || result.commandDockCanWrite !== "true"
       || result.commandDockInputCapability !== "known"
+      || result.screenChromeMode !== "compact"
+      || !result.hasCompactScreenChrome
+      || result.terminalScreenChromeHeight > 58
+      || Math.abs(result.terminalScreenChromeViewportGapPx ?? 99) > 1
+      || result.terminalScreenCompactSizeLabel !== "96x24"
       || result.workspaceLayoutPreset !== "terminal"
       || result.workspaceNavigationMode !== "collapsed"
       || result.workspaceInspectorMode !== "collapsed"
@@ -293,6 +298,8 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       const paste = commandRoot?.querySelector('[data-testid="tp-paste-clipboard"]') ?? null;
       const interrupt = commandRoot?.querySelector('[data-testid="tp-send-interrupt"]') ?? null;
       const enter = commandRoot?.querySelector('[data-testid="tp-send-enter"]') ?? null;
+      const screenPanel = screenRoot?.querySelector('[data-testid="tp-terminal-screen"]') ?? null;
+      const screenChrome = screenRoot?.querySelector('[data-testid="tp-screen-chrome"]') ?? null;
       const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
       const runEnabledBeforeSubmit = Boolean(run && !run.disabled);
 
@@ -325,6 +332,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n')
         : '';
       const terminalColumnRect = terminalColumn?.getBoundingClientRect();
+      const screenChromeRect = screenChrome?.getBoundingClientRect();
       const viewportRect = viewport?.getBoundingClientRect();
       const composerRect = composer?.getBoundingClientRect();
 
@@ -340,6 +348,13 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         commandDockPlacement: commandDockPanel?.getAttribute('data-placement') ?? null,
         commandDockCanWrite: commandDockPanel?.getAttribute('data-command-input') ?? null,
         commandDockInputCapability: commandDockPanel?.getAttribute('data-input-capability') ?? null,
+        screenChromeMode: screenPanel?.getAttribute('data-chrome-mode') ?? null,
+        hasCompactScreenChrome: Boolean(screenChrome && screenChrome.getAttribute('data-chrome-mode') === 'compact'),
+        terminalScreenChromeHeight: Math.round(screenChromeRect?.height ?? 0),
+        terminalScreenChromeViewportGapPx: screenChromeRect && viewportRect
+          ? Math.round(viewportRect.top - screenChromeRect.bottom)
+          : null,
+        terminalScreenCompactSizeLabel: screenRoot?.querySelector('[data-meta-id="size"]')?.textContent?.trim() ?? null,
         workspaceLayoutPreset: layoutRoot?.getAttribute('data-layout-preset') ?? null,
         workspaceNavigationMode: layoutRoot?.getAttribute('data-navigation-mode') ?? null,
         workspaceInspectorMode: operationsDeck?.getAttribute('data-inspector-mode') ?? null,

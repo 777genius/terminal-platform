@@ -84,6 +84,8 @@ open "file://$(pwd)/dist/renderer/index.html?demoStaticWorkspace=1"
 
 This mode renders the full workspace shell from a static NativeMux preview snapshot and verifies that the renderer bundle still includes the static preview contract. It is useful for fast visual QA when the native runtime or localhost preview server is unavailable, but it does not replace `npm run smoke:browser`.
 
+The demo uses `layoutPreset="terminal"` so the workspace opens as a dense terminal-first surface: collapsed navigation and inspector drawers, compact terminal screen chrome, a single command composer directly under the output viewport, and no launcher sidebar after an active session is available.
+
 Fast offline verification for sandboxed or dependency-constrained environments:
 
 ```bash
@@ -100,7 +102,7 @@ This gate verifies architecture boundaries, renderer type safety, the React/stat
 | `npm run test:offline` | fresh workspace SDK staging, architecture boundaries, renderer types, static workspace composition, renderer bundle, terminal layout contracts | Node dependencies |
 | `npm run smoke:renderer-static` | fresh workspace SDK staging, renderer bundle, static NativeMux preview contract | Node dependencies |
 | `npm run verify:renderer-static:browser` | static NativeMux preview in real headless Chrome, command input flow, attached terminal layout, screenshot artifact | Node dependencies, Chrome CDP |
-| `cd ../../sdk && npm run test:public-api` | workspace elements and React public exports, workspace layout presets, composer action IDs, keyboard hints, row layout helpers | Node dependencies |
+| `cd ../../sdk && npm run test:public-api` | workspace elements and React public exports, workspace layout presets, terminal screen chrome, composer action IDs, keyboard hints, row layout helpers | Node dependencies |
 | `npm run smoke:browser` | full native host, WebSocket gateway, browser UI, terminal layout, command composer interaction | Cargo dependencies, local bind to `127.0.0.1`, Chrome |
 
 Use `npm run test:offline` as the fast sandbox gate and `cd ../../sdk && npm run test:public-api` before changing SDK exports. Use `npm run verify:renderer-static:browser` for real Chrome QA when native dependencies are unavailable. Use `npm run smoke:browser` before release or when the native runtime and localhost browser preview are available.

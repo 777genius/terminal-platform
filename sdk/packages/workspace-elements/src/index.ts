@@ -78,6 +78,15 @@ export {
 export { TerminalStatusBarElement } from "./elements/terminal-status-bar-element.js";
 export { TerminalScreenElement } from "./elements/terminal-screen-element.js";
 export {
+  TERMINAL_SCREEN_CHROME_MODES,
+  resolveTerminalScreenChromeState,
+  type TerminalScreenChromeMetaItem,
+  type TerminalScreenChromeMetaItemId,
+  type TerminalScreenChromeMode,
+  type TerminalScreenChromeOptions,
+  type TerminalScreenChromeState,
+} from "./elements/terminal-screen-chrome.js";
+export {
   resolveTerminalScreenControlState,
   type TerminalScreenControlState,
 } from "./elements/terminal-screen-controls.js";

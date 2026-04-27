@@ -186,6 +186,11 @@ async function main() {
       || !result.afterCreate.hasScreenCopyControl
       || !result.afterCreate.hasScreenDirectInput
       || result.afterCreate.screenPlacement !== "terminal"
+      || result.afterCreate.screenChromeMode !== "compact"
+      || !result.afterCreate.hasCompactScreenChrome
+      || result.afterCreate.terminalScreenChromeHeight > 58
+      || Math.abs(result.afterCreate.terminalScreenChromeViewportGapPx ?? 99) > 1
+      || !/^\d+x\d+$/.test(result.afterCreate.terminalScreenCompactSizeLabel ?? "")
       || /Focused pane output/.test(result.afterCreate.screenVisibleText ?? "")
       || result.afterCreate.screenInputStatus !== "Input ready"
       || result.afterCreate.screenInputTone !== "ready"
@@ -313,6 +318,10 @@ async function main() {
       || result.afterCreateMobileLayout.documentHorizontalOverflow > 1
       || result.afterCreateMobileLayout.demoMainWidth < 430
       || result.afterCreateMobileLayout.screenViewportHeight < 260
+      || result.afterCreateMobileLayout.screenChromeMode !== "compact"
+      || !result.afterCreateMobileLayout.hasCompactScreenChrome
+      || result.afterCreateMobileLayout.terminalScreenChromeHeight > 140
+      || Math.abs(result.afterCreateMobileLayout.terminalScreenChromeViewportGapPx ?? 99) > 1
       || result.afterCreateMobileLayout.terminalScreenHeight > 650
       || result.afterCreateMobileLayout.commandRegionTop > 900
       || Math.abs(result.afterCreateMobileLayout.terminalComposerGapPx ?? 99) > 1
@@ -761,6 +770,7 @@ async function runSmokeScenario(browserUrl) {
       const screenSearch = screenRoot?.querySelector('[data-testid="tp-screen-search"]') ?? null;
       const screenCopy = screenRoot?.querySelector('[data-testid="tp-screen-copy"]') ?? null;
       const screenInputStatus = screenRoot?.querySelector('[data-testid="tp-screen-input-status"]') ?? null;
+      const screenChrome = screenRoot?.querySelector('[data-testid="tp-screen-chrome"]') ?? null;
       const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
       const screenPanel = screenRoot?.querySelector('[data-testid="tp-terminal-screen"]') ?? null;
       const saveLayout = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
@@ -796,6 +806,7 @@ async function runSmokeScenario(browserUrl) {
       const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
       const screenRect = screenHost?.getBoundingClientRect() ?? null;
       const tabStripRect = tabStripHost?.getBoundingClientRect() ?? null;
+      const screenChromeRect = screenChrome?.getBoundingClientRect() ?? null;
       const screenViewportRect = screenViewport?.getBoundingClientRect() ?? null;
       const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
       const commandComposer = commandRoot?.querySelector('[part="composer"]') ?? null;
@@ -880,6 +891,13 @@ async function runSmokeScenario(browserUrl) {
         screenInputTone: screenInputStatus?.getAttribute('data-input-tone') ?? null,
         screenInputTitle: screenInputStatus?.getAttribute('title') ?? null,
         screenPlacement: screenPanel?.getAttribute('data-placement') ?? null,
+        screenChromeMode: screenPanel?.getAttribute('data-chrome-mode') ?? null,
+        hasCompactScreenChrome: Boolean(screenChrome && screenChrome.getAttribute('data-chrome-mode') === 'compact'),
+        terminalScreenChromeHeight: Math.round(screenChrome?.getBoundingClientRect().height ?? 0),
+        terminalScreenChromeViewportGapPx: screenChromeRect && screenViewportRect
+          ? Math.round(screenViewportRect.top - screenChromeRect.bottom)
+          : null,
+        terminalScreenCompactSizeLabel: screenRoot?.querySelector('[data-meta-id="size"]')?.textContent?.trim() ?? null,
         screenVisibleText: screenPanel?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
         hasPasteClipboardControl: Boolean(pasteClipboard && !pasteClipboard.disabled),
         hasSaveLayoutControl: Boolean(saveLayout && !saveLayout.disabled),
@@ -1049,6 +1067,8 @@ async function runSmokeScenario(browserUrl) {
       const terminalScreen = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
       const screenRoot = terminalScreen?.shadowRoot ?? null;
       const screenViewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      const screenChrome = screenRoot?.querySelector('[data-testid="tp-screen-chrome"]') ?? null;
+      const screenPanel = screenRoot?.querySelector('[data-testid="tp-terminal-screen"]') ?? null;
       const commandRegion = workspaceRoot?.querySelector('[data-testid="tp-workspace-command-region"]') ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
@@ -1061,6 +1081,7 @@ async function runSmokeScenario(browserUrl) {
         commandRoot?.querySelector('[data-testid="tp-send-enter"]') ?? null,
       ];
       const terminalScreenRect = terminalScreen?.getBoundingClientRect() ?? null;
+      const screenChromeRect = screenChrome?.getBoundingClientRect() ?? null;
       const screenViewportRect = screenViewport?.getBoundingClientRect() ?? null;
       const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
       const commandDockPanelRect = commandDockPanel?.getBoundingClientRect() ?? null;
@@ -1090,6 +1111,12 @@ async function runSmokeScenario(browserUrl) {
         ),
         terminalScreenHeight: Math.round(terminalScreen?.getBoundingClientRect().height ?? 0),
         screenViewportHeight: Math.round(screenViewport?.getBoundingClientRect().height ?? 0),
+        screenChromeMode: screenPanel?.getAttribute('data-chrome-mode') ?? null,
+        hasCompactScreenChrome: Boolean(screenChrome && screenChrome.getAttribute('data-chrome-mode') === 'compact'),
+        terminalScreenChromeHeight: Math.round(screenChrome?.getBoundingClientRect().height ?? 0),
+        terminalScreenChromeViewportGapPx: screenChromeRect && screenViewportRect
+          ? Math.round(screenViewportRect.top - screenChromeRect.bottom)
+          : null,
         commandRegionTop: Math.round(commandRegion?.getBoundingClientRect().top ?? 0),
         terminalComposerGapPx: terminalScreenRect && commandRegionRect
           ? Math.round(commandRegionRect.top - terminalScreenRect.bottom)

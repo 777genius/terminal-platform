@@ -24,6 +24,12 @@ import {
 import { terminalInputForKeyboardEvent } from "./terminal-keyboard-input.js";
 import { resolveTerminalScreenControlState } from "./terminal-screen-controls.js";
 import { isTerminalScreenSearchShortcut } from "./terminal-screen-shortcuts.js";
+import {
+  resolveTerminalScreenChromeState,
+  TERMINAL_SCREEN_CHROME_MODES,
+  type TerminalScreenChromeMetaItem,
+  type TerminalScreenChromeState,
+} from "./terminal-screen-chrome.js";
 
 type ScreenCopyState = "idle" | "copied" | "failed";
 type TerminalScreenPlacement = "panel" | "terminal";
@@ -72,7 +78,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] {
-        gap: var(--tp-space-2);
+        gap: 0;
+        grid-template-rows: auto minmax(0, 1fr);
         height: 100%;
         min-height: 0;
         color: var(--tp-terminal-color-text);
@@ -83,6 +90,37 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
             var(--tp-terminal-color-bg)
           ),
           var(--tp-terminal-color-bg);
+      }
+
+      .screen-chrome {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.48fr) auto;
+        gap: 0.45rem;
+        align-items: center;
+        min-height: 2.45rem;
+        min-width: 0;
+        border: 1px solid color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
+        border-bottom-width: 0;
+        border-radius: var(--tp-radius-md) var(--tp-radius-md) 0 0;
+        background:
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--tp-terminal-color-bg-raised) 88%, transparent),
+            color-mix(in srgb, var(--tp-terminal-color-bg) 96%, transparent)
+          ),
+          var(--tp-terminal-color-bg);
+        padding: 0.42rem 0.65rem;
+      }
+
+      .screen-chrome__title {
+        display: flex;
+        align-items: center;
+        gap: 0.48rem;
+        min-width: 0;
+      }
+
+      .screen-chrome__tools {
+        display: contents;
       }
 
       .screen-header {
@@ -120,6 +158,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .screen-actions {
+        flex-wrap: nowrap;
         gap: 0.35rem;
       }
 
@@ -151,6 +190,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       .screen[data-placement="terminal"] .screen-tools {
         grid-template-columns: minmax(11rem, 0.64fr) auto;
         gap: 0.35rem;
+      }
+
+      .screen-chrome .search {
+        min-width: 0;
+      }
+
+      .screen-chrome .search-actions {
+        display: none;
       }
 
       .search {
@@ -260,7 +307,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         min-height: 0;
         max-height: none;
         border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
-        border-radius: var(--tp-radius-md) var(--tp-radius-md) 0 0;
+        border-top-width: 0;
+        border-radius: 0;
         border-bottom-left-radius: var(--tp-terminal-screen-viewport-border-bottom-left-radius, 0);
         border-bottom-right-radius: var(--tp-terminal-screen-viewport-border-bottom-right-radius, 0);
         box-shadow: inset 0 1px 0 color-mix(in srgb, var(--tp-terminal-color-accent) 18%, transparent);
@@ -362,15 +410,23 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
       .screen[data-placement="terminal"] .screen-meta {
         color: var(--tp-terminal-color-text-muted);
+        flex-wrap: nowrap;
         gap: 0.35rem;
         font-size: 0.78rem;
+        min-width: 0;
+        overflow: hidden;
       }
 
       .screen[data-placement="terminal"] .screen-meta span {
         border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
         border-radius: 0.45rem;
         background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 78%, transparent);
+        min-width: 0;
+        max-width: 10rem;
+        overflow: hidden;
         padding: 0.18rem 0.45rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .screen-meta [data-input-tone="ready"] {
@@ -420,6 +476,24 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           justify-content: flex-start;
         }
 
+        .screen-chrome {
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+          min-height: 0;
+        }
+
+        .screen-chrome__title {
+          grid-column: 1 / -1;
+          overflow: hidden;
+        }
+
+        .screen-chrome .screen-actions {
+          justify-content: flex-end;
+          max-width: 100%;
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+
         .viewport {
           min-height: var(--tp-terminal-screen-mobile-viewport-min-height, clamp(14rem, 38vh, 22rem));
           max-height: var(--tp-terminal-screen-mobile-viewport-max-height, min(48vh, 26rem));
@@ -427,8 +501,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         }
 
         .screen[data-placement="terminal"] .viewport {
-          min-height: var(--tp-terminal-screen-mobile-viewport-min-height, clamp(14rem, 38vh, 22rem));
-          max-height: var(--tp-terminal-screen-mobile-viewport-max-height, min(48vh, 26rem));
+          min-height: var(--tp-terminal-screen-mobile-viewport-min-height, 0);
+          max-height: none;
         }
 
         .line {
@@ -514,6 +588,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     const searchResult = this.createSearchResult();
     const terminalDisplay = this.snapshot.terminalDisplay;
     const isTerminalPlacement = this.placement === "terminal";
+    const chrome = screen
+      ? resolveTerminalScreenChromeState(screen, terminalDisplay, {
+          mode: isTerminalPlacement
+            ? TERMINAL_SCREEN_CHROME_MODES.compact
+            : TERMINAL_SCREEN_CHROME_MODES.full,
+        })
+      : null;
 
     return html`
       <div
@@ -521,121 +602,20 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         part="screen"
         data-testid="tp-terminal-screen"
         data-placement=${this.placement}
+        data-chrome-mode=${chrome?.mode ?? TERMINAL_SCREEN_CHROME_MODES.full}
         data-font-scale=${terminalDisplay.fontScale}
         data-line-wrap=${String(terminalDisplay.lineWrap)}
         data-direct-input=${String(controls.canUseDirectInput)}
         data-input-capability=${controls.inputCapabilityStatus}
         data-input-status=${inputStatus.tone}
       >
-        <div class="screen-header">
-          <div class="panel-header">
-            ${isTerminalPlacement ? nothing : html`<div class="panel-eyebrow">Terminal</div>`}
-            <div class="panel-title">${screen?.surface.title ?? "Live output"}</div>
-            ${isTerminalPlacement ? nothing : html`<div class="panel-copy">Focused pane output.</div>`}
-          </div>
-          <div class="screen-actions" part="screen-actions">
-            <button
-              type="button"
-              data-testid="tp-screen-follow"
-              aria-pressed=${String(this.followOutput)}
-              ?disabled=${!screen}
-              @click=${() => this.toggleFollowOutput()}
-            >
-              ${this.followOutput ? "Following" : "Paused"}
-            </button>
-            <button
-              type="button"
-              data-testid="tp-screen-scroll-latest"
-              ?disabled=${!screen}
-              @click=${() => this.scrollLatest()}
-            >
-              Scroll latest
-            </button>
-            <button
-              type="button"
-              data-testid="tp-screen-copy"
-              ?disabled=${!controls.canCopyVisibleOutput}
-              @click=${() => this.copyVisibleOutput()}
-            >
-              ${this.copyState === "copied" ? "Copied" : this.copyState === "failed" ? "Copy failed" : "Copy visible"}
-            </button>
-          </div>
-        </div>
         ${screen
           ? html`
-              <div class="screen-meta" part="meta">
-                <span>${screen.cols} columns</span>
-                <span>${screen.rows} rows</span>
-                <span>seq ${String(screen.sequence)}</span>
-                <span>${screen.source}</span>
-                <span>${terminalDisplay.fontScale}</span>
-                <span>${terminalDisplay.lineWrap ? "wrapped" : "nowrap"}</span>
-                <span
-                  id="tp-screen-input-status"
-                  part=${`input-status input-status-${inputStatus.tone}`}
-                  data-testid="tp-screen-input-status"
-                  data-input-tone=${inputStatus.tone}
-                  title=${inputStatus.title}
-                  aria-live="polite"
-                >
-                  ${inputStatus.label}
-                </span>
-                ${screen.surface.cursor
-                  ? html`<span>cursor ${screen.surface.cursor.row + 1}:${screen.surface.cursor.col + 1}</span>`
-                  : null}
-              </div>
-              <div class="screen-tools" part="screen-tools">
-                <label class="search" part="search">
-                  <input
-                    data-testid="tp-screen-search"
-                    name="tp-screen-search"
-                    .value=${this.searchQuery}
-                    placeholder="Find output"
-                    aria-label="Find terminal output"
-                    aria-keyshortcuts="Control+F Meta+F"
-                    @input=${(event: Event) => this.handleSearchInput(event)}
-                    @keydown=${(event: KeyboardEvent) => this.handleSearchKeydown(event)}
-                  />
-                  <span
-                    class="search-count"
-                    part="search-count"
-                    aria-live="polite"
-                    data-search-active=${String(Boolean(searchResult.query))}
-                  >
-                    ${formatTerminalOutputSearchCount(
-                      searchResult.query,
-                      searchResult.matchCount,
-                      searchResult.activeMatchIndex,
-                    )}
-                  </span>
-                </label>
-                <div class="search-actions" part="search-actions">
-                  <button
-                    type="button"
-                    data-testid="tp-screen-search-prev"
-                    ?disabled=${searchResult.matchCount === 0}
-                    @click=${() => this.selectSearchMatch("previous")}
-                  >
-                    Prev
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="tp-screen-search-next"
-                    ?disabled=${searchResult.matchCount === 0}
-                    @click=${() => this.selectSearchMatch("next")}
-                  >
-                    Next
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="tp-screen-search-clear"
-                    ?disabled=${!searchResult.query}
-                    @click=${() => this.clearSearch()}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
+              ${chrome
+                ? isTerminalPlacement
+                  ? this.renderCompactChrome(chrome, inputStatus, searchResult, controls.canCopyVisibleOutput)
+                  : this.renderFullChrome(chrome, inputStatus, searchResult, controls.canCopyVisibleOutput)
+                : nothing}
               <div
                 class="viewport"
                 part="screen-lines"
@@ -654,6 +634,170 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
               </div>
             `
           : html`<div class="empty-state" part="empty">No active screen yet. Start or attach a session to see output here.</div>`}
+      </div>
+    `;
+  }
+
+  private renderFullChrome(
+    chrome: TerminalScreenChromeState,
+    inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
+    searchResult: TerminalOutputSearchResult,
+    canCopyVisibleOutput: boolean,
+  ): TemplateResult {
+    return html`
+      <div class="screen-header">
+        <div class="panel-header">
+          <div class="panel-eyebrow">Terminal</div>
+          <div class="panel-title">${chrome.title}</div>
+          <div class="panel-copy">Focused pane output.</div>
+        </div>
+        ${this.renderScreenActions(canCopyVisibleOutput)}
+      </div>
+      ${this.renderScreenMeta(chrome, inputStatus)}
+      <div class="screen-tools" part="screen-tools">
+        ${this.renderSearch(searchResult)}
+        ${this.renderSearchActions(searchResult)}
+      </div>
+    `;
+  }
+
+  private renderCompactChrome(
+    chrome: TerminalScreenChromeState,
+    inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
+    searchResult: TerminalOutputSearchResult,
+    canCopyVisibleOutput: boolean,
+  ): TemplateResult {
+    return html`
+      <div
+        class="screen-chrome"
+        part="screen-chrome"
+        data-testid="tp-screen-chrome"
+        data-chrome-mode=${chrome.mode}
+      >
+        <div class="screen-chrome__title">
+          <span class="panel-title">${chrome.title}</span>
+          ${this.renderScreenMeta(chrome, inputStatus)}
+        </div>
+        <div class="screen-chrome__tools">
+          ${this.renderSearch(searchResult)}
+          ${this.renderScreenActions(canCopyVisibleOutput)}
+        </div>
+      </div>
+      ${searchResult.query ? this.renderSearchActions(searchResult) : nothing}
+    `;
+  }
+
+  private renderScreenMeta(
+    chrome: TerminalScreenChromeState,
+    inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
+  ): TemplateResult {
+    return html`
+      <div class="screen-meta" part="meta" data-chrome-mode=${chrome.mode}>
+        ${chrome.metaItems.map((item) => this.renderScreenMetaItem(item))}
+        <span
+          id="tp-screen-input-status"
+          part=${`input-status input-status-${inputStatus.tone}`}
+          data-testid="tp-screen-input-status"
+          data-input-tone=${inputStatus.tone}
+          title=${inputStatus.title}
+          aria-live="polite"
+        >
+          ${inputStatus.label}
+        </span>
+      </div>
+    `;
+  }
+
+  private renderScreenMetaItem(item: TerminalScreenChromeMetaItem): TemplateResult {
+    return html`<span data-meta-id=${item.id} title=${item.title ?? item.label}>${item.label}</span>`;
+  }
+
+  private renderScreenActions(canCopyVisibleOutput: boolean): TemplateResult {
+    return html`
+      <div class="screen-actions" part="screen-actions">
+        <button
+          type="button"
+          data-testid="tp-screen-follow"
+          aria-pressed=${String(this.followOutput)}
+          @click=${() => this.toggleFollowOutput()}
+        >
+          ${this.followOutput ? "Following" : "Paused"}
+        </button>
+        <button
+          type="button"
+          data-testid="tp-screen-scroll-latest"
+          @click=${() => this.scrollLatest()}
+        >
+          Scroll latest
+        </button>
+        <button
+          type="button"
+          data-testid="tp-screen-copy"
+          ?disabled=${!canCopyVisibleOutput}
+          @click=${() => this.copyVisibleOutput()}
+        >
+          ${this.copyState === "copied" ? "Copied" : this.copyState === "failed" ? "Copy failed" : "Copy visible"}
+        </button>
+      </div>
+    `;
+  }
+
+  private renderSearch(searchResult: TerminalOutputSearchResult): TemplateResult {
+    return html`
+      <label class="search" part="search">
+        <input
+          data-testid="tp-screen-search"
+          name="tp-screen-search"
+          .value=${this.searchQuery}
+          placeholder="Find output"
+          aria-label="Find terminal output"
+          aria-keyshortcuts="Control+F Meta+F"
+          @input=${(event: Event) => this.handleSearchInput(event)}
+          @keydown=${(event: KeyboardEvent) => this.handleSearchKeydown(event)}
+        />
+        <span
+          class="search-count"
+          part="search-count"
+          aria-live="polite"
+          data-search-active=${String(Boolean(searchResult.query))}
+        >
+          ${formatTerminalOutputSearchCount(
+            searchResult.query,
+            searchResult.matchCount,
+            searchResult.activeMatchIndex,
+          )}
+        </span>
+      </label>
+    `;
+  }
+
+  private renderSearchActions(searchResult: TerminalOutputSearchResult): TemplateResult {
+    return html`
+      <div class="search-actions" part="search-actions">
+        <button
+          type="button"
+          data-testid="tp-screen-search-prev"
+          ?disabled=${searchResult.matchCount === 0}
+          @click=${() => this.selectSearchMatch("previous")}
+        >
+          Prev
+        </button>
+        <button
+          type="button"
+          data-testid="tp-screen-search-next"
+          ?disabled=${searchResult.matchCount === 0}
+          @click=${() => this.selectSearchMatch("next")}
+        >
+          Next
+        </button>
+        <button
+          type="button"
+          data-testid="tp-screen-search-clear"
+          ?disabled=${!searchResult.query}
+          @click=${() => this.clearSearch()}
+        >
+          Clear
+        </button>
       </div>
     `;
   }
