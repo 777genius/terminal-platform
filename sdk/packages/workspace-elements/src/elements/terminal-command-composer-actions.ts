@@ -14,12 +14,15 @@ export type TerminalCommandComposerShortcut = "\u0003" | "\r";
 
 export type TerminalCommandComposerActionTone = "primary" | "secondary";
 
+export type TerminalCommandComposerActionLabelMode = "glyph" | "label";
+
 export type TerminalCommandComposerActionPresentation = {
   readonly id: TerminalCommandComposerActionId;
   readonly ariaKeyShortcuts?: string;
   readonly ariaLabel: string;
   readonly keyHint?: string;
   readonly label: string;
+  readonly labelMode: TerminalCommandComposerActionLabelMode;
   readonly placement: TerminalCommandComposerActionPlacement;
   readonly part: string;
   readonly primary: boolean;
@@ -37,8 +40,9 @@ export type TerminalCommandComposerActionOptions = {
 export const TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE = "Paste clipboard into the focused pane";
 
 type TerminalCommandComposerActionDefinition =
-  Omit<TerminalCommandComposerActionPresentation, "label" | "placement"> & {
+  Omit<TerminalCommandComposerActionPresentation, "label" | "labelMode" | "placement"> & {
     readonly label: string;
+    readonly labelModes: Readonly<Record<TerminalCommandComposerActionPlacement, TerminalCommandComposerActionLabelMode>>;
     readonly labels: Readonly<Record<TerminalCommandComposerActionPlacement, string>>;
   };
 
@@ -51,7 +55,11 @@ const terminalCommandComposerActions = [
     label: "Run",
     labels: {
       panel: "Run",
-      terminal: "Run",
+      terminal: "\u25b6",
+    },
+    labelModes: {
+      panel: "label",
+      terminal: "glyph",
     },
     part: "send-command",
     primary: true,
@@ -65,7 +73,11 @@ const terminalCommandComposerActions = [
     label: "Paste",
     labels: {
       panel: "Paste",
-      terminal: "Paste",
+      terminal: "\u2398",
+    },
+    labelModes: {
+      panel: "label",
+      terminal: "glyph",
     },
     part: "paste-clipboard",
     primary: false,
@@ -82,6 +94,10 @@ const terminalCommandComposerActions = [
       panel: "^C",
       terminal: "^C",
     },
+    labelModes: {
+      panel: "label",
+      terminal: "glyph",
+    },
     part: "send-interrupt",
     primary: false,
     shortcut: "\u0003",
@@ -97,6 +113,10 @@ const terminalCommandComposerActions = [
     labels: {
       panel: "Enter",
       terminal: "\u21b5",
+    },
+    labelModes: {
+      panel: "label",
+      terminal: "glyph",
     },
     part: "send-enter",
     primary: false,
@@ -118,10 +138,12 @@ export function resolveTerminalCommandComposerActions(
 
   return terminalCommandComposerActions.map((action) => {
     const label = resolveTerminalCommandComposerActionLabel(action, placement);
-    const { labels: _labels, ...baseAction } = action;
+    const labelMode = resolveTerminalCommandComposerActionLabelMode(action, placement);
+    const { labelModes: _labelModes, labels: _labels, ...baseAction } = action;
     const presentation = {
       ...baseAction,
       label,
+      labelMode,
       placement,
     };
 
@@ -151,4 +173,11 @@ function resolveTerminalCommandComposerActionLabel(
   placement: TerminalCommandComposerActionPlacement,
 ): string {
   return action.labels[placement] ?? action.label;
+}
+
+function resolveTerminalCommandComposerActionLabelMode(
+  action: (typeof terminalCommandComposerActions)[number],
+  placement: TerminalCommandComposerActionPlacement,
+): TerminalCommandComposerActionLabelMode {
+  return action.labelModes[placement] ?? "label";
 }

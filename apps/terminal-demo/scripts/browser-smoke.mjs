@@ -252,9 +252,10 @@ async function main() {
       || result.afterCreate.terminalComposerActionIds.join("|") !== "submit|paste|interrupt|enter"
       || result.afterCreate.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.afterCreate.terminalComposerActionTones.join("|") !== "primary|secondary|secondary|secondary"
+      || result.afterCreate.terminalComposerActionLabelModes.join("|") !== "glyph|glyph|glyph|glyph"
       || result.afterCreate.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
       || result.afterCreate.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
-      || result.afterCreate.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
+      || result.afterCreate.commandActionLabels.join("|") !== "\u25b6|\u2398|^C|\u21b5"
       || result.afterCreate.commandInputRows !== 1
       || result.afterCreate.commandInputRowCount !== "1"
       || result.afterCreate.commandInputMultiline !== "false"
@@ -410,9 +411,10 @@ async function main() {
       || result.afterCreateMobileLayout.terminalComposerActionIds.join("|") !== "submit|paste|interrupt|enter"
       || result.afterCreateMobileLayout.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.afterCreateMobileLayout.terminalComposerActionTones.join("|") !== "primary|secondary|secondary|secondary"
+      || result.afterCreateMobileLayout.terminalComposerActionLabelModes.join("|") !== "glyph|glyph|glyph|glyph"
       || result.afterCreateMobileLayout.terminalComposerActionKeyHints.join("|") !== "Enter||Ctrl+C|Enter"
       || result.afterCreateMobileLayout.terminalComposerActionAriaKeyShortcuts.join("|") !== "Enter|||"
-      || result.afterCreateMobileLayout.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
+      || result.afterCreateMobileLayout.commandActionLabels.join("|") !== "\u25b6|\u2398|^C|\u21b5"
       || result.afterCreateMobileLayout.terminalScreenActionIds.join("|") !== "follow-output|scroll-latest|copy-visible"
       || result.afterCreateMobileLayout.terminalScreenActionTones.join("|") !== "primary|secondary|secondary"
       || result.afterCreateMobileLayout.terminalScreenActionLabels.join("|") !== "Live|Latest|Copy"
@@ -1141,6 +1143,9 @@ async function runSmokeScenario(browserUrl) {
         terminalComposerActionTones: commandActionButtons.map((button) =>
           button?.getAttribute('data-action-tone') ?? '',
         ),
+        terminalComposerActionLabelModes: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-label-mode') ?? '',
+        ),
         terminalComposerActionKeyHints: commandActionButtons.map((button) => button?.getAttribute('data-key-hint') ?? ''),
         terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>
           button?.getAttribute('aria-keyshortcuts') ?? '',
@@ -1435,6 +1440,9 @@ async function runSmokeScenario(browserUrl) {
         ),
         terminalComposerActionTones: commandActionButtons.map((button) =>
           button?.getAttribute('data-action-tone') ?? '',
+        ),
+        terminalComposerActionLabelModes: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-label-mode') ?? '',
         ),
         terminalComposerActionKeyHints: commandActionButtons.map((button) => button?.getAttribute('data-key-hint') ?? ''),
         terminalComposerActionAriaKeyShortcuts: commandActionButtons.map((button) =>

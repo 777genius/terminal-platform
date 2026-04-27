@@ -217,6 +217,10 @@ const terminalLayoutSourceContracts = [
         marker: 'button[data-action-tone="primary"]',
       },
       {
+        label: "composer compact glyph mode drives terminal styling",
+        marker: 'button[data-action-label-mode="glyph"]',
+      },
+      {
         label: "quick commands expose stable ids",
         marker: "data-quick-command=${command.id}",
       },
@@ -270,6 +274,56 @@ const terminalLayoutSourceContracts = [
           "errorTemplate,",
           "headerTemplate,",
         ],
+      },
+    ],
+  },
+  {
+    name: "terminal command composer element exposes action label mode",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-command-composer-element.ts",
+    ),
+    includes: [
+      {
+        label: "composer action label mode is a DOM contract",
+        marker: "data-action-label-mode=${action.labelMode}",
+      },
+      {
+        label: "composer action placement remains addressable",
+        marker: "data-action-placement=${action.placement}",
+      },
+    ],
+  },
+  {
+    name: "terminal command composer actions resolve glyph presentation",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-command-composer-actions.ts",
+    ),
+    includes: [
+      {
+        label: "action label mode is a public presentation contract",
+        marker: "TerminalCommandComposerActionLabelMode",
+      },
+      {
+        label: "terminal submit action resolves to a compact glyph",
+        marker: 'terminal: "\\u25b6"',
+      },
+      {
+        label: "terminal placement opts into glyph presentation",
+        marker: 'terminal: "glyph"',
+      },
+      {
+        label: "label mode is resolved outside rendering",
+        marker: "resolveTerminalCommandComposerActionLabelMode",
       },
     ],
   },

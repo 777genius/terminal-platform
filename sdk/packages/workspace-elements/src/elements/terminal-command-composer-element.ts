@@ -248,6 +248,7 @@ export class TerminalCommandComposerElement extends LitElement {
         part=${action.part}
         type="button"
         data-action=${action.id}
+        data-action-label-mode=${action.labelMode}
         data-action-placement=${action.placement}
         data-action-tone=${action.tone}
         data-key-hint=${action.keyHint ?? nothing}

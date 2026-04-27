@@ -7,6 +7,7 @@ export {
   resolveTerminalCommandComposerActionPlacement,
   resolveTerminalCommandComposerActions,
   type TerminalCommandComposerActionId,
+  type TerminalCommandComposerActionLabelMode,
   type TerminalCommandComposerActionOptions,
   type TerminalCommandComposerActionPlacement,
   type TerminalCommandComposerActionPresentation,

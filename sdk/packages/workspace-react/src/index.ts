@@ -64,6 +64,7 @@ export {
 
 export type {
   TerminalCommandComposerActionId,
+  TerminalCommandComposerActionLabelMode,
   TerminalCommandComposerActionOptions,
   TerminalCommandComposerActionPresentation,
   TerminalCommandComposerActionTone,

@@ -65,9 +65,10 @@ async function main() {
       || result.commandInputPlaceholder !== "Type shell input for the focused pane"
       || result.commandInputStatus !== "Ready"
       || !/^\d+ cmd$/.test(result.commandHistoryBadgeText ?? "")
-      || result.commandActionLabels.join("|") !== "Run|Paste|^C|\u21b5"
+      || result.commandActionLabels.join("|") !== "\u25b6|\u2398|^C|\u21b5"
       || result.terminalComposerActionPlacements.join("|") !== "terminal|terminal|terminal|terminal"
       || result.terminalComposerActionTones.join("|") !== "primary|secondary|secondary|secondary"
+      || result.terminalComposerActionLabelModes.join("|") !== "glyph|glyph|glyph|glyph"
       || !result.terminalComposerPrimaryToneStyle
       || !result.terminalComposerSecondaryToneStyle
       || result.terminalComposerPrimaryToneStyle.borderColor === result.terminalComposerSecondaryToneStyle.borderColor
@@ -474,6 +475,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         ),
         terminalComposerActionTones: commandActionButtons.map((button) =>
           button?.getAttribute('data-action-tone') ?? '',
+        ),
+        terminalComposerActionLabelModes: commandActionButtons.map((button) =>
+          button?.getAttribute('data-action-label-mode') ?? '',
         ),
         terminalComposerPrimaryToneStyle: readActionToneStyle(run),
         terminalComposerSecondaryToneStyle: readActionToneStyle(paste),

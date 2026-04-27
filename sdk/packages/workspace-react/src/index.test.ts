@@ -5,6 +5,7 @@ import type {
   TerminalCommandComposer,
   TerminalWorkspace,
   TerminalCommandComposerActionId,
+  TerminalCommandComposerActionLabelMode,
   TerminalCommandComposerActionOptions,
   TerminalCommandComposerActionPresentation,
   TerminalCommandComposerActionTone,
@@ -75,6 +76,7 @@ type _WorkspaceLayoutPresetProp = Assert<
 >;
 type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandComposerActionId
+  | TerminalCommandComposerActionLabelMode
   | TerminalCommandComposerActionOptions
   | TerminalCommandComposerActionPresentation
   | TerminalCommandComposerActionTone
@@ -110,6 +112,9 @@ describe("workspace react public api", () => {
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_ACTIONS.map((action) => action.tone).join("|")).toBe(
       "primary|secondary|secondary|secondary",
     );
+    expect(workspaceReact.resolveTerminalCommandComposerActions({ placement: "terminal" })
+      .map((action) => action.labelMode)
+      .join("|")).toBe("glyph|glyph|glyph|glyph");
     expect(workspaceReact.resolveTerminalCommandComposerActions()[0]?.keyHint).toBe("Enter");
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
     expect(workspaceReact.TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");

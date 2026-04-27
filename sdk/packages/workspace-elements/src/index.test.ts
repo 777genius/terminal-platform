@@ -68,6 +68,7 @@ import {
   resolveWorkspaceCapability,
   TerminalCommandComposerElement,
   type TerminalCommandComposerActionId,
+  type TerminalCommandComposerActionLabelMode,
   type TerminalCommandComposerActionOptions,
   type TerminalCommandComposerActionPlacement,
   type TerminalCommandComposerActionPresentation,
@@ -166,6 +167,7 @@ import {
 
 type PublicControlTypes =
   | TerminalCommandComposerActionId
+  | TerminalCommandComposerActionLabelMode
   | TerminalCommandComposerActionOptions
   | TerminalCommandComposerActionPlacement
   | TerminalCommandComposerActionPresentation

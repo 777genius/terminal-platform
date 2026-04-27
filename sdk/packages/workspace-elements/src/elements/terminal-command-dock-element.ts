@@ -294,6 +294,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .composer-actions button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
         border-radius: 0.45rem;
         background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
@@ -301,6 +304,16 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         font-size: 0.8rem;
         min-width: 2.15rem;
         padding: 0.3rem 0.48rem;
+      }
+
+      .dock[data-placement="terminal"] .composer-actions button[data-action-label-mode="glyph"] {
+        inline-size: 2.2rem;
+        min-width: 2.2rem;
+        aspect-ratio: 1;
+        padding: 0;
+        font-family: var(--tp-font-family-mono);
+        font-size: 0.92rem;
+        line-height: 1;
       }
 
       .dock[data-placement="terminal"] .composer-actions .primary,
@@ -311,7 +324,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           var(--tp-terminal-color-accent) 16%,
           var(--tp-terminal-color-bg-raised)
         );
-        min-width: 3rem;
+      }
+
+      .dock[data-placement="terminal"] .composer-actions button[data-action="submit"] {
+        inline-size: 2.35rem;
+        min-width: 2.35rem;
       }
 
       .prompt {
