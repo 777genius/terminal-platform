@@ -81,6 +81,9 @@ async function main() {
       || result.commandDockPlacement !== "terminal"
       || result.commandDockAccessoryMode !== "bar"
       || result.commandAccessoryBarMode !== "bar"
+      || result.commandAccessoryBarHasHistory !== "true"
+      || result.commandAccessoryBarQuickCommandCount !== "5"
+      || result.commandAccessoryBarRecentCommandCount !== "2"
       || !result.hasCommandAccessoryBar
       || result.terminalCommandAccessoryBarHeight > 72
       || result.quickCommandIds.join("|") !== "pwd|list-files|git-status|node-version|hello"
@@ -477,6 +480,9 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
         commandDockPlacement: commandDockPanel?.getAttribute('data-placement') ?? null,
         commandDockAccessoryMode: commandDockPanel?.getAttribute('data-accessory-mode') ?? null,
         commandAccessoryBarMode: commandAccessoryBar?.getAttribute('data-accessory-mode') ?? null,
+        commandAccessoryBarHasHistory: commandAccessoryBar?.getAttribute('data-has-command-history') ?? null,
+        commandAccessoryBarQuickCommandCount: commandAccessoryBar?.getAttribute('data-quick-command-count') ?? null,
+        commandAccessoryBarRecentCommandCount: commandAccessoryBar?.getAttribute('data-recent-command-count') ?? null,
         hasCommandAccessoryBar: Boolean(commandAccessoryBar),
         terminalCommandAccessoryBarHeight: Math.round(commandAccessoryBarRect?.height ?? 0),
         quickCommandIds: quickCommands.map((button) => button.getAttribute('data-quick-command') ?? ''),

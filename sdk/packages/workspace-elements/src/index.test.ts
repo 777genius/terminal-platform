@@ -38,6 +38,7 @@ import {
   resolveActiveBackendCapabilities,
   resolvePaneResizeCommand,
   resolveTerminalCommandDockAccessoryMode,
+  resolveTerminalCommandDockAccessoryState,
   resolveTerminalCommandDockControlState,
   resolveTerminalCommandDockSessionActions,
   resolveTerminalCommandDockStatusBadges,
@@ -91,6 +92,8 @@ import {
   type TerminalCommandComposerShortcutDetail,
   type TerminalCommandDockAccessoryMode,
   type TerminalCommandDockAccessoryOptions,
+  type TerminalCommandDockAccessoryState,
+  type TerminalCommandDockAccessoryStateOptions,
   type TerminalCommandHistoryInputState,
   type TerminalCommandHistoryNavigationDirection,
   type TerminalCommandHistoryNavigationResult,
@@ -187,6 +190,8 @@ type PublicControlTypes =
   | TerminalCommandComposerShortcutDetail
   | TerminalCommandDockAccessoryMode
   | TerminalCommandDockAccessoryOptions
+  | TerminalCommandDockAccessoryState
+  | TerminalCommandDockAccessoryStateOptions
   | TerminalCommandHistoryInputState
   | TerminalCommandHistoryNavigationDirection
   | TerminalCommandHistoryNavigationResult
@@ -268,6 +273,7 @@ describe("workspace elements public api", () => {
       resolveActiveBackendCapabilities,
       resolvePaneResizeCommand,
       resolveTerminalCommandDockAccessoryMode,
+      resolveTerminalCommandDockAccessoryState,
       resolveTerminalCommandDockControlState,
       resolveTerminalCommandDockSessionActions,
       resolveTerminalCommandDockStatusBadges,

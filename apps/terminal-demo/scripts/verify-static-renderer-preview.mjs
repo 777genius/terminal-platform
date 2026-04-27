@@ -252,6 +252,14 @@ const terminalLayoutSourceContracts = [
         label: "compact terminal placement keeps quick and recent commands on one accessory row",
         marker: '"quick history"',
       },
+      {
+        label: "accessory bar exposes recent-history layout state",
+        marker: "data-has-command-history=${String(accessoryState.hasRecentCommands)}",
+      },
+      {
+        label: "accessory bar exposes quick-command counts",
+        marker: "data-quick-command-count=${accessoryState.quickCommandCount}",
+      },
     ],
     order: [
       {
@@ -262,6 +270,31 @@ const terminalLayoutSourceContracts = [
           "errorTemplate,",
           "headerTemplate,",
         ],
+      },
+    ],
+  },
+  {
+    name: "command dock accessories resolve presentation metadata",
+    relativePath: path.join(
+      "sdk",
+      "packages",
+      "workspace-elements",
+      "src",
+      "elements",
+      "terminal-command-dock-accessories.ts",
+    ),
+    includes: [
+      {
+        label: "accessory state is resolved outside rendering",
+        marker: "TerminalCommandDockAccessoryState",
+      },
+      {
+        label: "quick command count is normalized",
+        marker: "const quickCommandCount = normalizeAccessoryCount",
+      },
+      {
+        label: "recent command presence is explicit",
+        marker: "hasRecentCommands: recentCommandCount > 0",
       },
     ],
   },

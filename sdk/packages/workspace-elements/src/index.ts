@@ -36,8 +36,11 @@ export { TerminalCommandDockElement } from "./elements/terminal-command-dock-ele
 export {
   TERMINAL_COMMAND_DOCK_ACCESSORY_MODES,
   resolveTerminalCommandDockAccessoryMode,
+  resolveTerminalCommandDockAccessoryState,
   type TerminalCommandDockAccessoryMode,
   type TerminalCommandDockAccessoryOptions,
+  type TerminalCommandDockAccessoryState,
+  type TerminalCommandDockAccessoryStateOptions,
 } from "./elements/terminal-command-dock-accessories.js";
 export {
   TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT,

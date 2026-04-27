@@ -13,6 +13,8 @@ import type {
   TerminalCommandComposerShortcutDetail,
   TerminalCommandDockAccessoryMode,
   TerminalCommandDockAccessoryOptions,
+  TerminalCommandDockAccessoryState,
+  TerminalCommandDockAccessoryStateOptions,
   TerminalCommandDockSessionActionTone,
   TerminalScreenActionTone,
   TerminalScreenChromeMode,
@@ -78,6 +80,8 @@ type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandComposerActionTone
   | TerminalCommandDockAccessoryMode
   | TerminalCommandDockAccessoryOptions
+  | TerminalCommandDockAccessoryState
+  | TerminalCommandDockAccessoryStateOptions
   | TerminalCommandDockSessionActionTone
   | TerminalScreenActionTone
   | TerminalScreenChromeMode
@@ -110,6 +114,15 @@ describe("workspace react public api", () => {
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
     expect(workspaceReact.TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");
     expect(workspaceReact.resolveTerminalCommandDockAccessoryMode({ placement: "terminal" })).toBe("bar");
+    expect(workspaceReact.resolveTerminalCommandDockAccessoryState({
+      placement: "terminal",
+      quickCommandCount: 5,
+      recentCommandCount: 0,
+    })).toMatchObject({
+      mode: "bar",
+      hasQuickCommands: true,
+      hasRecentCommands: false,
+    });
     expect(workspaceReact.TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
     expect(typeof workspaceReact.resolveTerminalScreenChromeState).toBe("function");
     expect(workspaceReact.resolveTerminalCommandComposerRows("echo one\necho two")).toBe(2);

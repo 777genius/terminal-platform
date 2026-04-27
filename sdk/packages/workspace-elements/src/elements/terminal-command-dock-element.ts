@@ -24,7 +24,7 @@ import {
   resolveTerminalCommandQuickCommands,
   type TerminalCommandQuickCommand,
 } from "./terminal-command-quick-commands.js";
-import { resolveTerminalCommandDockAccessoryMode } from "./terminal-command-dock-accessories.js";
+import { resolveTerminalCommandDockAccessoryState } from "./terminal-command-dock-accessories.js";
 import {
   TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
   resolveTerminalCommandDockControlState,
@@ -501,6 +501,13 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
         .dock-accessory-bar {
           grid-template-areas:
+            "status"
+            "quick";
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .dock-accessory-bar[data-has-command-history="true"] {
+          grid-template-areas:
             "status status"
             "quick history";
           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -581,7 +588,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     const pasteTitle = controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
       ? "Paste is not supported by the active backend"
       : "Paste clipboard into the focused pane";
-    const accessoryMode = resolveTerminalCommandDockAccessoryMode({ placement: this.placement });
+    const accessoryState = resolveTerminalCommandDockAccessoryState({
+      placement: this.placement,
+      quickCommandCount: quickCommands.length,
+      recentCommandCount: controls.recentCommandEntries.length,
+    });
     const sessionActions = resolveTerminalCommandDockSessionActions(controls, {
       historyClearConfirmationArmed: this.historyClearConfirmationArmed,
       pending: this.pending,
@@ -747,7 +758,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         class="dock-accessory-bar"
         part="terminal-accessories"
         data-testid="tp-command-accessory-bar"
-        data-accessory-mode=${accessoryMode}
+        data-accessory-mode=${accessoryState.mode}
+        data-has-quick-commands=${String(accessoryState.hasQuickCommands)}
+        data-has-command-history=${String(accessoryState.hasRecentCommands)}
+        data-quick-command-count=${accessoryState.quickCommandCount}
+        data-recent-command-count=${accessoryState.recentCommandCount}
         aria-label="Terminal command accessories"
       >
         ${headerTemplate}
@@ -783,7 +798,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         data-input-capability=${controls.inputCapabilityStatus}
         data-save-capability=${controls.saveCapabilityStatus}
         data-save-layout=${String(controls.canSaveLayout)}
-        data-accessory-mode=${accessoryMode}
+        data-accessory-mode=${accessoryState.mode}
+        data-has-quick-commands=${String(accessoryState.hasQuickCommands)}
+        data-has-command-history=${String(accessoryState.hasRecentCommands)}
+        data-quick-command-count=${accessoryState.quickCommandCount}
+        data-recent-command-count=${accessoryState.recentCommandCount}
       >
         ${orderedDockContent}
       </div>

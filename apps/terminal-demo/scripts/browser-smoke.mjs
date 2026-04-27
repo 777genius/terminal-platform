@@ -396,8 +396,13 @@ async function main() {
       || Math.abs(result.afterCreateMobileLayout.terminalInputGapPx ?? 99) > 12
       || result.afterCreateMobileLayout.commandDockAccessoryMode !== "bar"
       || result.afterCreateMobileLayout.commandAccessoryBarMode !== "bar"
+      || result.afterCreateMobileLayout.commandAccessoryBarHasHistory !== "false"
+      || result.afterCreateMobileLayout.commandAccessoryBarQuickCommandCount !== "5"
+      || result.afterCreateMobileLayout.commandAccessoryBarRecentCommandCount !== "0"
       || !result.afterCreateMobileLayout.hasCommandAccessoryBar
       || result.afterCreateMobileLayout.terminalCommandAccessoryBarHeight > 130
+      || !result.afterCreateMobileLayout.quickCommandRowFillsAccessoryBar
+      || result.afterCreateMobileLayout.historyChipCount !== 0
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatus
       || !result.afterCreateMobileLayout.terminalComposerBeforeDockStatusDom
       || !result.afterCreateMobileLayout.terminalComposerFirstInDockDom
@@ -637,6 +642,9 @@ async function main() {
     if (
       !result.afterCommandCompactHistoryLayout.checked
       || result.afterCommandCompactHistoryLayout.commandDockAccessoryMode !== "bar"
+      || result.afterCommandCompactHistoryLayout.commandAccessoryBarHasHistory !== "true"
+      || result.afterCommandCompactHistoryLayout.commandAccessoryBarQuickCommandCount !== "5"
+      || result.afterCommandCompactHistoryLayout.commandAccessoryBarRecentCommandCount !== "1"
       || !result.afterCommandCompactHistoryLayout.historyRowVisible
       || result.afterCommandCompactHistoryLayout.historyChipCount < 1
       || result.afterCommandCompactHistoryLayout.historyChipVisibleCount
@@ -1299,6 +1307,8 @@ async function runSmokeScenario(browserUrl) {
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const commandDockPanel = commandRoot?.querySelector('[data-testid="tp-command-dock"]') ?? null;
       const commandAccessoryBar = commandRoot?.querySelector('[data-testid="tp-command-accessory-bar"]') ?? null;
+      const quickCommandRow = commandRoot?.querySelector('[part="quick-commands"]') ?? null;
+      const historyEntries = [...(commandRoot?.querySelectorAll('[data-testid="tp-command-history-entry"]') ?? [])];
       const commandComposer = commandRoot?.querySelector('[part="composer"]') ?? null;
       const commandInputStatus = commandRoot?.querySelector('[data-testid="tp-command-input-status"]') ?? null;
       const commandActionButtons = [
@@ -1316,6 +1326,7 @@ async function runSmokeScenario(browserUrl) {
       const commandRegionRect = commandRegion?.getBoundingClientRect() ?? null;
       const commandDockPanelRect = commandDockPanel?.getBoundingClientRect() ?? null;
       const commandAccessoryBarRect = commandAccessoryBar?.getBoundingClientRect() ?? null;
+      const quickCommandRowRect = quickCommandRow?.getBoundingClientRect() ?? null;
       const commandComposerRect = commandComposer?.getBoundingClientRect() ?? null;
       const dockHeaderRect = commandRoot?.querySelector('.dock-header')?.getBoundingClientRect() ?? null;
       const demoShellStyle = demoShell ? getComputedStyle(demoShell) : null;
@@ -1399,8 +1410,15 @@ async function runSmokeScenario(browserUrl) {
           : null,
         commandDockAccessoryMode: commandDockPanel?.getAttribute('data-accessory-mode') ?? null,
         commandAccessoryBarMode: commandAccessoryBar?.getAttribute('data-accessory-mode') ?? null,
+        commandAccessoryBarHasHistory: commandAccessoryBar?.getAttribute('data-has-command-history') ?? null,
+        commandAccessoryBarQuickCommandCount: commandAccessoryBar?.getAttribute('data-quick-command-count') ?? null,
+        commandAccessoryBarRecentCommandCount: commandAccessoryBar?.getAttribute('data-recent-command-count') ?? null,
         hasCommandAccessoryBar: Boolean(commandAccessoryBar),
         terminalCommandAccessoryBarHeight: Math.round(commandAccessoryBarRect?.height ?? 0),
+        quickCommandRowFillsAccessoryBar: quickCommandRowRect && commandAccessoryBarRect
+          ? quickCommandRowRect.width >= commandAccessoryBarRect.width * 0.92
+          : false,
+        historyChipCount: historyEntries.length,
         terminalComposerBeforeDockStatus: commandComposerRect && dockHeaderRect
           ? commandComposerRect.top <= dockHeaderRect.top
           : false,
@@ -2366,6 +2384,9 @@ async function runSmokeScenario(browserUrl) {
       return {
         checked: Boolean(commandRoot && commandDockPanel && commandAccessoryBar),
         commandDockAccessoryMode: commandDockPanel?.getAttribute('data-accessory-mode') ?? null,
+        commandAccessoryBarHasHistory: commandAccessoryBar?.getAttribute('data-has-command-history') ?? null,
+        commandAccessoryBarQuickCommandCount: commandAccessoryBar?.getAttribute('data-quick-command-count') ?? null,
+        commandAccessoryBarRecentCommandCount: commandAccessoryBar?.getAttribute('data-recent-command-count') ?? null,
         historyRowVisible: isVisible(historyRow),
         historyChipCount: historyEntries.length,
         historyChipVisibleCount: historyEntries.filter((button) => isVisible(button)).length,
