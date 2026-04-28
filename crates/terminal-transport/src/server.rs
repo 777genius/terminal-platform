@@ -1,7 +1,11 @@
 use std::{io, sync::Arc};
 
 use futures_util::{SinkExt as _, StreamExt as _};
-use interprocess::local_socket::{ListenerOptions, tokio::Stream, traits::tokio::Listener as _};
+use interprocess::local_socket::{
+    ListenerOptions,
+    tokio::{Listener, Stream},
+    traits::tokio::Listener as _,
+};
 use tokio::{
     sync::{oneshot, watch},
     task::{JoinError, JoinHandle, JoinSet},
@@ -44,8 +48,7 @@ pub fn spawn_local_socket_server<Handler>(
 where
     Handler: TransportRequestHandler + TransportSubscriptionHandler + Send + Sync + 'static,
 {
-    let listener =
-        ListenerOptions::new().name(address.to_name()?).try_overwrite(true).create_tokio()?;
+    let listener = create_listener(&address)?;
     let handler = Arc::new(handler);
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
     let (connection_shutdown_tx, connection_shutdown_rx) = watch::channel(false);
@@ -82,6 +85,42 @@ where
     });
 
     Ok(LocalSocketServerHandle { address, shutdown_tx: Some(shutdown_tx), task })
+}
+
+fn create_listener(address: &LocalSocketAddress) -> io::Result<Listener> {
+    #[cfg(windows)]
+    {
+        let mut last_error = None;
+        for attempt in 0..20 {
+            match bind_listener(address) {
+                Ok(listener) => return Ok(listener),
+                Err(error) if attempt < 19 && is_retryable_windows_bind_error(&error) => {
+                    last_error = Some(error);
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| io::Error::other("listener bind retry failed")))
+    }
+
+    #[cfg(not(windows))]
+    {
+        bind_listener(address)
+    }
+}
+
+fn bind_listener(address: &LocalSocketAddress) -> io::Result<Listener> {
+    ListenerOptions::new().name(address.to_name()?).try_overwrite(true).create_tokio()
+}
+
+#[cfg(windows)]
+fn is_retryable_windows_bind_error(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::PermissionDenied | io::ErrorKind::AddrInUse | io::ErrorKind::AlreadyExists
+    ) || matches!(error.raw_os_error(), Some(5 | 32 | 183))
 }
 
 async fn handle_connection<Handler>(

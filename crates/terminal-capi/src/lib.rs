@@ -619,11 +619,14 @@ mod tests {
 
     use std::{sync::mpsc, thread};
 
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use terminal_daemon::spawn_local_socket_server;
     use terminal_daemon_client::LocalSocketDaemonClient;
     use terminal_protocol::LocalSocketAddress;
-    use terminal_testing::{daemon, daemon_fixture, unique_socket_address, wait_for_daemon_ready};
+    use terminal_testing::{
+        daemon, daemon_fixture, echo_shell_launch_spec, unique_socket_address,
+        wait_for_daemon_ready,
+    };
 
     use super::*;
 
@@ -666,15 +669,7 @@ mod tests {
             assert_eq!(capabilities["backend"], "native");
             assert_eq!(capabilities["capabilities"]["explicit_session_save"], true);
 
-            let create_request = c_string(
-                r#"{
-                  "title":"capi-smoke",
-                  "launch":{
-                    "program":"/bin/sh",
-                    "args":["-lc","printf 'ready\n'; exec cat"]
-                  }
-                }"#,
-            );
+            let create_request = create_native_session_request("capi-smoke");
             let created = read_json_result(terminal_capi_client_create_native_session_json(
                 handle,
                 create_request.as_ptr(),
@@ -1011,6 +1006,10 @@ mod tests {
         }
     }
 
+    fn create_native_session_request(title: &str) -> CString {
+        c_string(&json!({ "title": title, "launch": echo_shell_launch_spec() }).to_string())
+    }
+
     fn read_json_result(result: TerminalCapiStringResult) -> Value {
         read_json_result_with_status(result, TerminalCapiStatus::Ok)
     }
@@ -1057,15 +1056,7 @@ mod tests {
         handle: *mut TerminalCapiClientHandle,
         title: &str,
     ) -> (String, String) {
-        let create_request = c_string(&format!(
-            r#"{{
-              "title":"{title}",
-              "launch":{{
-                "program":"/bin/sh",
-                "args":["-lc","printf 'ready\n'; exec cat"]
-              }}
-            }}"#
-        ));
+        let create_request = create_native_session_request(title);
         let created = read_json_result(terminal_capi_client_create_native_session_json(
             handle,
             create_request.as_ptr(),

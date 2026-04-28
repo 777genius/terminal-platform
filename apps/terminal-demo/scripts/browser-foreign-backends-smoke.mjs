@@ -12,6 +12,7 @@ import WebSocket from "ws";
 import {
   launchChromeWithCdp,
   pipeProcess,
+  removeChromeUserDataDir,
   resolveRuntimeEvaluationValue,
   stopProcess,
   waitForHttpServer,
@@ -30,6 +31,7 @@ const sessionStorePath = path.join(
   `terminal-demo-foreign-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`,
 );
 const zellijMinimum = [0, 44, 0];
+const foreignBackends = process.platform === "win32" ? ["zellij"] : ["tmux", "zellij"];
 
 let previewProcess = null;
 let browserHostProcess = null;
@@ -39,22 +41,23 @@ let tmuxSessionName = null;
 let zellijSessionName = null;
 let tempZellijBinDir = null;
 let smokeEnv = process.env;
+const windowsZellijProcessIds = [];
 
 await main();
 
 async function main() {
   try {
-    if (process.platform === "win32") {
-      throw new Error("tmux UI smoke is Unix-only; Windows acceptance covers Native + Zellij.");
-    }
-
     runSync("npm", ["run", "build"], appRoot, smokeEnv);
-    smokeEnv = await resolveForeignBackendEnv();
+    smokeEnv = await resolveForeignBackendEnv(foreignBackends);
 
-    tmuxSessionName = uniqueName("tp-ui-tmux");
-    zellijSessionName = uniqueName("tp-ui-zellij");
-    startTmuxSession(tmuxSessionName, smokeEnv);
-    await startZellijSession(zellijSessionName, smokeEnv);
+    if (foreignBackends.includes("tmux")) {
+      tmuxSessionName = uniqueName("tp-ui-tmux");
+      startTmuxSession(tmuxSessionName, smokeEnv);
+    }
+    if (foreignBackends.includes("zellij")) {
+      zellijSessionName = uniqueName("tp-ui-zellij");
+      await startZellijSession(zellijSessionName, smokeEnv);
+    }
 
     previewProcess = spawn(process.execPath, [
       viteCliPath,
@@ -99,15 +102,17 @@ async function main() {
       sessionStorePath,
     });
     const result = await runForeignBackendScenario(browserUrl, {
-      tmuxSessionName,
-      zellijSessionName,
+      backendSessions: {
+        ...(tmuxSessionName ? { tmux: tmuxSessionName } : {}),
+        ...(zellijSessionName ? { zellij: zellijSessionName } : {}),
+      },
     });
 
     if (result.issues.length > 0) {
       throw new Error(`Foreign backend browser smoke reported runtime issues: ${JSON.stringify(result.issues)}`);
     }
 
-    for (const backend of ["tmux", "zellij"]) {
+    for (const backend of foreignBackends) {
       const imported = result.imports[backend];
       if (
         !imported?.importClicked
@@ -124,8 +129,7 @@ async function main() {
       result.beforeImport.connectionState !== "ready"
       || !result.beforeImport.hasForeignSection
       || !result.beforeImport.hasRefresh
-      || result.beforeImport.tmuxDiscovered < 1
-      || result.beforeImport.zellijDiscovered < 1
+      || foreignBackends.some((backend) => (result.beforeImport.discoveredCounts?.[backend] ?? 0) < 1)
       || result.beforeImport.documentHorizontalOverflow > 1
     ) {
       throw new Error(`Foreign backend UI did not expose discovered sessions: ${JSON.stringify(result.beforeImport)}`);
@@ -135,8 +139,10 @@ async function main() {
   }
 }
 
-async function resolveForeignBackendEnv() {
-  assertCommand("tmux", ["-V"], "tmux is required for foreign backend browser smoke.");
+async function resolveForeignBackendEnv(backends) {
+  if (backends.includes("tmux")) {
+    assertCommand("tmux", ["-V"], "tmux is required for foreign backend browser smoke.");
+  }
   let env = { ...process.env };
   let version = resolveZellijVersion(env);
 
@@ -147,18 +153,18 @@ async function resolveForeignBackendEnv() {
 
     tempZellijBinDir = path.join(os.tmpdir(), `terminal-demo-zellij-${process.pid}-${Date.now()}`);
     const python = resolvePython();
+    const installEnv = { ...env };
+    if (process.env.SSL_CERT_FILE) {
+      installEnv.SSL_CERT_FILE = process.env.SSL_CERT_FILE;
+    }
     runSync(python, [
       path.join(repoRoot, ".github", "scripts", "install_zellij.py"),
       "--out",
       tempZellijBinDir,
-    ], repoRoot, {
-      ...env,
-      SSL_CERT_FILE: process.env.SSL_CERT_FILE ?? "/etc/ssl/cert.pem",
-    });
+    ], repoRoot, installEnv);
     env = {
       ...env,
       PATH: `${tempZellijBinDir}${path.delimiter}${env.PATH ?? ""}`,
-      SSL_CERT_FILE: env.SSL_CERT_FILE ?? "/etc/ssl/cert.pem",
     };
     version = resolveZellijVersion(env);
   }
@@ -167,7 +173,11 @@ async function resolveForeignBackendEnv() {
     throw new Error(`Zellij ${formatVersion(zellijMinimum)}+ is required; found ${version.raw}.`);
   }
 
-  process.stdout.write(`Foreign backend smoke tools - tmux ${runCapture("tmux", ["-V"], appRoot, env).trim()}, ${version.raw}\n`);
+  const tools = [
+    backends.includes("tmux") ? `tmux ${runCapture("tmux", ["-V"], appRoot, env).trim()}` : "tmux skipped",
+    version.raw,
+  ];
+  process.stdout.write(`Foreign backend smoke tools - ${tools.join(", ")}\n`);
   return env;
 }
 
@@ -197,6 +207,18 @@ function startTmuxSession(sessionName, env) {
 
 async function startZellijSession(sessionName, env) {
   runCapture("zellij", ["kill-session", sessionName], appRoot, env, { allowFailure: true });
+
+  if (process.platform === "win32") {
+    startWindowsZellijPty(sessionName, env);
+    await waitFor(async () => {
+      const sessions = runCapture("zellij", ["list-sessions", "--short", "--no-formatting"], appRoot, env, {
+        allowFailure: true,
+      });
+      return sessions.split("\n").map((line) => line.trim()).includes(sessionName);
+    }, `zellij session ${sessionName} to appear`);
+    return;
+  }
+
   runCapture("zellij", ["attach", "--create-background", sessionName], appRoot, env, {
     allowFailure: true,
     timeout: 15_000,
@@ -210,7 +232,23 @@ async function startZellijSession(sessionName, env) {
   }, `zellij session ${sessionName} to appear`);
 }
 
+function startWindowsZellijPty(sessionName, env) {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$zellij = (Get-Command zellij.exe -ErrorAction Stop).Source",
+    `$process = Start-Process -FilePath $zellij -ArgumentList @('attach','--create',${quotePowerShell(sessionName)}) -WindowStyle Hidden -PassThru`,
+    "Write-Output $process.Id",
+  ].join("; ");
+  const output = runCapture("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], appRoot, env);
+  const processId = Number(output.trim().match(/\d+/u)?.[0] ?? 0);
+  if (!Number.isInteger(processId) || processId <= 0) {
+    throw new Error(`Failed to capture Windows Zellij process id: ${output.trim()}`);
+  }
+  windowsZellijProcessIds.push(processId);
+}
+
 async function runForeignBackendScenario(browserUrl, expected) {
+  const backendSessions = Object.entries(expected.backendSessions);
   const target = await fetch(`http://127.0.0.1:${cdpPort}/json/new?${encodeURIComponent(browserUrl)}`, {
     method: "PUT",
   }).then((response) => response.json());
@@ -268,12 +306,14 @@ async function runForeignBackendScenario(browserUrl, expected) {
       mobile: false,
     });
 
-    await waitForBrowser(send, `state ready with discovered ${expected.tmuxSessionName} and ${expected.zellijSessionName}`, `(() => {
+    await waitForBrowser(send, `state ready with discovered ${backendSessions.map(([, title]) => title).join(", ")}`, `(() => {
       const state = window.terminalDemoDebug?.getState?.();
       const discovered = state?.catalog?.discoveredSessions ?? {};
-      const hasTmux = (discovered.tmux ?? []).some((session) => session.title === ${JSON.stringify(expected.tmuxSessionName)});
-      const hasZellij = (discovered.zellij ?? []).some((session) => session.title === ${JSON.stringify(expected.zellijSessionName)});
-      return state?.connection?.state === 'ready' && hasTmux && hasZellij;
+      const expected = ${JSON.stringify(expected.backendSessions)};
+      return state?.connection?.state === 'ready'
+        && Object.entries(expected).every(([backend, title]) =>
+          (discovered[backend] ?? []).some((session) => session.title === title)
+        );
     })()`);
 
     const beforeImport = await evaluate(send, `(() => {
@@ -291,19 +331,23 @@ async function runForeignBackendScenario(browserUrl, expected) {
         hasRefresh: Boolean(sessionListRoot?.querySelector('[data-testid="tp-foreign-refresh"]')),
         tmuxDiscovered: buttons.filter((button) => button.getAttribute('data-backend') === 'tmux').length,
         zellijDiscovered: buttons.filter((button) => button.getAttribute('data-backend') === 'zellij').length,
+        discoveredCounts: buttons.reduce((counts, button) => {
+          const backend = button.getAttribute('data-backend');
+          counts[backend] = (counts[backend] ?? 0) + 1;
+          return counts;
+        }, {}),
         documentHorizontalOverflow: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
       };
     })()`);
 
-    const tmuxImport = await importBackendViaUi(send, "tmux", expected.tmuxSessionName, "tmux-ui-smoke-marker");
-    const zellijImport = await importBackendViaUi(send, "zellij", expected.zellijSessionName, "zellij-ui-smoke-marker");
+    const imports = {};
+    for (const [backend, title] of backendSessions) {
+      imports[backend] = await importBackendViaUi(send, backend, title, `${backend}-ui-smoke-marker`);
+    }
 
     return {
       beforeImport,
-      imports: {
-        tmux: tmuxImport,
-        zellij: zellijImport,
-      },
+      imports,
       issues,
     };
   } finally {
@@ -349,7 +393,7 @@ async function importBackendViaUi(send, backend, title, marker) {
       return false;
     }
     const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
-    descriptor?.set?.call(textarea, ${JSON.stringify(`printf "${marker}\\n"`)} );
+    descriptor?.set?.call(textarea, ${JSON.stringify(`echo ${marker}`)} );
     textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     if (button.disabled) {
@@ -483,9 +527,16 @@ async function shutdown() {
   if (zellijSessionName) {
     runCapture("zellij", ["kill-session", zellijSessionName], appRoot, smokeEnv, { allowFailure: true });
   }
-  if (chromeUserDataDir) {
-    await fs.rm(chromeUserDataDir, { recursive: true, force: true });
+  for (const processId of windowsZellijProcessIds) {
+    runCapture(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `Stop-Process -Id ${processId} -Force -ErrorAction SilentlyContinue`],
+      appRoot,
+      smokeEnv,
+      { allowFailure: true },
+    );
   }
+  await removeChromeUserDataDir(chromeUserDataDir);
   await removeSessionStore(sessionStorePath);
   if (tempZellijBinDir) {
     await fs.rm(tempZellijBinDir, { recursive: true, force: true });
@@ -543,10 +594,10 @@ function assertCommand(command, args, message) {
 }
 
 function resolveZellijVersion(env) {
-  const raw = runCapture("zellij", ["--version"], appRoot, env).trim();
+  const raw = runCapture("zellij", ["--version"], appRoot, env, { allowFailure: true }).trim();
   const parsed = raw.match(/(\d+)\.(\d+)\.(\d+)/u)?.slice(1).map(Number) ?? [0, 0, 0];
   return {
-    raw,
+    raw: raw || "zellij not found",
     parsed,
   };
 }
@@ -583,6 +634,10 @@ function formatVersion(parts) {
 
 function uniqueName(prefix) {
   return `${prefix}-${process.pid}-${Date.now().toString(16)}`;
+}
+
+function quotePowerShell(value) {
+  return `'${String(value).replace(/'/gu, "''")}'`;
 }
 
 function onceSocketOpen(socket) {

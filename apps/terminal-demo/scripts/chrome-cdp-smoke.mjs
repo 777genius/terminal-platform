@@ -56,7 +56,7 @@ export async function launchChromeWithCdp({
         version: chromeVersion,
       }));
       await stopProcess(child);
-      await fs.rm(userDataDir, { recursive: true, force: true });
+      await removeChromeUserDataDir(userDataDir);
     }
   }
 
@@ -106,6 +106,28 @@ export async function stopProcess(child) {
   await Promise.race([exited, sleep(5_000)]);
   if (child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
+  }
+}
+
+export async function removeChromeUserDataDir(userDataDir) {
+  if (!userDataDir) {
+    return;
+  }
+
+  try {
+    await fs.rm(userDataDir, {
+      recursive: true,
+      force: true,
+      maxRetries: process.platform === "win32" ? 8 : 0,
+      retryDelay: 250,
+    });
+  } catch (error) {
+    if (process.platform === "win32" && ["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
+      process.stderr.write(`Skipped locked Chrome profile cleanup: ${userDataDir} - ${error.message}\n`);
+      return;
+    }
+
+    throw error;
   }
 }
 

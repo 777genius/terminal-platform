@@ -7,7 +7,12 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
-import { launchChromeWithCdp, resolveRuntimeEvaluationValue, stopProcess } from "./chrome-cdp-smoke.mjs";
+import {
+  launchChromeWithCdp,
+  removeChromeUserDataDir,
+  resolveRuntimeEvaluationValue,
+  stopProcess,
+} from "./chrome-cdp-smoke.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -213,9 +218,7 @@ async function main() {
   } finally {
     await stopProcess(chromeProcess);
     await closeStaticRendererServer(staticRendererServer?.server);
-    if (chromeUserDataDir) {
-      await fs.rm(chromeUserDataDir, { recursive: true, force: true });
-    }
+    await removeChromeUserDataDir(chromeUserDataDir);
   }
 }
 

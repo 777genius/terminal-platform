@@ -30,7 +30,7 @@
     "build:host": "node --input-type=module -e \"import fs from 'node:fs'; fs.rmSync('dist/host', { recursive: true, force: true }); fs.rmSync('dist/features', { recursive: true, force: true }); fs.rmSync('dist/shared', { recursive: true, force: true });\" && tsc -p tsconfig.host.json && tsc-alias -p tsconfig.host.json --resolve-full-paths --resolve-full-extension .js",
     "build:renderer": "vite build",
     "build": "npm run stage:sdk && npm run check:architecture && npm run build:host && npm run build:renderer",
-    "test": "npm run check:architecture && npm run stage:sdk && npm run build:host && node --test ./tests/**/*.test.mjs",
+    "test": "npm run check:architecture && npm run stage:sdk && npm run build:host && node --test tests",
     "preview": "electron ./dist/host/main/index.js",
     "start": "npm run build && electron ./dist/host/main/index.js"
   },

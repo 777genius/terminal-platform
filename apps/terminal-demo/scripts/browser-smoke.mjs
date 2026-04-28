@@ -12,6 +12,7 @@ import WebSocket from "ws";
 import {
   launchChromeWithCdp,
   pipeProcess,
+  removeChromeUserDataDir,
   resolveRuntimeEvaluationValue,
   stopProcess,
   waitForHttpServer,
@@ -3465,9 +3466,7 @@ async function shutdown() {
   await stopProcess(browserHostProcess);
   await stopProcess(previewProcess);
   await stopProcess(chromeProcess);
-  if (chromeUserDataDir) {
-    await fs.rm(chromeUserDataDir, { recursive: true, force: true });
-  }
+  await removeChromeUserDataDir(chromeUserDataDir);
   await removeSessionStore(autoStartSessionStorePath);
   await removeSessionStore(sessionStorePath);
 }

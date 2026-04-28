@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 
-import { WebSocketServer, type WebSocket } from "ws";
+import { WebSocket as NodeWebSocket, WebSocketServer, type WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createMemoryWorkspaceTransport } from "@terminal-platform/workspace-adapter-memory";
@@ -36,6 +36,7 @@ describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
     const transport = createWorkspaceWebSocketTransport({
       controlUrl: gateway.controlUrl,
       streamUrl: gateway.streamUrl,
+      webSocketFactory: createNodeWebSocket,
     });
     cleanups.push(() => transport.close());
 
@@ -68,6 +69,7 @@ describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
     const transport = createWorkspaceWebSocketTransport({
       controlUrl: gateway.controlUrl,
       streamUrl: gateway.streamUrl,
+      webSocketFactory: createNodeWebSocket,
     });
     cleanups.push(() => transport.close());
 
@@ -347,4 +349,8 @@ async function probeLoopbackTcp(): Promise<boolean> {
 
 function assertNever(value: never): never {
   throw new Error(`Unsupported message: ${JSON.stringify(value)}`);
+}
+
+function createNodeWebSocket(url: string, protocols?: string[]): globalThis.WebSocket {
+  return new NodeWebSocket(url, protocols) as unknown as globalThis.WebSocket;
 }

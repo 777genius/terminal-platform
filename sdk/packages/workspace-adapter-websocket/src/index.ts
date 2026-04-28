@@ -37,6 +37,8 @@ import type {
 
 const INITIAL_CONNECT_MAX_ATTEMPTS = 6;
 const RECONNECT_BACKOFF_MS = [100, 200, 400, 800, 1_600, 2_000] as const;
+const WEB_SOCKET_CONNECTING = 0;
+const WEB_SOCKET_OPEN = 1;
 
 export interface CreateWorkspaceWebSocketTransportOptions {
   controlUrl: string;
@@ -289,7 +291,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
   }
 
   private async ensureControlConnected(): Promise<WebSocket> {
-    if (this.#controlSocket?.readyState === WebSocket.OPEN) {
+    if (this.#controlSocket?.readyState === WEB_SOCKET_OPEN) {
       return this.#controlSocket;
     }
 
@@ -375,7 +377,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
   }
 
   private async ensureStreamConnected(): Promise<WebSocket> {
-    if (this.#streamSocket?.readyState === WebSocket.OPEN) {
+    if (this.#streamSocket?.readyState === WEB_SOCKET_OPEN) {
       return this.#streamSocket;
     }
 
@@ -521,7 +523,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     }
 
     const socket = this.#streamSocket;
-    if (socket?.readyState === WebSocket.OPEN) {
+    if (socket?.readyState === WEB_SOCKET_OPEN) {
       this.sendStream(socket, {
         type: "workspace_unsubscribe",
         subscriptionId,
@@ -705,7 +707,7 @@ async function closeSocket(socket: WebSocket | null): Promise<void> {
     return;
   }
 
-  if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+  if (socket.readyState === WEB_SOCKET_OPEN || socket.readyState === WEB_SOCKET_CONNECTING) {
     await new Promise<void>((resolve) => {
       socket.addEventListener(
         "close",
