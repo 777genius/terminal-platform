@@ -1,6 +1,9 @@
 [build]
 target-dir = "target"
 
+[env]
+TS_RS_IMPORT_EXTENSION = "js"
+
 [alias]
 xtest = "test --workspace"
 xfmt = "fmt --all"

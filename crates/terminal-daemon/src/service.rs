@@ -149,6 +149,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native-backend")]
     fn isolated_daemon() -> TerminalDaemon {
         let store = SqliteSessionStore::open(isolated_store_path("test"))
             .expect("isolated sqlite session store should open");
