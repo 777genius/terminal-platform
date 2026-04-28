@@ -3,12 +3,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
+import { fileURLToPath } from "node:url";
 import { loadTerminalPlatformSdk } from "./terminal-platform-sdk.js";
 
 const DAEMON_GRACEFUL_SHUTDOWN_MS = 5_000;
 const DAEMON_FORCED_SHUTDOWN_MS = 2_000;
 const DAEMON_PROCESS_POLL_MS = 150;
 const WINDOWS_RM_RETRIES = 8;
+const TERMINAL_DAEMON_REPO_ROOT_ENV = "TERMINAL_DEMO_REPO_ROOT";
 
 interface DaemonSupervisorOptions {
   runtimeSlug: string;
@@ -83,6 +85,7 @@ export class DaemonSupervisor {
       cwd: resolveRepoRoot(),
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
     this.#child = child;
 
@@ -120,8 +123,9 @@ export class DaemonSupervisor {
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < 15_000) {
-      if (this.#child?.exitCode != null) {
-        throw new Error(`terminal-daemon exited with code ${this.#child.exitCode}`);
+      const exitState = resolveChildExitState(this.#child);
+      if (exitState) {
+        throw new Error(`terminal-daemon exited before becoming ready: ${exitState}`);
       }
 
       if (await this.isReady()) {
@@ -174,6 +178,22 @@ async function stopChildProcess(child: ChildProcess): Promise<void> {
 
 function isChildProcessRunning(child: ChildProcess): boolean {
   return child.exitCode === null && child.signalCode === null;
+}
+
+function resolveChildExitState(child: ChildProcess | null): string | null {
+  if (!child) {
+    return null;
+  }
+
+  if (child.exitCode !== null) {
+    return `exit code ${child.exitCode}`;
+  }
+
+  if (child.signalCode !== null) {
+    return `signal ${child.signalCode}`;
+  }
+
+  return null;
 }
 
 function terminateChildProcess(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
@@ -240,19 +260,40 @@ function sleep(ms: number): Promise<void> {
 }
 
 function resolveRepoRoot(): string {
-  return path.resolve(process.cwd(), "../..");
+  return resolveDaemonRepoRoot();
 }
 
-function resolveDaemonBinaryPath(): string {
-  const filename = process.platform === "win32"
+export function resolveDaemonRepoRoot(options: {
+  env?: Readonly<Record<string, string | undefined>>;
+  moduleUrl?: string;
+} = {}): string {
+  const env = options.env ?? process.env;
+  const explicitRoot = env[TERMINAL_DAEMON_REPO_ROOT_ENV]?.trim();
+  if (explicitRoot) {
+    return path.resolve(explicitRoot);
+  }
+
+  const moduleDir = path.dirname(fileURLToPath(options.moduleUrl ?? import.meta.url));
+  const appRoot = path.resolve(moduleDir, "../../../../../");
+  return path.resolve(appRoot, "../..");
+}
+
+export function resolveDaemonBinaryPath(options: {
+  env?: Readonly<Record<string, string | undefined>>;
+  moduleUrl?: string;
+  platform?: NodeJS.Platform;
+} = {}): string {
+  const platform = options.platform ?? process.platform;
+  const filename = platform === "win32"
     ? "terminal-daemon.exe"
     : "terminal-daemon";
 
-  return path.resolve(resolveRepoRoot(), "target", "debug", filename);
+  return path.resolve(resolveDaemonRepoRoot(options), "target", "debug", filename);
 }
 
 async function resolveDaemonRuntimeBinary(): Promise<{ binaryPath: string; runtimeDir: string | null }> {
   const binaryPath = resolveDaemonBinaryPath();
+  await assertDaemonBinaryExists(binaryPath);
   if (process.platform !== "win32" || process.env.TERMINAL_DEMO_DAEMON_RUNTIME_COPY === "0") {
     return { binaryPath, runtimeDir: null };
   }
@@ -263,6 +304,16 @@ async function resolveDaemonRuntimeBinary(): Promise<{ binaryPath: string; runti
   const runtimeBinaryPath = path.join(runtimeDir, path.basename(binaryPath));
   await fs.copyFile(binaryPath, runtimeBinaryPath);
   return { binaryPath: runtimeBinaryPath, runtimeDir };
+}
+
+async function assertDaemonBinaryExists(binaryPath: string): Promise<void> {
+  try {
+    await fs.access(binaryPath);
+  } catch {
+    throw new Error(
+      `terminal-daemon binary not found at ${binaryPath}. Run cargo build -p terminal-daemon before starting terminal-demo.`,
+    );
+  }
 }
 
 function findDaemonProcesses(runtimeSlug: string): number[] {
@@ -309,6 +360,7 @@ function findDaemonProcesses(runtimeSlug: string): number[] {
 function findWindowsDaemonProcesses(runtimeSlug: string): number[] {
   const result = spawnSync(windowsPowerShellPath(), [
     "-NoProfile",
+    "-NonInteractive",
     "-ExecutionPolicy",
     "Bypass",
     "-Command",
@@ -321,6 +373,7 @@ function findWindowsDaemonProcesses(runtimeSlug: string): number[] {
     cwd: resolveRepoRoot(),
     env: process.env,
     encoding: "utf8",
+    windowsHide: true,
   });
 
   if (result.status !== 0 || !result.stdout.trim()) {
