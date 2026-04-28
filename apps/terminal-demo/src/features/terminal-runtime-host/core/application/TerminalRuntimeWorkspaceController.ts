@@ -299,8 +299,7 @@ export class TerminalRuntimeWorkspaceController {
     }
 
     return this.runAction(async () => {
-      await this.sendInput(payload);
-      await this.sendInput("\r");
+      await this.sendInput(`${payload}\r`);
     });
   }
 

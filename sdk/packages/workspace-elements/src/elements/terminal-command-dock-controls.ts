@@ -63,6 +63,10 @@ export function resolveTerminalCommandDockControlState(
   };
 }
 
+export function formatTerminalCommandSubmitInput(draft: string): string {
+  return `${draft}\r`;
+}
+
 function normalizeRecentCommandLimit(value: number | null | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT;

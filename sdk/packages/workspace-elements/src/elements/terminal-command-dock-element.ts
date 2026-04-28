@@ -31,6 +31,7 @@ import {
 import { resolveTerminalCommandDockAccessoryState } from "./terminal-command-dock-accessories.js";
 import {
   TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
+  formatTerminalCommandSubmitInput,
   resolveTerminalCommandDockControlState,
 } from "./terminal-command-dock-controls.js";
 import {
@@ -893,7 +894,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
-    await this.dispatchInput(controls.activeSessionId, controls.activePaneId, `${controls.draft}\n`);
+    await this.dispatchInput(
+      controls.activeSessionId,
+      controls.activePaneId,
+      formatTerminalCommandSubmitInput(controls.draft),
+    );
     this.recordCommandHistory(controls.draft);
     this.clearHistoryClearConfirmation();
     this.resetHistoryNavigation();

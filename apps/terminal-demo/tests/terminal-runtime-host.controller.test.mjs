@@ -321,6 +321,27 @@ test("saveSession blocks explicitly when capability model says save is unsupport
   assert.equal(store.getState().actionDegradedReason?.code, "action_save_session_unsupported");
 });
 
+test("submitInput writes command text and enter as one carriage-return terminated mux input", async () => {
+  const store = createStore();
+  const gateway = createGateway();
+  const controller = new TerminalRuntimeWorkspaceController(gateway, gateway, store);
+
+  await controller.bootstrap();
+  const submitted = await controller.submitInput("  git status  ");
+
+  assert.equal(submitted, true);
+  assert.deepEqual(gateway.dispatchCalls, [
+    {
+      sessionId: "session-1",
+      command: {
+        kind: "send_input",
+        pane_id: "pane-1",
+        data: "git status\r",
+      },
+    },
+  ]);
+});
+
 test("restoreSavedSession blocks explicitly when saved session is incompatible", async () => {
   const store = createStore({
     savedSessions: [
