@@ -29,6 +29,12 @@ export class TerminalDirectInputBuffer {
       return;
     }
 
+    if (shouldAppendTerminalDirectInputToPendingBuffer(input) && this.#pendingInput) {
+      this.#pendingInput += input;
+      this.flush();
+      return;
+    }
+
     this.flush();
     this.#flush(input);
   }
@@ -74,6 +80,10 @@ export function shouldBufferTerminalDirectInput(input: string): boolean {
     && input >= " "
     && input !== "\u007f"
     && input !== "\u001b";
+}
+
+function shouldAppendTerminalDirectInputToPendingBuffer(input: string): boolean {
+  return input === "\r";
 }
 
 export function shouldRefreshAfterTerminalDirectInput(input: string): boolean {

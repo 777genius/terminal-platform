@@ -738,9 +738,27 @@ impl ZellijAttachedSession {
 
         let mut actions = Vec::new();
         let mut literal = String::new();
-        for ch in spec.data.chars() {
+        let mut remaining = spec.data.as_str();
+        while !remaining.is_empty() {
+            if let Some((sequence, key)) = zellij_named_key_sequence(remaining) {
+                flush_zellij_literal(&pane_target.backend_ref, &mut literal, &mut actions);
+                actions.push(ZellijAction::SendKeys {
+                    pane_ref: pane_target.backend_ref.clone(),
+                    keys: vec![key.to_string()],
+                });
+                remaining = &remaining[sequence.len()..];
+                continue;
+            }
+
+            let Some(ch) = remaining.chars().next() else {
+                break;
+            };
+            remaining = &remaining[ch.len_utf8()..];
             match ch {
                 '\r' | '\n' => {
+                    if ch == '\r' && remaining.starts_with('\n') {
+                        remaining = &remaining['\n'.len_utf8()..];
+                    }
                     flush_zellij_literal(&pane_target.backend_ref, &mut literal, &mut actions);
                     actions.push(ZellijAction::SendKeys {
                         pane_ref: pane_target.backend_ref.clone(),
@@ -755,10 +773,18 @@ impl ZellijAttachedSession {
                     });
                 }
                 c if c.is_control() => {
-                    return Err(BackendError::unsupported(
-                        format!("zellij input path does not support control character {:?}", c),
-                        DegradedModeReason::UnsupportedByBackend,
-                    ));
+                    if let Some(key) = zellij_control_key(c) {
+                        flush_zellij_literal(&pane_target.backend_ref, &mut literal, &mut actions);
+                        actions.push(ZellijAction::SendKeys {
+                            pane_ref: pane_target.backend_ref.clone(),
+                            keys: vec![key.to_string()],
+                        });
+                    } else {
+                        return Err(BackendError::unsupported(
+                            format!("zellij input path does not support control character {:?}", c),
+                            DegradedModeReason::UnsupportedByBackend,
+                        ));
+                    }
                 }
                 c => literal.push(c),
             }
@@ -1541,6 +1567,38 @@ fn flush_zellij_literal(pane_ref: &str, literal: &mut String, actions: &mut Vec<
     literal.clear();
 }
 
+fn zellij_named_key_sequence(input: &str) -> Option<(&'static str, &'static str)> {
+    [
+        ("\u{1b}[3~", "Delete"),
+        ("\u{1b}[5~", "PageUp"),
+        ("\u{1b}[6~", "PageDown"),
+        ("\u{1b}[A", "Up"),
+        ("\u{1b}[B", "Down"),
+        ("\u{1b}[C", "Right"),
+        ("\u{1b}[D", "Left"),
+        ("\u{1b}[H", "Home"),
+        ("\u{1b}[F", "End"),
+        ("\u{1b}", "Esc"),
+    ]
+    .into_iter()
+    .find(|(sequence, _)| input.starts_with(sequence))
+}
+
+fn zellij_control_key(ch: char) -> Option<&'static str> {
+    match ch {
+        '\u{0001}' => Some("Ctrl a"),
+        '\u{0003}' => Some("Ctrl c"),
+        '\u{0004}' => Some("Ctrl d"),
+        '\u{0005}' => Some("Ctrl e"),
+        '\u{000b}' => Some("Ctrl k"),
+        '\u{000c}' => Some("Ctrl l"),
+        '\u{0015}' => Some("Ctrl u"),
+        '\u{0017}' => Some("Ctrl w"),
+        '\u{007f}' => Some("Backspace"),
+        _ => None,
+    }
+}
+
 fn tab_contains_pane(tab: &TabSnapshot, pane_id: PaneId) -> bool {
     collect_pane_ids(&tab.root).into_iter().any(|candidate| candidate == pane_id)
 }
@@ -1866,7 +1924,7 @@ mod tests {
                 &snapshot,
                 MuxCommand::SendInput(SendInputSpec {
                     pane_id: terminal_pane,
-                    data: "echo\tok\r".to_string(),
+                    data: "echo\tok\r\u{1b}[A\u{0003}\u{007f}\r\n".to_string(),
                 }),
             )
             .expect("send-input should map");
@@ -1890,8 +1948,42 @@ mod tests {
                     pane_ref: "terminal_1".to_string(),
                     keys: vec!["Enter".to_string()],
                 },
+                ZellijAction::SendKeys {
+                    pane_ref: "terminal_1".to_string(),
+                    keys: vec!["Up".to_string()],
+                },
+                ZellijAction::SendKeys {
+                    pane_ref: "terminal_1".to_string(),
+                    keys: vec!["Ctrl c".to_string()],
+                },
+                ZellijAction::SendKeys {
+                    pane_ref: "terminal_1".to_string(),
+                    keys: vec!["Backspace".to_string()],
+                },
+                ZellijAction::SendKeys {
+                    pane_ref: "terminal_1".to_string(),
+                    keys: vec!["Enter".to_string()],
+                },
             ]
         );
+    }
+
+    #[test]
+    fn rejects_unmapped_zellij_control_input_explicitly() {
+        let (attached, snapshot, _first_tab, _second_tab, terminal_pane, _plugin_pane) =
+            sample_attached_session();
+
+        let error = attached
+            .dispatch_actions(
+                &snapshot,
+                MuxCommand::SendInput(SendInputSpec {
+                    pane_id: terminal_pane,
+                    data: "\u{0002}".to_string(),
+                }),
+            )
+            .expect_err("unmapped control input should stay explicit");
+
+        assert!(error.to_string().contains("control character"));
     }
 
     #[test]

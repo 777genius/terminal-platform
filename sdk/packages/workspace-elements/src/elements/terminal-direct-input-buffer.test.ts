@@ -24,7 +24,7 @@ describe("TerminalDirectInputBuffer", () => {
     expect(flushes).toEqual(["pwd"]);
   });
 
-  it("flushes pending printable input before immediate terminal controls", () => {
+  it("coalesces pending printable input with carriage return for command submission", () => {
     const flushes: string[] = [];
     const buffer = createBuffer(flushes);
 
@@ -33,7 +33,18 @@ describe("TerminalDirectInputBuffer", () => {
     buffer.push(" ");
     buffer.push("\r");
 
-    expect(flushes).toEqual(["cd ", "\r"]);
+    expect(flushes).toEqual(["cd \r"]);
+  });
+
+  it("flushes pending printable input before non-submit terminal controls", () => {
+    const flushes: string[] = [];
+    const buffer = createBuffer(flushes);
+
+    buffer.push("p");
+    buffer.push("w");
+    buffer.push("\u0003");
+
+    expect(flushes).toEqual(["pw", "\u0003"]);
   });
 
   it("flushes pending input on dispose", () => {

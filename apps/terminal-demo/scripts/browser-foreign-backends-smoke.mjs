@@ -137,6 +137,7 @@ async function main() {
           || !imported.muxActions?.closedTab
           || !imported.muxActions?.unsupportedSplitRejected
           || !imported.muxActions?.focusCapabilitiesMatchPlatform
+          || !imported.muxActions?.controlInputSucceeded
         )
       ) {
         throw new Error(`Foreign backend zellij mux actions failed: ${JSON.stringify(imported.muxActions)}`);
@@ -576,6 +577,21 @@ async function exerciseZellijMuxActions(send, title) {
     };
   })()`);
 
+  const controlInput = await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    try {
+      await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+        kind: 'send_input',
+        pane_id: ${JSON.stringify(afterNewTab.newPaneId)},
+        data: ${JSON.stringify("\u001b[A\u0003")},
+      });
+      await commands.attachSession(${JSON.stringify(before.sessionId)});
+      return { ok: true, message: null };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  })()`);
+
   await evaluate(send, `(async () => {
     const commands = window.terminalDemoDebug?.controller?.commands;
     await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
@@ -662,6 +678,8 @@ async function exerciseZellijMuxActions(send, title) {
     renamed: !afterClose.renamedStillPresent,
     pasteMarker,
     pasteMarkerSeen: zellijPasteScreen.markerSeen,
+    controlInputSucceeded: controlInput.ok,
+    controlInputMessage: controlInput.message,
     closedTab: afterClose.tabCount === before.tabCount,
     unsupportedSplitRejected,
     unsupportedSplitMessage: unsupportedSplit.message,
