@@ -2,6 +2,9 @@ import { spawn, spawnSync } from "node:child_process";
 import process from "node:process";
 import path from "node:path";
 
+const DEFAULT_PROCESS_GRACE_MS = 5_000;
+const DEFAULT_PROCESS_FORCE_GRACE_MS = 2_000;
+
 export function runSync(command, args, cwd) {
   const resolved = resolveSpawnCommand(command, args);
   const result = spawnSync(resolved.command, resolved.args, {
@@ -9,6 +12,7 @@ export function runSync(command, args, cwd) {
     env: process.env,
     shell: resolved.shell,
     stdio: "inherit",
+    windowsHide: true,
   });
 
   if (result.error) {
@@ -26,6 +30,7 @@ export function spawnViteDevServer(appRoot, rendererPort) {
     cwd: appRoot,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
 
   pipeProcess(child, "[terminal-demo:vite]");
@@ -58,10 +63,30 @@ export function spawnElectronPreview(appRoot, rendererUrl) {
   return child;
 }
 
-export function stopProcess(child) {
-  if (child && !child.killed) {
-    child.kill("SIGTERM");
+export async function stopProcess(child, options = {}) {
+  if (!isProcessRunning(child)) {
+    return false;
   }
+
+  const exited = waitForProcessExit(child);
+  sendProcessSignal(child, options.gracefulSignal ?? resolveGracefulStopSignal());
+  await Promise.race([exited, sleep(options.graceMs ?? DEFAULT_PROCESS_GRACE_MS)]);
+
+  if (!isProcessRunning(child)) {
+    return true;
+  }
+
+  if (process.platform === "win32" && child.pid && options.forceProcessTree !== false) {
+    spawnSync("taskkill.exe", buildWindowsTaskkillArgs(child.pid), {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  } else {
+    sendProcessSignal(child, "SIGKILL");
+  }
+
+  await Promise.race([exited, sleep(options.forceGraceMs ?? DEFAULT_PROCESS_FORCE_GRACE_MS)]);
+  return !isProcessRunning(child);
 }
 
 export async function waitForServer(url, options = {}) {
@@ -118,6 +143,36 @@ function pipeProcess(child, label) {
 
   pipe(child.stdout);
   pipe(child.stderr);
+}
+
+export function resolveGracefulStopSignal(platform = process.platform) {
+  return platform === "win32" ? "SIGINT" : "SIGTERM";
+}
+
+export function buildWindowsTaskkillArgs(pid) {
+  return ["/PID", String(pid), "/T", "/F"];
+}
+
+function isProcessRunning(child) {
+  return Boolean(child && child.exitCode === null && child.signalCode === null);
+}
+
+function waitForProcessExit(child) {
+  return new Promise((resolve) => {
+    child.once("exit", () => resolve());
+  });
+}
+
+function sendProcessSignal(child, signal) {
+  try {
+    child.kill(signal);
+  } catch {
+    // The process may have exited between the running check and the signal.
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function resolveSpawnCommand(command, args, env = process.env) {

@@ -22,15 +22,29 @@ runSync("npm", ["run", "build:host"], appRoot);
 const vite = spawnViteDevServer(appRoot, rendererPort);
 
 let browserHost = null;
-const shutdown = () => {
-  stopProcess(browserHost);
-  stopProcess(vite);
+let shuttingDown = false;
+let shutdownPromise = null;
+const shutdown = async (exitCode = 0) => {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  await Promise.allSettled([
+    stopProcess(browserHost),
+    stopProcess(vite),
+  ]);
   cleanupBrowserSessionStore(sessionStore);
+  process.exit(exitCode);
 };
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-process.on("exit", shutdown);
+const requestShutdown = (exitCode = 0) => {
+  shutdownPromise ??= shutdown(exitCode);
+};
+
+process.on("SIGINT", () => requestShutdown(0));
+process.on("SIGTERM", () => requestShutdown(0));
+process.on("exit", () => cleanupBrowserSessionStore(sessionStore));
 
 await waitForServer(rendererUrl, {
   child: vite,
@@ -46,19 +60,19 @@ browserHost = spawn(process.execPath, ["./dist/host/browser/index.js"], {
     ...(sessionStore.path ? { TERMINAL_DEMO_SESSION_STORE_PATH: sessionStore.path } : {}),
   },
   stdio: "inherit",
+  windowsHide: true,
 });
 
 console.log(`[terminal-demo-browser] session store ${sessionStore.label}`);
 console.log(`[terminal-demo-browser] auto start session ${autoStartSession === "1" ? "enabled" : "disabled"}`);
 
 browserHost.on("exit", (code) => {
-  shutdown();
-  process.exit(code ?? 0);
+  requestShutdown(code ?? 0);
 });
 
 vite.on("exit", (code) => {
-  if (code && code !== 0) {
-    process.exit(code);
+  if (!shuttingDown && code && code !== 0) {
+    requestShutdown(code);
   }
 });
 
@@ -98,6 +112,22 @@ function cleanupBrowserSessionStore(sessionStoreInfo) {
   }
 
   for (const suffix of ["", "-shm", "-wal"]) {
-    fs.rmSync(`${sessionStoreInfo.path}${suffix}`, { force: true });
+    try {
+      fs.rmSync(`${sessionStoreInfo.path}${suffix}`, {
+        force: true,
+        recursive: true,
+        maxRetries: process.platform === "win32" ? 8 : 0,
+        retryDelay: process.platform === "win32" ? 250 : 0,
+      });
+    } catch (error) {
+      if (process.platform === "win32" && ["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
+        process.stderr.write(
+          `[terminal-demo-browser] skipped locked session store cleanup ${sessionStoreInfo.path}${suffix}: ${error.message}\n`,
+        );
+        continue;
+      }
+
+      throw error;
+    }
   }
 }

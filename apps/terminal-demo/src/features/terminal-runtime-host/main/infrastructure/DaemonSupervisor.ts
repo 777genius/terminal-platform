@@ -5,6 +5,11 @@ import path from "node:path";
 import { once } from "node:events";
 import { loadTerminalPlatformSdk } from "./terminal-platform-sdk.js";
 
+const DAEMON_GRACEFUL_SHUTDOWN_MS = 5_000;
+const DAEMON_FORCED_SHUTDOWN_MS = 2_000;
+const DAEMON_PROCESS_POLL_MS = 150;
+const WINDOWS_RM_RETRIES = 8;
+
 interface DaemonSupervisorOptions {
   runtimeSlug: string;
   forceRestartReadyDaemon?: boolean;
@@ -31,7 +36,7 @@ export class DaemonSupervisor {
         return;
       }
 
-      this.stopExistingDaemonProcesses();
+      await this.stopExistingDaemonProcesses();
     }
 
     await this.spawnDaemon();
@@ -50,13 +55,7 @@ export class DaemonSupervisor {
     }
 
     const child = this.#child;
-    if (child.exitCode === null && !child.killed) {
-      child.kill("SIGTERM");
-    }
-
-    if (child.exitCode === null) {
-      await once(child, "exit").catch(() => undefined);
-    }
+    await stopChildProcess(child);
     this.#child = null;
     await this.cleanupRuntimeDaemonDir();
   }
@@ -96,14 +95,25 @@ export class DaemonSupervisor {
     });
   }
 
-  private stopExistingDaemonProcesses(): void {
-    for (const pid of findDaemonProcesses(this.#runtimeSlug)) {
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {
-        // Ignore races where the matched daemon exited before we could signal it.
-      }
+  private async stopExistingDaemonProcesses(): Promise<void> {
+    const pids = findDaemonProcesses(this.#runtimeSlug);
+    if (pids.length === 0) {
+      return;
     }
+
+    for (const pid of pids) {
+      terminateProcessId(pid);
+    }
+
+    await waitForDaemonProcessesToExit(this.#runtimeSlug, pids, DAEMON_GRACEFUL_SHUTDOWN_MS);
+
+    const survivors = findDaemonProcesses(this.#runtimeSlug)
+      .filter((pid) => pids.includes(pid));
+    for (const pid of survivors) {
+      forceKillProcessId(pid);
+    }
+
+    await waitForDaemonProcessesToExit(this.#runtimeSlug, survivors, DAEMON_FORCED_SHUTDOWN_MS);
   }
 
   private async waitUntilReady(): Promise<void> {
@@ -131,8 +141,102 @@ export class DaemonSupervisor {
 
     const dir = this.#runtimeDaemonDir;
     this.#runtimeDaemonDir = null;
-    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    await fs.rm(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: process.platform === "win32" ? WINDOWS_RM_RETRIES : 0,
+      retryDelay: process.platform === "win32" ? 250 : 0,
+    }).catch(() => undefined);
   }
+}
+
+async function stopChildProcess(child: ChildProcess): Promise<void> {
+  if (!isChildProcessRunning(child)) {
+    return;
+  }
+
+  const exited = once(child, "exit").then(() => undefined).catch(() => undefined);
+  terminateChildProcess(child);
+  await Promise.race([exited, sleep(DAEMON_GRACEFUL_SHUTDOWN_MS)]);
+
+  if (!isChildProcessRunning(child)) {
+    return;
+  }
+
+  if (process.platform === "win32" && child.pid) {
+    forceKillWindowsProcessTree(child.pid);
+  } else {
+    terminateChildProcess(child, "SIGKILL");
+  }
+
+  await Promise.race([exited, sleep(DAEMON_FORCED_SHUTDOWN_MS)]);
+}
+
+function isChildProcessRunning(child: ChildProcess): boolean {
+  return child.exitCode === null && child.signalCode === null;
+}
+
+function terminateChildProcess(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
+  try {
+    child.kill(signal);
+  } catch {
+    // Ignore races where the child exited before we could signal it.
+  }
+}
+
+function terminateProcessId(pid: number): void {
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // Ignore races where the matched daemon exited before we could signal it.
+  }
+}
+
+function forceKillProcessId(pid: number): void {
+  if (process.platform === "win32") {
+    forceKillWindowsProcessTree(pid);
+    return;
+  }
+
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // Ignore races where the matched daemon exited before we could signal it.
+  }
+}
+
+function forceKillWindowsProcessTree(pid: number): void {
+  spawnSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+    encoding: "utf8",
+    stdio: "ignore",
+    windowsHide: true,
+  });
+}
+
+async function waitForDaemonProcessesToExit(
+  runtimeSlug: string,
+  pids: number[],
+  timeoutMs: number,
+): Promise<void> {
+  if (pids.length === 0) {
+    return;
+  }
+
+  const pidSet = new Set(pids);
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const stillRunning = findDaemonProcesses(runtimeSlug)
+      .some((pid) => pidSet.has(pid));
+    if (!stillRunning) {
+      return;
+    }
+
+    await sleep(DAEMON_PROCESS_POLL_MS);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function resolveRepoRoot(): string {

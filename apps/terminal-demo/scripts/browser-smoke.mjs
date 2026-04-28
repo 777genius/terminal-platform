@@ -75,6 +75,7 @@ async function main() {
       cwd: appRoot,
       env: process.env,
       stdio: "pipe",
+      windowsHide: true,
     });
     pipeProcess(previewProcess, "[browser-smoke:preview]");
     await waitForHttpServer(rendererUrl, {
@@ -3472,6 +3473,7 @@ async function startBrowserHost(rendererUrlValue, options) {
         TERMINAL_DEMO_SESSION_STORE_PATH: options.sessionStorePath,
       },
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     const onLine = (line) => {
@@ -3515,10 +3517,28 @@ async function shutdown() {
 
 async function removeSessionStore(storePath) {
   await Promise.all([
-    fs.rm(storePath, { force: true }),
-    fs.rm(`${storePath}-shm`, { force: true }),
-    fs.rm(`${storePath}-wal`, { force: true }),
+    removeSessionStoreFile(storePath),
+    removeSessionStoreFile(`${storePath}-shm`),
+    removeSessionStoreFile(`${storePath}-wal`),
   ]);
+}
+
+async function removeSessionStoreFile(filePath) {
+  try {
+    await fs.rm(filePath, {
+      force: true,
+      recursive: true,
+      maxRetries: process.platform === "win32" ? 8 : 0,
+      retryDelay: process.platform === "win32" ? 250 : 0,
+    });
+  } catch (error) {
+    if (process.platform === "win32" && ["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
+      process.stderr.write(`[browser-smoke] skipped locked session store cleanup ${filePath}: ${error.message}\n`);
+      return;
+    }
+
+    throw error;
+  }
 }
 
 function evaluate(send, expression) {

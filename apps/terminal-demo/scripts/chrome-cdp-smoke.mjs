@@ -31,6 +31,7 @@ export async function launchChromeWithCdp({
       cwd: appRoot,
       env: process.env,
       stdio: "pipe",
+      windowsHide: true,
     });
     const readOutput = pipeProcess(child, `[${logPrefix}:${headlessMode}]`);
 
@@ -102,10 +103,18 @@ export async function stopProcess(child) {
   const exited = new Promise((resolve) => {
     child.once("exit", () => resolve());
   });
-  child.kill("SIGTERM");
+  sendProcessSignal(child, process.platform === "win32" ? "SIGINT" : "SIGTERM");
   await Promise.race([exited, sleep(5_000)]);
   if (child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGKILL");
+    if (process.platform === "win32" && child.pid) {
+      spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } else {
+      sendProcessSignal(child, "SIGKILL");
+    }
+    await Promise.race([exited, sleep(2_000)]);
   }
 }
 
@@ -346,4 +355,12 @@ function indent(value) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sendProcessSignal(child, signal) {
+  try {
+    child.kill(signal);
+  } catch {
+    // The process may have exited between the running check and the signal.
+  }
 }

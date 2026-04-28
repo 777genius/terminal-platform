@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildWindowsTaskkillArgs,
   buildViteDevServerArgs,
+  resolveGracefulStopSignal,
   resolveSpawnCommand,
 } from "../scripts/dev-launcher-utils.mjs";
 
@@ -35,4 +37,10 @@ test("dev launcher resolves npm through node on Windows when npm_execpath is ava
       shell: false,
     },
   );
+});
+
+test("dev launcher requests a catchable signal before force-killing Windows process trees", () => {
+  assert.equal(resolveGracefulStopSignal("win32"), "SIGINT");
+  assert.equal(resolveGracefulStopSignal("linux"), "SIGTERM");
+  assert.deepEqual(buildWindowsTaskkillArgs(1234), ["/PID", "1234", "/T", "/F"]);
 });
