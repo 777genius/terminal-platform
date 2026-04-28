@@ -32,6 +32,7 @@ const sessionStorePath = path.join(
   os.tmpdir(),
   `terminal-demo-foreign-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`,
 );
+const browserBootstrapPath = path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json");
 const zellijMinimum = [0, 44, 0];
 const foreignBackends = process.platform === "win32" ? ["zellij"] : ["tmux", "zellij"];
 
@@ -73,6 +74,7 @@ async function main() {
       cwd: appRoot,
       env: smokeEnv,
       stdio: "pipe",
+      windowsHide: true,
     });
     pipeProcess(previewProcess, "[foreign-browser-smoke:preview]");
     await waitForHttpServer(rendererUrl, {
@@ -747,6 +749,7 @@ async function startBrowserHost(rendererUrlValue, options) {
         TERMINAL_DEMO_SESSION_STORE_PATH: options.sessionStorePath,
       },
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     const onLine = (line) => {
@@ -814,6 +817,7 @@ async function waitFor(probe, label, timeoutMs = 20_000) {
 
 async function shutdown() {
   await stopProcess(browserHostProcess);
+  await removeBrowserBootstrapConfig();
   await stopProcess(previewProcess);
   await stopProcess(chromeProcess);
   if (tmuxSessionName) {
@@ -834,16 +838,29 @@ async function shutdown() {
   await removeChromeUserDataDir(chromeUserDataDir);
   await removeSessionStore(sessionStorePath);
   if (tempZellijBinDir) {
-    await fs.rm(tempZellijBinDir, { recursive: true, force: true });
+    await removeFileWithWindowsRetries(tempZellijBinDir, { recursive: true });
   }
+}
+
+async function removeBrowserBootstrapConfig() {
+  await removeFileWithWindowsRetries(browserBootstrapPath);
 }
 
 async function removeSessionStore(storePath) {
   await Promise.all([
-    fs.rm(storePath, { force: true }),
-    fs.rm(`${storePath}-shm`, { force: true }),
-    fs.rm(`${storePath}-wal`, { force: true }),
+    removeFileWithWindowsRetries(storePath),
+    removeFileWithWindowsRetries(`${storePath}-shm`),
+    removeFileWithWindowsRetries(`${storePath}-wal`),
   ]);
+}
+
+async function removeFileWithWindowsRetries(filePath, options = {}) {
+  await fs.rm(filePath, {
+    force: true,
+    recursive: Boolean(options.recursive),
+    maxRetries: process.platform === "win32" ? 8 : 0,
+    retryDelay: process.platform === "win32" ? 250 : 0,
+  });
 }
 
 function runSync(command, args, cwd, env) {
@@ -853,6 +870,7 @@ function runSync(command, args, cwd, env) {
     env,
     shell: resolved.shell,
     stdio: "inherit",
+    windowsHide: true,
   });
 
   if (result.error) {
@@ -870,6 +888,7 @@ function runCapture(command, args, cwd, env, options = {}) {
     env,
     encoding: "utf8",
     timeout: options.timeout ?? 10_000,
+    windowsHide: true,
   });
   if ((result.error || result.status !== 0 || result.signal) && !options.allowFailure) {
     const output = [result.error?.message, result.stderr, result.stdout]
@@ -896,6 +915,7 @@ function assertCommand(command, args, message) {
     cwd: appRoot,
     env: process.env,
     encoding: "utf8",
+    windowsHide: true,
   });
   if (result.status !== 0) {
     throw new Error(message);
@@ -917,6 +937,7 @@ function resolvePython() {
       cwd: repoRoot,
       env: process.env,
       encoding: "utf8",
+      windowsHide: true,
     });
     if (result.status === 0) {
       return candidate;

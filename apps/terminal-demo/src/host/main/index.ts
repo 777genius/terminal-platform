@@ -25,6 +25,7 @@ const demoDefaultWorkingDirectory = resolveDemoDefaultWorkingDirectory({
   validateExists: true,
 });
 let hostHandle: TerminalRuntimeHostHandle | null = null;
+let disposingRuntime = false;
 
 async function bootstrap(): Promise<void> {
   await app.whenReady();
@@ -70,8 +71,23 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
-  void hostHandle?.dispose();
+app.on("before-quit", (event) => {
+  if (!hostHandle || disposingRuntime) {
+    return;
+  }
+
+  event.preventDefault();
+  disposingRuntime = true;
+  const handle = hostHandle;
+  hostHandle = null;
+
+  void handle.dispose()
+    .catch((error) => {
+      console.error(error);
+    })
+    .finally(() => {
+      app.exit(0);
+    });
 });
 
 void bootstrap().catch((error) => {

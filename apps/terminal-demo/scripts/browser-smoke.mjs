@@ -33,6 +33,7 @@ const autoStartSessionStorePath = path.join(
   os.tmpdir(),
   `terminal-demo-browser-smoke-auto-store-${process.pid}-${Date.now()}.sqlite3`,
 );
+const browserBootstrapPath = path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json");
 const themeStorageKey = "terminal-platform-demo.theme";
 const fontScaleStorageKey = "terminal-platform-demo.terminal-font-scale";
 const lineWrapStorageKey = "terminal-platform-demo.terminal-line-wrap";
@@ -152,6 +153,7 @@ async function main() {
 
     await stopProcess(browserHostProcess);
     browserHostProcess = null;
+    await removeBrowserBootstrapConfig();
     await removeSessionStore(autoStartSessionStorePath);
 
     const browserUrl = await startBrowserHost(rendererUrl, {
@@ -3508,6 +3510,7 @@ async function startBrowserHost(rendererUrlValue, options) {
 
 async function shutdown() {
   await stopProcess(browserHostProcess);
+  await removeBrowserBootstrapConfig();
   await stopProcess(previewProcess);
   await stopProcess(chromeProcess);
   await removeChromeUserDataDir(chromeUserDataDir);
@@ -3515,25 +3518,33 @@ async function shutdown() {
   await removeSessionStore(sessionStorePath);
 }
 
+async function removeBrowserBootstrapConfig() {
+  await fs.rm(browserBootstrapPath, {
+    force: true,
+    maxRetries: process.platform === "win32" ? 8 : 0,
+    retryDelay: process.platform === "win32" ? 250 : 0,
+  });
+}
+
 async function removeSessionStore(storePath) {
   await Promise.all([
-    removeSessionStoreFile(storePath),
-    removeSessionStoreFile(`${storePath}-shm`),
-    removeSessionStoreFile(`${storePath}-wal`),
+    removeFileWithWindowsRetries(storePath, { recursive: true }),
+    removeFileWithWindowsRetries(`${storePath}-shm`, { recursive: true }),
+    removeFileWithWindowsRetries(`${storePath}-wal`, { recursive: true }),
   ]);
 }
 
-async function removeSessionStoreFile(filePath) {
+async function removeFileWithWindowsRetries(filePath, options = {}) {
   try {
     await fs.rm(filePath, {
       force: true,
-      recursive: true,
+      recursive: Boolean(options.recursive),
       maxRetries: process.platform === "win32" ? 8 : 0,
       retryDelay: process.platform === "win32" ? 250 : 0,
     });
   } catch (error) {
     if (process.platform === "win32" && ["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
-      process.stderr.write(`[browser-smoke] skipped locked session store cleanup ${filePath}: ${error.message}\n`);
+      process.stderr.write(`[browser-smoke] skipped locked temporary cleanup ${filePath}: ${error.message}\n`);
       return;
     }
 
@@ -3583,6 +3594,7 @@ function runSync(command, args, cwd) {
     env: process.env,
     shell: resolved.shell,
     stdio: "inherit",
+    windowsHide: true,
   });
 
   if (result.error) {
