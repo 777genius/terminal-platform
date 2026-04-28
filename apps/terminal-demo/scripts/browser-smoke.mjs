@@ -3420,7 +3420,7 @@ async function startBrowserHost(rendererUrlValue, options) {
       reject(new Error("Timed out waiting for TERMINAL_DEMO_BROWSER_URL"));
     }, 20_000);
 
-    browserHostProcess = spawn("node", ["./dist/host/browser/index.js"], {
+    browserHostProcess = spawn(process.execPath, ["./dist/host/browser/index.js"], {
       cwd: appRoot,
       env: {
         ...process.env,

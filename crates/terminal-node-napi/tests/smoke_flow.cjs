@@ -1,6 +1,8 @@
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 5000;
 const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 45000 : 5000;
@@ -1358,7 +1360,7 @@ function uniqueZellijSessionName(label) {
 }
 
 function spawnZellijSession(sessionName) {
-  const result = spawnSync("zellij", ["attach", "--create-background", sessionName], {
+  const result = spawnSync(zellijCommandPath(), ["attach", "--create-background", sessionName], {
     encoding: "utf8",
     timeout: ZELLIJ_CREATE_TIMEOUT_MS,
     windowsHide: true,
@@ -1381,7 +1383,7 @@ function spawnZellijSession(sessionName) {
 function stopZellijSpawnProcess(_child) {}
 
 function stopZellijSession(sessionName) {
-  spawnSync("zellij", ["kill-session", sessionName], {
+  spawnSync(zellijCommandPath(), ["kill-session", sessionName], {
     encoding: "utf8",
     timeout: ZELLIJ_COMMAND_TIMEOUT_MS,
     windowsHide: true,
@@ -1438,7 +1440,7 @@ async function waitForRawZellijSession(sessionName) {
 
 function listZellijSessionsRaw() {
   const result = spawnSync(
-    "zellij",
+    zellijCommandPath(),
     ["list-sessions", "--short", "--no-formatting"],
     {
       encoding: "utf8",
@@ -1482,7 +1484,7 @@ function isLegacyZellijActionError(error) {
 
 function zellijSessionControlReady(sessionName) {
   const tabs = spawnSync(
-    "zellij",
+    zellijCommandPath(),
     ["--session", sessionName, "action", "list-tabs", "--json"],
     {
       encoding: "utf8",
@@ -1508,7 +1510,7 @@ function zellijSessionControlReady(sessionName) {
   }
 
   const panes = spawnSync(
-    "zellij",
+    zellijCommandPath(),
     ["--session", sessionName, "action", "list-panes", "--json"],
     {
       encoding: "utf8",
@@ -1531,6 +1533,55 @@ function zellijSessionControlReady(sessionName) {
   }
 
   return (panes.stdout ?? "").trimStart().startsWith("[");
+}
+
+function zellijCommandPath() {
+  const configured = process.env.TERMINAL_PLATFORM_ZELLIJ_BIN?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  if (process.platform === "win32") {
+    return resolveWindowsExecutable("zellij") ?? workspaceZellijCommandPath() ?? "zellij";
+  }
+
+  return "zellij";
+}
+
+function resolveWindowsExecutable(program) {
+  if (program.includes("\\") || program.includes("/")) {
+    return fs.existsSync(program) ? program : null;
+  }
+
+  const candidates = program.toLowerCase().endsWith(".exe") ? [program] : [program, `${program}.exe`];
+  const pathValue = process.env.Path ?? process.env.PATH ?? "";
+  for (const dir of pathValue.split(path.delimiter)) {
+    if (!dir) {
+      continue;
+    }
+    for (const candidate of candidates) {
+      const fullPath = path.join(dir, candidate);
+      if (fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return null;
+}
+
+function workspaceZellijCommandPath() {
+  const repoRoot = path.resolve(__dirname, "..", "..", "..");
+  const candidate = path.join(
+    repoRoot,
+    "apps",
+    "terminal-demo",
+    ".generated",
+    "tools",
+    "zellij",
+    "zellij.exe",
+  );
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
 function fallbackZellijCandidate(sessionName) {

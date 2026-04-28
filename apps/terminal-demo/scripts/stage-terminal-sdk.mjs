@@ -62,7 +62,7 @@ async function main() {
       return;
     }
 
-    run("node", ["./scripts/build-local-package.mjs", "--out", outDir], packageDir);
+    run(process.execPath, ["./scripts/build-local-package.mjs", "--out", outDir], packageDir);
     run("cargo", ["build", "-p", "terminal-daemon"], repoRoot);
   }, {
     metadata: {

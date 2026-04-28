@@ -37,7 +37,7 @@ await waitForServer(rendererUrl, {
   label: "Renderer dev server",
 });
 
-browserHost = spawn("node", ["./dist/host/browser/index.js"], {
+browserHost = spawn(process.execPath, ["./dist/host/browser/index.js"], {
   cwd: appRoot,
   env: {
     ...process.env,

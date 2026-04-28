@@ -26,7 +26,7 @@ function main() {
 
     const addonPath = locateAddon(options.release ? "release" : "debug");
     await withSiblingStagingDirectory(options.out, "stage", async (stagedOutDir) => {
-      run("node", ["./scripts/stage-package.mjs", "--out", stagedOutDir, "--addon", addonPath], packageDir);
+      run(process.execPath, ["./scripts/stage-package.mjs", "--out", stagedOutDir, "--addon", addonPath], packageDir);
       await fs.copyFile(
         path.join(stagedOutDir, "index.d.ts"),
         path.join(stagedOutDir, "index.d.mts"),

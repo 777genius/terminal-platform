@@ -130,10 +130,11 @@ pub fn echo_shell_launch_spec() -> ShellLaunchSpec {
 }
 
 #[cfg(windows)]
-fn resolve_windows_executable(program: &str) -> String {
+fn resolve_windows_executable_path(program: &str) -> Option<PathBuf> {
     let has_path_separator = program.contains('\\') || program.contains('/');
     if has_path_separator {
-        return program.to_string();
+        let path = PathBuf::from(program);
+        return path.is_file().then_some(path);
     }
 
     let candidates = if program.to_ascii_lowercase().ends_with(".exe") {
@@ -147,13 +148,13 @@ fn resolve_windows_executable(program: &str) -> String {
             for candidate in &candidates {
                 let path = dir.join(candidate);
                 if path.is_file() {
-                    return path.display().to_string();
+                    return Some(path);
                 }
             }
         }
     }
 
-    program.to_string()
+    None
 }
 
 #[cfg(all(unix, feature = "tmux-backend"))]
@@ -386,7 +387,7 @@ fn spawn_windows_zellij_pty(session_name: &str) -> Result<WindowsZellijPtyGuard,
         .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
         .map_err(|error| format!("failed to open zellij test pty: {error}"))?;
 
-    let mut command = CommandBuilder::new(resolve_windows_executable("zellij"));
+    let mut command = CommandBuilder::new(zellij_command_path());
     command.args(["attach", "--create", session_name]);
     command.env("TERM", "xterm-256color");
 
@@ -466,7 +467,7 @@ fn run_zellij(args: &[&str]) -> Result<String, String> {
 
 #[cfg(any(unix, windows))]
 fn run_zellij_with_timeout(args: &[&str], timeout: Duration) -> Result<Output, String> {
-    let mut child = Command::new("zellij")
+    let mut child = Command::new(zellij_command_path())
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -665,7 +666,7 @@ fn is_zellij_test_lock_pid_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn is_zellij_test_lock_pid_alive(pid: u32) -> bool {
-    Command::new("powershell.exe")
+    Command::new(windows_powershell_path())
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -679,4 +680,51 @@ fn is_zellij_test_lock_pid_alive(pid: u32) -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(true)
+}
+
+#[cfg(any(unix, windows))]
+fn zellij_command_path() -> String {
+    if let Some(path) = std::env::var_os("TERMINAL_PLATFORM_ZELLIJ_BIN")
+        && !path.as_os_str().is_empty()
+    {
+        return PathBuf::from(path).display().to_string();
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(path) = resolve_windows_executable_path("zellij") {
+            return path.display().to_string();
+        }
+
+        if let Some(path) = workspace_zellij_command_path() {
+            return path.display().to_string();
+        }
+    }
+
+    "zellij".to_string()
+}
+
+#[cfg(windows)]
+fn workspace_zellij_command_path() -> Option<PathBuf> {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent()?.parent()?.to_path_buf();
+    let candidate = repo_root
+        .join("apps")
+        .join("terminal-demo")
+        .join(".generated")
+        .join("tools")
+        .join("zellij")
+        .join("zellij.exe");
+    candidate.is_file().then_some(candidate)
+}
+
+#[cfg(windows)]
+fn windows_powershell_path() -> PathBuf {
+    let windows_root = std::env::var_os("SystemRoot")
+        .or_else(|| std::env::var_os("WINDIR"))
+        .unwrap_or_else(|| "C:\\Windows".into());
+    PathBuf::from(windows_root)
+        .join("System32")
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe")
 }

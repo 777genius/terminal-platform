@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
+    path::PathBuf,
     process::{Command, Stdio},
     sync::{Arc, Mutex as StdMutex},
     thread,
@@ -51,7 +52,7 @@ impl ZellijBackend {
     fn run(&self, target: Option<&ZellijTarget>, args: &[&str]) -> Result<String, BackendError> {
         let mut last_error = None;
         for attempt in 0..ZELLIJ_TRANSIENT_RETRY_ATTEMPTS {
-            let mut command = Command::new("zellij");
+            let mut command = Command::new(zellij_command_path());
             if let Some(target) = target {
                 command.arg("--session").arg(&target.session_name);
             }
@@ -125,7 +126,7 @@ impl ZellijBackend {
         target: &ZellijTarget,
         pane_ref: &str,
     ) -> Result<tokio::process::Child, BackendError> {
-        let mut command = TokioCommand::new("zellij");
+        let mut command = TokioCommand::new(zellij_command_path());
         command
             .arg("--session")
             .arg(&target.session_name)
@@ -1233,6 +1234,65 @@ fn zellij_focus_unsupported_error() -> BackendError {
         "zellij imported routes cannot focus tabs or panes on Windows because CLI focus actions are scoped to the transient action client",
         DegradedModeReason::UnsupportedByBackend,
     )
+}
+
+fn zellij_command_path() -> PathBuf {
+    if let Some(path) = non_empty_env_path("TERMINAL_PLATFORM_ZELLIJ_BIN") {
+        return path;
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(path) = resolve_windows_executable("zellij") {
+            return path;
+        }
+
+        if let Some(path) = workspace_zellij_command_path() {
+            return path;
+        }
+    }
+
+    PathBuf::from("zellij")
+}
+
+fn non_empty_env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name).and_then(|value| {
+        if value.as_os_str().is_empty() { None } else { Some(PathBuf::from(value)) }
+    })
+}
+
+#[cfg(windows)]
+fn resolve_windows_executable(program: &str) -> Option<PathBuf> {
+    let has_path_separator = program.contains('\\') || program.contains('/');
+    if has_path_separator {
+        let path = PathBuf::from(program);
+        return path.is_file().then_some(path);
+    }
+
+    let candidates = if program.to_ascii_lowercase().ends_with(".exe") {
+        vec![program.to_string()]
+    } else {
+        vec![program.to_string(), format!("{program}.exe")]
+    };
+
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|dir| {
+            candidates.iter().map(|candidate| dir.join(candidate)).find(|path| path.is_file())
+        })
+    })
+}
+
+#[cfg(windows)]
+fn workspace_zellij_command_path() -> Option<PathBuf> {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent()?.parent()?.to_path_buf();
+    let candidate = repo_root
+        .join("apps")
+        .join("terminal-demo")
+        .join(".generated")
+        .join("tools")
+        .join("zellij")
+        .join("zellij.exe");
+    candidate.is_file().then_some(candidate)
 }
 
 fn build_session_snapshot(

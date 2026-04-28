@@ -15,8 +15,8 @@ function main() {
     buildArgs.push("--release");
   }
 
-  run("node", buildArgs, packageDir);
-  run("node", ["./scripts/verify-package.mjs", "--package-dir", options.out], packageDir);
+  run(process.execPath, buildArgs, packageDir);
+  run(process.execPath, ["./scripts/verify-package.mjs", "--package-dir", options.out], packageDir);
 
   const packResult = spawnSync(nodePackageManager(), ["pack", "--json"], {
     cwd: options.out,
