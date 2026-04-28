@@ -1049,13 +1049,15 @@ pub mod __fuzz {
 mod tests {
     use std::collections::BTreeMap;
 
+    #[cfg(unix)]
     use terminal_backend_api::{BackendScope, MuxBackendPort};
     use terminal_domain::{RouteAuthority, SessionRoute};
     use terminal_mux_domain::{PaneTreeNode, SplitDirection};
 
+    #[cfg(unix)]
+    use super::TmuxBackend;
     use super::{
-        TMUX_ROUTE_NAMESPACE, TmuxBackend, TmuxTarget, fallback_tree, parse_tmux_layout,
-        tmux_split_flag,
+        TMUX_ROUTE_NAMESPACE, TmuxTarget, fallback_tree, parse_tmux_layout, tmux_split_flag,
     };
 
     #[test]

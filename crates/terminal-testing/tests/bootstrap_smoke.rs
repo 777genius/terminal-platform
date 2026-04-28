@@ -21,11 +21,10 @@ use terminal_backend_tmux::TmuxBackend;
 use terminal_backend_zellij::ZellijBackend;
 #[cfg(unix)]
 use terminal_daemon::TerminalDaemon;
-use terminal_domain::{
-    BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
-};
+use terminal_domain::BackendKind;
 #[cfg(unix)]
 use terminal_domain::{
+    CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
     CURRENT_SAVED_SESSION_FORMAT_VERSION, SavedSessionCompatibilityStatus, SavedSessionManifest,
     SessionId, local_native_route,
 };
@@ -43,9 +42,11 @@ use terminal_protocol::{DaemonPhase, SubscriptionEvent};
 #[cfg(unix)]
 use terminal_runtime::{BackendCatalog, TerminalRuntime};
 use terminal_testing::{
-    ZellijSessionGuard, ZellijTestLock, daemon, daemon_fixture, daemon_fixture_with_daemon,
-    echo_shell_launch_spec, isolated_daemon, unique_sqlite_path, unique_zellij_session_name,
+    ZellijSessionGuard, ZellijTestLock, daemon, daemon_fixture, echo_shell_launch_spec,
+    unique_zellij_session_name,
 };
+#[cfg(unix)]
+use terminal_testing::{daemon_fixture_with_daemon, isolated_daemon, unique_sqlite_path};
 use tokio::time::{sleep, timeout};
 
 #[test]
@@ -128,12 +129,12 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
         assert!(zellij.capabilities.tiled_panes);
         assert!(zellij.capabilities.tab_create);
         assert!(zellij.capabilities.tab_close);
-        assert!(zellij.capabilities.tab_focus);
+        assert_eq!(zellij.capabilities.tab_focus, !cfg!(windows));
         assert!(zellij.capabilities.tab_rename);
         assert!(zellij.capabilities.session_scoped_tab_refs);
         assert!(zellij.capabilities.session_scoped_pane_refs);
         assert!(zellij.capabilities.pane_close);
-        assert!(zellij.capabilities.pane_focus);
+        assert_eq!(zellij.capabilities.pane_focus, !cfg!(windows));
         assert!(zellij.capabilities.pane_input_write);
         assert!(zellij.capabilities.pane_paste_write);
         assert!(zellij.capabilities.rendered_viewport_stream);
@@ -2578,23 +2579,28 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                     )
                     .await;
 
-                    let focused = tokio::time::timeout(
-                        zellij_operation_timeout(),
-                        fixture.client.dispatch(
+                    let focused = if capabilities.capabilities.tab_focus {
+                        let focused = tokio::time::timeout(
+                            zellij_operation_timeout(),
+                            fixture.client.dispatch(
+                                imported.session.session_id,
+                                MuxCommand::FocusTab { tab_id: initial_focused_tab },
+                            ),
+                        )
+                        .await
+                        .expect("zellij focus_tab should not hang")
+                        .expect("zellij focus_tab should succeed");
+                        let after_focus = wait_for_topology(
+                            &fixture,
                             imported.session.session_id,
-                            MuxCommand::FocusTab { tab_id: initial_focused_tab },
-                        ),
-                    )
-                    .await
-                    .expect("zellij focus_tab should not hang")
-                    .expect("zellij focus_tab should succeed");
-                    let after_focus = wait_for_topology(
-                        &fixture,
-                        imported.session.session_id,
-                        |snapshot| snapshot.focused_tab == Some(initial_focused_tab),
-                        "zellij rich focus tab topology",
-                    )
-                    .await;
+                            |snapshot| snapshot.focused_tab == Some(initial_focused_tab),
+                            "zellij rich focus tab topology",
+                        )
+                        .await;
+                        Some((focused, after_focus))
+                    } else {
+                        None
+                    };
 
                     let closed = tokio::time::timeout(
                         zellij_operation_timeout(),
@@ -2624,8 +2630,10 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                         tab.tab_id == rich_tab_id
                             && tab.title.as_deref() == Some("logs-rich-renamed")
                     }));
-                    assert!(focused.changed);
-                    assert_eq!(after_focus.focused_tab, Some(initial_focused_tab));
+                    if let Some((focused, after_focus)) = focused {
+                        assert!(focused.changed);
+                        assert_eq!(after_focus.focused_tab, Some(initial_focused_tab));
+                    }
                     assert!(closed.changed);
                     assert_eq!(after_close.tabs.len(), initial_tab_count);
 
@@ -2673,7 +2681,8 @@ async fn bootstrap_smoke_handles_rapid_zellij_tab_focus_churn() {
         .await
         .expect("zellij capabilities should succeed");
 
-    if !capabilities.capabilities.rendered_viewport_snapshot {
+    if !capabilities.capabilities.rendered_viewport_snapshot || !capabilities.capabilities.tab_focus
+    {
         fixture.shutdown().await.expect("fixture should stop cleanly");
         return;
     }

@@ -239,7 +239,7 @@ function startWindowsZellijPty(sessionName, env) {
     `$process = Start-Process -FilePath $zellij -ArgumentList @('attach','--create',${quotePowerShell(sessionName)}) -WindowStyle Hidden -PassThru`,
     "Write-Output $process.Id",
   ].join("; ");
-  const output = runCapture("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], appRoot, env);
+  const output = runCapture(windowsPowerShellPath(), ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], appRoot, env);
   const processId = Number(output.trim().match(/\d+/u)?.[0] ?? 0);
   if (!Number.isInteger(processId) || processId <= 0) {
     throw new Error(`Failed to capture Windows Zellij process id: ${output.trim()}`);
@@ -442,7 +442,7 @@ async function startBrowserHost(rendererUrlValue, options) {
       reject(new Error("Timed out waiting for TERMINAL_DEMO_BROWSER_URL"));
     }, 20_000);
 
-    browserHostProcess = spawn("node", ["./dist/host/browser/index.js"], {
+    browserHostProcess = spawn(process.execPath, ["./dist/host/browser/index.js"], {
       cwd: appRoot,
       env: {
         ...smokeEnv,
@@ -529,7 +529,7 @@ async function shutdown() {
   }
   for (const processId of windowsZellijProcessIds) {
     runCapture(
-      "powershell.exe",
+      windowsPowerShellPath(),
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `Stop-Process -Id ${processId} -Force -ErrorAction SilentlyContinue`],
       appRoot,
       smokeEnv,
@@ -576,10 +576,24 @@ function runCapture(command, args, cwd, env, options = {}) {
     encoding: "utf8",
     timeout: options.timeout ?? 10_000,
   });
-  if (result.status !== 0 && !options.allowFailure) {
-    throw new Error(`${command} ${args.join(" ")} failed: ${result.stderr.trim()}`);
+  if ((result.error || result.status !== 0 || result.signal) && !options.allowFailure) {
+    const output = [result.error?.message, result.stderr, result.stdout]
+      .filter(Boolean)
+      .map((value) => String(value).trim())
+      .filter(Boolean)
+      .join("\n");
+    const reason = output || `exit code ${result.status ?? "unknown"}${result.signal ? `, signal ${result.signal}` : ""}`;
+    throw new Error(`${command} ${args.join(" ")} failed: ${reason}`);
   }
   return result.stdout ?? "";
+}
+
+function windowsPowerShellPath() {
+  if (process.platform !== "win32") {
+    return "powershell.exe";
+  }
+  const windowsRoot = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
+  return path.join(windowsRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
 function assertCommand(command, args, message) {

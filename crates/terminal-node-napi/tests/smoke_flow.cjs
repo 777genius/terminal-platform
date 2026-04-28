@@ -138,15 +138,16 @@ async function runSmoke(createClient, sdk = null) {
   assert.equal(tmuxCapabilities.capabilities.read_only_client_mode, true);
   assert.equal(zellijCapabilities.backend, "zellij");
   if (zellijCapabilities.capabilities.rendered_viewport_snapshot) {
+    const zellijFocusSupported = process.platform !== "win32";
     assert.equal(zellijCapabilities.capabilities.tab_create, true);
     assert.equal(zellijCapabilities.capabilities.tab_close, true);
-    assert.equal(zellijCapabilities.capabilities.tab_focus, true);
+    assert.equal(zellijCapabilities.capabilities.tab_focus, zellijFocusSupported);
     assert.equal(zellijCapabilities.capabilities.tab_rename, true);
     assert.equal(zellijCapabilities.capabilities.rendered_viewport_stream, true);
     assert.equal(zellijCapabilities.capabilities.session_scoped_tab_refs, true);
     assert.equal(zellijCapabilities.capabilities.session_scoped_pane_refs, true);
     assert.equal(zellijCapabilities.capabilities.pane_close, true);
-    assert.equal(zellijCapabilities.capabilities.pane_focus, true);
+    assert.equal(zellijCapabilities.capabilities.pane_focus, zellijFocusSupported);
     assert.equal(zellijCapabilities.capabilities.pane_input_write, true);
     assert.equal(zellijCapabilities.capabilities.pane_paste_write, true);
     assert.equal(zellijCapabilities.capabilities.plugin_panes, true);
@@ -334,20 +335,24 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
         ),
       "zellij package rename tab",
     );
-    const focusTab = await withTimeout(
-      client.dispatchMuxCommand(imported.session_id, {
-        kind: "focus_tab",
-        tab_id: initialFocusedTab,
-      }),
-      DEFAULT_HOST_TIMEOUT_MS,
-      "Timed out focusing zellij package tab",
-    );
-    const topologyAfterFocus = await waitForTopologyState(
-      client,
-      imported.session_id,
-      (snapshot) => snapshot.focused_tab === initialFocusedTab,
-      "zellij package focus tab",
-    );
+    let focusTab = null;
+    let topologyAfterFocus = null;
+    if (zellijCapabilities.capabilities.tab_focus) {
+      focusTab = await withTimeout(
+        client.dispatchMuxCommand(imported.session_id, {
+          kind: "focus_tab",
+          tab_id: initialFocusedTab,
+        }),
+        DEFAULT_HOST_TIMEOUT_MS,
+        "Timed out focusing zellij package tab",
+      );
+      topologyAfterFocus = await waitForTopologyState(
+        client,
+        imported.session_id,
+        (snapshot) => snapshot.focused_tab === initialFocusedTab,
+        "zellij package focus tab",
+      );
+    }
     const closeTab = await withTimeout(
       client.dispatchMuxCommand(imported.session_id, {
         kind: "close_tab",
@@ -372,8 +377,10 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
       ),
       true,
     );
-    assert.equal(focusTab.changed, true);
-    assert.equal(topologyAfterFocus.focused_tab, initialFocusedTab);
+    if (zellijCapabilities.capabilities.tab_focus) {
+      assert.equal(focusTab.changed, true);
+      assert.equal(topologyAfterFocus.focused_tab, initialFocusedTab);
+    }
     assert.equal(closeTab.changed, true);
     assert.equal(topologyAfterClose.tabs.length, initialTabCount);
   } finally {

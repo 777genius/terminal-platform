@@ -2,10 +2,14 @@ use std::time::Duration;
 
 use terminal_backend_api::BackendSubscriptionEvent;
 use terminal_backend_api::{
-    BackendScope, CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, OverrideLayoutSpec,
-    ResizePaneSpec, SendInputSpec, ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
+    BackendScope, CreateSessionSpec, MuxBackendPort, MuxCommand, NewTabSpec, SubscriptionSpec,
+};
+#[cfg(any(unix, windows))]
+use terminal_backend_api::{
+    OverrideLayoutSpec, ResizePaneSpec, SendInputSpec, ShellLaunchSpec, SplitPaneSpec,
 };
 use terminal_domain::BackendKind;
+#[cfg(any(unix, windows))]
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection};
 use terminal_projection::ProjectionSource;
 use tokio::time::sleep;
@@ -102,7 +106,7 @@ async fn mutates_topology_through_dispatch() {
     assert_eq!(after.focused_tab, Some(before.tabs[0].tab_id));
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 async fn splits_and_closes_panes_within_native_tab() {
     let backend = NativeBackend::default();
@@ -171,7 +175,7 @@ async fn splits_and_closes_panes_within_native_tab() {
     assert_eq!(close_last.kind, terminal_backend_api::BackendErrorKind::InvalidInput);
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 async fn resizes_split_panes_through_layout_ratios() {
     let backend = NativeBackend::default();
@@ -243,7 +247,7 @@ async fn resizes_split_panes_through_layout_ratios() {
     assert_eq!(target_after.cols + original_after.cols, target_before.cols + original_before.cols);
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 async fn overrides_native_layout_with_existing_pane_set() {
     let backend = NativeBackend::default();
@@ -321,7 +325,7 @@ async fn overrides_native_layout_with_existing_pane_set() {
     assert_eq!(invalid_override.kind, terminal_backend_api::BackendErrorKind::InvalidInput);
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 async fn writes_input_into_live_pty_backed_session() {
     let backend = NativeBackend::default();
@@ -344,7 +348,7 @@ async fn writes_input_into_live_pty_backed_session() {
     let result = session
         .dispatch(MuxCommand::SendInput(SendInputSpec {
             pane_id,
-            data: "hello from backend test\r".to_string(),
+            data: echo_input("hello from backend test"),
         }))
         .await
         .expect("send input should succeed");
@@ -482,7 +486,7 @@ async fn streams_initial_surface_and_title_patch_updates() {
     assert_eq!(patch.title.as_deref(), Some("renamed"));
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 async fn streams_surface_updates_for_all_affected_panes_after_resize() {
     let backend = NativeBackend::default();
@@ -575,6 +579,7 @@ async fn streams_surface_updates_for_all_affected_panes_after_resize() {
     assert!(resized_updated.full_replace.is_some());
 }
 
+#[cfg(any(unix, windows))]
 fn cat_launch_spec() -> ShellLaunchSpec {
     #[cfg(unix)]
     {
@@ -592,6 +597,20 @@ fn cat_launch_spec() -> ShellLaunchSpec {
     }
 }
 
+#[cfg(any(unix, windows))]
+fn echo_input(text: &str) -> String {
+    #[cfg(unix)]
+    {
+        format!("{text}\r")
+    }
+
+    #[cfg(windows)]
+    {
+        format!("echo {text}\r")
+    }
+}
+
+#[cfg(any(unix, windows))]
 async fn wait_for_screen_line(
     session: &dyn terminal_backend_api::BackendSessionPort,
     pane_id: terminal_domain::PaneId,
@@ -611,12 +630,14 @@ async fn wait_for_screen_line(
     panic!("screen never contained expected text: {needle}; last lines: {last_lines:?}");
 }
 
+#[cfg(any(unix, windows))]
 fn collect_pane_ids(root: &terminal_mux_domain::PaneTreeNode) -> Vec<terminal_domain::PaneId> {
     let mut pane_ids = Vec::new();
     collect_pane_ids_inner(root, &mut pane_ids);
     pane_ids
 }
 
+#[cfg(any(unix, windows))]
 fn collect_pane_ids_inner(
     root: &terminal_mux_domain::PaneTreeNode,
     pane_ids: &mut Vec<terminal_domain::PaneId>,

@@ -164,12 +164,12 @@ impl MuxBackendPort for ZellijBackend {
                     tiled_panes: true,
                     tab_create: true,
                     tab_close: true,
-                    tab_focus: true,
+                    tab_focus: zellij_focus_actions_supported(),
                     tab_rename: true,
                     session_scoped_tab_refs: true,
                     session_scoped_pane_refs: true,
                     pane_close: true,
-                    pane_focus: true,
+                    pane_focus: zellij_focus_actions_supported(),
                     pane_input_write: true,
                     pane_paste_write: true,
                     rendered_viewport_stream: true,
@@ -592,11 +592,17 @@ impl ZellijAttachedSession {
             MuxCommand::NewTab(spec) => Ok(self.new_tab_actions(spec)),
             MuxCommand::SendInput(spec) => self.send_input_actions(snapshot, spec),
             MuxCommand::SendPaste(spec) => self.send_paste_actions(snapshot, spec),
+            MuxCommand::FocusPane { .. } if !zellij_focus_actions_supported() => {
+                Err(zellij_focus_unsupported_error())
+            }
             MuxCommand::FocusPane { pane_id } => {
                 Ok(vec![self.focus_pane_action(snapshot, pane_id)?])
             }
             MuxCommand::ClosePane { pane_id } => {
                 Ok(vec![self.close_pane_action(snapshot, pane_id)?])
+            }
+            MuxCommand::FocusTab { .. } if !zellij_focus_actions_supported() => {
+                Err(zellij_focus_unsupported_error())
             }
             MuxCommand::FocusTab { tab_id } => Ok(vec![self.focus_tab_action(snapshot, tab_id)?]),
             MuxCommand::CloseTab { tab_id } => Ok(vec![self.close_tab_action(snapshot, tab_id)?]),
@@ -628,7 +634,10 @@ impl ZellijAttachedSession {
             .get(&tab_id)
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("unknown zellij tab {tab_id:?}")))?;
-        Ok(ZellijAction::FocusTab { backend_tab_id: tab_target.backend_tab_id })
+        Ok(ZellijAction::FocusTab {
+            backend_tab_id: tab_target.backend_tab_id,
+            display_index: tab_target.display_index,
+        })
     }
 
     fn close_tab_action(
@@ -819,11 +828,14 @@ impl ZellijAttachedSession {
         action: &ZellijAction,
     ) -> Result<ZellijSessionSnapshot, BackendError> {
         let mut last_error = None;
+        let mut last_snapshot_summary = None;
         let started = Instant::now();
         for _ in 0..ZELLIJ_ACTION_SETTLE_ATTEMPTS {
             match self.snapshot() {
                 Ok(snapshot) if action.settled(previous, &snapshot) => return Ok(snapshot),
-                Ok(_) => {}
+                Ok(snapshot) => {
+                    last_snapshot_summary = Some(snapshot.settle_summary());
+                }
                 Err(error) if is_transient_zellij_backend_error(&error) => {
                     last_error = Some(error);
                 }
@@ -837,8 +849,9 @@ impl ZellijAttachedSession {
 
         Err(last_error.unwrap_or_else(|| {
             BackendError::transport(format!(
-                "zellij action did not settle within {} ms",
-                ZELLIJ_ACTION_SETTLE_TIMEOUT.as_millis()
+                "zellij action did not settle within {} ms: action={action:?}; last_snapshot={}",
+                ZELLIJ_ACTION_SETTLE_TIMEOUT.as_millis(),
+                last_snapshot_summary.unwrap_or_else(|| "<none>".to_string())
             ))
         }))
     }
@@ -868,6 +881,27 @@ impl ZellijSessionSnapshot {
             .values()
             .find(|tab| tab.backend_tab_id == backend_tab_id)
             .and_then(|tab| tab.title.as_deref())
+    }
+
+    fn settle_summary(&self) -> String {
+        let mut tabs: Vec<_> = self
+            .tab_targets
+            .values()
+            .map(|tab| {
+                format!(
+                    "{}:{}:{}",
+                    tab.backend_tab_id,
+                    tab.display_index,
+                    tab.title.as_deref().unwrap_or("<untitled>")
+                )
+            })
+            .collect();
+        tabs.sort();
+        format!(
+            "focused_backend_tab_id={:?}; tabs=[{}]",
+            self.focused_backend_tab_id(),
+            tabs.join(",")
+        )
     }
 }
 
@@ -975,13 +1009,14 @@ enum ZellijPaneKind {
 struct ZellijTabTarget {
     backend_tab_id: u32,
     position: u32,
+    display_index: u32,
     title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ZellijAction {
     NewTab { title: Option<String> },
-    FocusTab { backend_tab_id: u32 },
+    FocusTab { backend_tab_id: u32, display_index: u32 },
     CloseTab { backend_tab_id: u32 },
     RenameTab { backend_tab_id: u32, title: String },
     FocusPane { pane_ref: String },
@@ -1016,7 +1051,7 @@ impl ZellijAction {
                             .any(|tab| tab.title.as_deref() == Some(title.as_str()))
                     })
             }
-            Self::FocusTab { backend_tab_id } => {
+            Self::FocusTab { backend_tab_id, .. } => {
                 current.focused_backend_tab_id() == Some(*backend_tab_id)
             }
             Self::CloseTab { backend_tab_id } => !current.tab_exists(*backend_tab_id),
@@ -1049,11 +1084,21 @@ impl ZellijAction {
                 }
                 args
             }
-            Self::FocusTab { backend_tab_id } => vec![
-                "action".to_string(),
-                "go-to-tab-by-id".to_string(),
-                backend_tab_id.to_string(),
-            ],
+            Self::FocusTab { backend_tab_id, display_index } => {
+                if cfg!(windows) {
+                    vec![
+                        "action".to_string(),
+                        "go-to-tab".to_string(),
+                        (display_index + 1).to_string(),
+                    ]
+                } else {
+                    vec![
+                        "action".to_string(),
+                        "go-to-tab-by-id".to_string(),
+                        backend_tab_id.to_string(),
+                    ]
+                }
+            }
             Self::CloseTab { backend_tab_id } => vec![
                 "action".to_string(),
                 "close-tab".to_string(),
@@ -1179,6 +1224,17 @@ fn is_transient_zellij_backend_error(error: &BackendError) -> bool {
         || error.message.contains("exposed no importable panes")
 }
 
+fn zellij_focus_actions_supported() -> bool {
+    !cfg!(windows)
+}
+
+fn zellij_focus_unsupported_error() -> BackendError {
+    BackendError::unsupported(
+        "zellij imported routes cannot focus tabs or panes on Windows because CLI focus actions are scoped to the transient action client",
+        DegradedModeReason::UnsupportedByBackend,
+    )
+}
+
 fn build_session_snapshot(
     session_id: SessionId,
     target: &ZellijTarget,
@@ -1236,7 +1292,12 @@ fn build_session_snapshot(
 
         tab_targets.insert(
             tab_id,
-            ZellijTabTarget { backend_tab_id: tab.tab_id, position, title: non_empty(&tab.name) },
+            ZellijTabTarget {
+                backend_tab_id: tab.tab_id,
+                position,
+                display_index: tab.position,
+                title: non_empty(&tab.name),
+            },
         );
 
         if focused_tab.is_none() && (tab.active || focused_tab_from_pane == Some(tab.tab_id)) {
@@ -1685,12 +1746,19 @@ mod tests {
                 .expect("new-tab should map"),
             vec![ZellijAction::NewTab { title: Some("debug".to_string()) }]
         );
-        assert_eq!(
-            attached
+        if cfg!(windows) {
+            let error = attached
                 .dispatch_actions(&snapshot, MuxCommand::FocusTab { tab_id: second_tab })
-                .expect("focus-tab should map"),
-            vec![ZellijAction::FocusTab { backend_tab_id: 2 }]
-        );
+                .expect_err("windows focus-tab should be unsupported");
+            assert_eq!(error.kind, BackendErrorKind::Unsupported);
+        } else {
+            assert_eq!(
+                attached
+                    .dispatch_actions(&snapshot, MuxCommand::FocusTab { tab_id: second_tab })
+                    .expect("focus-tab should map"),
+                vec![ZellijAction::FocusTab { backend_tab_id: 2, display_index: 1 }]
+            );
+        }
         assert_eq!(
             attached
                 .dispatch_actions(
@@ -1706,12 +1774,19 @@ mod tests {
                 .expect("close-tab should map"),
             vec![ZellijAction::CloseTab { backend_tab_id: 2 }]
         );
-        assert_eq!(
-            attached
+        if cfg!(windows) {
+            let error = attached
                 .dispatch_actions(&snapshot, MuxCommand::FocusPane { pane_id: terminal_pane })
-                .expect("focus-pane should map"),
-            vec![ZellijAction::FocusPane { pane_ref: "terminal_1".to_string() }]
-        );
+                .expect_err("windows focus-pane should be unsupported");
+            assert_eq!(error.kind, BackendErrorKind::Unsupported);
+        } else {
+            assert_eq!(
+                attached
+                    .dispatch_actions(&snapshot, MuxCommand::FocusPane { pane_id: terminal_pane })
+                    .expect("focus-pane should map"),
+                vec![ZellijAction::FocusPane { pane_ref: "terminal_1".to_string() }]
+            );
+        }
         assert_eq!(
             attached
                 .dispatch_actions(&snapshot, MuxCommand::ClosePane { pane_id: terminal_pane })

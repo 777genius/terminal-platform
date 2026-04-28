@@ -453,13 +453,15 @@ mod tests {
     use terminal_daemon_client::LocalSocketDaemonClient;
     use terminal_domain::DegradedModeReason;
     #[cfg(unix)]
+    use terminal_testing::echo_shell_launch_spec;
+    #[cfg(unix)]
     use terminal_testing::{
         TmuxServerGuard, daemon_fixture_with_daemon, tmux_daemon, unique_tmux_session_name,
         unique_tmux_socket_name,
     };
     use terminal_testing::{
-        ZellijSessionGuard, ZellijTestLock, daemon, daemon_fixture, echo_shell_launch_spec,
-        unique_socket_address, unique_zellij_session_name, wait_for_daemon_ready,
+        ZellijSessionGuard, ZellijTestLock, daemon, daemon_fixture, unique_socket_address,
+        unique_zellij_session_name, wait_for_daemon_ready,
     };
     use tokio::time::{sleep, timeout};
 
@@ -574,13 +576,13 @@ mod tests {
         if zellij_capabilities.capabilities.rendered_viewport_snapshot {
             assert!(zellij_capabilities.capabilities.tab_create);
             assert!(zellij_capabilities.capabilities.tab_close);
-            assert!(zellij_capabilities.capabilities.tab_focus);
+            assert_eq!(zellij_capabilities.capabilities.tab_focus, !cfg!(windows));
             assert!(zellij_capabilities.capabilities.tab_rename);
             assert!(zellij_capabilities.capabilities.rendered_viewport_stream);
             assert!(zellij_capabilities.capabilities.session_scoped_tab_refs);
             assert!(zellij_capabilities.capabilities.session_scoped_pane_refs);
             assert!(zellij_capabilities.capabilities.pane_close);
-            assert!(zellij_capabilities.capabilities.pane_focus);
+            assert_eq!(zellij_capabilities.capabilities.pane_focus, !cfg!(windows));
             assert!(zellij_capabilities.capabilities.pane_input_write);
             assert!(zellij_capabilities.capabilities.pane_paste_write);
             assert!(zellij_capabilities.capabilities.plugin_panes);
@@ -871,26 +873,33 @@ mod tests {
                         )
                         .await;
 
-                        let focused = timeout(
-                            zellij_operation_timeout(),
-                            node.dispatch_mux_command(
+                        let focused = if zellij_capabilities.capabilities.tab_focus {
+                            let focused = timeout(
+                                zellij_operation_timeout(),
+                                node.dispatch_mux_command(
+                                    &imported.session_id,
+                                    &NodeMuxCommand::FocusTab {
+                                        tab_id: initial_focused_tab.clone(),
+                                    },
+                                ),
+                            )
+                            .await
+                            .expect("zellij focus_tab should not hang")
+                            .expect("zellij focus_tab should succeed");
+                            let after_focus = wait_for_topology_state(
+                                &node,
                                 &imported.session_id,
-                                &NodeMuxCommand::FocusTab { tab_id: initial_focused_tab.clone() },
-                            ),
-                        )
-                        .await
-                        .expect("zellij focus_tab should not hang")
-                        .expect("zellij focus_tab should succeed");
-                        let after_focus = wait_for_topology_state(
-                            &node,
-                            &imported.session_id,
-                            |snapshot| {
-                                snapshot.focused_tab.as_deref()
-                                    == Some(initial_focused_tab.as_str())
-                            },
-                            "zellij rich focus tab topology",
-                        )
-                        .await;
+                                |snapshot| {
+                                    snapshot.focused_tab.as_deref()
+                                        == Some(initial_focused_tab.as_str())
+                                },
+                                "zellij rich focus tab topology",
+                            )
+                            .await;
+                            Some((focused, after_focus))
+                        } else {
+                            None
+                        };
 
                         let closed = timeout(
                             zellij_operation_timeout(),
@@ -920,11 +929,13 @@ mod tests {
                             tab.tab_id == rich_tab_id
                                 && tab.title.as_deref() == Some("logs-rich-renamed")
                         }));
-                        assert!(focused.changed);
-                        assert_eq!(
-                            after_focus.focused_tab.as_deref(),
-                            Some(initial_focused_tab.as_str())
-                        );
+                        if let Some((focused, after_focus)) = focused {
+                            assert!(focused.changed);
+                            assert_eq!(
+                                after_focus.focused_tab.as_deref(),
+                                Some(initial_focused_tab.as_str())
+                            );
+                        }
                         assert!(closed.changed);
                         assert_eq!(after_close.tabs.len(), initial_tab_count);
 
