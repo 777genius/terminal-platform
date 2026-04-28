@@ -125,6 +125,19 @@ async function main() {
       ) {
         throw new Error(`Foreign backend ${backend} did not import through UI correctly: ${JSON.stringify(imported)}`);
       }
+      if (
+        backend === "zellij"
+        && (
+          !imported.muxActions?.newTabCreated
+          || !imported.muxActions?.renamed
+          || !imported.muxActions?.pasteMarkerSeen
+          || !imported.muxActions?.closedTab
+          || !imported.muxActions?.unsupportedSplitRejected
+          || !imported.muxActions?.focusCapabilitiesMatchPlatform
+        )
+      ) {
+        throw new Error(`Foreign backend zellij mux actions failed: ${JSON.stringify(imported.muxActions)}`);
+      }
     }
 
     if (
@@ -429,13 +442,292 @@ async function importBackendViaUi(send, backend, title, marker) {
       screenText,
     };
   })()`);
+  const muxActions = backend === "zellij"
+    ? await exerciseZellijMuxActions(send, title)
+    : null;
 
   return {
     ...afterCommand,
     commandSent,
     importClicked,
     marker,
+    muxActions,
   };
+}
+
+async function exerciseZellijMuxActions(send, title) {
+  const newTabTitle = uniqueName("zellij-mux-tab");
+  const renamedTabTitle = uniqueName("zellij-mux-renamed");
+  const pasteMarker = uniqueName("zellij-paste-marker");
+  const expectedTabFocus = process.platform !== "win32";
+  const expectedPaneFocus = process.platform !== "win32";
+
+  const before = await evaluate(send, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const session = state?.attachedSession?.session ?? null;
+    const topology = state?.attachedSession?.topology ?? null;
+    const capabilities = state?.catalog?.backendCapabilities?.zellij?.capabilities ?? null;
+    const focusedTab = topology?.tabs?.find((tab) => tab.tab_id === topology.focused_tab)
+      ?? topology?.tabs?.[0]
+      ?? null;
+    return {
+      sessionId: session?.session_id ?? null,
+      attachedBackend: session?.route?.backend ?? null,
+      attachedTitle: session?.title ?? null,
+      tabCount: topology?.tabs?.length ?? 0,
+      focusedTabId: focusedTab?.tab_id ?? null,
+      focusedPaneId: focusedTab?.focused_pane ?? null,
+      capabilities,
+    };
+  })()`);
+
+  if (!before.sessionId || before.attachedBackend !== "zellij" || before.attachedTitle !== title) {
+    return {
+      ok: false,
+      reason: "zellij session was not attached before mux action exercise",
+      before,
+    };
+  }
+
+  const focusCapabilitiesMatchPlatform = Boolean(
+    before.capabilities
+    && before.capabilities.tab_focus === expectedTabFocus
+    && before.capabilities.pane_focus === expectedPaneFocus,
+  );
+
+  const dispatchResult = await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands ?? null;
+    if (!commands?.dispatchMuxCommand || !commands?.attachSession) {
+      return { ok: false, reason: 'workspace commands missing' };
+    }
+    await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'new_tab',
+      title: ${JSON.stringify(newTabTitle)},
+    });
+    await commands.attachSession(${JSON.stringify(before.sessionId)});
+    return { ok: true };
+  })()`);
+  if (!dispatchResult.ok) {
+    return {
+      ok: false,
+      reason: dispatchResult.reason ?? "new_tab dispatch failed",
+      before,
+      focusCapabilitiesMatchPlatform,
+    };
+  }
+
+  await waitForBrowser(send, "zellij new tab to appear", `(() => {
+    const tabs = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology?.tabs ?? [];
+    return tabs.some((tab) => tab.title === ${JSON.stringify(newTabTitle)});
+  })()`);
+
+  const afterNewTab = await evaluate(send, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const topology = state?.attachedSession?.topology ?? null;
+    const newTab = topology?.tabs?.find((tab) => tab.title === ${JSON.stringify(newTabTitle)}) ?? null;
+    return {
+      tabCount: topology?.tabs?.length ?? 0,
+      focusedTabId: topology?.focused_tab ?? null,
+      newTabId: newTab?.tab_id ?? null,
+      newPaneId: newTab?.focused_pane ?? null,
+    };
+  })()`);
+  const newTabCreated = Boolean(
+    afterNewTab.newTabId
+    && afterNewTab.newPaneId
+    && afterNewTab.tabCount > before.tabCount,
+  );
+  if (!newTabCreated) {
+    return {
+      ok: false,
+      reason: "new_tab did not create an importable zellij tab",
+      before,
+      afterNewTab,
+      focusCapabilitiesMatchPlatform,
+    };
+  }
+
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'send_paste',
+      pane_id: ${JSON.stringify(afterNewTab.newPaneId)},
+      data: ${JSON.stringify(`echo ${pasteMarker}`)},
+    });
+    await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'send_input',
+      pane_id: ${JSON.stringify(afterNewTab.newPaneId)},
+      data: '\\r',
+    });
+    await commands.attachSession(${JSON.stringify(before.sessionId)});
+    return true;
+  })()`);
+
+  const zellijPasteScreen = await waitForZellijTabScreenMarker(newTabTitle, pasteMarker);
+  const afterPaste = await evaluate(send, `(() => {
+    const screenText = window.terminalDemoDebug?.getState?.()?.attachedSession?.focused_screen?.surface?.lines
+      ?.map((line) => line.text)
+      .join('\\n') ?? '';
+    return {
+      focusedScreenPasteMarkerSeen: screenText.includes(${JSON.stringify(pasteMarker)}),
+    };
+  })()`);
+
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'rename_tab',
+      tab_id: ${JSON.stringify(afterNewTab.newTabId)},
+      title: ${JSON.stringify(renamedTabTitle)},
+    });
+    await commands.attachSession(${JSON.stringify(before.sessionId)});
+    return true;
+  })()`);
+
+  await waitForBrowser(send, "zellij renamed tab", `(() => {
+    const tabs = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology?.tabs ?? [];
+    return tabs.some((tab) =>
+      tab.tab_id === ${JSON.stringify(afterNewTab.newTabId)}
+      && tab.title === ${JSON.stringify(renamedTabTitle)}
+    );
+  })()`);
+
+  const unsupportedSplit = await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    try {
+      await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+        kind: 'split_pane',
+        pane_id: ${JSON.stringify(afterNewTab.newPaneId)},
+        direction: 'horizontal',
+      });
+      return { rejected: false, message: null };
+    } catch (error) {
+      return { rejected: true, message: error instanceof Error ? error.message : String(error) };
+    }
+  })()`);
+
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'close_tab',
+      tab_id: ${JSON.stringify(afterNewTab.newTabId)},
+    });
+    await commands.attachSession(${JSON.stringify(before.sessionId)});
+    return true;
+  })()`);
+
+  await waitForBrowser(send, "zellij tab closed", `(() => {
+    const tabs = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology?.tabs ?? [];
+    return !tabs.some((tab) => tab.tab_id === ${JSON.stringify(afterNewTab.newTabId)});
+  })()`);
+
+  const afterClose = await evaluate(send, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const topology = state?.attachedSession?.topology ?? null;
+    const splitButton = document
+      .querySelector('tp-terminal-workspace')
+      ?.shadowRoot
+      ?.querySelector('tp-terminal-pane-tree')
+      ?.shadowRoot
+      ?.querySelector('[data-testid="tp-split-right"]') ?? null;
+    return {
+      tabCount: topology?.tabs?.length ?? 0,
+      renamedStillPresent: topology?.tabs?.some((tab) => tab.title === ${JSON.stringify(renamedTabTitle)}) ?? false,
+      splitButtonDisabled: splitButton?.disabled ?? null,
+    };
+  })()`);
+
+  const splitMessage = String(unsupportedSplit.message ?? "");
+  const unsupportedSplitRejected = Boolean(
+    unsupportedSplit.rejected
+    && (
+      splitMessage.includes("do not support this command")
+      || splitMessage.includes("UnsupportedByBackend")
+      || splitMessage.includes("unsupported")
+    ),
+  );
+
+  return {
+    ok: true,
+    before,
+    afterNewTab,
+    afterPaste,
+    afterClose,
+    zellijPasteScreen,
+    focusCapabilitiesMatchPlatform,
+    newTabCreated,
+    renamed: !afterClose.renamedStillPresent,
+    pasteMarker,
+    pasteMarkerSeen: zellijPasteScreen.markerSeen,
+    closedTab: afterClose.tabCount === before.tabCount,
+    unsupportedSplitRejected,
+    unsupportedSplitMessage: unsupportedSplit.message,
+    splitButtonDisabled: afterClose.splitButtonDisabled,
+  };
+}
+
+async function waitForZellijTabScreenMarker(tabTitle, marker) {
+  let latest = null;
+  await waitFor(() => {
+    latest = readZellijTabScreen(tabTitle);
+    return latest?.screenText.includes(marker) ?? false;
+  }, `zellij tab ${tabTitle} screen marker`);
+
+  return {
+    ...latest,
+    markerSeen: latest?.screenText.includes(marker) ?? false,
+    screenTextPreview: compactText(latest?.screenText ?? ""),
+  };
+}
+
+function readZellijTabScreen(tabTitle) {
+  if (!zellijSessionName) {
+    return null;
+  }
+
+  try {
+    const tabs = JSON.parse(runCapture(
+      "zellij",
+      ["--session", zellijSessionName, "action", "list-tabs", "--json"],
+      appRoot,
+      smokeEnv,
+    ));
+    const tab = tabs.find((candidate) => candidate?.name === tabTitle);
+    if (!tab) {
+      return null;
+    }
+
+    const panes = JSON.parse(runCapture(
+      "zellij",
+      ["--session", zellijSessionName, "action", "list-panes", "--json"],
+      appRoot,
+      smokeEnv,
+    ));
+    const pane = panes.find((candidate) =>
+      candidate?.tab_id === tab.tab_id
+      && !candidate?.is_plugin
+      && !candidate?.is_floating
+    );
+    if (!pane) {
+      return null;
+    }
+
+    const paneRef = `terminal_${pane.id}`;
+    const screenText = runCapture(
+      "zellij",
+      ["--session", zellijSessionName, "action", "dump-screen", "--pane-id", paneRef],
+      appRoot,
+      smokeEnv,
+    );
+    return {
+      tabId: tab.tab_id,
+      paneId: pane.id,
+      paneRef,
+      screenText,
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function startBrowserHost(rendererUrlValue, options) {
@@ -647,6 +939,15 @@ function isVersionAtLeast(version, minimum) {
 
 function formatVersion(parts) {
   return parts.join(".");
+}
+
+function compactText(value, limit = 240) {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, limit)}...`;
 }
 
 function uniqueName(prefix) {
