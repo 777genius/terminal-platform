@@ -5,6 +5,7 @@ import path from "node:path";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { loadTerminalPlatformSdk } from "./terminal-platform-sdk.js";
+import { cleanupStaleWindowsRuntimeTempDirs } from "./windows-runtime-temp.js";
 
 const DAEMON_GRACEFUL_SHUTDOWN_MS = 5_000;
 const DAEMON_FORCED_SHUTDOWN_MS = 2_000;
@@ -298,6 +299,7 @@ async function resolveDaemonRuntimeBinary(): Promise<{ binaryPath: string; runti
     return { binaryPath, runtimeDir: null };
   }
 
+  await cleanupStaleWindowsRuntimeTempDirs();
   const runtimeDir = await fs.mkdtemp(
     path.join(os.tmpdir(), `terminal-demo-daemon-runtime-${process.pid}-`),
   );

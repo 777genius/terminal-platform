@@ -118,7 +118,12 @@ export async function cleanTerminalTempArtifacts(options = {}) {
     }
 
     try {
-      await fs.rm(artifact.path, { recursive: true, force: true });
+      await fs.rm(artifact.path, {
+        force: true,
+        maxRetries: process.platform === "win32" ? 8 : 0,
+        recursive: true,
+        retryDelay: process.platform === "win32" ? 250 : 0,
+      });
       results.push({
         ...artifact,
         status: "deleted",

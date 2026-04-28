@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type * as TerminalPlatformSdk from "../../../../../.generated/terminal-platform-node/index.mjs";
+import { cleanupStaleWindowsRuntimeTempDirs } from "./windows-runtime-temp.js";
 
 export type TerminalPlatformSdkModule = typeof TerminalPlatformSdk;
 
@@ -33,6 +34,7 @@ async function resolveSdkModulePath(): Promise<string> {
     return path.join(sdkDir, "index.mjs");
   }
 
+  await cleanupStaleWindowsRuntimeTempDirs();
   const runtimeSdkDir = await fs.mkdtemp(
     path.join(os.tmpdir(), `terminal-demo-sdk-runtime-${process.pid}-`),
   );
