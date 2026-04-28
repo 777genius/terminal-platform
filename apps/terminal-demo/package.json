@@ -18,6 +18,7 @@
     "dev": "node ./scripts/dev.mjs",
     "dev:browser": "node ./scripts/dev-browser.mjs",
     "smoke:browser": "node ./scripts/browser-smoke.mjs",
+    "smoke:browser:foreign": "node ./scripts/browser-foreign-backends-smoke.mjs",
     "verify:renderer-static": "npm run stage:workspace-sdk && npm run build:renderer && node ./scripts/verify-static-renderer-preview.mjs",
     "verify:renderer-static:browser": "npm run verify:renderer-static && node ./scripts/verify-static-renderer-browser.mjs",
     "smoke:renderer-static": "npm run verify:renderer-static",

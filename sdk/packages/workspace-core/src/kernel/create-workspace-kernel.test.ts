@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   BackendCapabilitiesInfo,
   BackendKind,
+  DiscoveredSession,
   Handshake,
   SavedSessionSummary,
 } from "@terminal-platform/runtime-types";
@@ -268,6 +269,31 @@ describe("createWorkspaceKernel bootstrap", () => {
     await kernel.dispose();
   });
 
+  it("discovers advertised foreign backend sessions during bootstrap", async () => {
+    const requestedBackends: BackendKind[] = [];
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        handshake: async () => createHandshake(["native", "tmux", "zellij"]),
+        listSessions: async () => [],
+        listSavedSessions: async () => [],
+        getBackendCapabilities: async (backend: BackendKind) => createCapabilities(backend),
+        discoverSessions: async (backend: BackendKind) => {
+          requestedBackends.push(backend);
+          return [createDiscoveredSession(backend)];
+        },
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.bootstrap();
+
+    expect(requestedBackends).toEqual(["tmux", "zellij"]);
+    expect(kernel.getSnapshot().catalog.discoveredSessions.tmux?.[0]?.route.backend).toBe("tmux");
+    expect(kernel.getSnapshot().catalog.discoveredSessions.zellij?.[0]?.route.backend).toBe("zellij");
+
+    await kernel.dispose();
+  });
+
   it("keeps bootstrap usable when one capability probe fails", async () => {
     const kernel = createWorkspaceKernel({
       transport: {
@@ -419,6 +445,7 @@ describe("createWorkspaceKernel saved session maintenance", () => {
 function createUnusedTransport(): WorkspaceTransportClient {
   return {
     close: async () => {},
+    discoverSessions: async () => [],
   } as unknown as WorkspaceTransportClient;
 }
 
@@ -477,6 +504,20 @@ function createCapabilities(backend: BackendKind): BackendCapabilitiesInfo {
       advisory_metadata_subscriptions: true,
       independent_resize_authority: true,
     },
+  };
+}
+
+function createDiscoveredSession(backend: BackendKind): DiscoveredSession {
+  return {
+    route: {
+      backend,
+      authority: "imported_foreign",
+      external: {
+        namespace: `${backend}_session`,
+        value: "session=workspace",
+      },
+    },
+    title: `${backend} workspace`,
   };
 }
 

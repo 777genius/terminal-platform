@@ -137,6 +137,7 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
     assertNotDisposed();
     await connectionService.bootstrap();
     await refreshAvailableBackendCapabilities();
+    await refreshForeignBackendDiscovery();
     await catalogService.refreshSessions();
     await catalogService.refreshSavedSessions();
   }
@@ -201,6 +202,24 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
           await catalogService.getBackendCapabilities(backend);
         } catch {
           // Capability failures are already captured as diagnostics.
+        }
+      }),
+    );
+  }
+
+  async function refreshForeignBackendDiscovery(): Promise<void> {
+    const handshake = store.getSnapshot().connection.handshake;
+    if (!handshake?.capabilities.backend_discovery) {
+      return;
+    }
+
+    const backends = handshake.available_backends.filter((backend) => backend !== "native");
+    await Promise.all(
+      backends.map(async (backend) => {
+        try {
+          await catalogService.discoverSessions(backend);
+        } catch {
+          // Discovery failures are already captured as recoverable diagnostics.
         }
       }),
     );
