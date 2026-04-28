@@ -269,7 +269,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     payload: WorkspaceGatewayControlRequestMap[RecordKey]["payload"],
   ): Promise<WorkspaceGatewayControlRequestMap[RecordKey]["response"]> {
     this.assertOpen();
-    const socket = await this.ensureControlConnected();
+    const socket = await this.ensureControlConnectedWithRetry(INITIAL_CONNECT_MAX_ATTEMPTS);
     const requestId = createSubscriptionId();
 
     return await new Promise<WorkspaceGatewayControlRequestMap[RecordKey]["response"]>((resolve, reject) => {
@@ -288,6 +288,26 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
 
       socket.send(encodeWorkspaceWebSocketPayload(envelope));
     });
+  }
+
+  private async ensureControlConnectedWithRetry(maxAttempts: number): Promise<WebSocket> {
+    let attempt = 0;
+    let lastError: Error | null = null;
+
+    while (!this.#closed && attempt < maxAttempts) {
+      try {
+        return await this.ensureControlConnected();
+      } catch (error) {
+        lastError = toError(error);
+        attempt += 1;
+        if (attempt >= maxAttempts) {
+          break;
+        }
+        await this.waitBeforeRetry(attempt);
+      }
+    }
+
+    throw lastError ?? new Error("Failed to connect to workspace control plane");
   }
 
   private async ensureControlConnected(): Promise<WebSocket> {

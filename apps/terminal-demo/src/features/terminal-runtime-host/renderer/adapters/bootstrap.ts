@@ -1,6 +1,7 @@
 import {
   buildTerminalRuntimeBrowserUrl,
   deriveTerminalRuntimeSessionStreamUrl,
+  selectLatestTerminalRuntimeBootstrapConfig,
   TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH,
   type TerminalRuntimeBootstrapConfig,
 } from "../../contracts/index.js";
@@ -76,7 +77,7 @@ export async function loadLatestTerminalRuntimeBootstrapConfig(): Promise<Termin
   });
 
   const browserConfig = await loadBrowserBootstrapConfig();
-  return selectPreferredBootstrapConfig({
+  return selectLatestTerminalRuntimeBootstrapConfig({
     browserConfig,
     queryConfig,
   });

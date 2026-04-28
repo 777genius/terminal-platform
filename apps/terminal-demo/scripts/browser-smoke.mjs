@@ -137,7 +137,9 @@ async function main() {
     ) {
       throw new Error(`Host auto-start did not settle into one default shell: ${JSON.stringify(autoStartResult)}`);
     }
-    const staleAutoStartResult = await runAutoStartSmokeScenario(buildStaleBrowserUrl(autoStartBrowserUrl));
+    const staleAutoStartResult = await runAutoStartSmokeScenario(buildStaleBrowserUrl(autoStartBrowserUrl), {
+      allowStaleBootstrapConnectionIssues: true,
+    });
     if (
       staleAutoStartResult.issues.length > 0
       || !staleAutoStartResult.hasReady
@@ -3340,7 +3342,7 @@ async function runSmokeScenario(browserUrl) {
   }
 }
 
-async function runAutoStartSmokeScenario(browserUrl) {
+async function runAutoStartSmokeScenario(browserUrl, options = {}) {
   const target = await fetch(`http://127.0.0.1:${cdpPort}/json/new?${encodeURIComponent(browserUrl)}`, {
     method: "PUT",
   }).then((response) => response.json());
@@ -3442,7 +3444,9 @@ async function runAutoStartSmokeScenario(browserUrl) {
 
     return {
       ...result,
-      issues,
+      issues: options.allowStaleBootstrapConnectionIssues
+        ? issues.filter((issue) => !isExpectedStaleBootstrapConnectionIssue(issue))
+        : issues,
     };
   } finally {
     await closeWebSocket(socket);
@@ -3450,10 +3454,17 @@ async function runAutoStartSmokeScenario(browserUrl) {
   }
 }
 
+function isExpectedStaleBootstrapConnectionIssue(issue) {
+  return issue.type === "log"
+    && issue.source === "network"
+    && issue.text.includes("ws://127.0.0.1:1/terminal-gateway/");
+}
+
 function buildStaleBrowserUrl(browserUrl) {
   const url = new URL(browserUrl);
   url.searchParams.set("controlPlaneUrl", "ws://127.0.0.1:1/terminal-gateway/control?token=stale");
   url.searchParams.set("sessionStreamUrl", "ws://127.0.0.1:1/terminal-gateway/stream?token=stale");
+  url.searchParams.set("runtimeSlug", "terminal-demo-stale-window");
   url.searchParams.delete("demoDefaultWorkingDirectory");
   return url.toString();
 }

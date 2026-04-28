@@ -167,6 +167,7 @@ export function resolveTerminalDemoQuickCommands(
 }
 export function TerminalDemoWorkspaceApp(props: {
   config: TerminalRuntimeBootstrapConfig;
+  onRuntimeConnectionIssue?: (() => void) | undefined;
 }): ReactElement {
   const kernel = useDemoWorkspaceKernel(props.config);
 
@@ -182,12 +183,19 @@ export function TerminalDemoWorkspaceApp(props: {
     );
   }
 
-  return <TerminalDemoWorkspaceScreen config={props.config} kernel={kernel} />;
+  return (
+    <TerminalDemoWorkspaceScreen
+      config={props.config}
+      kernel={kernel}
+      onRuntimeConnectionIssue={props.onRuntimeConnectionIssue}
+    />
+  );
 }
 
 export function TerminalDemoWorkspaceScreen(props: {
   config: TerminalRuntimeBootstrapConfig;
   kernel: WorkspaceKernel;
+  onRuntimeConnectionIssue?: (() => void) | undefined;
 }): ReactElement {
   const snapshot = useWorkspaceSnapshot(props.kernel);
   const initialCreateForm = useMemo(() => createInitialNativeSessionFormState(props.config), []);
@@ -244,6 +252,12 @@ export function TerminalDemoWorkspaceScreen(props: {
       // Transport failures are recorded in kernel diagnostics.
     });
   }, [props.kernel]);
+
+  useEffect(() => {
+    if (snapshot.connection.state === "error") {
+      props.onRuntimeConnectionIssue?.();
+    }
+  }, [props.onRuntimeConnectionIssue, snapshot.connection.state]);
 
   useEffect(() => {
     persistTerminalDemoThemeId(snapshot.theme.themeId);

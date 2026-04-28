@@ -61,6 +61,30 @@ describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
     expect(delta.to_sequence).toBe(screen.sequence);
   });
 
+  it("retries transient control plane connection failures", async () => {
+    const fixture = createMemoryWorkspaceTransport();
+    const gateway = await startWorkspaceGateway(fixture);
+    cleanups.push(() => gateway.dispose());
+
+    let attempts = 0;
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: gateway.controlUrl,
+      streamUrl: gateway.streamUrl,
+      webSocketFactory: (url, protocols) => {
+        attempts += 1;
+        if (attempts <= 2) {
+          return createFailingWebSocket();
+        }
+
+        return createNodeWebSocket(url, protocols);
+      },
+    });
+    cleanups.push(() => transport.close());
+
+    await expect(transport.listSessions()).resolves.toHaveLength(1);
+    expect(attempts).toBe(3);
+  });
+
   it("streams subscription events over the websocket stream plane", async () => {
     const fixture = createMemoryWorkspaceTransport();
     const gateway = await startWorkspaceGateway(fixture);
@@ -353,4 +377,34 @@ function assertNever(value: never): never {
 
 function createNodeWebSocket(url: string, protocols?: string[]): globalThis.WebSocket {
   return new NodeWebSocket(url, protocols) as unknown as globalThis.WebSocket;
+}
+
+function createFailingWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 3,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    close() {
+      emit("close");
+    },
+  } as unknown as globalThis.WebSocket;
+
+  const emit = (type: string) => {
+    for (const listener of listeners.get(type) ?? []) {
+      listener.call(socket, { type } as Event);
+    }
+  };
+
+  queueMicrotask(() => {
+    emit("error");
+  });
+
+  return socket;
 }

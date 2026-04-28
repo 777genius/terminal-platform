@@ -14,6 +14,7 @@ import { resolveTerminalDemoShellChromeState } from "../dist/renderer-node-test/
 import {
   buildTerminalRuntimeBrowserUrl,
   sameTerminalRuntimeBootstrapConfig,
+  selectLatestTerminalRuntimeBootstrapConfig,
 } from "../dist/renderer-node-test/features/terminal-runtime-host/contracts/index.js";
 import {
   resolveDemoDefaultShellProgram,
@@ -234,6 +235,30 @@ test("browser bootstrap equality includes the Windows working directory", () => 
       demoDefaultWorkingDirectory: "C:\\Users\\User",
     }),
     false,
+  );
+});
+
+test("browser bootstrap refresh prefers the latest host config over stale query params", () => {
+  const queryConfig = {
+    controlPlaneUrl: "ws://127.0.0.1:61852/terminal-gateway/control?token=stale",
+    demoDefaultShellProgram: "C:\\Windows\\system32\\cmd.exe",
+    sessionStreamUrl: "ws://127.0.0.1:61852/terminal-gateway/stream?token=stale",
+    runtimeSlug: "terminal-demo-old-window",
+  };
+  const browserConfig = {
+    controlPlaneUrl: "ws://127.0.0.1:52738/terminal-gateway/control?token=fresh",
+    demoDefaultShellProgram: "C:\\Windows\\system32\\cmd.exe",
+    demoDefaultWorkingDirectory: "C:\\Users\\User\\PROJECT_IT\\terminal-platform",
+    sessionStreamUrl: "ws://127.0.0.1:52738/terminal-gateway/stream?token=fresh",
+    runtimeSlug: "terminal-demo",
+  };
+
+  assert.deepEqual(
+    selectLatestTerminalRuntimeBootstrapConfig({
+      browserConfig,
+      queryConfig,
+    }),
+    browserConfig,
   );
 });
 

@@ -46,6 +46,13 @@ export function sameTerminalRuntimeBootstrapConfig(
   );
 }
 
+export function selectLatestTerminalRuntimeBootstrapConfig(input: {
+  browserConfig: TerminalRuntimeBootstrapConfig | null;
+  queryConfig: TerminalRuntimeBootstrapConfig | null;
+}): TerminalRuntimeBootstrapConfig | null {
+  return input.browserConfig ?? input.queryConfig;
+}
+
 export function deriveTerminalRuntimeSessionStreamUrl(controlPlaneUrl: string): string {
   const url = new URL(controlPlaneUrl);
   if (url.pathname === "/terminal-gateway" || url.pathname === "/terminal-gateway/control") {
