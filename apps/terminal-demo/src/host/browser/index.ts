@@ -1,12 +1,8 @@
 import process from "node:process";
-import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
-import {
-  buildTerminalRuntimeBrowserUrl,
-  TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH,
-} from "@features/terminal-runtime-host/contracts";
+import { buildTerminalRuntimeBrowserUrl } from "@features/terminal-runtime-host/contracts";
 import {
   DEFAULT_TERMINAL_RUNTIME_SLUG,
   resolveDemoDefaultWorkingDirectory,
@@ -14,6 +10,7 @@ import {
   startTerminalRuntimeHost,
   type TerminalRuntimeHostHandle,
 } from "@features/terminal-runtime-host/main";
+import { clearBrowserBootstrapConfig, writeBrowserBootstrapConfig } from "./browser-bootstrap-config.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(moduleDir, "../../..");
@@ -30,6 +27,11 @@ let hostHandle: TerminalRuntimeHostHandle | null = null;
 let shuttingDown = false;
 
 async function bootstrap(): Promise<void> {
+  await clearBrowserBootstrapConfig({
+    appRoot,
+    scope: bootstrapScope,
+  });
+
   hostHandle = await startTerminalRuntimeHost({
     runtimeSlug,
     forceRestartReadyDaemon: true,
@@ -50,7 +52,11 @@ async function bootstrap(): Promise<void> {
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,
   };
-  await writeBrowserBootstrapConfig(config);
+  await writeBrowserBootstrapConfig({
+    appRoot,
+    config,
+    scope: bootstrapScope,
+  });
   const browserUrl = buildTerminalRuntimeBrowserUrl(rendererUrl, config);
 
   console.log(`[terminal-demo-browser] runtime ${config.runtimeSlug}`);
@@ -69,6 +75,10 @@ async function shutdown(exitCode = 0): Promise<void> {
   await Promise.allSettled([
     hostHandle?.dispose() ?? Promise.resolve(),
   ]);
+  await clearBrowserBootstrapConfig({
+    appRoot,
+    scope: bootstrapScope,
+  }).catch(() => undefined);
   process.exit(exitCode);
 }
 
@@ -94,29 +104,3 @@ void bootstrap().catch((error) => {
   console.error(error);
   void shutdown(1);
 });
-
-async function writeBrowserBootstrapConfig(config: TerminalRuntimeBootstrapConfig): Promise<void> {
-  const relativeTarget = TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH.replace(/^\/+/, "");
-  const targets = resolveBootstrapTargets(appRoot, relativeTarget);
-  const payload = `${JSON.stringify(config, null, 2)}\n`;
-
-  await Promise.all(targets.map(async (targetPath) => {
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.writeFile(targetPath, payload, "utf8");
-  }));
-}
-
-function resolveBootstrapTargets(appRoot: string, relativeTarget: string): string[] {
-  if (bootstrapScope === "dist-only") {
-    return [path.join(appRoot, "dist", "renderer", relativeTarget)];
-  }
-
-  if (bootstrapScope === "public-only") {
-    return [path.join(appRoot, "public", relativeTarget)];
-  }
-
-  return [
-    path.join(appRoot, "public", relativeTarget),
-    path.join(appRoot, "dist", "renderer", relativeTarget),
-  ];
-}
