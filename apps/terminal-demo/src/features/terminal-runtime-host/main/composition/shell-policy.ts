@@ -1,7 +1,7 @@
 export const DEFAULT_TERMINAL_RUNTIME_SLUG = "terminal-demo";
 export const DEFAULT_TERMINAL_DEMO_UNIX_SHELL = "bash";
 export const DEFAULT_TERMINAL_DEMO_MACOS_SHELL = "zsh";
-export const DEFAULT_TERMINAL_DEMO_WINDOWS_SHELL = "pwsh.exe";
+export const DEFAULT_TERMINAL_DEMO_WINDOWS_SHELL = "cmd.exe";
 
 export function resolveDemoDefaultShellProgram(options: {
   env?: Readonly<Record<string, string | undefined>>;
@@ -17,6 +17,7 @@ export function resolveDemoDefaultShellProgram(options: {
   if (platform === "win32") {
     return normalizeTerminalShellProgram(env.ComSpec)
       ?? normalizeTerminalShellProgram(env.COMSPEC)
+      ?? resolveWindowsCmdProgram(env)
       ?? DEFAULT_TERMINAL_DEMO_WINDOWS_SHELL;
   }
 
@@ -27,4 +28,9 @@ export function resolveDemoDefaultShellProgram(options: {
 export function normalizeTerminalShellProgram(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized || null;
+}
+
+function resolveWindowsCmdProgram(env: Readonly<Record<string, string | undefined>>): string | null {
+  const windowsRoot = normalizeTerminalShellProgram(env.SystemRoot) ?? normalizeTerminalShellProgram(env.WINDIR);
+  return windowsRoot ? `${windowsRoot}\\System32\\cmd.exe` : null;
 }

@@ -238,4 +238,18 @@ test("demo default shell resolver prefers host policy and stable platform fallba
     }),
     "C:\\Windows\\System32\\cmd.exe",
   );
+  assert.equal(
+    resolveDemoDefaultShellProgram({
+      env: { SystemRoot: "C:\\Windows" },
+      platform: "win32",
+    }),
+    "C:\\Windows\\System32\\cmd.exe",
+  );
+  assert.equal(
+    resolveDemoDefaultShellProgram({
+      env: {},
+      platform: "win32",
+    }),
+    "cmd.exe",
+  );
 });

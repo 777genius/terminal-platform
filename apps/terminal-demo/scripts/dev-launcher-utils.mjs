@@ -22,14 +22,7 @@ export function runSync(command, args, cwd) {
 
 export function spawnViteDevServer(appRoot, rendererPort) {
   const viteCliPath = path.join(appRoot, "node_modules", "vite", "bin", "vite.js");
-  const child = spawn(process.execPath, [
-    viteCliPath,
-    "--force",
-    "--host",
-    "127.0.0.1",
-    "--port",
-    rendererPort,
-  ], {
+  const child = spawn(process.execPath, buildViteDevServerArgs(viteCliPath, rendererPort), {
     cwd: appRoot,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -37,6 +30,18 @@ export function spawnViteDevServer(appRoot, rendererPort) {
 
   pipeProcess(child, "[terminal-demo:vite]");
   return child;
+}
+
+export function buildViteDevServerArgs(viteCliPath, rendererPort) {
+  return [
+    viteCliPath,
+    "--force",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    rendererPort,
+    "--strictPort",
+  ];
 }
 
 export function spawnElectronPreview(appRoot, rendererUrl) {

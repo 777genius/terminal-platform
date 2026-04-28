@@ -168,7 +168,7 @@ function resolveStaticPreviewWorkspace(): {
 
 function resolveStaticPreviewShellProgram(): string {
   if (typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)) {
-    return "pwsh.exe";
+    return "cmd.exe";
   }
 
   if (typeof navigator !== "undefined" && /macintosh|mac os x/i.test(navigator.userAgent)) {
