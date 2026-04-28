@@ -34,6 +34,10 @@ const autoStartSessionStorePath = path.join(
   os.tmpdir(),
   `terminal-demo-browser-smoke-auto-store-${process.pid}-${Date.now()}.sqlite3`,
 );
+const autoStartRestartSessionStorePath = path.join(
+  os.tmpdir(),
+  `terminal-demo-browser-smoke-auto-restart-store-${process.pid}-${Date.now()}.sqlite3`,
+);
 const browserBootstrapPath = path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json");
 const themeStorageKey = "terminal-platform-demo.theme";
 const fontScaleStorageKey = "terminal-platform-demo.terminal-font-scale";
@@ -154,10 +158,28 @@ async function main() {
       throw new Error(`Host auto-start did not replace a stale browser URL: ${JSON.stringify(staleAutoStartResult)}`);
     }
 
+    const restartRecoveryResult = await runAutoStartRestartRecoveryScenario(autoStartBrowserUrl, {
+      initialControlPlaneUrl: autoStartDefaultControlPlaneUrl,
+      initialSessionStreamUrl: autoStartDefaultSessionStreamUrl,
+      restartSessionStorePath: autoStartRestartSessionStorePath,
+      runtimeSlug: `${runtimeSlugPrefix}-auto`,
+    });
+    if (
+      restartRecoveryResult.issues.length > 0
+      || !restartRecoveryResult.recovered
+      || !restartRecoveryResult.commandSent
+      || !restartRecoveryResult.containsMarker
+      || restartRecoveryResult.initialControlPlaneUrl === restartRecoveryResult.restartedControlPlaneUrl
+      || restartRecoveryResult.initialSessionStreamUrl === restartRecoveryResult.restartedSessionStreamUrl
+    ) {
+      throw new Error(`Open browser page did not recover after browser host restart: ${JSON.stringify(restartRecoveryResult)}`);
+    }
+
     await stopProcess(browserHostProcess);
     browserHostProcess = null;
     await removeBrowserBootstrapConfig();
     await removeSessionStore(autoStartSessionStorePath);
+    await removeSessionStore(autoStartRestartSessionStorePath);
 
     const browserUrl = await startBrowserHost(rendererUrl, {
       autoStartSession: "0",
@@ -3455,10 +3477,195 @@ async function runAutoStartSmokeScenario(browserUrl, options = {}) {
   }
 }
 
+async function runAutoStartRestartRecoveryScenario(browserUrl, options) {
+  const target = await fetch(`http://127.0.0.1:${cdpPort}/json/new?${encodeURIComponent(browserUrl)}`, {
+    method: "PUT",
+  }).then((response) => response.json());
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await onceSocketOpen(socket);
+
+  let id = 0;
+  const pending = new Map();
+  const issues = [];
+
+  socket.on("message", (data) => {
+    const message = JSON.parse(data.toString());
+    if (message.id && pending.has(message.id)) {
+      const request = pending.get(message.id);
+      pending.delete(message.id);
+      if (message.error) {
+        request.reject(new Error(message.error.message));
+      } else {
+        request.resolve(message.result);
+      }
+      return;
+    }
+
+    if (message.method === "Log.entryAdded") {
+      const entry = message.params.entry;
+      if (entry.level === "error" && !isExpectedRestartRecoveryConnectionIssue(entry.text)) {
+        issues.push({ type: "log", source: entry.source, text: entry.text });
+      }
+      return;
+    }
+
+    if (message.method === "Runtime.exceptionThrown") {
+      issues.push({
+        type: "exception",
+        text: message.params.exceptionDetails?.text ?? "Runtime exception",
+      });
+    }
+  });
+
+  const send = (method, params = {}) => new Promise((resolve, reject) => {
+    const requestId = ++id;
+    pending.set(requestId, { resolve, reject });
+    socket.send(JSON.stringify({ id: requestId, method, params }));
+  });
+
+  try {
+    await send("Page.enable");
+    await send("Page.bringToFront").catch(() => undefined);
+    await send("Runtime.enable");
+    await send("Log.enable");
+    await send("Emulation.setDeviceMetricsOverride", {
+      width: 1440,
+      height: 1100,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await installBrowserSmokeHelpers(send);
+
+    await waitForBrowser(send, "initial auto-start browser page before host restart", `(() => {
+      const state = window.terminalDemoDebug?.getState?.();
+      const params = new URLSearchParams(window.location.search);
+      return state?.connection?.state === 'ready'
+        && Boolean(state?.attachedSession?.focused_screen)
+        && params.get('controlPlaneUrl') === ${JSON.stringify(options.initialControlPlaneUrl)}
+        && params.get('sessionStreamUrl') === ${JSON.stringify(options.initialSessionStreamUrl)};
+    })()`);
+
+    await stopProcess(browserHostProcess);
+    browserHostProcess = null;
+    await removeBrowserBootstrapConfig();
+    await removeSessionStore(autoStartSessionStorePath);
+
+    const restartedBrowserUrl = await startBrowserHost(rendererUrl, {
+      autoStartSession: "1",
+      runtimeSlug: options.runtimeSlug,
+      sessionStorePath: options.restartSessionStorePath,
+    });
+    const restartedUrl = new URL(restartedBrowserUrl);
+    const restartedControlPlaneUrl = restartedUrl.searchParams.get("controlPlaneUrl");
+    const restartedSessionStreamUrl = restartedUrl.searchParams.get("sessionStreamUrl");
+
+    const recovered = await waitForBrowserValue(send, "open auto-start browser page to recover after host restart", `(() => {
+      const state = window.terminalDemoDebug?.getState?.();
+      const params = new URLSearchParams(window.location.search);
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const terminalScreenText = state?.attachedSession?.focused_screen?.surface?.lines
+        ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+        : '';
+
+      return {
+        attached: Boolean(state?.attachedSession?.focused_screen),
+        commandInputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, input) === true,
+        controlPlaneUrl: params.get('controlPlaneUrl'),
+        hasReady: state?.connection?.state === 'ready',
+        sessionCount: state?.catalog?.sessions?.length ?? 0,
+        sessionStreamUrl: params.get('sessionStreamUrl'),
+        terminalScreenTextPreview: terminalScreenText.slice(0, 240),
+      };
+    })()`, (value) => (
+      value.hasReady
+      && value.attached
+      && value.sessionCount === 1
+      && value.controlPlaneUrl === restartedControlPlaneUrl
+      && value.sessionStreamUrl === restartedSessionStreamUrl
+      && value.commandInputFocused
+    ), 45_000);
+
+    const marker = `browser-restart-ok-${Date.now()}`;
+    const commandSent = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const button = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
+      if (!textarea || !button) {
+        return false;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+      descriptor?.set?.call(textarea, ${JSON.stringify(process.platform === "win32" ? `echo ${marker}` : `printf "${marker}\\n"`)} );
+      textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (button.disabled) {
+        return false;
+      }
+      button.click();
+      return true;
+    })()`);
+    if (!commandSent) {
+      return {
+        commandSent: false,
+        containsMarker: false,
+        initialControlPlaneUrl: options.initialControlPlaneUrl,
+        initialSessionStreamUrl: options.initialSessionStreamUrl,
+        issues,
+        marker,
+        recovered: true,
+        recoveredState: recovered,
+        restartedControlPlaneUrl,
+        restartedSessionStreamUrl,
+        restartedTerminalScreenTextPreview: null,
+      };
+    }
+
+    const afterCommand = await waitForBrowserValue(send, "command output after browser host restart", `(() => {
+      const state = window.terminalDemoDebug?.getState?.();
+      const terminalScreenText = state?.attachedSession?.focused_screen?.surface?.lines
+        ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+        : '';
+      return {
+        containsMarker: terminalScreenText.includes(${JSON.stringify(marker)}),
+        terminalScreenTextPreview: terminalScreenText.slice(-360),
+      };
+    })()`, (value) => value.containsMarker, 10_000);
+
+    return {
+      commandSent,
+      containsMarker: afterCommand.containsMarker,
+      initialControlPlaneUrl: options.initialControlPlaneUrl,
+      initialSessionStreamUrl: options.initialSessionStreamUrl,
+      issues,
+      marker,
+      recovered: true,
+      recoveredState: recovered,
+      restartedControlPlaneUrl,
+      restartedSessionStreamUrl,
+      restartedTerminalScreenTextPreview: afterCommand.terminalScreenTextPreview,
+    };
+  } finally {
+    await closeWebSocket(socket);
+    await closePageTarget(target.id);
+  }
+}
+
 function isExpectedStaleBootstrapConnectionIssue(issue) {
   return issue.type === "log"
     && issue.source === "network"
     && issue.text.includes("ws://127.0.0.1:1/terminal-gateway/");
+}
+
+function isExpectedRestartRecoveryConnectionIssue(text) {
+  const message = String(text ?? "");
+  return message.includes("/terminal-gateway/")
+    && (
+      message.includes("WebSocket is closed before the connection is established")
+      || message.includes("WebSocket connection")
+      || message.includes("ERR_CONNECTION_REFUSED")
+    );
 }
 
 function buildStaleBrowserUrl(browserUrl) {
@@ -3527,6 +3734,7 @@ async function shutdown() {
   await stopProcess(chromeProcess);
   await removeChromeUserDataDir(chromeUserDataDir);
   await removeSessionStore(autoStartSessionStorePath);
+  await removeSessionStore(autoStartRestartSessionStorePath);
   await removeSessionStore(sessionStorePath);
 }
 
@@ -3580,6 +3788,30 @@ function evaluate(send, expression) {
   return Promise.race([evaluation, timeout]).finally(() => {
     clearTimeout(timeoutId);
   });
+}
+
+async function waitForBrowser(send, label, expression, timeoutMs = 20_000) {
+  await waitFor(async () => evaluate(send, expression), label, timeoutMs);
+}
+
+async function waitForBrowserValue(send, label, expression, predicate, timeoutMs = 20_000) {
+  let latest = null;
+  await waitFor(async () => {
+    latest = await evaluate(send, expression);
+    return predicate(latest);
+  }, label, timeoutMs);
+  return latest;
+}
+
+async function waitFor(probe, label, timeoutMs = 20_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await probe()) {
+      return;
+    }
+    await sleep(200);
+  }
+  throw new Error(`Timed out waiting for ${label}`);
 }
 
 async function installBrowserSmokeHelpers(send) {
