@@ -35,6 +35,24 @@ export interface TerminalRuntimeInitialNativeSession {
   cwd?: string | null;
 }
 
+interface TerminalRuntimeDaemonSupervisorPort {
+  ensureRunning(): Promise<void>;
+  dispose(): Promise<void>;
+}
+
+interface TerminalRuntimeGatewayServerHandle {
+  controlPlaneUrl: string;
+  sessionStreamUrl: string;
+  runtimeSlug: string;
+  dispose(): Promise<void>;
+}
+
+interface TerminalRuntimeHostDependencies {
+  daemonSupervisor: TerminalRuntimeDaemonSupervisorPort;
+  createClientProvider(runtimeSlug: string): TerminalPlatformClientProvider;
+  startGateway: typeof TerminalRuntimeGatewayServer.start;
+}
+
 export async function startTerminalRuntimeHost(options?: {
   runtimeSlug?: string;
   forceRestartReadyDaemon?: boolean;
@@ -42,38 +60,88 @@ export async function startTerminalRuntimeHost(options?: {
   sessionStorePath?: string | null;
 }): Promise<TerminalRuntimeHostHandle> {
   const runtimeSlug = options?.runtimeSlug ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
-  const daemonSupervisor = new DaemonSupervisor({
-    runtimeSlug,
-    forceRestartReadyDaemon: options?.forceRestartReadyDaemon ?? false,
-    sessionStorePath: options?.sessionStorePath ?? null,
+  return startTerminalRuntimeHostWithDependencies(options, {
+    daemonSupervisor: new DaemonSupervisor({
+      runtimeSlug,
+      forceRestartReadyDaemon: options?.forceRestartReadyDaemon ?? false,
+      sessionStorePath: options?.sessionStorePath ?? null,
+    }),
+    createClientProvider: (slug) => new TerminalPlatformClientProvider(slug),
+    startGateway: (input) => TerminalRuntimeGatewayServer.start(input),
   });
-  await daemonSupervisor.ensureRunning();
+}
 
-  const clientProvider = new TerminalPlatformClientProvider(runtimeSlug);
-  if (options?.initialNativeSession) {
-    await ensureInitialNativeSession(clientProvider, options.initialNativeSession);
+export async function startTerminalRuntimeHostWithDependencies(
+  options: {
+    runtimeSlug?: string;
+    initialNativeSession?: TerminalRuntimeInitialNativeSession | null;
+  } | undefined,
+  dependencies: TerminalRuntimeHostDependencies,
+): Promise<TerminalRuntimeHostHandle> {
+  const runtimeSlug = options?.runtimeSlug ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
+  let gatewayServer: TerminalRuntimeGatewayServerHandle | null = null;
+
+  try {
+    await dependencies.daemonSupervisor.ensureRunning();
+
+    const clientProvider = dependencies.createClientProvider(runtimeSlug);
+    if (options?.initialNativeSession) {
+      await ensureInitialNativeSession(clientProvider, options.initialNativeSession);
+    }
+
+    const controlRuntimeAdapter = new TerminalPlatformControlRuntimeAdapter(clientProvider);
+    const sessionStateRuntimeAdapter = new TerminalPlatformSessionStateRuntimeAdapter(clientProvider);
+    const controlService = new TerminalRuntimeControlService(controlRuntimeAdapter);
+    const sessionStreamService = new TerminalRuntimeSessionStreamService(sessionStateRuntimeAdapter);
+    gatewayServer = await dependencies.startGateway({
+      runtimeSlug,
+      controlService,
+      sessionStreamService,
+      clientProvider,
+    });
+
+    return {
+      controlPlaneUrl: gatewayServer.controlPlaneUrl,
+      sessionStreamUrl: gatewayServer.sessionStreamUrl,
+      runtimeSlug: gatewayServer.runtimeSlug,
+      dispose: async () => {
+        await disposeTerminalRuntimeHostResources({
+          daemonSupervisor: dependencies.daemonSupervisor,
+          gatewayServer,
+        });
+      },
+    };
+  } catch (error) {
+    await disposeTerminalRuntimeHostResources({
+      daemonSupervisor: dependencies.daemonSupervisor,
+      gatewayServer,
+    }).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function disposeTerminalRuntimeHostResources(resources: {
+  daemonSupervisor?: TerminalRuntimeDaemonSupervisorPort | null;
+  gatewayServer?: TerminalRuntimeGatewayServerHandle | null;
+}): Promise<void> {
+  const disposals = [
+    resources.gatewayServer?.dispose(),
+    resources.daemonSupervisor?.dispose(),
+  ].filter((disposal): disposal is Promise<void> => Boolean(disposal));
+
+  const results = await Promise.allSettled(disposals);
+  const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  const [firstFailure] = failures;
+  if (failures.length === 1 && firstFailure) {
+    throw firstFailure.reason;
   }
 
-  const controlRuntimeAdapter = new TerminalPlatformControlRuntimeAdapter(clientProvider);
-  const sessionStateRuntimeAdapter = new TerminalPlatformSessionStateRuntimeAdapter(clientProvider);
-  const controlService = new TerminalRuntimeControlService(controlRuntimeAdapter);
-  const sessionStreamService = new TerminalRuntimeSessionStreamService(sessionStateRuntimeAdapter);
-  const gatewayServer = await TerminalRuntimeGatewayServer.start({
-    runtimeSlug,
-    controlService,
-    sessionStreamService,
-    clientProvider,
-  });
-
-  return {
-    controlPlaneUrl: gatewayServer.controlPlaneUrl,
-    sessionStreamUrl: gatewayServer.sessionStreamUrl,
-    runtimeSlug: gatewayServer.runtimeSlug,
-    dispose: async () => {
-      await gatewayServer.dispose();
-      await daemonSupervisor.dispose();
-    },
-  };
+  if (failures.length > 1) {
+    throw new AggregateError(
+      failures.map((failure) => failure.reason),
+      "Failed to dispose terminal runtime host resources",
+    );
+  }
 }
 
 async function ensureInitialNativeSession(
