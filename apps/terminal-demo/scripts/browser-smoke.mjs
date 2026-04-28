@@ -110,6 +110,10 @@ async function main() {
       new URL(autoStartBrowserUrl).searchParams.get("demoDefaultShellProgram");
     const autoStartDefaultWorkingDirectory =
       new URL(autoStartBrowserUrl).searchParams.get("demoDefaultWorkingDirectory");
+    const autoStartDefaultControlPlaneUrl =
+      new URL(autoStartBrowserUrl).searchParams.get("controlPlaneUrl");
+    const autoStartDefaultSessionStreamUrl =
+      new URL(autoStartBrowserUrl).searchParams.get("sessionStreamUrl");
     const autoStartResult = await runAutoStartSmokeScenario(autoStartBrowserUrl);
     if (autoStartResult.issues.length > 0) {
       throw new Error(`Browser auto-start reported runtime issues: ${JSON.stringify(autoStartResult.issues)}`);
@@ -130,6 +134,19 @@ async function main() {
       || /default interactive shell is now zsh/i.test(autoStartResult.terminalScreenTextPreview ?? "")
     ) {
       throw new Error(`Host auto-start did not settle into one default shell: ${JSON.stringify(autoStartResult)}`);
+    }
+    const staleAutoStartResult = await runAutoStartSmokeScenario(buildStaleBrowserUrl(autoStartBrowserUrl));
+    if (
+      staleAutoStartResult.issues.length > 0
+      || !staleAutoStartResult.hasReady
+      || staleAutoStartResult.hasError
+      || !staleAutoStartResult.attached
+      || staleAutoStartResult.controlPlaneUrl !== autoStartDefaultControlPlaneUrl
+      || staleAutoStartResult.sessionStreamUrl !== autoStartDefaultSessionStreamUrl
+      || staleAutoStartResult.demoDefaultShellProgram !== autoStartDefaultShellProgram
+      || staleAutoStartResult.demoDefaultWorkingDirectory !== autoStartDefaultWorkingDirectory
+    ) {
+      throw new Error(`Host auto-start did not replace a stale browser URL: ${JSON.stringify(staleAutoStartResult)}`);
     }
 
     await stopProcess(browserHostProcess);
@@ -3407,6 +3424,8 @@ async function runAutoStartSmokeScenario(browserUrl) {
         sessionCount: state?.catalog?.sessions?.length ?? 0,
         attached: Boolean(state?.attachedSession?.focused_screen),
         demoAutoStartSession: new URLSearchParams(window.location.search).get('demoAutoStartSession'),
+        controlPlaneUrl: new URLSearchParams(window.location.search).get('controlPlaneUrl'),
+        sessionStreamUrl: new URLSearchParams(window.location.search).get('sessionStreamUrl'),
         demoDefaultShellProgram: new URLSearchParams(window.location.search).get('demoDefaultShellProgram'),
         demoDefaultWorkingDirectory: new URLSearchParams(window.location.search).get('demoDefaultWorkingDirectory'),
         commandInputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, input) === true,
@@ -3426,6 +3445,14 @@ async function runAutoStartSmokeScenario(browserUrl) {
     await closeWebSocket(socket);
     await closePageTarget(target.id);
   }
+}
+
+function buildStaleBrowserUrl(browserUrl) {
+  const url = new URL(browserUrl);
+  url.searchParams.set("controlPlaneUrl", "ws://127.0.0.1:1/terminal-gateway/control?token=stale");
+  url.searchParams.set("sessionStreamUrl", "ws://127.0.0.1:1/terminal-gateway/stream?token=stale");
+  url.searchParams.delete("demoDefaultWorkingDirectory");
+  return url.toString();
 }
 
 async function startBrowserHost(rendererUrlValue, options) {

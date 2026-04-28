@@ -29,6 +29,23 @@ export function buildTerminalRuntimeBrowserUrl(
   return url.toString();
 }
 
+export function sameTerminalRuntimeBootstrapConfig(
+  left: TerminalRuntimeBootstrapConfig | null,
+  right: TerminalRuntimeBootstrapConfig | null,
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+
+  return (
+    left.controlPlaneUrl === right.controlPlaneUrl
+    && left.sessionStreamUrl === right.sessionStreamUrl
+    && left.runtimeSlug === right.runtimeSlug
+    && left.demoDefaultShellProgram === right.demoDefaultShellProgram
+    && left.demoDefaultWorkingDirectory === right.demoDefaultWorkingDirectory
+  );
+}
+
 export function deriveTerminalRuntimeSessionStreamUrl(controlPlaneUrl: string): string {
   const url = new URL(controlPlaneUrl);
   if (url.pathname === "/terminal-gateway" || url.pathname === "/terminal-gateway/control") {

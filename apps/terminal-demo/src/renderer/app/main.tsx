@@ -9,7 +9,10 @@ import {
   syncTerminalRuntimeBrowserLocation,
   TerminalRuntimeBootstrapErrorView,
 } from "@features/terminal-runtime-host/renderer";
-import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
+import {
+  sameTerminalRuntimeBootstrapConfig,
+  type TerminalRuntimeBootstrapConfig,
+} from "@features/terminal-runtime-host/contracts";
 import {
   TerminalDemoWorkspaceApp,
   TerminalDemoWorkspaceScreen,
@@ -68,7 +71,9 @@ function TerminalDemoRuntimeBootstrapBoundary() {
         }
 
         startTransition(() => {
-          setConfig((current) => (sameBootstrapConfig(current, resolved.config) ? current : resolved.config));
+          setConfig((current) => (
+            sameTerminalRuntimeBootstrapConfig(current, resolved.config) ? current : resolved.config
+          ));
           setError(resolved.error);
           setResolvedOnce(true);
         });
@@ -84,7 +89,9 @@ function TerminalDemoRuntimeBootstrapBoundary() {
       if (bootstrap) {
         syncTerminalRuntimeBrowserLocation(bootstrap);
         startTransition(() => {
-          setConfig((current) => (sameBootstrapConfig(current, bootstrap) ? current : bootstrap));
+          setConfig((current) => (
+            sameTerminalRuntimeBootstrapConfig(current, bootstrap) ? current : bootstrap
+          ));
           setError(null);
           setResolvedOnce(true);
         });
@@ -120,6 +127,7 @@ function TerminalDemoRuntimeBootstrapBoundary() {
           config.controlPlaneUrl,
           config.sessionStreamUrl,
           config.demoDefaultShellProgram ?? "default-shell",
+          config.demoDefaultWorkingDirectory ?? "default-cwd",
         ].join("|")
       : "bootstrap"),
     [config],
@@ -176,20 +184,4 @@ function resolveStaticPreviewShellProgram(): string {
   }
 
   return "bash";
-}
-
-function sameBootstrapConfig(
-  left: TerminalRuntimeBootstrapConfig | null,
-  right: TerminalRuntimeBootstrapConfig | null,
-): boolean {
-  if (!left || !right) {
-    return left === right;
-  }
-
-  return (
-    left.controlPlaneUrl === right.controlPlaneUrl
-    && left.sessionStreamUrl === right.sessionStreamUrl
-    && left.runtimeSlug === right.runtimeSlug
-    && left.demoDefaultShellProgram === right.demoDefaultShellProgram
-  );
 }

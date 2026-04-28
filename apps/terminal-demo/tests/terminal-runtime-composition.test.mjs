@@ -11,7 +11,10 @@ import {
   resolveTerminalDemoQuickCommands,
 } from "../dist/renderer-node-test/renderer/app/TerminalDemoWorkspaceApp.js";
 import { resolveTerminalDemoShellChromeState } from "../dist/renderer-node-test/renderer/app/terminal-demo-shell-chrome.js";
-import { buildTerminalRuntimeBrowserUrl } from "../dist/renderer-node-test/features/terminal-runtime-host/contracts/index.js";
+import {
+  buildTerminalRuntimeBrowserUrl,
+  sameTerminalRuntimeBootstrapConfig,
+} from "../dist/renderer-node-test/features/terminal-runtime-host/contracts/index.js";
 import {
   resolveDemoDefaultShellProgram,
   resolveDemoDefaultWorkingDirectory,
@@ -213,6 +216,25 @@ test("browser bootstrap URL preserves host shell policy", () => {
   assert.equal(url.searchParams.get("demoAutoStartSession"), null);
   assert.equal(url.searchParams.get("demoDefaultShellProgram"), "/bin/zsh");
   assert.equal(url.searchParams.get("demoDefaultWorkingDirectory"), "C:\\Users\\User\\PROJECT_IT\\terminal-platform");
+});
+
+test("browser bootstrap equality includes the Windows working directory", () => {
+  const baseConfig = {
+    controlPlaneUrl: "ws://127.0.0.1:4100/terminal-gateway/control?token=abc",
+    demoDefaultWorkingDirectory: "C:\\Users\\User\\PROJECT_IT\\terminal-platform",
+    demoDefaultShellProgram: "C:\\Windows\\system32\\cmd.exe",
+    sessionStreamUrl: "ws://127.0.0.1:4100/terminal-gateway/stream?token=abc",
+    runtimeSlug: "terminal-demo",
+  };
+
+  assert.equal(sameTerminalRuntimeBootstrapConfig(baseConfig, { ...baseConfig }), true);
+  assert.equal(
+    sameTerminalRuntimeBootstrapConfig(baseConfig, {
+      ...baseConfig,
+      demoDefaultWorkingDirectory: "C:\\Users\\User",
+    }),
+    false,
+  );
 });
 
 test("demo default launch resolvers prefer host policy and stable platform fallbacks", () => {

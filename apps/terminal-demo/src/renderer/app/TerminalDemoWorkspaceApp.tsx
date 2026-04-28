@@ -189,7 +189,9 @@ export function TerminalDemoWorkspaceScreen(props: {
   kernel: WorkspaceKernel;
 }): ReactElement {
   const snapshot = useWorkspaceSnapshot(props.kernel);
-  const [createForm, setCreateForm] = useState(() => createInitialNativeSessionFormState(props.config));
+  const initialCreateForm = useMemo(() => createInitialNativeSessionFormState(props.config), []);
+  const defaultCreateFormRef = useRef(initialCreateForm);
+  const [createForm, setCreateForm] = useState(initialCreateForm);
   const [createPending, setCreatePending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [advancedSavedSessionAction, setAdvancedSavedSessionAction] = useState<{
@@ -300,14 +302,21 @@ export function TerminalDemoWorkspaceScreen(props: {
   }, [props.kernel]);
 
   useEffect(() => {
-    setCreateForm((current) => {
-      if (current.program.trim()) {
-        return current;
-      }
+    const previousDefault = defaultCreateFormRef.current;
+    const nextDefault = createInitialNativeSessionFormState(props.config);
+    defaultCreateFormRef.current = nextDefault;
 
-      return createInitialNativeSessionFormState(props.config);
+    setCreateForm((current) => {
+      return {
+        title: current.title === previousDefault.title ? nextDefault.title : current.title,
+        program: !current.program.trim() || current.program === previousDefault.program
+          ? nextDefault.program
+          : current.program,
+        args: current.args === previousDefault.args ? nextDefault.args : current.args,
+        cwd: !current.cwd.trim() || current.cwd === previousDefault.cwd ? nextDefault.cwd : current.cwd,
+      };
     });
-  }, [props.config]);
+  }, [props.config.demoDefaultShellProgram, props.config.demoDefaultWorkingDirectory]);
 
   useEffect(() => {
     const debug = {
