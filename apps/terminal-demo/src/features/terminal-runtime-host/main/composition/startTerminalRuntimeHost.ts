@@ -17,6 +17,7 @@ export {
   DEFAULT_TERMINAL_DEMO_MACOS_SHELL,
   DEFAULT_TERMINAL_DEMO_UNIX_SHELL,
   DEFAULT_TERMINAL_DEMO_WINDOWS_SHELL,
+  resolveDemoDefaultWorkingDirectory,
   resolveDemoDefaultShellProgram,
 } from "./shell-policy.js";
 

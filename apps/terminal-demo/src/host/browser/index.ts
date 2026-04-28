@@ -9,17 +9,22 @@ import {
 } from "@features/terminal-runtime-host/contracts";
 import {
   DEFAULT_TERMINAL_RUNTIME_SLUG,
+  resolveDemoDefaultWorkingDirectory,
   resolveDemoDefaultShellProgram,
   startTerminalRuntimeHost,
   type TerminalRuntimeHostHandle,
 } from "@features/terminal-runtime-host/main";
 
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const appRoot = path.resolve(moduleDir, "../../..");
+const repoRoot = path.resolve(appRoot, "../..");
 const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
 const rendererUrl = process.env.TERMINAL_DEMO_RENDERER_URL ?? "http://127.0.0.1:5173";
 const bootstrapScope = process.env.TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE ?? "public-and-dist";
 const sessionStorePath = process.env.TERMINAL_DEMO_SESSION_STORE_PATH ?? null;
 const demoAutoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION === "1";
 const demoDefaultShellProgram = resolveDemoDefaultShellProgram();
+const demoDefaultWorkingDirectory = resolveDemoDefaultWorkingDirectory({ cwd: repoRoot });
 
 let hostHandle: TerminalRuntimeHostHandle | null = null;
 let shuttingDown = false;
@@ -32,6 +37,7 @@ async function bootstrap(): Promise<void> {
       ? {
           title: "SDK Workspace",
           program: demoDefaultShellProgram,
+          cwd: demoDefaultWorkingDirectory,
         }
       : null,
     sessionStorePath,
@@ -39,6 +45,7 @@ async function bootstrap(): Promise<void> {
 
   const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,
+    ...(demoDefaultWorkingDirectory ? { demoDefaultWorkingDirectory } : {}),
     demoDefaultShellProgram,
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,
@@ -47,6 +54,7 @@ async function bootstrap(): Promise<void> {
   const browserUrl = buildTerminalRuntimeBrowserUrl(rendererUrl, config);
 
   console.log(`[terminal-demo-browser] runtime ${config.runtimeSlug}`);
+  console.log(`[terminal-demo-browser] cwd ${demoDefaultWorkingDirectory ?? "(default)"}`);
   console.log(`[terminal-demo-browser] control ${config.controlPlaneUrl}`);
   console.log(`[terminal-demo-browser] stream ${config.sessionStreamUrl}`);
   console.log(`TERMINAL_DEMO_BROWSER_URL=${browserUrl}`);
@@ -88,8 +96,6 @@ void bootstrap().catch((error) => {
 });
 
 async function writeBrowserBootstrapConfig(config: TerminalRuntimeBootstrapConfig): Promise<void> {
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  const appRoot = path.resolve(moduleDir, "../../..");
   const relativeTarget = TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH.replace(/^\/+/, "");
   const targets = resolveBootstrapTargets(appRoot, relativeTarget);
   const payload = `${JSON.stringify(config, null, 2)}\n`;

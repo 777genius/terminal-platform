@@ -1,5 +1,6 @@
 export interface TerminalRuntimeBootstrapConfig {
   controlPlaneUrl: string;
+  demoDefaultWorkingDirectory?: string;
   demoDefaultShellProgram?: string;
   sessionStreamUrl: string;
   runtimeSlug: string;
@@ -19,6 +20,11 @@ export function buildTerminalRuntimeBrowserUrl(
     url.searchParams.set("demoDefaultShellProgram", config.demoDefaultShellProgram);
   } else {
     url.searchParams.delete("demoDefaultShellProgram");
+  }
+  if (config.demoDefaultWorkingDirectory) {
+    url.searchParams.set("demoDefaultWorkingDirectory", config.demoDefaultWorkingDirectory);
+  } else {
+    url.searchParams.delete("demoDefaultWorkingDirectory");
   }
   return url.toString();
 }

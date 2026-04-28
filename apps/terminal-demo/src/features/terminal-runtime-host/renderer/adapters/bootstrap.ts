@@ -25,11 +25,13 @@ export async function resolveTerminalRuntimeBootstrapConfig(): Promise<Bootstrap
   const legacyGatewayUrl = params.get("gatewayUrl")?.trim();
   const runtimeSlug = params.get("runtimeSlug")?.trim();
   const demoDefaultShellProgram = params.get("demoDefaultShellProgram")?.trim();
+  const demoDefaultWorkingDirectory = params.get("demoDefaultWorkingDirectory")?.trim();
 
   const queryConfig = normalizeBootstrapConfig(
     runtimeSlug
       ? {
           controlPlaneUrl,
+          demoDefaultWorkingDirectory,
           demoDefaultShellProgram,
           sessionStreamUrl,
           gatewayUrl: legacyGatewayUrl,
@@ -66,6 +68,7 @@ export async function loadLatestTerminalRuntimeBootstrapConfig(): Promise<Termin
   const params = new URLSearchParams(window.location.search);
   const queryConfig = normalizeBootstrapConfig({
     controlPlaneUrl: params.get("controlPlaneUrl")?.trim(),
+    demoDefaultWorkingDirectory: params.get("demoDefaultWorkingDirectory")?.trim(),
     demoDefaultShellProgram: params.get("demoDefaultShellProgram")?.trim(),
     sessionStreamUrl: params.get("sessionStreamUrl")?.trim(),
     gatewayUrl: params.get("gatewayUrl")?.trim(),
@@ -123,6 +126,7 @@ function normalizeBootstrapConfig(
   raw:
     | {
         controlPlaneUrl?: string | null | undefined;
+        demoDefaultWorkingDirectory?: string | null | undefined;
         demoDefaultShellProgram?: string | null | undefined;
         sessionStreamUrl?: string | null | undefined;
         runtimeSlug?: string | null | undefined;
@@ -152,6 +156,10 @@ function normalizeBootstrapConfig(
   const demoDefaultShellProgram = normalizeBootstrapScalar(raw.demoDefaultShellProgram);
   if (demoDefaultShellProgram) {
     config.demoDefaultShellProgram = demoDefaultShellProgram;
+  }
+  const demoDefaultWorkingDirectory = normalizeBootstrapScalar(raw.demoDefaultWorkingDirectory);
+  if (demoDefaultWorkingDirectory) {
+    config.demoDefaultWorkingDirectory = demoDefaultWorkingDirectory;
   }
 
   return config;

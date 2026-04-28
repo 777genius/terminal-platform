@@ -288,6 +288,11 @@ function resolveChromeLaunchModes({ envName }) {
 }
 
 function resolveChromeVersion({ appRoot, chromeBinary }) {
+  if (process.platform === "win32") {
+    return resolveWindowsExecutableVersion({ appRoot, binary: chromeBinary })
+      ?? "Chrome version unavailable on Windows";
+  }
+
   const result = spawnSync(chromeBinary, ["--version"], {
     cwd: appRoot,
     env: process.env,
@@ -295,6 +300,41 @@ function resolveChromeVersion({ appRoot, chromeBinary }) {
   });
   const version = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
   return version || "unknown";
+}
+
+function resolveWindowsExecutableVersion({ appRoot, binary }) {
+  const powershellCandidates = [
+    process.env.SystemRoot
+      ? path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+      : null,
+    resolveBinaryFromWhere("powershell.exe"),
+    resolveBinaryFromWhere("pwsh.exe"),
+  ].filter(Boolean);
+
+  for (const powershell of powershellCandidates) {
+    const result = spawnSync(powershell, [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      "(Get-Item -LiteralPath $env:TERMINAL_DEMO_CHROME_VERSION_TARGET).VersionInfo.ProductVersion",
+    ], {
+      cwd: appRoot,
+      env: {
+        ...process.env,
+        TERMINAL_DEMO_CHROME_VERSION_TARGET: binary,
+      },
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const version = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+    if (result.status === 0 && version) {
+      return version;
+    }
+  }
+
+  return null;
 }
 
 function indent(value) {

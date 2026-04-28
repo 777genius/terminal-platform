@@ -8,10 +8,14 @@ import {
   createDemoPreviewBackendCapabilities,
   createDemoPreviewWorkspaceSnapshot,
   createStaticWorkspaceKernel,
+  resolveTerminalDemoQuickCommands,
 } from "../dist/renderer-node-test/renderer/app/TerminalDemoWorkspaceApp.js";
 import { resolveTerminalDemoShellChromeState } from "../dist/renderer-node-test/renderer/app/terminal-demo-shell-chrome.js";
 import { buildTerminalRuntimeBrowserUrl } from "../dist/renderer-node-test/features/terminal-runtime-host/contracts/index.js";
-import { resolveDemoDefaultShellProgram } from "../dist/renderer-node-test/features/terminal-runtime-host/main/composition/shell-policy.js";
+import {
+  resolveDemoDefaultShellProgram,
+  resolveDemoDefaultWorkingDirectory,
+} from "../dist/renderer-node-test/features/terminal-runtime-host/main/composition/shell-policy.js";
 
 test("renderer app mounts the sdk react workspace shell", () => {
   const config = {
@@ -199,6 +203,7 @@ test("static preview kernel models save layout as local demo state", async () =>
 test("browser bootstrap URL preserves host shell policy", () => {
   const url = new URL(buildTerminalRuntimeBrowserUrl("http://127.0.0.1:5173/", {
     controlPlaneUrl: "ws://127.0.0.1:4100/terminal-gateway/control?token=abc",
+    demoDefaultWorkingDirectory: "C:\\Users\\User\\PROJECT_IT\\terminal-platform",
     demoDefaultShellProgram: "/bin/zsh",
     sessionStreamUrl: "ws://127.0.0.1:4100/terminal-gateway/stream?token=abc",
     runtimeSlug: "terminal-demo",
@@ -207,9 +212,10 @@ test("browser bootstrap URL preserves host shell policy", () => {
   assert.equal(url.searchParams.get("runtimeSlug"), "terminal-demo");
   assert.equal(url.searchParams.get("demoAutoStartSession"), null);
   assert.equal(url.searchParams.get("demoDefaultShellProgram"), "/bin/zsh");
+  assert.equal(url.searchParams.get("demoDefaultWorkingDirectory"), "C:\\Users\\User\\PROJECT_IT\\terminal-platform");
 });
 
-test("demo default shell resolver prefers host policy and stable platform fallbacks", () => {
+test("demo default launch resolvers prefer host policy and stable platform fallbacks", () => {
   assert.equal(
     resolveDemoDefaultShellProgram({
       env: { TERMINAL_DEMO_DEFAULT_SHELL: "/opt/homebrew/bin/fish", SHELL: "/bin/zsh" },
@@ -251,5 +257,55 @@ test("demo default shell resolver prefers host policy and stable platform fallba
       platform: "win32",
     }),
     "cmd.exe",
+  );
+  assert.equal(
+    resolveDemoDefaultWorkingDirectory({
+      env: { TERMINAL_DEMO_DEFAULT_CWD: "C:\\work\\terminal-platform" },
+      cwd: "C:\\fallback",
+    }),
+    "C:\\work\\terminal-platform",
+  );
+  assert.equal(
+    resolveDemoDefaultWorkingDirectory({
+      env: {},
+      cwd: "C:\\fallback",
+    }),
+    "C:\\fallback",
+  );
+});
+
+test("demo quick commands match the selected shell family", () => {
+  assert.deepEqual(
+    resolveTerminalDemoQuickCommands({ demoDefaultShellProgram: "C:\\Windows\\System32\\cmd.exe" })
+      .map(({ id, label, value }) => ({ id, label, value })),
+    [
+      { id: "pwd", label: "cd", value: "cd" },
+      { id: "list-files", label: "dir", value: "dir" },
+      { id: "git-status", label: "git status", value: "git status" },
+      { id: "node-version", label: "node -v", value: "node -v" },
+      { id: "hello", label: "hello", value: "echo hello from Terminal Platform" },
+    ],
+  );
+  assert.deepEqual(
+    resolveTerminalDemoQuickCommands({ demoDefaultShellProgram: "pwsh.exe" })
+      .map(({ id, label, value }) => ({ id, label, value })),
+    [
+      { id: "pwd", label: "Get-Location", value: "Get-Location" },
+      { id: "list-files", label: "Get-ChildItem", value: "Get-ChildItem -Force" },
+      { id: "git-status", label: "git status", value: "git status" },
+      { id: "node-version", label: "node -v", value: "node -v" },
+      { id: "hello", label: "hello", value: 'Write-Output "hello from Terminal Platform"' },
+    ],
+  );
+  assert.deepEqual(
+    resolveTerminalDemoQuickCommands({ demoDefaultShellProgram: "/bin/bash" })
+      .map(({ id, label, value }) => ({ id, label, value })),
+    [
+      { id: "pwd", label: "pwd", value: "pwd" },
+      { id: "list-files", label: "ls -la", value: "ls -la" },
+      { id: "git-status", label: "git status", value: "git status" },
+      { id: "node-version", label: "node -v", value: "node -v" },
+      { id: "hello", label: "hello", value: 'printf "hello from Terminal Platform\\n"' },
+    ],
   );
 });

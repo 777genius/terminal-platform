@@ -46,7 +46,8 @@ const TERMINAL_DEMO_FONT_SCALE_STORAGE_KEY = "terminal-platform-demo.terminal-fo
 const TERMINAL_DEMO_LINE_WRAP_STORAGE_KEY = "terminal-platform-demo.terminal-line-wrap";
 const ADVANCED_SAVED_LAYOUT_VISIBLE_COUNT = 6;
 const terminalDemoThemeIds = terminalPlatformThemeManifests.map((theme) => theme.id);
-const terminalDemoQuickCommands = [
+type TerminalDemoShellKind = "cmd" | "powershell" | "unix";
+const terminalDemoUnixQuickCommands = [
   {
     id: "pwd",
     label: "pwd",
@@ -80,6 +81,89 @@ const terminalDemoQuickCommands = [
     description: "Print a Terminal Platform greeting",
   },
 ] satisfies TerminalCommandQuickCommand[];
+const terminalDemoCmdQuickCommands = [
+  {
+    id: "pwd",
+    label: "cd",
+    value: "cd",
+    description: "Show the current working directory",
+  },
+  {
+    id: "list-files",
+    label: "dir",
+    value: "dir",
+    description: "List files with metadata",
+  },
+  {
+    id: "git-status",
+    label: "git status",
+    value: "git status",
+    description: "Inspect the current git worktree",
+  },
+  {
+    id: "node-version",
+    label: "node -v",
+    value: "node -v",
+    description: "Print the active Node.js version",
+    ariaLabel: "Insert node version command",
+    tone: "primary",
+  },
+  {
+    id: "hello",
+    label: "hello",
+    value: "echo hello from Terminal Platform",
+    description: "Print a Terminal Platform greeting",
+  },
+] satisfies TerminalCommandQuickCommand[];
+const terminalDemoPowerShellQuickCommands = [
+  {
+    id: "pwd",
+    label: "Get-Location",
+    value: "Get-Location",
+    description: "Show the current working directory",
+  },
+  {
+    id: "list-files",
+    label: "Get-ChildItem",
+    value: "Get-ChildItem -Force",
+    description: "List files with metadata",
+  },
+  {
+    id: "git-status",
+    label: "git status",
+    value: "git status",
+    description: "Inspect the current git worktree",
+  },
+  {
+    id: "node-version",
+    label: "node -v",
+    value: "node -v",
+    description: "Print the active Node.js version",
+    ariaLabel: "Insert node version command",
+    tone: "primary",
+  },
+  {
+    id: "hello",
+    label: "hello",
+    value: 'Write-Output "hello from Terminal Platform"',
+    description: "Print a Terminal Platform greeting",
+  },
+] satisfies TerminalCommandQuickCommand[];
+
+export function resolveTerminalDemoQuickCommands(
+  config: Pick<TerminalRuntimeBootstrapConfig, "demoDefaultShellProgram">,
+): TerminalCommandQuickCommand[] {
+  const shellKind = resolveTerminalDemoShellKind(config.demoDefaultShellProgram);
+  if (shellKind === "cmd") {
+    return terminalDemoCmdQuickCommands;
+  }
+
+  if (shellKind === "powershell") {
+    return terminalDemoPowerShellQuickCommands;
+  }
+
+  return terminalDemoUnixQuickCommands;
+}
 export function TerminalDemoWorkspaceApp(props: {
   config: TerminalRuntimeBootstrapConfig;
 }): ReactElement {
@@ -134,6 +218,10 @@ export function TerminalDemoWorkspaceScreen(props: {
   const terminalDisplay = snapshot.terminalDisplay ?? DEFAULT_TERMINAL_DEMO_DISPLAY;
   const diagnosticsPreview = snapshot.diagnostics.slice(0, 3);
   const advancedNoticeCount = diagnosticsPreview.length + (actionError ? 1 : 0);
+  const quickCommands = useMemo(
+    () => resolveTerminalDemoQuickCommands(props.config),
+    [props.config.demoDefaultShellProgram],
+  );
   const shellChrome = useMemo(() => resolveTerminalDemoShellChromeState(snapshot), [snapshot]);
   const advancedSavedSessionsControl = useMemo(
     () => resolveTerminalSavedSessionsControlState(snapshot, {
@@ -655,7 +743,7 @@ export function TerminalDemoWorkspaceScreen(props: {
                 autoFocusCommandInput={true}
                 kernel={props.kernel}
                 layoutPreset="terminal"
-                quickCommands={terminalDemoQuickCommands}
+                quickCommands={quickCommands}
               />
             </div>
           </div>
@@ -887,7 +975,7 @@ function createInitialNativeSessionFormState(config: TerminalRuntimeBootstrapCon
     title: "SDK Workspace",
     program: resolveDefaultShellProgram(config),
     args: "",
-    cwd: "",
+    cwd: resolveDefaultWorkingDirectory(config),
   };
 }
 
@@ -898,7 +986,7 @@ function resolveDefaultShellProgram(config: TerminalRuntimeBootstrapConfig): str
   }
 
   if (typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)) {
-    return "pwsh.exe";
+    return "cmd.exe";
   }
 
   if (typeof navigator !== "undefined" && /macintosh|mac os x/i.test(navigator.userAgent)) {
@@ -906,4 +994,39 @@ function resolveDefaultShellProgram(config: TerminalRuntimeBootstrapConfig): str
   }
 
   return "bash";
+}
+
+function resolveDefaultWorkingDirectory(config: TerminalRuntimeBootstrapConfig): string {
+  return config.demoDefaultWorkingDirectory?.trim() ?? "";
+}
+
+function resolveTerminalDemoShellKind(program: string | null | undefined): TerminalDemoShellKind {
+  const shellName = resolveTerminalDemoShellName(program);
+  if (shellName === "cmd" || shellName === "cmd.exe") {
+    return "cmd";
+  }
+
+  if (
+    shellName === "powershell"
+    || shellName === "powershell.exe"
+    || shellName === "pwsh"
+    || shellName === "pwsh.exe"
+  ) {
+    return "powershell";
+  }
+
+  if (!shellName && typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)) {
+    return "cmd";
+  }
+
+  return "unix";
+}
+
+function resolveTerminalDemoShellName(program: string | null | undefined): string {
+  const normalized = program?.trim().replace(/\//g, "\\");
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.split("\\").filter(Boolean).at(-1)?.toLowerCase() ?? "";
 }

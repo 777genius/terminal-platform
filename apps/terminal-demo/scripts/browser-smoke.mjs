@@ -48,6 +48,9 @@ const directScreenInputCommand = process.platform === "win32"
 const directScreenPasteCommand = process.platform === "win32"
   ? "echo screen-paste-ok\r"
   : "printf \"screen-paste-ok\\n\"\n";
+const expectedQuickCommandLabels = process.platform === "win32"
+  ? "cd|dir|git status|node -v|hello"
+  : "pwd|ls -la|git status|node -v|hello";
 
 let previewProcess = null;
 let browserHostProcess = null;
@@ -105,6 +108,8 @@ async function main() {
     });
     const autoStartDefaultShellProgram =
       new URL(autoStartBrowserUrl).searchParams.get("demoDefaultShellProgram");
+    const autoStartDefaultWorkingDirectory =
+      new URL(autoStartBrowserUrl).searchParams.get("demoDefaultWorkingDirectory");
     const autoStartResult = await runAutoStartSmokeScenario(autoStartBrowserUrl);
     if (autoStartResult.issues.length > 0) {
       throw new Error(`Browser auto-start reported runtime issues: ${JSON.stringify(autoStartResult.issues)}`);
@@ -118,6 +123,8 @@ async function main() {
       || autoStartResult.demoAutoStartSession !== null
       || !autoStartDefaultShellProgram
       || autoStartResult.demoDefaultShellProgram !== autoStartDefaultShellProgram
+      || !autoStartDefaultWorkingDirectory
+      || autoStartResult.demoDefaultWorkingDirectory !== autoStartDefaultWorkingDirectory
       || !autoStartResult.commandInputFocused
       || autoStartResult.documentHorizontalOverflow > 1
       || /default interactive shell is now zsh/i.test(autoStartResult.terminalScreenTextPreview ?? "")
@@ -350,7 +357,7 @@ async function main() {
         )
       )
       || !Array.isArray(result.afterCreate.quickCommandLabels)
-      || result.afterCreate.quickCommandLabels.join("|") !== "pwd|ls -la|git status|node -v|hello"
+      || result.afterCreate.quickCommandLabels.join("|") !== expectedQuickCommandLabels
       || result.afterCreate.quickCommandIds.join("|") !== "pwd|list-files|git-status|node-version|hello"
       || result.afterCreate.quickCommandTones.join("|") !== "secondary|secondary|secondary|primary|secondary"
       || result.afterCreate.quickCommandAriaLabels.join("|") !== "Show the current working directory|List files with metadata|Inspect the current git worktree|Insert node version command|Print a Terminal Platform greeting"
@@ -3401,6 +3408,7 @@ async function runAutoStartSmokeScenario(browserUrl) {
         attached: Boolean(state?.attachedSession?.focused_screen),
         demoAutoStartSession: new URLSearchParams(window.location.search).get('demoAutoStartSession'),
         demoDefaultShellProgram: new URLSearchParams(window.location.search).get('demoDefaultShellProgram'),
+        demoDefaultWorkingDirectory: new URLSearchParams(window.location.search).get('demoDefaultWorkingDirectory'),
         commandInputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, input) === true,
         documentHorizontalOverflow: Math.max(
           0,

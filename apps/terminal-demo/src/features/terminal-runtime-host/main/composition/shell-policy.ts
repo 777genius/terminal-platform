@@ -25,6 +25,15 @@ export function resolveDemoDefaultShellProgram(options: {
     ?? (platform === "darwin" ? DEFAULT_TERMINAL_DEMO_MACOS_SHELL : DEFAULT_TERMINAL_DEMO_UNIX_SHELL);
 }
 
+export function resolveDemoDefaultWorkingDirectory(options: {
+  env?: Readonly<Record<string, string | undefined>>;
+  cwd?: string;
+} = {}): string | null {
+  const env = options.env ?? process.env;
+  return normalizeTerminalShellProgram(env.TERMINAL_DEMO_DEFAULT_CWD)
+    ?? normalizeTerminalShellProgram(options.cwd ?? process.cwd());
+}
+
 export function normalizeTerminalShellProgram(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized || null;
