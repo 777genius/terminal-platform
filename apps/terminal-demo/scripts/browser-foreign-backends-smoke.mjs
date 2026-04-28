@@ -16,6 +16,7 @@ import {
   stopProcess,
   waitForHttpServer,
 } from "./chrome-cdp-smoke.mjs";
+import { resolveSpawnCommand } from "./dev-launcher-utils.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -500,11 +501,17 @@ async function removeSessionStore(storePath) {
 }
 
 function runSync(command, args, cwd, env) {
-  const result = spawnSync(command, args, {
+  const resolved = resolveSpawnCommand(command, args, env);
+  const result = spawnSync(resolved.command, resolved.args, {
     cwd,
     env,
+    shell: resolved.shell,
     stdio: "inherit",
   });
+
+  if (result.error) {
+    throw new Error(`${command} ${args.join(" ")} failed: ${result.error.message}`);
+  }
 
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);

@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
@@ -19,7 +21,7 @@ export async function launchChromeWithCdp({
   const failures = [];
 
   for (const headlessMode of chromeLaunchModes) {
-    const userDataDir = path.join("/tmp", `${profilePrefix}-${process.pid}-${Date.now()}-${headlessMode}`);
+    const userDataDir = path.join(os.tmpdir(), `${profilePrefix}-${process.pid}-${Date.now()}-${headlessMode}`);
     const child = spawn(chromeBinary, buildChromeArgs({
       cdpPort,
       extraArgs,
@@ -189,6 +191,7 @@ function processExitState(child) {
 function resolveChromeBinary({ appRoot, binaryMissingMessage }) {
   const candidates = [
     process.env.TERMINAL_DEMO_CHROME_BIN,
+    ...resolveWindowsChromeCandidates(),
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     resolveBinaryFromShell({ appRoot, name: "google-chrome" }),
@@ -196,12 +199,41 @@ function resolveChromeBinary({ appRoot, binaryMissingMessage }) {
     resolveBinaryFromShell({ appRoot, name: "chromium-browser" }),
   ].filter(Boolean);
 
-  const binary = candidates[0];
+  const binary = candidates.find((candidate) => existsSync(candidate));
   if (!binary) {
     throw new Error(binaryMissingMessage);
   }
 
   return binary;
+}
+
+function resolveWindowsChromeCandidates() {
+  if (process.platform !== "win32") {
+    return [];
+  }
+
+  const env = process.env;
+  return [
+    env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe"),
+    env.PROGRAMFILES && path.join(env.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe"),
+    env["PROGRAMFILES(X86)"] && path.join(env["PROGRAMFILES(X86)"], "Google", "Chrome", "Application", "chrome.exe"),
+    resolveBinaryFromWhere("chrome.exe"),
+    resolveBinaryFromWhere("msedge.exe"),
+  ].filter(Boolean);
+}
+
+function resolveBinaryFromWhere(name) {
+  const result = spawnSync("where.exe", [name], {
+    env: process.env,
+    encoding: "utf8",
+  });
+
+  if (result.status !== 0) {
+    return null;
+  }
+
+  const [firstMatch] = result.stdout.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean);
+  return firstMatch ?? null;
 }
 
 function resolveBinaryFromShell({ appRoot, name }) {

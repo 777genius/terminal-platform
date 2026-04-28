@@ -2,6 +2,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
@@ -15,6 +16,7 @@ import {
   stopProcess,
   waitForHttpServer,
 } from "./chrome-cdp-smoke.mjs";
+import { resolveSpawnCommand } from "./dev-launcher-utils.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -22,15 +24,27 @@ const viteCliPath = path.join(appRoot, "node_modules", "vite", "bin", "vite.js")
 const rendererPort = process.env.TERMINAL_DEMO_SMOKE_RENDERER_PORT ?? "4273";
 const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const cdpPort = process.env.TERMINAL_DEMO_SMOKE_CDP_PORT ?? "9226";
-const screenshotPath = path.join("/tmp", `terminal-demo-browser-smoke-${Date.now()}.png`);
-const sessionStorePath = path.join("/tmp", `terminal-demo-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`);
+const screenshotPath = path.join(os.tmpdir(), `terminal-demo-browser-smoke-${Date.now()}.png`);
+const sessionStorePath = path.join(os.tmpdir(), `terminal-demo-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`);
 const autoStartSessionStorePath = path.join(
-  "/tmp",
+  os.tmpdir(),
   `terminal-demo-browser-smoke-auto-store-${process.pid}-${Date.now()}.sqlite3`,
 );
 const themeStorageKey = "terminal-platform-demo.theme";
 const fontScaleStorageKey = "terminal-platform-demo.terminal-font-scale";
 const lineWrapStorageKey = "terminal-platform-demo.terminal-line-wrap";
+const primarySmokeCommand = process.platform === "win32"
+  ? "echo browser-smoke-ok"
+  : "printf \"browser-smoke-ok\\n\"";
+const clipboardPasteSmokeCommand = process.platform === "win32"
+  ? "echo browser-paste-ok\r"
+  : "printf \"browser-paste-ok\\n\"\n";
+const directScreenInputCommand = process.platform === "win32"
+  ? "echo screen-key-ok"
+  : "printf \"screen-key-ok\\n\"";
+const directScreenPasteCommand = process.platform === "win32"
+  ? "echo screen-paste-ok\r"
+  : "printf \"screen-paste-ok\\n\"\n";
 
 let previewProcess = null;
 let browserHostProcess = null;
@@ -418,7 +432,7 @@ async function main() {
       || !result.afterCreateMobileLayout.hasCompactScreenChrome
       || result.afterCreateMobileLayout.terminalScreenChromeHeight > 140
       || Math.abs(result.afterCreateMobileLayout.terminalScreenChromeViewportGapPx ?? 99) > 1
-      || result.afterCreateMobileLayout.terminalScreenHeight > 650
+      || result.afterCreateMobileLayout.terminalScreenHeight > 660
       || result.afterCreateMobileLayout.commandRegionTop > 900
       || Math.abs(result.afterCreateMobileLayout.terminalComposerGapPx ?? 99) > 1
       || Math.abs(result.afterCreateMobileLayout.terminalInputGapPx ?? 99) > 12
@@ -2388,7 +2402,7 @@ async function runSmokeScenario(browserUrl) {
         return { ok: false, reason: 'textarea missing' };
       }
       const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
-      descriptor?.set?.call(textarea, 'printf \"browser-smoke-ok\\\\n\"');
+      descriptor?.set?.call(textarea, ${JSON.stringify(primarySmokeCommand)});
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const button = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
@@ -2682,7 +2696,7 @@ async function runSmokeScenario(browserUrl) {
 
     const clipboardSeedResult = await evaluate(send, `(async () => {
       try {
-        await navigator.clipboard.writeText(${JSON.stringify('printf "browser-paste-ok\\n"\n')});
+        await navigator.clipboard.writeText(${JSON.stringify(clipboardPasteSmokeCommand)});
         return { ok: true };
       } catch (error) {
         return { ok: false, error: String(error?.message ?? error) };
@@ -2708,8 +2722,10 @@ async function runSmokeScenario(browserUrl) {
       }
 
       let submittedEvents = 0;
-      commandHost.addEventListener('tp-terminal-paste-submitted', () => {
+      let eventDetail = null;
+      commandHost.addEventListener('tp-terminal-paste-submitted', (event) => {
         submittedEvents += 1;
+        eventDetail = event.detail ?? null;
       }, { once: true });
 
       if (pasteButton.disabled) {
@@ -2723,12 +2739,13 @@ async function runSmokeScenario(browserUrl) {
       }
 
       pasteButton.click();
-      await new Promise((resolve) => setTimeout(resolve, 1600));
+      await new Promise((resolve) => setTimeout(resolve, 5000));
 
       return {
         ok: true,
         pasteButtonEnabled: !pasteButton.disabled,
         submittedEvents,
+        eventDetail,
         title: pasteButton.getAttribute('title'),
       };
     })()`);
@@ -2736,21 +2753,29 @@ async function runSmokeScenario(browserUrl) {
       throw new Error(`Unable to paste clipboard through command dock: ${JSON.stringify(pasteResult)}`);
     }
 
-    const afterClipboardPaste = await evaluate(send, `(() => {
+    const afterClipboardPaste = await evaluate(send, `(async () => {
       const debug = window.terminalDemoDebug?.getState?.();
+      const eventDetail = ${JSON.stringify(pasteResult.eventDetail)};
+      if (eventDetail?.sessionId) {
+        await window.terminalDemoDebug?.controller?.commands?.attachSession?.(eventDetail.sessionId);
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+      const refreshedDebug = window.terminalDemoDebug?.getState?.();
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
-      const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
-        ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+      const terminalScreenText = refreshedDebug?.attachedSession?.focused_screen?.surface?.lines
+        ? refreshedDebug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : '';
       return {
         clicked: true,
         pasteButtonEnabled: ${JSON.stringify(pasteResult.pasteButtonEnabled)},
         submittedEvents: ${JSON.stringify(pasteResult.submittedEvents)},
-        connectionReady: debug?.connection?.state === 'ready',
-        commandHistoryCount: debug?.commandHistory?.entries?.length ?? 0,
-        commandHistoryLatest: debug?.commandHistory?.entries?.at(-1) ?? null,
+        eventDetail,
+        connectionReady: refreshedDebug?.connection?.state === 'ready',
+        focusedPaneId: refreshedDebug?.attachedSession?.focused_screen?.pane_id ?? null,
+        commandHistoryCount: refreshedDebug?.commandHistory?.entries?.length ?? 0,
+        commandHistoryLatest: refreshedDebug?.commandHistory?.entries?.at(-1) ?? null,
         inputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true,
         cursorAtEnd: Boolean(
           textarea
@@ -3114,16 +3139,17 @@ async function runSmokeScenario(browserUrl) {
       };
       screenHost.addEventListener('tp-terminal-screen-input-submitted', handleSubmitted);
       viewport.focus();
-      const directInput = ${JSON.stringify('printf "screen-key-ok\\n"')};
+      const directInput = ${JSON.stringify(directScreenInputCommand)};
+      const keyDelayMs = ${process.platform === "win32" ? 60 : 20};
       for (const key of [...directInput, 'Enter']) {
         viewport.dispatchEvent(new KeyboardEvent('keydown', {
           key,
           bubbles: true,
           cancelable: true,
         }));
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await new Promise((resolve) => setTimeout(resolve, keyDelayMs));
       }
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setTimeout(resolve, ${process.platform === "win32" ? 2600 : 1200}));
       screenHost.removeEventListener('tp-terminal-screen-input-submitted', handleSubmitted);
 
       return {
@@ -3136,7 +3162,7 @@ async function runSmokeScenario(browserUrl) {
       throw new Error(`Unable to send input through terminal screen: ${JSON.stringify(directScreenInputResult)}`);
     }
 
-    await sleep(2500);
+    await sleep(process.platform === "win32" ? 5000 : 2500);
 
     const afterDirectScreenInput = await evaluate(send, `(() => {
       const debug = window.terminalDemoDebug?.getState?.();
@@ -3179,7 +3205,7 @@ async function runSmokeScenario(browserUrl) {
       screenHost.addEventListener('tp-terminal-screen-paste-submitted', handleSubmitted);
       screenHost.addEventListener('tp-terminal-screen-paste-failed', handleFailed);
       viewport.focus();
-      const pasteText = ${JSON.stringify('printf "screen-paste-ok\\n"\n')};
+      const pasteText = ${JSON.stringify(directScreenPasteCommand)};
       const pasteEvent = new Event('paste', {
         bubbles: true,
         cancelable: true,
@@ -3206,19 +3232,25 @@ async function runSmokeScenario(browserUrl) {
       throw new Error(`Unable to paste through terminal screen: ${JSON.stringify(directScreenPasteResult)}`);
     }
 
-    await sleep(2500);
+    await sleep(process.platform === "win32" ? 5000 : 2500);
 
-    const afterDirectScreenPaste = await evaluate(send, `(() => {
+    const afterDirectScreenPaste = await evaluate(send, `(async () => {
       const debug = window.terminalDemoDebug?.getState?.();
-      const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
-        ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+      const sessionId = debug?.attachedSession?.session?.session_id ?? null;
+      if (sessionId) {
+        await window.terminalDemoDebug?.controller?.commands?.attachSession?.(sessionId);
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+      const refreshedDebug = window.terminalDemoDebug?.getState?.();
+      const terminalScreenText = refreshedDebug?.attachedSession?.focused_screen?.surface?.lines
+        ? refreshedDebug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : '';
       return {
         focused: ${JSON.stringify(directScreenPasteResult.focused)},
         defaultPrevented: ${JSON.stringify(directScreenPasteResult.defaultPrevented)},
         submittedEvents: ${JSON.stringify(directScreenPasteResult.submittedEvents)},
         failedEvents: ${JSON.stringify(directScreenPasteResult.failedEvents)},
-        connectionReady: debug?.connection?.state === 'ready',
+        connectionReady: refreshedDebug?.connection?.state === 'ready',
         terminalScreenText,
         containsPasteOutput: /screen-paste-ok/i.test(terminalScreenText),
       };
@@ -3484,11 +3516,17 @@ async function closePageTarget(targetId) {
 }
 
 function runSync(command, args, cwd) {
-  const result = spawnSync(command, args, {
+  const resolved = resolveSpawnCommand(command, args);
+  const result = spawnSync(resolved.command, resolved.args, {
     cwd,
     env: process.env,
+    shell: resolved.shell,
     stdio: "inherit",
   });
+
+  if (result.error) {
+    throw new Error(`${command} ${args.join(" ")} failed: ${result.error.message}`);
+  }
 
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);

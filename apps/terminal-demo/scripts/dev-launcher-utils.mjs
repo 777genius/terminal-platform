@@ -3,11 +3,17 @@ import process from "node:process";
 import path from "node:path";
 
 export function runSync(command, args, cwd) {
-  const result = spawnSync(command, args, {
+  const resolved = resolveSpawnCommand(command, args);
+  const result = spawnSync(resolved.command, resolved.args, {
     cwd,
     env: process.env,
+    shell: resolved.shell,
     stdio: "inherit",
   });
+
+  if (result.error) {
+    throw new Error(`${command} ${args.join(" ")} failed: ${result.error.message}`);
+  }
 
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);
@@ -107,4 +113,25 @@ function pipeProcess(child, label) {
 
   pipe(child.stdout);
   pipe(child.stderr);
+}
+
+export function resolveSpawnCommand(command, args, env = process.env) {
+  if (process.platform !== "win32" || command.includes("/") || command.includes("\\")) {
+    return { args, command, shell: false };
+  }
+
+  if (command === "npm" || command === "npx" || command === "pnpm" || command === "yarn") {
+    const npmExecPath = command === "npm" ? env.npm_execpath : null;
+    if (npmExecPath) {
+      return { args: [npmExecPath, ...args], command: process.execPath, shell: false };
+    }
+
+    return { args, command: `${command}.cmd`, shell: true };
+  }
+
+  return { args, command, shell: false };
+}
+
+export function resolveCommandForSpawn(command) {
+  return resolveSpawnCommand(command, []).command;
 }
