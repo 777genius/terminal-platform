@@ -226,12 +226,16 @@ function readOptionalFile(filePath) {
   try {
     return fs.readFileSync(filePath, "utf8");
   } catch (error) {
-    if (error?.code === "ENOENT") {
+    if (error?.code === "ENOENT" || isTransientWindowsFileLock(error)) {
       return null;
     }
 
     throw error;
   }
+}
+
+function isTransientWindowsFileLock(error) {
+  return process.platform === "win32" && ["EBUSY", "EPERM"].includes(error?.code);
 }
 
 function childExitState(child) {
