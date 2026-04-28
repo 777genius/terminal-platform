@@ -18,6 +18,7 @@ import {
   waitForHttpServer,
 } from "./chrome-cdp-smoke.mjs";
 import { resolveSpawnCommand } from "./dev-launcher-utils.mjs";
+import { withTerminalDemoSmokeLock } from "./smoke-lock.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -58,7 +59,7 @@ let browserHostProcess = null;
 let chromeProcess = null;
 let chromeUserDataDir = null;
 
-await main();
+await withTerminalDemoSmokeLock("browser-smoke", main);
 
 async function main() {
   try {

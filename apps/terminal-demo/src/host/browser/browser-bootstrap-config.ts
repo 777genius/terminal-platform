@@ -28,6 +28,7 @@ export async function writeBrowserBootstrapConfig(options: {
 
 export async function clearBrowserBootstrapConfig(options: {
   appRoot: string;
+  expectedConfig?: TerminalRuntimeBootstrapConfig | null;
   scope: string;
 }): Promise<void> {
   const relativeTarget = TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH.replace(/^\/+/, "");
@@ -37,7 +38,13 @@ export async function clearBrowserBootstrapConfig(options: {
     scope: options.scope,
   });
 
-  await Promise.all(targets.map((targetPath) => removeFileWithWindowsRetries(targetPath)));
+  const expectedPayload = options.expectedConfig
+    ? buildBrowserBootstrapPayload(options.expectedConfig)
+    : null;
+
+  await Promise.all(
+    targets.map((targetPath) => removeBrowserBootstrapTarget(targetPath, expectedPayload)),
+  );
 }
 
 export function buildBrowserBootstrapPayload(config: TerminalRuntimeBootstrapConfig): string {
@@ -98,6 +105,32 @@ async function renameWithWindowsRetries(fromPath: string, toPath: string): Promi
 
 async function removeFileWithWindowsRetries(filePath: string): Promise<void> {
   await retryWindowsFileOperation(() => fs.rm(filePath, { force: true }));
+}
+
+async function removeBrowserBootstrapTarget(
+  targetPath: string,
+  expectedPayload: string | null,
+): Promise<void> {
+  if (expectedPayload) {
+    const currentPayload = await readOptionalFile(targetPath);
+    if (currentPayload === null || currentPayload !== expectedPayload) {
+      return;
+    }
+  }
+
+  await removeFileWithWindowsRetries(targetPath);
+}
+
+async function readOptionalFile(filePath: string): Promise<string | null> {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 async function retryWindowsFileOperation(operation: () => Promise<void>): Promise<void> {

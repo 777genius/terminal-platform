@@ -29,6 +29,7 @@ const demoDefaultWorkingDirectory = resolveDemoDefaultWorkingDirectory({
 });
 
 let hostHandle: TerminalRuntimeHostHandle | null = null;
+let bootstrapConfig: TerminalRuntimeBootstrapConfig | null = null;
 let shuttingDown = false;
 
 async function bootstrap(): Promise<void> {
@@ -57,6 +58,7 @@ async function bootstrap(): Promise<void> {
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,
   };
+  bootstrapConfig = config;
   await writeBrowserBootstrapConfig({
     appRoot,
     config,
@@ -82,8 +84,10 @@ async function shutdown(exitCode = 0): Promise<void> {
   ]);
   await clearBrowserBootstrapConfig({
     appRoot,
+    expectedConfig: bootstrapConfig,
     scope: bootstrapScope,
   }).catch(() => undefined);
+  bootstrapConfig = null;
   process.exit(exitCode);
 }
 

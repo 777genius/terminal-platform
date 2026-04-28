@@ -18,6 +18,7 @@ import {
   waitForHttpServer,
 } from "./chrome-cdp-smoke.mjs";
 import { resolveSpawnCommand } from "./dev-launcher-utils.mjs";
+import { withTerminalDemoSmokeLock } from "./smoke-lock.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -46,7 +47,7 @@ let tempZellijBinDir = null;
 let smokeEnv = process.env;
 const windowsZellijProcessIds = [];
 
-await main();
+await withTerminalDemoSmokeLock("browser-foreign-backends-smoke", main);
 
 async function main() {
   try {

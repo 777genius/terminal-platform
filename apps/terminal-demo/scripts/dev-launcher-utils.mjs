@@ -99,6 +99,7 @@ export async function stopProcess(child, options = {}) {
 export async function waitForServer(url, options = {}) {
   const startedAt = Date.now();
   const timeoutMs = options.timeoutMs ?? 30_000;
+  const readinessSettleMs = options.readinessSettleMs ?? 250;
 
   while (Date.now() - startedAt < timeoutMs) {
     const exitState = processExitState(options.child);
@@ -106,13 +107,19 @@ export async function waitForServer(url, options = {}) {
       throw new Error(`${options.label ?? "Server"} exited before ${url} became ready - ${exitState}`);
     }
 
-    try {
-      const response = await fetch(url, { method: "GET" });
-      if (response.ok) {
-        return;
+    const response = await fetch(url, { method: "GET" }).catch(() => null);
+    if (response?.ok) {
+      if (options.child && readinessSettleMs > 0) {
+        await sleep(readinessSettleMs);
+        const settledExitState = processExitState(options.child);
+        if (settledExitState) {
+          throw new Error(
+            `${options.label ?? "Server"} exited after ${url} became ready - ${settledExitState}`,
+          );
+        }
       }
-    } catch {
-      // Server is still starting.
+
+      return;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 250));

@@ -74,3 +74,42 @@ test("browser bootstrap writer updates and clears public and dist bootstrap file
     await fs.rm(appRoot, { recursive: true, force: true });
   }
 });
+
+test("browser bootstrap clear keeps newer configs owned by another browser host", async () => {
+  const appRoot = await fs.mkdtemp(path.join(os.tmpdir(), "terminal-demo-bootstrap-owner-test-"));
+  const newerConfig = {
+    ...bootstrapConfig,
+    controlPlaneUrl: "ws://127.0.0.1:4200/terminal-gateway/control?token=newer",
+    sessionStreamUrl: "ws://127.0.0.1:4200/terminal-gateway/stream?token=newer",
+  };
+
+  try {
+    await writeBrowserBootstrapConfig({
+      appRoot,
+      config: newerConfig,
+      scope: "public-and-dist",
+    });
+
+    await clearBrowserBootstrapConfig({
+      appRoot,
+      expectedConfig: bootstrapConfig,
+      scope: "public-and-dist",
+    });
+
+    const publicPath = path.join(appRoot, "public", "terminal-runtime-bootstrap.json");
+    const distPath = path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json");
+    assert.deepEqual(JSON.parse(await fs.readFile(publicPath, "utf8")), newerConfig);
+    assert.deepEqual(JSON.parse(await fs.readFile(distPath, "utf8")), newerConfig);
+
+    await clearBrowserBootstrapConfig({
+      appRoot,
+      expectedConfig: newerConfig,
+      scope: "public-and-dist",
+    });
+
+    await assert.rejects(() => fs.access(publicPath), { code: "ENOENT" });
+    await assert.rejects(() => fs.access(distPath), { code: "ENOENT" });
+  } finally {
+    await fs.rm(appRoot, { recursive: true, force: true });
+  }
+});

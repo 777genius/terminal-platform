@@ -22,6 +22,7 @@ const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const sessionStore = resolveBrowserSessionStore();
 const autoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION ?? "1";
 const browserBootstrapPaths = buildBrowserBootstrapConfigPaths(appRoot);
+const initialBrowserBootstrapPayloads = readBrowserBootstrapPayloads(browserBootstrapPaths);
 
 runSync("npm", ["run", "stage:sdk"], appRoot);
 runSync("npm", ["run", "build:host"], appRoot);
@@ -29,6 +30,7 @@ runSync("npm", ["run", "build:host"], appRoot);
 const vite = spawnViteDevServer(appRoot, rendererPort);
 
 let browserHost = null;
+let browserBootstrapPayload = null;
 let shuttingDown = false;
 let shutdownPromise = null;
 const shutdown = async (exitCode = 0) => {
@@ -76,6 +78,16 @@ browserHost = spawn(process.execPath, ["./dist/host/browser/index.js"], {
 
 console.log(`[terminal-demo-browser] session store ${sessionStore.label}`);
 console.log(`[terminal-demo-browser] auto start session ${autoStartSession === "1" ? "enabled" : "disabled"}`);
+
+try {
+  browserBootstrapPayload = await waitForBrowserBootstrapPayload(browserBootstrapPaths, {
+    child: browserHost,
+    previousPayloads: initialBrowserBootstrapPayloads,
+  });
+} catch (error) {
+  console.error(error);
+  await shutdown(1);
+}
 
 browserHost.on("exit", (code) => {
   requestShutdown(code ?? 0);
@@ -144,8 +156,17 @@ function cleanupBrowserSessionStore(sessionStoreInfo) {
 }
 
 function cleanupBrowserBootstrapConfig() {
+  if (!browserBootstrapPayload) {
+    return;
+  }
+
   for (const bootstrapPath of browserBootstrapPaths) {
     try {
+      const currentPayload = readOptionalFile(bootstrapPath);
+      if (currentPayload !== browserBootstrapPayload) {
+        continue;
+      }
+
       fs.rmSync(bootstrapPath, {
         force: true,
         maxRetries: process.platform === "win32" ? 8 : 0,
@@ -162,4 +183,69 @@ function cleanupBrowserBootstrapConfig() {
       throw error;
     }
   }
+}
+
+function readBrowserBootstrapPayloads(paths) {
+  return new Set(paths.map((bootstrapPath) => readOptionalFile(bootstrapPath)).filter(Boolean));
+}
+
+async function waitForBrowserBootstrapPayload(paths, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const startedAt = Date.now();
+  const previousPayloads = options.previousPayloads ?? new Set();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const exitState = childExitState(options.child);
+    if (exitState) {
+      throw new Error(`Browser runtime host exited before publishing bootstrap - ${exitState}`);
+    }
+
+    for (const bootstrapPath of paths) {
+      const payload = readOptionalFile(bootstrapPath);
+      if (payload && !previousPayloads.has(payload) && isBrowserBootstrapPayload(payload)) {
+        return payload;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error("Timed out waiting for browser runtime bootstrap");
+}
+
+function isBrowserBootstrapPayload(payload) {
+  try {
+    const config = JSON.parse(payload);
+    return Boolean(config?.controlPlaneUrl && config?.sessionStreamUrl && config?.runtimeSlug);
+  } catch {
+    return false;
+  }
+}
+
+function readOptionalFile(filePath) {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function childExitState(child) {
+  if (!child) {
+    return null;
+  }
+
+  if (child.exitCode !== null) {
+    return `exit code ${child.exitCode}`;
+  }
+
+  if (child.signalCode !== null) {
+    return `signal ${child.signalCode}`;
+  }
+
+  return null;
 }
