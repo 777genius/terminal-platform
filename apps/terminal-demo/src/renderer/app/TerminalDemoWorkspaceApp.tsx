@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
+import { parseLaunchArgs } from "@features/terminal-workspace-kernel/contracts";
 import { terminalPlatformThemeManifests } from "@terminal-platform/design-tokens";
 import type { CreateSessionRequest, SessionId } from "@terminal-platform/runtime-types";
 import { createWorkspaceWebSocketTransport } from "@terminal-platform/workspace-adapter-websocket";
@@ -847,15 +848,6 @@ function buildNativeSessionRequest(form: NativeSessionFormState): CreateSessionR
         }
       : null,
   };
-}
-
-function parseLaunchArgs(value: string): string[] {
-  const matches = value.match(/(?:[^\s"]+|"[^"]*")+/g);
-  if (!matches) {
-    return [];
-  }
-
-  return matches.map((entry) => entry.replace(/^"|"$/g, ""));
 }
 
 function badgeToneForConnection(state: WorkspaceSnapshot["connection"]["state"]): string {

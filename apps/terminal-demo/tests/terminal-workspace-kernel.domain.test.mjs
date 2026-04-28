@@ -16,6 +16,21 @@ test("parseLaunchArgs keeps quoted groups intact", () => {
   assert.deepEqual(parseLaunchArgs('-l "-c echo demo" --flag'), ["-l", "-c echo demo", "--flag"]);
 });
 
+test("parseLaunchArgs handles Windows shell quoting and escaped quotes", () => {
+  assert.deepEqual(
+    parseLaunchArgs('/K "echo \\"hello from cmd\\""'),
+    ["/K", 'echo "hello from cmd"'],
+  );
+  assert.deepEqual(
+    parseLaunchArgs('--path "C:\\Program Files\\Git\\bin" --empty "" next'),
+    ["--path", "C:\\Program Files\\Git\\bin", "--empty", "", "next"],
+  );
+  assert.deepEqual(
+    parseLaunchArgs("-NoExit -Command 'Write-Output \"hello from PowerShell\"'"),
+    ["-NoExit", "-Command", 'Write-Output "hello from PowerShell"'],
+  );
+});
+
 test("buildCreateNativeSessionPayload trims optional launch fields", () => {
   assert.deepEqual(
     buildCreateNativeSessionPayload({
