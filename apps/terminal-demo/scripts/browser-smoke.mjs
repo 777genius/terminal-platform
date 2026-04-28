@@ -1942,7 +1942,9 @@ async function runSmokeScenario(browserUrl) {
       const paneCountAfterSplit = splitTab ? countPanes(splitTab.root) : 0;
       const resizeColsBefore = stateAfterSplit?.attachedSession?.focused_screen?.cols ?? 0;
       const splitDirection = paneTreeRoot?.querySelector('[part="split"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null;
-      resizeWiderButton.click();
+      const resizeWiderButtonAfterSplit =
+        paneTreeRoot?.querySelector('[data-testid="tp-resize-wider"]') ?? null;
+      resizeWiderButtonAfterSplit?.click();
       await settle();
       const stateAfterResize = window.terminalDemoDebug?.getState?.();
       const resizeColsAfter = stateAfterResize?.attachedSession?.focused_screen?.cols ?? 0;
@@ -2042,7 +2044,7 @@ async function runSmokeScenario(browserUrl) {
       return {
         ok: true,
         splitClicked: true,
-        resizeClicked: true,
+        resizeClicked: Boolean(resizeWiderButtonAfterSplit),
         closePanePrompted,
         closePaneDanger,
         closePaneTitle,

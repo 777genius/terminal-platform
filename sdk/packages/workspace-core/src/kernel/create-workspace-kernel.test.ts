@@ -1,13 +1,23 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+  AttachedSession,
   BackendCapabilitiesInfo,
   BackendKind,
   DiscoveredSession,
   Handshake,
+  MuxCommand,
+  PaneId,
+  ScreenDelta,
+  ScreenSnapshot,
   SavedSessionSummary,
+  SessionId,
+  SubscriptionEvent,
+  SubscriptionMeta,
+  SubscriptionSpec,
+  TopologySnapshot,
 } from "@terminal-platform/runtime-types";
-import type { WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
+import type { WorkspaceSubscription, WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
 
 import { createWorkspaceKernel } from "./create-workspace-kernel.js";
 import {
@@ -331,6 +341,31 @@ describe("createWorkspaceKernel bootstrap", () => {
   });
 });
 
+describe("createWorkspaceKernel live session subscriptions", () => {
+  it("applies pane surface updates without another attach", async () => {
+    const live = createLiveScreenTransport();
+    const kernel = createWorkspaceKernel({
+      transport: live.transport,
+    });
+
+    await kernel.commands.attachSession(live.sessionId);
+    expect(attachedScreenText(kernel)).toBe("ready");
+
+    await kernel.commands.dispatchMuxCommand(live.sessionId, {
+      kind: "send_input",
+      pane_id: live.paneId,
+      data: "echo live\r",
+    });
+
+    await waitUntil(() => attachedScreenText(kernel).includes("live output"));
+
+    expect(attachedScreenText(kernel)).toContain("live output");
+    expect(live.attachCalls()).toBe(1);
+
+    await kernel.dispose();
+  });
+});
+
 describe("createWorkspaceKernel saved session maintenance", () => {
   it("returns prune results and refreshes the saved session catalog", async () => {
     let savedSessions = [
@@ -447,6 +482,219 @@ function createUnusedTransport(): WorkspaceTransportClient {
     close: async () => {},
     discoverSessions: async () => [],
   } as unknown as WorkspaceTransportClient;
+}
+
+function createLiveScreenTransport(): {
+  transport: WorkspaceTransportClient;
+  sessionId: SessionId;
+  paneId: PaneId;
+  attachCalls(): number;
+} {
+  const sessionId = "live-session-1";
+  const paneId = "live-pane-1";
+  const topology = createLiveTopology(sessionId, paneId);
+  const attachedSession = createAttachedSession(sessionId, paneId, topology, "ready", 1n);
+  const topologySubscription = new TestWorkspaceSubscription("live-topology-subscription");
+  const paneSubscription = new TestWorkspaceSubscription("live-pane-subscription");
+  let attachCount = 0;
+
+  const transport: WorkspaceTransportClient = {
+    ...createUnusedTransport(),
+    attachSession: async () => {
+      attachCount += 1;
+      return structuredClone(attachedSession);
+    },
+    dispatchMuxCommand: async (_sessionId: SessionId, command: MuxCommand) => {
+      if (command.kind === "send_input") {
+        paneSubscription.push(createFullReplaceDelta(paneId, 1n, 2n, "ready\nlive output"));
+      }
+
+      return { changed: true };
+    },
+    openSubscription: async (_sessionId: SessionId, spec: SubscriptionSpec) => {
+      if (spec.kind === "session_topology") {
+        return topologySubscription;
+      }
+
+      return paneSubscription;
+    },
+  } as WorkspaceTransportClient;
+
+  return {
+    transport,
+    sessionId,
+    paneId,
+    attachCalls: () => attachCount,
+  };
+}
+
+class TestWorkspaceSubscription implements WorkspaceSubscription {
+  readonly #subscriptionId: string;
+  #closed = false;
+  #events: SubscriptionEvent[] = [];
+  #waiters: Array<(event: SubscriptionEvent | null) => void> = [];
+
+  constructor(subscriptionId: string) {
+    this.#subscriptionId = subscriptionId;
+  }
+
+  meta(): SubscriptionMeta {
+    return {
+      subscription_id: this.#subscriptionId,
+    };
+  }
+
+  push(event: SubscriptionEvent): void {
+    if (this.#closed) {
+      return;
+    }
+
+    const waiter = this.#waiters.shift();
+    if (waiter) {
+      waiter(event);
+      return;
+    }
+
+    this.#events.push(event);
+  }
+
+  async nextEvent(): Promise<SubscriptionEvent | null> {
+    if (this.#closed) {
+      return null;
+    }
+
+    const event = this.#events.shift();
+    if (event) {
+      return event;
+    }
+
+    return new Promise((resolve) => {
+      this.#waiters.push(resolve);
+    });
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) {
+      return;
+    }
+
+    this.#closed = true;
+    this.#events = [];
+    const waiters = this.#waiters.splice(0);
+    for (const waiter of waiters) {
+      waiter(null);
+    }
+  }
+}
+
+function createAttachedSession(
+  sessionId: SessionId,
+  paneId: PaneId,
+  topology: TopologySnapshot,
+  line: string,
+  sequence: bigint,
+): AttachedSession {
+  return {
+    session: {
+      session_id: sessionId,
+      route: {
+        backend: "native",
+        authority: "local_daemon",
+        external: {
+          namespace: "native_session",
+          value: sessionId,
+        },
+      },
+      title: "Live shell",
+    },
+    health: {
+      session_id: sessionId,
+      phase: "ready",
+      can_attach: true,
+      invalidated: false,
+      reason: null,
+      detail: null,
+    },
+    topology,
+    focused_screen: createLiveScreen(paneId, line, sequence),
+  };
+}
+
+function createLiveTopology(sessionId: SessionId, paneId: PaneId): TopologySnapshot {
+  return {
+    session_id: sessionId,
+    backend_kind: "native",
+    focused_tab: "live-tab-1",
+    tabs: [
+      {
+        tab_id: "live-tab-1",
+        title: "Live shell",
+        root: {
+          kind: "leaf",
+          pane_id: paneId,
+        },
+        focused_pane: paneId,
+      },
+    ],
+  };
+}
+
+function createLiveScreen(paneId: PaneId, line: string, sequence: bigint): ScreenSnapshot {
+  return {
+    pane_id: paneId,
+    sequence,
+    rows: 24,
+    cols: 80,
+    source: "native_emulator",
+    surface: {
+      title: "Live shell",
+      cursor: {
+        row: 0,
+        col: line.length,
+      },
+      lines: line.split("\n").map((text) => ({ text })),
+    },
+  };
+}
+
+function createFullReplaceDelta(
+  paneId: PaneId,
+  fromSequence: bigint,
+  toSequence: bigint,
+  line: string,
+): Extract<SubscriptionEvent, { kind: "screen_delta" }> {
+  const screen = createLiveScreen(paneId, line, toSequence);
+  return {
+    kind: "screen_delta",
+    pane_id: paneId,
+    from_sequence: fromSequence,
+    to_sequence: toSequence,
+    rows: screen.rows,
+    cols: screen.cols,
+    source: screen.source,
+    patch: null,
+    full_replace: screen.surface,
+  } satisfies Extract<SubscriptionEvent, { kind: "screen_delta" }>;
+}
+
+function attachedScreenText(kernel: ReturnType<typeof createWorkspaceKernel>): string {
+  return kernel.getSnapshot().attachedSession?.focused_screen?.surface.lines
+    .map((line) => line.text)
+    .join("\n") ?? "";
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error("timed out waiting for workspace snapshot update");
 }
 
 function createHandshake(availableBackends: BackendKind[]): Handshake {

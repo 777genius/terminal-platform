@@ -451,6 +451,79 @@ test("gateway keeps session state traffic on the stream plane only", loopbackTes
   }
 });
 
+test("gateway bridges workspace subscriptions over the stream plane for SDK clients", loopbackTestOptions, async () => {
+  const subscriptionEvent = {
+    kind: "screen_delta",
+    pane_id: "pane-1",
+    from_sequence: 0,
+    to_sequence: 1,
+    rows: 24,
+    cols: 80,
+    source: "native",
+    full_replace: {
+      lines: [{ text: "ready" }],
+      cursor: null,
+      title: null,
+    },
+    patch: null,
+  };
+  const sdkClient = {
+    ...createSdkClient(),
+    openCalls: [],
+    openSubscription: async (sessionId, spec) => {
+      const subscription = createDeferredWorkspaceSubscription("native-sub-1", subscriptionEvent);
+      sdkClient.openCalls.push({ sessionId, spec, subscription });
+      return subscription;
+    },
+  };
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(createRuntime()),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(createRuntime()),
+    clientProvider: {
+      getClient: async () => sdkClient,
+    },
+  });
+
+  const streamClient = createStreamClient(gateway.sessionStreamUrl);
+  try {
+    await streamClient.connect();
+
+    streamClient.send({
+      type: "workspace_subscribe",
+      subscriptionId: "workspace-sub-1",
+      sessionId: "session-1",
+      spec: {
+        kind: "pane_surface",
+        pane_id: "pane-1",
+      },
+    });
+
+    const ack = await streamClient.waitForEvent((event) => event.type === "workspace_subscription_ack");
+    assert.equal(ack.subscriptionId, "workspace-sub-1");
+    assert.deepEqual(ack.meta, { subscription_id: "native-sub-1" });
+    assert.equal(sdkClient.openCalls.length, 1);
+    assert.deepEqual(sdkClient.openCalls[0].spec, { kind: "pane_surface", pane_id: "pane-1" });
+
+    const eventMessage = await streamClient.waitForEvent((event) => event.type === "workspace_subscription_event");
+    assert.equal(eventMessage.subscriptionId, "workspace-sub-1");
+    assert.deepEqual(eventMessage.event, subscriptionEvent);
+
+    streamClient.send({
+      type: "workspace_unsubscribe",
+      subscriptionId: "workspace-sub-1",
+    });
+    const closed = await streamClient.waitForEvent((event) => event.type === "workspace_subscription_closed");
+    assert.equal(closed.subscriptionId, "workspace-sub-1");
+    assert.equal(sdkClient.openCalls[0].subscription.closeCalls, 1);
+  } finally {
+    await Promise.all([
+      streamClient.close(),
+      gateway.dispose(),
+    ]);
+  }
+});
+
 function createSdkClient() {
   return {
     handshakeInfo: async () => ({
@@ -512,6 +585,32 @@ function createSdkClient() {
         independent_resize_authority: true,
       },
     }),
+  };
+}
+
+function createDeferredWorkspaceSubscription(subscriptionId, event) {
+  let delivered = false;
+  let releaseCloseWait;
+  const closeWait = new Promise((resolve) => {
+    releaseCloseWait = resolve;
+  });
+
+  return {
+    subscriptionId,
+    closeCalls: 0,
+    async nextEvent() {
+      if (!delivered) {
+        delivered = true;
+        return event;
+      }
+
+      await closeWait;
+      return null;
+    },
+    async close() {
+      this.closeCalls += 1;
+      releaseCloseWait();
+    },
   };
 }
 

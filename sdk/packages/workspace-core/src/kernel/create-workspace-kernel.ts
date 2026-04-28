@@ -149,6 +149,7 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
 
     disposed = true;
     connectionService.markDisposed();
+    await sessionCommandService.dispose();
     await scope.dispose();
   }
 

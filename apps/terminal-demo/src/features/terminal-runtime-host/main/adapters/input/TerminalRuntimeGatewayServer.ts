@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import type {
+  WorkspaceGatewayStreamClientMessage,
+  WorkspaceGatewayStreamServerMessage,
+} from "@terminal-platform/workspace-adapter-websocket/protocol";
+import type {
   TerminalBackendKind,
   TerminalCreateNativeSessionInput,
   TerminalDiscoveredSession,
@@ -45,7 +49,14 @@ interface LegacyStreamSubscriptionRecord {
   handle: Awaited<ReturnType<TerminalRuntimeSessionStreamService["watchSessionState"]>> | null;
 }
 
-type StreamSubscriptionRecord = LegacyStreamSubscriptionRecord;
+interface WorkspaceStreamSubscriptionRecord {
+  kind: "workspace";
+  sessionId: string;
+  subscription: Awaited<ReturnType<TerminalPlatformClient["openSubscription"]>> | null;
+  pump: Promise<void> | null;
+}
+
+type StreamSubscriptionRecord = LegacyStreamSubscriptionRecord | WorkspaceStreamSubscriptionRecord;
 
 interface StreamConnectionRecord {
   socket: WebSocket;
@@ -248,7 +259,7 @@ export class TerminalRuntimeGatewayServer {
     connection: StreamConnectionRecord,
     payload: string,
   ): Promise<void> {
-    let message: TerminalGatewayStreamClientMessage;
+    let message: TerminalGatewayStreamClientMessage | WorkspaceGatewayStreamClientMessage;
 
     try {
       message = parseStreamClientMessage(payload);
@@ -263,6 +274,12 @@ export class TerminalRuntimeGatewayServer {
         return;
       case "stream_unsubscribe_session_state":
         await this.unsubscribeSessionState(connection, message.subscriptionId, message.sessionId);
+        return;
+      case "workspace_subscribe":
+        await this.subscribeWorkspace(connection, message);
+        return;
+      case "workspace_unsubscribe":
+        await this.unsubscribeWorkspace(connection, message.subscriptionId);
         return;
     }
   }
@@ -488,7 +505,7 @@ export class TerminalRuntimeGatewayServer {
     sessionId: string,
   ): Promise<void> {
     const record = connection.subscriptions.get(subscriptionId);
-    if (!record || !record.handle) {
+    if (!record || record.kind !== "legacy_session_state" || !record.handle) {
       connection.subscriptions.delete(subscriptionId);
       this.sendStream(connection.socket, {
         type: "subscription_closed",
@@ -499,6 +516,120 @@ export class TerminalRuntimeGatewayServer {
     }
 
     await record.handle.dispose();
+  }
+
+  private async subscribeWorkspace(
+    connection: StreamConnectionRecord,
+    message: Extract<WorkspaceGatewayStreamClientMessage, { type: "workspace_subscribe" }>,
+  ): Promise<void> {
+    if (connection.subscriptions.has(message.subscriptionId)) {
+      this.sendWorkspaceStream(connection.socket, {
+        type: "workspace_subscription_rejected",
+        subscriptionId: message.subscriptionId,
+        error: {
+          message: `Subscription ${message.subscriptionId} already exists`,
+          code: "duplicate_subscription",
+        },
+      });
+      return;
+    }
+
+    const record: WorkspaceStreamSubscriptionRecord = {
+      kind: "workspace",
+      sessionId: message.sessionId,
+      subscription: null,
+      pump: null,
+    };
+    connection.subscriptions.set(message.subscriptionId, record);
+
+    try {
+      const client = await this.#clientProvider.getClient();
+      const subscription = await client.openSubscription(message.sessionId, message.spec);
+      if (connection.subscriptions.get(message.subscriptionId) !== record) {
+        await subscription.close();
+        return;
+      }
+
+      record.subscription = subscription;
+      this.sendWorkspaceStream(connection.socket, {
+        type: "workspace_subscription_ack",
+        subscriptionId: message.subscriptionId,
+        meta: {
+          subscription_id: subscription.subscriptionId,
+        },
+      });
+      record.pump = this.pumpWorkspaceSubscription(connection, message.subscriptionId, record);
+    } catch (error) {
+      connection.subscriptions.delete(message.subscriptionId);
+      this.sendWorkspaceStream(connection.socket, {
+        type: "workspace_subscription_rejected",
+        subscriptionId: message.subscriptionId,
+        error: serializeError(error),
+      });
+    }
+  }
+
+  private async unsubscribeWorkspace(
+    connection: StreamConnectionRecord,
+    subscriptionId: string,
+  ): Promise<void> {
+    const record = connection.subscriptions.get(subscriptionId);
+    if (!record || record.kind !== "workspace") {
+      connection.subscriptions.delete(subscriptionId);
+      this.sendWorkspaceStream(connection.socket, {
+        type: "workspace_subscription_closed",
+        subscriptionId,
+      });
+      return;
+    }
+
+    connection.subscriptions.delete(subscriptionId);
+    await record.subscription?.close();
+    this.sendWorkspaceStream(connection.socket, {
+      type: "workspace_subscription_closed",
+      subscriptionId,
+    });
+  }
+
+  private async pumpWorkspaceSubscription(
+    connection: StreamConnectionRecord,
+    subscriptionId: string,
+    record: WorkspaceStreamSubscriptionRecord,
+  ): Promise<void> {
+    try {
+      while (connection.subscriptions.get(subscriptionId) === record && record.subscription) {
+        const event = await record.subscription.nextEvent();
+        if (!event) {
+          break;
+        }
+
+        if (connection.subscriptions.get(subscriptionId) !== record) {
+          break;
+        }
+
+        this.sendWorkspaceStream(connection.socket, {
+          type: "workspace_subscription_event",
+          subscriptionId,
+          event,
+        });
+      }
+    } catch (error) {
+      if (connection.subscriptions.get(subscriptionId) === record) {
+        this.sendWorkspaceStream(connection.socket, {
+          type: "workspace_subscription_error",
+          subscriptionId,
+          error: serializeError(error),
+        });
+      }
+    } finally {
+      if (connection.subscriptions.get(subscriptionId) === record) {
+        connection.subscriptions.delete(subscriptionId);
+        this.sendWorkspaceStream(connection.socket, {
+          type: "workspace_subscription_closed",
+          subscriptionId,
+        });
+      }
+    }
   }
 
   private registerImportHandle(
@@ -536,7 +667,13 @@ export class TerminalRuntimeGatewayServer {
 
   private async disposeStreamConnection(connection: StreamConnectionRecord): Promise<void> {
     const stops = [...connection.subscriptions.values()]
-      .map((record) => record.handle?.dispose() ?? null)
+      .map((record) => {
+        if (record.kind === "legacy_session_state") {
+          return record.handle?.dispose() ?? null;
+        }
+
+        return record.subscription?.close() ?? null;
+      })
       .filter(Boolean);
     connection.subscriptions.clear();
     await Promise.allSettled(stops);
@@ -546,13 +683,25 @@ export class TerminalRuntimeGatewayServer {
     this.send(socket, message);
   }
 
-  private sendStream(socket: WebSocket, message: TerminalGatewayStreamServerMessage): void {
+  private sendStream(
+    socket: WebSocket,
+    message: TerminalGatewayStreamServerMessage,
+  ): void {
+    this.send(socket, message);
+  }
+
+  private sendWorkspaceStream(
+    socket: WebSocket,
+    message: WorkspaceGatewayStreamServerMessage,
+  ): void {
     this.send(socket, message);
   }
 
   private send(
     socket: WebSocket,
-    message: GatewayControlResponseMessage | TerminalGatewayStreamServerMessage,
+    message: GatewayControlResponseMessage
+      | TerminalGatewayStreamServerMessage
+      | WorkspaceGatewayStreamServerMessage,
   ): void {
     if (socket.readyState !== WebSocket.OPEN) {
       return;
@@ -612,7 +761,9 @@ function parseControlClientMessage(payload: string): GatewayControlRequestMessag
   };
 }
 
-function parseStreamClientMessage(payload: string): TerminalGatewayStreamClientMessage {
+function parseStreamClientMessage(
+  payload: string,
+): TerminalGatewayStreamClientMessage | WorkspaceGatewayStreamClientMessage {
   const parsed = decodeGatewayPayload(payload);
   if (!isGatewayPayloadRecord(parsed)) {
     throw new Error("Gateway stream message must be an object");
@@ -626,22 +777,49 @@ function parseStreamClientMessage(payload: string): TerminalGatewayStreamClientM
     throw new Error("Gateway stream subscriptionId must be a non-empty string");
   }
 
-  if (typeof parsed.sessionId !== "string" || parsed.sessionId.length === 0) {
-    throw new Error("Gateway stream message requires a non-empty sessionId");
-  }
-
   if (
-    parsed.type !== "stream_subscribe_session_state"
-    && parsed.type !== "stream_unsubscribe_session_state"
+    parsed.type === "stream_subscribe_session_state"
+    || parsed.type === "stream_unsubscribe_session_state"
   ) {
-    throw new Error("Unsupported gateway stream message");
+    if (typeof parsed.sessionId !== "string" || parsed.sessionId.length === 0) {
+      throw new Error("Gateway stream message requires a non-empty sessionId");
+    }
+
+    return {
+      type: parsed.type,
+      subscriptionId: parsed.subscriptionId,
+      sessionId: parsed.sessionId,
+    };
   }
 
-  return {
-    type: parsed.type,
-    subscriptionId: parsed.subscriptionId,
-    sessionId: parsed.sessionId,
-  };
+  if (parsed.type === "workspace_subscribe") {
+    if (typeof parsed.sessionId !== "string" || parsed.sessionId.length === 0) {
+      throw new Error("Workspace stream subscribe requires a non-empty sessionId");
+    }
+
+    if (!isGatewayPayloadRecord(parsed.spec)) {
+      throw new Error("Workspace stream subscribe requires a subscription spec");
+    }
+
+    return {
+      type: "workspace_subscribe",
+      subscriptionId: parsed.subscriptionId,
+      sessionId: parsed.sessionId,
+      spec: parsed.spec as Extract<
+        WorkspaceGatewayStreamClientMessage,
+        { type: "workspace_subscribe" }
+      >["spec"],
+    };
+  }
+
+  if (parsed.type === "workspace_unsubscribe") {
+    return {
+      type: "workspace_unsubscribe",
+      subscriptionId: parsed.subscriptionId,
+    };
+  }
+
+  throw new Error("Unsupported gateway stream message");
 }
 
 function serializeError(error: unknown): TerminalGatewayErrorEnvelope {
