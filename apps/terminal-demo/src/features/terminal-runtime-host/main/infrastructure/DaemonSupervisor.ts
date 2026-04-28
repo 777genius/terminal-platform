@@ -126,7 +126,7 @@ function resolveDaemonBinaryPath(): string {
 
 function findDaemonProcesses(runtimeSlug: string): number[] {
   if (process.platform === "win32") {
-    return [];
+    return findWindowsDaemonProcesses(runtimeSlug);
   }
 
   const result = spawnSync("ps", ["-ax", "-o", "pid=,command="], {
@@ -156,15 +156,74 @@ function findDaemonProcesses(runtimeSlug: string): number[] {
         return null;
       }
 
-      if (
-        !command.includes("terminal-daemon")
-        || !command.includes(`--runtime-slug ${runtimeSlug}`)
-        || pid === process.pid
-      ) {
+      if (!isDaemonCommandForRuntime(command, runtimeSlug) || pid === process.pid) {
         return null;
       }
 
       return pid;
     })
     .filter((pid): pid is number => pid != null);
+}
+
+function findWindowsDaemonProcesses(runtimeSlug: string): number[] {
+  const result = spawnSync(windowsPowerShellPath(), [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    [
+      "$ErrorActionPreference = 'SilentlyContinue'",
+      "$items = Get-CimInstance Win32_Process -Filter \"Name = 'terminal-daemon.exe'\"",
+      "$items | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress",
+    ].join("; "),
+  ], {
+    cwd: resolveRepoRoot(),
+    env: process.env,
+    encoding: "utf8",
+  });
+
+  if (result.status !== 0 || !result.stdout.trim()) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout) as
+      | { ProcessId?: number; CommandLine?: string }
+      | Array<{ ProcessId?: number; CommandLine?: string }>;
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    return rows
+      .map((row) => {
+        const pid = row.ProcessId;
+        const command = row.CommandLine;
+        if (!Number.isInteger(pid) || !command) {
+          return null;
+        }
+
+        if (!isDaemonCommandForRuntime(command, runtimeSlug) || pid === process.pid) {
+          return null;
+        }
+
+        return pid;
+      })
+      .filter((pid): pid is number => pid != null);
+  } catch {
+    return [];
+  }
+}
+
+function isDaemonCommandForRuntime(command: string, runtimeSlug: string): boolean {
+  const runtimePattern = new RegExp(
+    `--runtime-slug(?:=|\\s+["']?)${escapeRegExp(runtimeSlug)}(?:["']?(?:\\s|$))`,
+    "i",
+  );
+  return /terminal-daemon(?:\.exe)?/i.test(command) && runtimePattern.test(command);
+}
+
+function windowsPowerShellPath(): string {
+  const windowsRoot = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
+  return path.join(windowsRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

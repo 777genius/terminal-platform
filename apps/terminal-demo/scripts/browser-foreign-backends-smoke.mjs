@@ -26,6 +26,8 @@ const viteCliPath = path.join(appRoot, "node_modules", "vite", "bin", "vite.js")
 const rendererPort = process.env.TERMINAL_DEMO_FOREIGN_SMOKE_RENDERER_PORT ?? "4274";
 const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const cdpPort = process.env.TERMINAL_DEMO_FOREIGN_SMOKE_CDP_PORT ?? "9227";
+const runtimeSlug = process.env.TERMINAL_DEMO_FOREIGN_SMOKE_RUNTIME_SLUG
+  ?? `terminal-demo-foreign-browser-smoke-${process.pid}-${Date.now().toString(16)}`;
 const sessionStorePath = path.join(
   os.tmpdir(),
   `terminal-demo-foreign-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`,
@@ -449,6 +451,7 @@ async function startBrowserHost(rendererUrlValue, options) {
         TERMINAL_DEMO_AUTO_START_SESSION: options.autoStartSession,
         TERMINAL_DEMO_RENDERER_URL: rendererUrlValue,
         TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE: "dist-only",
+        TERMINAL_DEMO_RUNTIME_SLUG: runtimeSlug,
         TERMINAL_DEMO_SESSION_STORE_PATH: options.sessionStorePath,
       },
       stdio: ["ignore", "pipe", "pipe"],

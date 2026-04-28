@@ -25,6 +25,8 @@ const viteCliPath = path.join(appRoot, "node_modules", "vite", "bin", "vite.js")
 const rendererPort = process.env.TERMINAL_DEMO_SMOKE_RENDERER_PORT ?? "4273";
 const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const cdpPort = process.env.TERMINAL_DEMO_SMOKE_CDP_PORT ?? "9226";
+const runtimeSlugPrefix = process.env.TERMINAL_DEMO_SMOKE_RUNTIME_SLUG
+  ?? `terminal-demo-browser-smoke-${process.pid}-${Date.now().toString(16)}`;
 const screenshotPath = path.join(os.tmpdir(), `terminal-demo-browser-smoke-${Date.now()}.png`);
 const sessionStorePath = path.join(os.tmpdir(), `terminal-demo-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`);
 const autoStartSessionStorePath = path.join(
@@ -98,6 +100,7 @@ async function main() {
 
     const autoStartBrowserUrl = await startBrowserHost(rendererUrl, {
       autoStartSession: "1",
+      runtimeSlug: `${runtimeSlugPrefix}-auto`,
       sessionStorePath: autoStartSessionStorePath,
     });
     const autoStartDefaultShellProgram =
@@ -128,6 +131,7 @@ async function main() {
 
     const browserUrl = await startBrowserHost(rendererUrl, {
       autoStartSession: "0",
+      runtimeSlug: `${runtimeSlugPrefix}-explicit`,
       sessionStorePath,
     });
     const result = await runSmokeScenario(browserUrl);
@@ -3427,6 +3431,7 @@ async function startBrowserHost(rendererUrlValue, options) {
         TERMINAL_DEMO_AUTO_START_SESSION: options.autoStartSession,
         TERMINAL_DEMO_RENDERER_URL: rendererUrlValue,
         TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE: "dist-only",
+        TERMINAL_DEMO_RUNTIME_SLUG: options.runtimeSlug,
         TERMINAL_DEMO_SESSION_STORE_PATH: options.sessionStorePath,
       },
       stdio: ["ignore", "pipe", "pipe"],
