@@ -20,8 +20,13 @@ const rendererUrl = process.env.TERMINAL_DEMO_RENDERER_URL ?? "http://127.0.0.1:
 const bootstrapScope = process.env.TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE ?? "public-and-dist";
 const sessionStorePath = process.env.TERMINAL_DEMO_SESSION_STORE_PATH ?? null;
 const demoAutoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION === "1";
-const demoDefaultShellProgram = resolveDemoDefaultShellProgram();
-const demoDefaultWorkingDirectory = resolveDemoDefaultWorkingDirectory({ cwd: repoRoot });
+const demoDefaultShellProgram = resolveDemoDefaultShellProgram({
+  validateWindowsPaths: true,
+});
+const demoDefaultWorkingDirectory = resolveDemoDefaultWorkingDirectory({
+  cwd: repoRoot,
+  validateExists: true,
+});
 
 let hostHandle: TerminalRuntimeHostHandle | null = null;
 let shuttingDown = false;

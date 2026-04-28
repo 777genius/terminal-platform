@@ -17,8 +17,13 @@ const repoRoot = path.resolve(appRoot, "../..");
 const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
 const sessionStorePath = process.env.TERMINAL_DEMO_SESSION_STORE_PATH ?? null;
 const demoAutoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION === "1";
-const demoDefaultShellProgram = resolveDemoDefaultShellProgram();
-const demoDefaultWorkingDirectory = resolveDemoDefaultWorkingDirectory({ cwd: repoRoot });
+const demoDefaultShellProgram = resolveDemoDefaultShellProgram({
+  validateWindowsPaths: true,
+});
+const demoDefaultWorkingDirectory = resolveDemoDefaultWorkingDirectory({
+  cwd: repoRoot,
+  validateExists: true,
+});
 let hostHandle: TerminalRuntimeHostHandle | null = null;
 
 async function bootstrap(): Promise<void> {
