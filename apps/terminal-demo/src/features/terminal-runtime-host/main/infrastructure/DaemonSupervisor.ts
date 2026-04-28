@@ -1,4 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
 import { loadTerminalPlatformSdk } from "./terminal-platform-sdk.js";
@@ -15,6 +17,7 @@ export class DaemonSupervisor {
   readonly #sessionStorePath: string | null;
   #child: ChildProcess | null = null;
   #ownsProcess = false;
+  #runtimeDaemonDir: string | null = null;
 
   constructor(options: DaemonSupervisorOptions) {
     this.#runtimeSlug = options.runtimeSlug;
@@ -31,9 +34,14 @@ export class DaemonSupervisor {
       this.stopExistingDaemonProcesses();
     }
 
-    this.spawnDaemon();
+    await this.spawnDaemon();
     this.#ownsProcess = true;
-    await this.waitUntilReady();
+    try {
+      await this.waitUntilReady();
+    } catch (error) {
+      await this.dispose();
+      throw error;
+    }
   }
 
   async dispose(): Promise<void> {
@@ -41,12 +49,16 @@ export class DaemonSupervisor {
       return;
     }
 
-    if (this.#child.exitCode === null && !this.#child.killed) {
-      this.#child.kill("SIGTERM");
+    const child = this.#child;
+    if (child.exitCode === null && !child.killed) {
+      child.kill("SIGTERM");
     }
 
-    await once(this.#child, "exit").catch(() => undefined);
+    if (child.exitCode === null) {
+      await once(child, "exit").catch(() => undefined);
+    }
     this.#child = null;
+    await this.cleanupRuntimeDaemonDir();
   }
 
   private async isReady(): Promise<boolean> {
@@ -60,14 +72,15 @@ export class DaemonSupervisor {
     }
   }
 
-  private spawnDaemon(): void {
-    const binaryPath = resolveDaemonBinaryPath();
+  private async spawnDaemon(): Promise<void> {
+    const runtimeDaemon = await resolveDaemonRuntimeBinary();
+    this.#runtimeDaemonDir = runtimeDaemon.runtimeDir;
     const args = ["--runtime-slug", this.#runtimeSlug];
     if (this.#sessionStorePath) {
       args.push("--session-store", this.#sessionStorePath);
     }
 
-    const child = spawn(binaryPath, args, {
+    const child = spawn(runtimeDaemon.binaryPath, args, {
       cwd: resolveRepoRoot(),
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -110,6 +123,16 @@ export class DaemonSupervisor {
 
     throw new Error("Timed out waiting for terminal-daemon to become ready");
   }
+
+  private async cleanupRuntimeDaemonDir(): Promise<void> {
+    if (!this.#runtimeDaemonDir) {
+      return;
+    }
+
+    const dir = this.#runtimeDaemonDir;
+    this.#runtimeDaemonDir = null;
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 function resolveRepoRoot(): string {
@@ -122,6 +145,20 @@ function resolveDaemonBinaryPath(): string {
     : "terminal-daemon";
 
   return path.resolve(resolveRepoRoot(), "target", "debug", filename);
+}
+
+async function resolveDaemonRuntimeBinary(): Promise<{ binaryPath: string; runtimeDir: string | null }> {
+  const binaryPath = resolveDaemonBinaryPath();
+  if (process.platform !== "win32" || process.env.TERMINAL_DEMO_DAEMON_RUNTIME_COPY === "0") {
+    return { binaryPath, runtimeDir: null };
+  }
+
+  const runtimeDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), `terminal-demo-daemon-runtime-${process.pid}-`),
+  );
+  const runtimeBinaryPath = path.join(runtimeDir, path.basename(binaryPath));
+  await fs.copyFile(binaryPath, runtimeBinaryPath);
+  return { binaryPath: runtimeBinaryPath, runtimeDir };
 }
 
 function findDaemonProcesses(runtimeSlug: string): number[] {
