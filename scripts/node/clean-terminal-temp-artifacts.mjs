@@ -76,7 +76,7 @@ export async function cleanTerminalTempArtifacts(options = {}) {
   const {
     apply = false,
     checkOpenFiles = true,
-    openFileChecker = checkOpenFilesWithLsof,
+    openFileChecker = checkOpenFilesWithPlatformDefault,
   } = options;
   const artifacts = await collectTerminalTempArtifacts(options);
   const results = [];
@@ -102,7 +102,7 @@ export async function cleanTerminalTempArtifacts(options = {}) {
         results.push({
           ...artifact,
           error: openFiles.error,
-          reason: "lsof-error",
+          reason: openFiles.reason ?? "open-file-check-error",
           status: "skipped",
         });
         continue;
@@ -144,7 +144,7 @@ export function checkOpenFilesWithLsof(artifact) {
   });
 
   if (result.error) {
-    return { error: result.error.message, open: false };
+    return { error: result.error.message, reason: "lsof-error", open: false };
   }
 
   if (result.status === 0) {
@@ -157,8 +157,107 @@ export function checkOpenFilesWithLsof(artifact) {
 
   return {
     error: result.stderr.trim() || `lsof exited with ${result.status}`,
+    reason: "lsof-error",
     open: false,
   };
+}
+
+export function checkOpenFilesWithPlatformDefault(artifact) {
+  if (process.platform === "win32") {
+    return checkOpenFilesWithWindowsProcesses(artifact);
+  }
+
+  return checkOpenFilesWithLsof(artifact);
+}
+
+let windowsOpenPathSnapshot = null;
+
+export function checkOpenFilesWithWindowsProcesses(artifact) {
+  const snapshot = windowsOpenPaths();
+  if (snapshot.error) {
+    return {
+      error: snapshot.error,
+      reason: "windows-open-file-check-error",
+      open: false,
+    };
+  }
+
+  const artifactPath = normalizeWindowsPath(artifact.path);
+  const artifactDirectoryPrefix = `${artifactPath}${path.sep.toLowerCase()}`;
+  const open = snapshot.paths.some((openPath) => {
+    if (artifact.kind === "directory") {
+      return openPath === artifactPath || openPath.includes(artifactDirectoryPrefix);
+    }
+
+    return openPath.includes(artifactPath);
+  });
+
+  return { open };
+}
+
+function windowsOpenPaths() {
+  if (windowsOpenPathSnapshot) {
+    return windowsOpenPathSnapshot;
+  }
+
+  const result = spawnSync(windowsPowerShellPath(), [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    [
+      "$ErrorActionPreference = 'SilentlyContinue'",
+      "$items = New-Object 'System.Collections.Generic.List[string]'",
+      "Get-CimInstance Win32_Process | ForEach-Object { if ($_.CommandLine) { $items.Add($_.CommandLine) } }",
+      "Get-Process | ForEach-Object { try { $_.Modules | ForEach-Object { if ($_.FileName) { $items.Add($_.FileName) } } } catch {} }",
+      "$items | ConvertTo-Json -Compress",
+    ].join("; "),
+  ], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+
+  if (result.error) {
+    windowsOpenPathSnapshot = {
+      error: result.error.message,
+      paths: [],
+    };
+    return windowsOpenPathSnapshot;
+  }
+
+  if (result.status !== 0) {
+    windowsOpenPathSnapshot = {
+      error: result.stderr.trim() || `PowerShell exited with ${result.status}`,
+      paths: [],
+    };
+    return windowsOpenPathSnapshot;
+  }
+
+  try {
+    const parsed = result.stdout.trim() ? JSON.parse(result.stdout) : [];
+    const values = Array.isArray(parsed) ? parsed : [parsed];
+    windowsOpenPathSnapshot = {
+      paths: values
+        .filter((value) => typeof value === "string")
+        .map(normalizeWindowsPath),
+    };
+  } catch (error) {
+    windowsOpenPathSnapshot = {
+      error: error instanceof Error ? error.message : String(error),
+      paths: [],
+    };
+  }
+
+  return windowsOpenPathSnapshot;
+}
+
+function normalizeWindowsPath(value) {
+  return String(value).replace(/\//gu, "\\").toLowerCase();
+}
+
+function windowsPowerShellPath() {
+  const windowsRoot = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
+  return path.join(windowsRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
 function kindFromStat(stat) {
@@ -187,7 +286,7 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === "--no-lsof") {
+    if (arg === "--no-lsof" || arg === "--no-open-file-check") {
       options.checkOpenFiles = false;
       continue;
     }
@@ -227,10 +326,10 @@ function readFlagValue(argv, index, flag) {
 }
 
 function printHelp() {
-  process.stdout.write(`Usage: node scripts/node/clean-terminal-temp-artifacts.mjs [--apply] [--tmp-dir PATH] [--min-age-minutes N] [--no-lsof]
+  process.stdout.write(`Usage: node scripts/node/clean-terminal-temp-artifacts.mjs [--apply] [--tmp-dir PATH] [--min-age-minutes N] [--no-open-file-check]
 
 Safely cleans known Terminal Platform temp artifacts from one temp directory.
-Default mode is dry-run. Deletion checks open files with lsof unless --no-lsof is provided.
+Default mode is dry-run. Deletion checks open files with lsof on Unix-like systems and process/module paths on Windows unless --no-open-file-check is provided.
 `);
 }
 
