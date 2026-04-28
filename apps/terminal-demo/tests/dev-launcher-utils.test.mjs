@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 
 import {
+  buildBrowserBootstrapConfigPaths,
   buildWindowsTaskkillArgs,
   buildViteDevServerArgs,
   resolveGracefulStopSignal,
@@ -19,6 +21,20 @@ test("dev launcher keeps the renderer on the requested port", () => {
       "--port",
       "5173",
       "--strictPort",
+    ],
+  );
+});
+
+test("dev launcher resolves browser bootstrap cleanup paths", () => {
+  const appRoot = process.platform === "win32"
+    ? "C:\\Users\\User\\PROJECT_IT\\terminal-platform\\apps\\terminal-demo"
+    : "/workspace/terminal-platform/apps/terminal-demo";
+
+  assert.deepEqual(
+    buildBrowserBootstrapConfigPaths(appRoot),
+    [
+      path.join(appRoot, "public", "terminal-runtime-bootstrap.json"),
+      path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json"),
     ],
   );
 });

@@ -7,7 +7,13 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { runSync, spawnViteDevServer, stopProcess, waitForServer } from "./dev-launcher-utils.mjs";
+import {
+  buildBrowserBootstrapConfigPaths,
+  runSync,
+  spawnViteDevServer,
+  stopProcess,
+  waitForServer,
+} from "./dev-launcher-utils.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -15,6 +21,7 @@ const rendererPort = process.env.TERMINAL_DEMO_RENDERER_PORT ?? "5173";
 const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const sessionStore = resolveBrowserSessionStore();
 const autoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION ?? "1";
+const browserBootstrapPaths = buildBrowserBootstrapConfigPaths(appRoot);
 
 runSync("npm", ["run", "stage:sdk"], appRoot);
 runSync("npm", ["run", "build:host"], appRoot);
@@ -34,6 +41,7 @@ const shutdown = async (exitCode = 0) => {
     stopProcess(browserHost),
     stopProcess(vite),
   ]);
+  cleanupBrowserBootstrapConfig();
   cleanupBrowserSessionStore(sessionStore);
   process.exit(exitCode);
 };
@@ -44,7 +52,10 @@ const requestShutdown = (exitCode = 0) => {
 
 process.on("SIGINT", () => requestShutdown(0));
 process.on("SIGTERM", () => requestShutdown(0));
-process.on("exit", () => cleanupBrowserSessionStore(sessionStore));
+process.on("exit", () => {
+  cleanupBrowserBootstrapConfig();
+  cleanupBrowserSessionStore(sessionStore);
+});
 
 await waitForServer(rendererUrl, {
   child: vite,
@@ -123,6 +134,27 @@ function cleanupBrowserSessionStore(sessionStoreInfo) {
       if (process.platform === "win32" && ["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
         process.stderr.write(
           `[terminal-demo-browser] skipped locked session store cleanup ${sessionStoreInfo.path}${suffix}: ${error.message}\n`,
+        );
+        continue;
+      }
+
+      throw error;
+    }
+  }
+}
+
+function cleanupBrowserBootstrapConfig() {
+  for (const bootstrapPath of browserBootstrapPaths) {
+    try {
+      fs.rmSync(bootstrapPath, {
+        force: true,
+        maxRetries: process.platform === "win32" ? 8 : 0,
+        retryDelay: process.platform === "win32" ? 250 : 0,
+      });
+    } catch (error) {
+      if (process.platform === "win32" && ["EBUSY", "EPERM"].includes(error?.code)) {
+        process.stderr.write(
+          `[terminal-demo-browser] skipped locked bootstrap cleanup ${bootstrapPath}: ${error.message}\n`,
         );
         continue;
       }

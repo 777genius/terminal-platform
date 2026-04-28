@@ -49,6 +49,13 @@ export function buildViteDevServerArgs(viteCliPath, rendererPort) {
   ];
 }
 
+export function buildBrowserBootstrapConfigPaths(appRoot) {
+  return [
+    path.join(appRoot, "public", "terminal-runtime-bootstrap.json"),
+    path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json"),
+  ];
+}
+
 export function spawnElectronPreview(appRoot, rendererUrl) {
   const electronCliPath = path.join(appRoot, "node_modules", "electron", "cli.js");
   const child = spawn(process.execPath, [electronCliPath, "./dist/host/main/index.js"], {
