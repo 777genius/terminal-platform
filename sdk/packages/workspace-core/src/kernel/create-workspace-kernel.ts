@@ -40,6 +40,9 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
     ...(options.commandHistoryLimit === undefined
       ? {}
       : { commandHistoryLimit: options.commandHistoryLimit }),
+    ...(options.initialCommandHistoryEntries === undefined
+      ? {}
+      : { commandHistoryEntries: options.initialCommandHistoryEntries }),
   }));
   const scope = new ResourceScope();
   const telemetry = options.telemetry ?? noopTelemetrySink;

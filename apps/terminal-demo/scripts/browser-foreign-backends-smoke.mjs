@@ -34,6 +34,7 @@ const sessionStorePath = path.join(
   `terminal-demo-foreign-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`,
 );
 const browserBootstrapPath = path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json");
+const commandHistoryStorageKey = "terminal-platform-demo.command-history";
 const zellijMinimum = [0, 44, 0];
 const foreignBackends = process.platform === "win32" ? ["zellij"] : ["tmux", "zellij"];
 
@@ -124,6 +125,10 @@ async function main() {
         || !imported.imported
         || imported.attachedBackend !== backend
         || !imported.commandSent
+        || !imported.commandHistoryPersisted
+        || !imported.historyAfterReload?.persisted
+        || imported.historyAfterReload?.attachedBackend !== backend
+        || imported.historyAfterReload?.historyChipCount < 1
         || !imported.screenText?.includes(imported.marker)
       ) {
         throw new Error(`Foreign backend ${backend} did not import through UI correctly: ${JSON.stringify(imported)}`);
@@ -421,6 +426,7 @@ async function importBackendViaUi(send, backend, title, marker) {
     button.click();
     return true;
   })()`);
+  const submittedCommand = `echo ${marker}`;
 
   await waitForBrowser(send, `${backend} screen marker`, `(() => {
     const state = window.terminalDemoDebug?.getState?.();
@@ -429,6 +435,20 @@ async function importBackendViaUi(send, backend, title, marker) {
       .join('\\n') ?? '';
     return screenText.includes(${JSON.stringify(marker)});
   })()`);
+
+  await waitForBrowser(send, `${backend} command history persisted before page reload`, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const storedCommandHistory = (() => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+    return (state?.commandHistory?.entries ?? []).includes(${JSON.stringify(submittedCommand)})
+      && storedCommandHistory.includes(${JSON.stringify(submittedCommand)});
+  })()`, 10_000);
 
   const afterCommand = await evaluate(send, `(() => {
     const state = window.terminalDemoDebug?.getState?.();
@@ -442,10 +462,28 @@ async function importBackendViaUi(send, backend, title, marker) {
       ) ?? false,
       attachedBackend: state?.attachedSession?.session?.route?.backend ?? null,
       attachedTitle: state?.attachedSession?.session?.title ?? null,
+      commandHistoryLatest: state?.commandHistory?.entries?.at(-1) ?? null,
+      commandHistoryPersisted: (state?.commandHistory?.entries ?? []).includes(${JSON.stringify(submittedCommand)}),
+      storedCommandHistory: (() => {
+        try {
+          const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })(),
       screenSource: state?.attachedSession?.focused_screen?.source ?? null,
       screenText,
     };
   })()`);
+  afterCommand.storedCommandHistoryPersisted = afterCommand.storedCommandHistory.includes(submittedCommand);
+  afterCommand.commandHistoryPersisted = afterCommand.commandHistoryPersisted
+    && afterCommand.storedCommandHistoryPersisted;
+  const historyAfterReload = await verifyCommandHistorySurvivesPageReload(send, {
+    backend,
+    submittedCommand,
+    title,
+  });
   const muxActions = backend === "zellij"
     ? await exerciseZellijMuxActions(send, title)
     : null;
@@ -455,8 +493,83 @@ async function importBackendViaUi(send, backend, title, marker) {
     commandSent,
     importClicked,
     marker,
+    submittedCommand,
+    historyAfterReload,
     muxActions,
   };
+}
+
+async function verifyCommandHistorySurvivesPageReload(send, expected) {
+  await send("Page.reload", { ignoreCache: true });
+  await sleep(1200);
+  await waitForBrowser(send, `${expected.backend} command history restored after page reload`, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const session = state?.catalog?.sessions?.find((candidate) =>
+      candidate.route.backend === ${JSON.stringify(expected.backend)}
+      && candidate.title === ${JSON.stringify(expected.title)}
+    ) ?? null;
+    const storedCommandHistory = (() => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+    return state?.connection?.state === 'ready'
+      && Boolean(session)
+      && (state?.commandHistory?.entries ?? []).includes(${JSON.stringify(expected.submittedCommand)})
+      && storedCommandHistory.includes(${JSON.stringify(expected.submittedCommand)});
+  })()`, 45_000);
+
+  await evaluate(send, `(async () => {
+    const debug = window.terminalDemoDebug;
+    const state = debug?.getState?.();
+    const session = state?.catalog?.sessions?.find((candidate) =>
+      candidate.route.backend === ${JSON.stringify(expected.backend)}
+      && candidate.title === ${JSON.stringify(expected.title)}
+    ) ?? null;
+    if (!session) {
+      return false;
+    }
+    if (state?.attachedSession?.session?.session_id !== session.session_id) {
+      debug.controller.commands.setActiveSession(session.session_id);
+      await debug.controller.commands.attachSession(session.session_id);
+    }
+    return true;
+  })()`);
+
+  await waitForBrowser(send, `${expected.backend} reattached after page reload`, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    return state?.attachedSession?.session?.route?.backend === ${JSON.stringify(expected.backend)}
+      && state?.attachedSession?.session?.title === ${JSON.stringify(expected.title)};
+  })()`, 45_000);
+
+  return evaluate(send, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+    const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+    const historyEntries = [...(commandRoot?.querySelectorAll('[data-testid="tp-command-history-entry"]') ?? [])];
+    const storedCommandHistory = (() => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+    const commandHistoryEntries = state?.commandHistory?.entries ?? [];
+    return {
+      attachedBackend: state?.attachedSession?.session?.route?.backend ?? null,
+      attachedTitle: state?.attachedSession?.session?.title ?? null,
+      commandHistoryEntries,
+      commandHistoryLatest: commandHistoryEntries.at(-1) ?? null,
+      historyChipCount: historyEntries.length,
+      persisted: commandHistoryEntries.includes(${JSON.stringify(expected.submittedCommand)})
+        && storedCommandHistory.includes(${JSON.stringify(expected.submittedCommand)}),
+      storedCommandHistory,
+    };
+  })()`);
 }
 
 async function exerciseZellijMuxActions(send, title) {

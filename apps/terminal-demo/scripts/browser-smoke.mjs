@@ -42,6 +42,7 @@ const browserBootstrapPath = path.join(appRoot, "dist", "renderer", "terminal-ru
 const themeStorageKey = "terminal-platform-demo.theme";
 const fontScaleStorageKey = "terminal-platform-demo.terminal-font-scale";
 const lineWrapStorageKey = "terminal-platform-demo.terminal-line-wrap";
+const commandHistoryStorageKey = "terminal-platform-demo.command-history";
 const primarySmokeCommand = process.platform === "win32"
   ? "echo browser-smoke-ok"
   : "printf \"browser-smoke-ok\\n\"";
@@ -167,6 +168,14 @@ async function main() {
     if (
       restartRecoveryResult.issues.length > 0
       || !restartRecoveryResult.recovered
+      || !restartRecoveryResult.historyBeforeRestartCommandSent
+      || !restartRecoveryResult.historyBeforeRestartOutputSeen
+      || !restartRecoveryResult.historyBeforeRestartPersisted
+      || !restartRecoveryResult.historyRecoveredState?.historyIncludesBeforeRestart
+      || !restartRecoveryResult.historyRecoveredState?.storedHistoryIncludesBeforeRestart
+      || !restartRecoveryResult.historyAfterRestartIncludesBeforeRestart
+      || !restartRecoveryResult.postRestartHistoryLatest?.includes("browser-restart-ok")
+      || !restartRecoveryResult.postRestartHistoryStored
       || !restartRecoveryResult.commandSent
       || !restartRecoveryResult.containsMarker
       || restartRecoveryResult.initialControlPlaneUrl === restartRecoveryResult.restartedControlPlaneUrl
@@ -742,6 +751,7 @@ async function main() {
       || !result.afterCommand.commandCursorAtEnd
       || result.afterCommand.commandHistoryCount < 1
       || !result.afterCommand.commandHistoryLatest?.includes("browser-smoke-ok")
+      || !result.afterCommand.storedCommandHistoryIncludesPrimary
       || !isCompactCommandHistoryBadge(result.afterCommand.historyBadgeText)
       || result.afterCommand.historyChipWhiteSpaces.some((value) => value !== "nowrap")
       || Math.max(0, ...result.afterCommand.historyChipHeights) > 38
@@ -849,6 +859,7 @@ async function main() {
       || result.afterCommandHistoryClear.afterFirstCount !== result.afterCommandHistoryClear.beforeCount
       || result.afterCommandHistoryClear.clearedEventsAfterFirst !== 0
       || result.afterCommandHistoryClear.afterCount !== 0
+      || result.afterCommandHistoryClear.storedCount !== 0
       || result.afterCommandHistoryClear.clearedEvents !== 1
       || result.afterCommandHistoryClear.clearButtonDisabled !== true
       || result.afterCommandHistoryClear.finalConfirming !== false
@@ -948,6 +959,11 @@ async function runSmokeScenario(browserUrl) {
 
     await sleep(3000);
     await installBrowserSmokeHelpers(send);
+    await evaluate(send, `(() => {
+      window.localStorage.removeItem(${JSON.stringify(commandHistoryStorageKey)});
+      window.terminalDemoDebug?.controller?.commands?.clearCommandHistory?.();
+      return true;
+    })()`);
 
     const before = await evaluate(send, `(() => ({
       bodyText: document.body.innerText,
@@ -2527,10 +2543,20 @@ async function runSmokeScenario(browserUrl) {
         historyChipIds: historyEntries.map((button) => button.getAttribute('data-command-history-entry') ?? ''),
         historyChipHistoryIndexes: historyEntries.map((button) => button.getAttribute('data-history-index') ?? ''),
         historyChipAriaLabels: historyEntries.map((button) => button.getAttribute('aria-label') ?? ''),
+        storedCommandHistory: (() => {
+          try {
+            const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })(),
         terminalScreenText,
         containsCommandOutput: /browser-smoke-ok/i.test(terminalScreenText),
       };
     })()`);
+    afterCommand.storedCommandHistoryIncludesPrimary = afterCommand.storedCommandHistory
+      .some((entry) => typeof entry === "string" && entry.includes("browser-smoke-ok"));
     const replayInitialSequence = afterCommand.focusedSequence;
 
     await send("Emulation.setDeviceMetricsOverride", {
@@ -3162,11 +3188,25 @@ async function runSmokeScenario(browserUrl) {
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const finalButton = commandRoot.querySelector('[data-testid="tp-clear-command-history"]');
       const state = window.terminalDemoDebug?.getState?.();
+      let storedCommandHistory = [];
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+          const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+          storedCommandHistory = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          storedCommandHistory = [];
+        }
+        if (storedCommandHistory.length === 0) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       return {
         clicked: true,
         beforeCount,
         afterFirstCount,
         afterCount: state?.commandHistory?.entries?.length ?? 0,
+        storedCount: storedCommandHistory.length,
         clearedEvents,
         clearedEventsAfterFirst,
         firstClickArmed,
@@ -3423,6 +3463,10 @@ async function runAutoStartSmokeScenario(browserUrl, options = {}) {
       mobile: false,
     });
     await installBrowserSmokeHelpers(send);
+    await evaluate(send, `(() => {
+      window.localStorage.removeItem(${JSON.stringify(commandHistoryStorageKey)});
+      return true;
+    })()`);
 
     const result = await evaluate(send, `(async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -3545,6 +3589,63 @@ async function runAutoStartRestartRecoveryScenario(browserUrl, options) {
         && params.get('sessionStreamUrl') === ${JSON.stringify(options.initialSessionStreamUrl)};
     })()`);
 
+    const historyBeforeRestartMarker = `browser-restart-history-${Date.now()}`;
+    const historyBeforeRestartCommand = process.platform === "win32"
+      ? `echo ${historyBeforeRestartMarker}`
+      : `printf "${historyBeforeRestartMarker}\\n"`;
+    const historyBeforeRestartCommandSent = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const button = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
+      if (!textarea || !button) {
+        return false;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+      descriptor?.set?.call(textarea, ${JSON.stringify(historyBeforeRestartCommand)});
+      textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (button.disabled) {
+        return false;
+      }
+      button.click();
+      return true;
+    })()`);
+    const historyBeforeRestart = historyBeforeRestartCommandSent
+      ? await waitForBrowserValue(send, "command history persisted before browser host restart", `(() => {
+          const state = window.terminalDemoDebug?.getState?.();
+          const terminalScreenText = state?.attachedSession?.focused_screen?.surface?.lines
+            ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+            : '';
+          const storedCommandHistory = (() => {
+            try {
+              const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          })();
+          const commandHistoryEntries = state?.commandHistory?.entries ?? [];
+          return {
+            commandHistoryEntries,
+            outputSeen: terminalScreenText.includes(${JSON.stringify(historyBeforeRestartMarker)}),
+            storedCommandHistory,
+            storedIncludesCommand: storedCommandHistory.includes(${JSON.stringify(historyBeforeRestartCommand)}),
+            snapshotIncludesCommand: commandHistoryEntries.includes(${JSON.stringify(historyBeforeRestartCommand)}),
+          };
+        })()`, (value) => (
+          value.outputSeen
+          && value.snapshotIncludesCommand
+          && value.storedIncludesCommand
+        ), 10_000)
+      : {
+          commandHistoryEntries: [],
+          outputSeen: false,
+          storedCommandHistory: [],
+          storedIncludesCommand: false,
+          snapshotIncludesCommand: false,
+        };
+
     await stopProcess(browserHostProcess);
     browserHostProcess = null;
     await removeBrowserBootstrapConfig();
@@ -3576,6 +3677,17 @@ async function runAutoStartRestartRecoveryScenario(browserUrl, options) {
         hasReady: state?.connection?.state === 'ready',
         sessionCount: state?.catalog?.sessions?.length ?? 0,
         sessionStreamUrl: params.get('sessionStreamUrl'),
+        commandHistoryEntries: state?.commandHistory?.entries ?? [],
+        historyIncludesBeforeRestart: (state?.commandHistory?.entries ?? [])
+          .includes(${JSON.stringify(historyBeforeRestartCommand)}),
+        storedHistoryIncludesBeforeRestart: (() => {
+          try {
+            const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+            return Array.isArray(parsed) && parsed.includes(${JSON.stringify(historyBeforeRestartCommand)});
+          } catch {
+            return false;
+          }
+        })(),
         terminalScreenTextPreview: terminalScreenText.slice(0, 240),
       };
     })()`, (value) => (
@@ -3584,6 +3696,8 @@ async function runAutoStartRestartRecoveryScenario(browserUrl, options) {
       && value.sessionCount === 1
       && value.controlPlaneUrl === restartedControlPlaneUrl
       && value.sessionStreamUrl === restartedSessionStreamUrl
+      && value.historyIncludesBeforeRestart
+      && value.storedHistoryIncludesBeforeRestart
       && value.commandInputFocused
     ), 45_000);
 
@@ -3629,13 +3743,42 @@ async function runAutoStartRestartRecoveryScenario(browserUrl, options) {
         : '';
       return {
         containsMarker: terminalScreenText.includes(${JSON.stringify(marker)}),
+        commandHistoryLatest: state?.commandHistory?.entries?.at(-1) ?? null,
+        commandHistoryIncludesBeforeRestart: (state?.commandHistory?.entries ?? [])
+          .includes(${JSON.stringify(historyBeforeRestartCommand)}),
+        storedHistoryIncludesMarker: (() => {
+          try {
+            const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+            return Array.isArray(parsed) && parsed.includes(${JSON.stringify(process.platform === "win32" ? `echo ${marker}` : `printf "${marker}\\n"`)} );
+          } catch {
+            return false;
+          }
+        })(),
         terminalScreenTextPreview: terminalScreenText.slice(-360),
       };
-    })()`, (value) => value.containsMarker, 10_000);
+    })()`, (value) => (
+      value.containsMarker
+      && value.commandHistoryLatest?.includes(marker)
+      && value.commandHistoryIncludesBeforeRestart
+      && value.storedHistoryIncludesMarker
+    ), 10_000);
 
     return {
       commandSent,
       containsMarker: afterCommand.containsMarker,
+      historyAfterRestartIncludesBeforeRestart: afterCommand.commandHistoryIncludesBeforeRestart,
+      historyBeforeRestartCommand,
+      historyBeforeRestartCommandSent,
+      historyBeforeRestartOutputSeen: historyBeforeRestart.outputSeen,
+      historyBeforeRestartPersisted: historyBeforeRestart.snapshotIncludesCommand
+        && historyBeforeRestart.storedIncludesCommand,
+      historyRecoveredState: {
+        commandHistoryEntries: recovered.commandHistoryEntries,
+        historyIncludesBeforeRestart: recovered.historyIncludesBeforeRestart,
+        storedHistoryIncludesBeforeRestart: recovered.storedHistoryIncludesBeforeRestart,
+      },
+      postRestartHistoryLatest: afterCommand.commandHistoryLatest,
+      postRestartHistoryStored: afterCommand.storedHistoryIncludesMarker,
       initialControlPlaneUrl: options.initialControlPlaneUrl,
       initialSessionStreamUrl: options.initialSessionStreamUrl,
       issues,

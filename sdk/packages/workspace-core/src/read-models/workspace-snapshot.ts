@@ -89,12 +89,15 @@ export interface CreateInitialWorkspaceSnapshotOptions {
   themeId?: string | null;
   terminalFontScale?: TerminalPlatformTerminalFontScale | null;
   terminalLineWrap?: boolean | null;
+  commandHistoryEntries?: readonly string[] | null;
   commandHistoryLimit?: number | null;
 }
 
 export function createInitialWorkspaceSnapshot(
   options: CreateInitialWorkspaceSnapshotOptions = {},
 ): WorkspaceSnapshot {
+  const commandHistoryLimit = normalizeCommandHistoryLimit(options.commandHistoryLimit);
+
   return {
     connection: {
       state: "idle",
@@ -115,8 +118,8 @@ export function createInitialWorkspaceSnapshot(
     diagnostics: [],
     drafts: {},
     commandHistory: {
-      entries: [],
-      limit: normalizeCommandHistoryLimit(options.commandHistoryLimit),
+      entries: normalizeCommandHistoryEntries(options.commandHistoryEntries, commandHistoryLimit),
+      limit: commandHistoryLimit,
     },
     theme: {
       themeId: options.themeId ?? DEFAULT_WORKSPACE_THEME_ID,
@@ -134,4 +137,40 @@ export function normalizeCommandHistoryLimit(limit: number | null | undefined): 
   }
 
   return Math.max(1, Math.trunc(limit));
+}
+
+export function normalizeCommandHistoryEntries(
+  entries: readonly string[] | null | undefined,
+  limit: number | null | undefined,
+): string[] {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+
+  const normalizedLimit = normalizeCommandHistoryLimit(limit);
+  const normalizedEntries: string[] = [];
+
+  for (const value of entries) {
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    const entry = normalizeCommandHistoryEntry(value);
+    if (!entry) {
+      continue;
+    }
+
+    const existingIndex = normalizedEntries.indexOf(entry);
+    if (existingIndex >= 0) {
+      normalizedEntries.splice(existingIndex, 1);
+    }
+    normalizedEntries.push(entry);
+  }
+
+  return normalizedEntries.slice(-normalizedLimit);
+}
+
+export function normalizeCommandHistoryEntry(value: string): string | null {
+  const entry = value.replace(/\s+$/u, "");
+  return entry.trim().length > 0 ? entry : null;
 }

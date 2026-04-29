@@ -45,6 +45,8 @@ interface NativeSessionFormState {
 const TERMINAL_DEMO_THEME_STORAGE_KEY = "terminal-platform-demo.theme";
 const TERMINAL_DEMO_FONT_SCALE_STORAGE_KEY = "terminal-platform-demo.terminal-font-scale";
 const TERMINAL_DEMO_LINE_WRAP_STORAGE_KEY = "terminal-platform-demo.terminal-line-wrap";
+const TERMINAL_DEMO_COMMAND_HISTORY_STORAGE_KEY = "terminal-platform-demo.command-history";
+const TERMINAL_DEMO_COMMAND_HISTORY_STORAGE_READ_LIMIT = 200;
 const ADVANCED_SAVED_LAYOUT_VISIBLE_COUNT = 6;
 const terminalDemoThemeIds = terminalPlatformThemeManifests.map((theme) => theme.id);
 type TerminalDemoShellKind = "cmd" | "powershell" | "unix";
@@ -266,6 +268,10 @@ export function TerminalDemoWorkspaceScreen(props: {
   useEffect(() => {
     persistTerminalDemoDisplayPreferences(terminalDisplay);
   }, [terminalDisplay.fontScale, terminalDisplay.lineWrap]);
+
+  useEffect(() => {
+    persistTerminalDemoCommandHistory(snapshot.commandHistory.entries);
+  }, [snapshot.commandHistory.entries]);
 
   useEffect(() => {
     const targetSessionId = snapshot.selection.activeSessionId ?? snapshot.catalog.sessions[0]?.session_id ?? null;
@@ -790,6 +796,7 @@ function useDemoWorkspaceKernel(config: TerminalRuntimeBootstrapConfig): Workspa
       initialThemeId: readStoredTerminalDemoThemeId(),
       initialTerminalFontScale: readStoredValue(TERMINAL_DEMO_FONT_SCALE_STORAGE_KEY),
       initialTerminalLineWrap: readStoredBoolean(TERMINAL_DEMO_LINE_WRAP_STORAGE_KEY),
+      initialCommandHistoryEntries: readStoredTerminalDemoCommandHistory(),
     });
 
     setKernel(nextKernel);
@@ -828,11 +835,39 @@ function readStoredBoolean(key: string): boolean | null {
   return null;
 }
 
+function readStoredTerminalDemoCommandHistory(): string[] | null {
+  const value = readStoredValue(TERMINAL_DEMO_COMMAND_HISTORY_STORAGE_KEY);
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+
+    return parsed
+      .filter((entry): entry is string => typeof entry === "string")
+      .slice(-TERMINAL_DEMO_COMMAND_HISTORY_STORAGE_READ_LIMIT);
+  } catch {
+    return null;
+  }
+}
+
 function persistTerminalDemoThemeId(themeId: string): void {
   try {
     window.localStorage.setItem(TERMINAL_DEMO_THEME_STORAGE_KEY, themeId);
   } catch {
     // Theme persistence is a convenience and must not affect terminal control.
+  }
+}
+
+function persistTerminalDemoCommandHistory(entries: readonly string[]): void {
+  try {
+    window.localStorage.setItem(TERMINAL_DEMO_COMMAND_HISTORY_STORAGE_KEY, JSON.stringify(entries));
+  } catch {
+    // Command history persistence is best-effort and must not affect terminal control.
   }
 }
 

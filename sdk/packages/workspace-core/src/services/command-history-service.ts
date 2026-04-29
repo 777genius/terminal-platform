@@ -1,3 +1,5 @@
+import { normalizeCommandHistoryEntry } from "../read-models/workspace-snapshot.js";
+
 import type { ServiceContext } from "./service-context.js";
 
 export class CommandHistoryService {
@@ -34,9 +36,4 @@ export class CommandHistoryService {
       },
     }));
   }
-}
-
-function normalizeCommandHistoryEntry(value: string): string | null {
-  const entry = value.replace(/\s+$/u, "");
-  return entry.trim().length > 0 ? entry : null;
 }

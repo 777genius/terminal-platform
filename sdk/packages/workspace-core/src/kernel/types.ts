@@ -86,5 +86,6 @@ export interface CreateWorkspaceKernelOptions {
   initialThemeId?: string | null;
   initialTerminalFontScale?: string | null;
   initialTerminalLineWrap?: boolean | null;
+  initialCommandHistoryEntries?: readonly string[] | null;
   commandHistoryLimit?: number | null;
 }

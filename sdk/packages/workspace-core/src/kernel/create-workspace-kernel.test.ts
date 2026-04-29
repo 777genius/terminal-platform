@@ -239,6 +239,35 @@ describe("createWorkspaceKernel command history", () => {
     await kernel.dispose();
   });
 
+  it("starts with normalized persisted command history entries", async () => {
+    const kernel = createWorkspaceKernel({
+      transport: createUnusedTransport(),
+      commandHistoryLimit: 3,
+      initialCommandHistoryEntries: [
+        "echo one",
+        "git status\r\n",
+        "echo one",
+        "   ",
+        "printf ok",
+        "node -v",
+      ],
+    });
+
+    expect(kernel.selectors.commandHistory()).toEqual({
+      entries: ["echo one", "printf ok", "node -v"],
+      limit: 3,
+    });
+
+    kernel.commands.recordCommandHistory("printf ok ");
+
+    expect(kernel.selectors.commandHistory()).toEqual({
+      entries: ["echo one", "node -v", "printf ok"],
+      limit: 3,
+    });
+
+    await kernel.dispose();
+  });
+
   it("falls back to the default command history limit", async () => {
     const kernel = createWorkspaceKernel({
       transport: createUnusedTransport(),
