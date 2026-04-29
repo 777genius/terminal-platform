@@ -4,6 +4,7 @@ import type {
   AttachedSession,
   BackendCapabilitiesInfo,
   BackendKind,
+  CommandHistoryEntry,
   DiscoveredSession,
   Handshake,
   MuxCommand,
@@ -390,6 +391,33 @@ describe("createWorkspaceKernel live session subscriptions", () => {
 
     expect(attachedScreenText(kernel)).toContain("live output");
     expect(live.attachCalls()).toBe(1);
+
+    await kernel.dispose();
+  });
+
+  it("hydrates command history from persistence during bootstrap", async () => {
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        handshake: async () => createHandshake(["native"]),
+        listSessions: async () => [],
+        listSavedSessions: async () => [],
+        getBackendCapabilities: async (backend: BackendKind) => createCapabilities(backend),
+        listCommandHistory: async () => [
+          createCommandHistoryEntry("git status", 2_000n),
+          createCommandHistoryEntry("pwd", 1_000n),
+        ],
+      } as WorkspaceTransportClient,
+      commandHistoryLimit: 4,
+      initialCommandHistoryEntries: ["node -v"],
+    });
+
+    await kernel.bootstrap();
+
+    expect(kernel.selectors.commandHistory()).toEqual({
+      entries: ["node -v", "pwd", "git status"],
+      limit: 4,
+    });
 
     await kernel.dispose();
   });
@@ -795,6 +823,17 @@ function createDiscoveredSession(backend: BackendKind): DiscoveredSession {
       },
     },
     title: `${backend} workspace`,
+  };
+}
+
+function createCommandHistoryEntry(displayText: string, lastUsedAtMs: bigint): CommandHistoryEntry {
+  return {
+    id: `history-${displayText}`,
+    session_id: "session-1",
+    pane_id: "pane-1",
+    display_text: displayText,
+    last_used_at_ms: lastUsedAtMs,
+    use_count: 1n,
   };
 }
 

@@ -2,12 +2,14 @@ import type {
   AttachedSession,
   BackendCapabilitiesInfo,
   BackendKind,
+  CommandHistoryEntry,
   CreateSessionRequest,
   DeleteSavedSessionResult,
   DiscoveredSession,
   Handshake,
   MuxCommand,
   MuxCommandResult,
+  PaneHistory,
   PaneId,
   PruneSavedSessionsResult,
   RestoredSession,
@@ -24,6 +26,7 @@ import type {
   TopologySnapshot,
 } from "@terminal-platform/runtime-types";
 import type { WorkspaceSubscription, WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
+import type { WorkspacePaneHistoryRequestOptions } from "@terminal-platform/workspace-contracts";
 import { WorkspaceError } from "@terminal-platform/workspace-contracts";
 
 import { decodeWorkspaceWebSocketPayload, encodeWorkspaceWebSocketPayload } from "./json-codec.js";
@@ -155,6 +158,30 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
 
   async getSavedSession(sessionId: SessionId): Promise<SavedSessionRecord> {
     return this.request("workspace_saved_session", { sessionId });
+  }
+
+  async listCommandHistory(
+    sessionId?: SessionId | null,
+    limit?: number | null,
+  ): Promise<CommandHistoryEntry[]> {
+    return this.request("workspace_command_history", {
+      sessionId: sessionId ?? null,
+      limit: limit ?? null,
+    });
+  }
+
+  async getPaneHistory(
+    sessionId: SessionId,
+    paneId: PaneId,
+    options: WorkspacePaneHistoryRequestOptions = {},
+  ): Promise<PaneHistory> {
+    return this.request("workspace_pane_history", {
+      sessionId,
+      paneId,
+      fromEventSeq: options.fromEventSeq ?? null,
+      maxSegments: options.maxSegments ?? null,
+      maxBytes: options.maxBytes ?? null,
+    });
   }
 
   async deleteSavedSession(sessionId: SessionId): Promise<DeleteSavedSessionResult> {

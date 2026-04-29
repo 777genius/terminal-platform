@@ -143,6 +143,7 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
     await refreshForeignBackendDiscovery();
     await catalogService.refreshSessions();
     await catalogService.refreshSavedSessions();
+    await refreshCommandHistory();
   }
 
   async function dispose(): Promise<void> {
@@ -227,6 +228,27 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
         }
       }),
     );
+  }
+
+  async function refreshCommandHistory(): Promise<void> {
+    try {
+      const transport = await context.ensureTransport();
+      if (!transport.listCommandHistory) {
+        return;
+      }
+
+      const limit = store.getSnapshot().commandHistory.limit;
+      const entries = await transport.listCommandHistory(null, limit);
+      commandHistoryService.merge(entries.map((entry) => entry.display_text).reverse());
+    } catch (error) {
+      context.recordDiagnostic({
+        code: "command_history_hydration_failed",
+        message: "failed to hydrate command history from persistence",
+        severity: "warn",
+        recoverable: true,
+        cause: error,
+      });
+    }
   }
 }
 

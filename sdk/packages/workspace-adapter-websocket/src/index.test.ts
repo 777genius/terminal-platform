@@ -247,6 +247,21 @@ async function dispatchControl(
       return transport.importSession(message.payload.route, message.payload.title ?? null);
     case "workspace_saved_session":
       return transport.getSavedSession(message.payload.sessionId);
+    case "workspace_command_history":
+      return transport.listCommandHistory?.(message.payload.sessionId ?? null, message.payload.limit ?? null) ?? [];
+    case "workspace_pane_history":
+      if (!transport.getPaneHistory) {
+        throw new Error("pane history is not supported by this transport");
+      }
+      return transport.getPaneHistory(
+        message.payload.sessionId,
+        message.payload.paneId,
+        {
+          fromEventSeq: message.payload.fromEventSeq ?? null,
+          maxSegments: message.payload.maxSegments ?? null,
+          maxBytes: message.payload.maxBytes ?? null,
+        },
+      );
     case "workspace_prune_saved_sessions":
       return transport.pruneSavedSessions(message.payload.keepLatest);
     case "workspace_restore_saved_session":

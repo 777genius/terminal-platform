@@ -17,6 +17,9 @@ export type {
   NodeCreateSessionRequest as CreateSessionRequest,
 } from "./generated/raw/NodeCreateSessionRequest.js";
 export type {
+  NodeCommandHistoryEntry as CommandHistoryEntry,
+} from "./generated/raw/NodeCommandHistoryEntry.js";
+export type {
   NodeDaemonCapabilities as DaemonCapabilities,
 } from "./generated/raw/NodeDaemonCapabilities.js";
 export type { NodeDaemonPhase as DaemonPhase } from "./generated/raw/NodeDaemonPhase.js";
@@ -38,6 +41,23 @@ export type {
 } from "./generated/raw/NodeOverrideLayoutCommand.js";
 export type { NodePaneSplit as PaneSplit } from "./generated/raw/NodePaneSplit.js";
 export type { NodePaneTreeNode as PaneTreeNode } from "./generated/raw/NodePaneTreeNode.js";
+export type { NodePaneHistory as PaneHistory } from "./generated/raw/NodePaneHistory.js";
+export type { NodePaneHistoryGap as PaneHistoryGap } from "./generated/raw/NodePaneHistoryGap.js";
+export type {
+  NodePaneHistoryReplayStrategy as PaneHistoryReplayStrategy,
+} from "./generated/raw/NodePaneHistoryReplayStrategy.js";
+export type {
+  NodePaneHistoryRestoreEvidence as PaneHistoryRestoreEvidence,
+} from "./generated/raw/NodePaneHistoryRestoreEvidence.js";
+export type {
+  NodePaneHistoryRestorePlan as PaneHistoryRestorePlan,
+} from "./generated/raw/NodePaneHistoryRestorePlan.js";
+export type {
+  NodePaneHistoryScreenSnapshot as PaneHistoryScreenSnapshot,
+} from "./generated/raw/NodePaneHistoryScreenSnapshot.js";
+export type {
+  NodePaneHistorySegment as PaneHistorySegment,
+} from "./generated/raw/NodePaneHistorySegment.js";
 export type {
   NodeProjectionSource as ProjectionSource,
 } from "./generated/raw/NodeProjectionSource.js";

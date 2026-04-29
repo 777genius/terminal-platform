@@ -23,6 +23,7 @@ export type { WorkspaceErrorCode, WorkspaceErrorShape } from "./errors/workspace
 export type { WorkspaceObservation } from "./observations/workspace-observations.js";
 
 export type {
+  WorkspacePaneHistoryRequestOptions,
   WorkspaceSubscription,
   WorkspaceTransportClient,
   WorkspaceTransportFactory,

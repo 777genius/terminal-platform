@@ -377,6 +377,23 @@ export class TerminalRuntimeGatewayServer {
         const client = await this.#clientProvider.getClient();
         return client.savedSession(readStringPayload(payload, "sessionId"));
       }
+      case "workspace_command_history": {
+        const client = await this.#clientProvider.getClient();
+        return client.commandHistory(
+          readOptionalStringPayload(payload, "sessionId") ?? null,
+          readOptionalNumberPayload(payload, "limit") ?? null,
+        );
+      }
+      case "workspace_pane_history": {
+        const client = await this.#clientProvider.getClient();
+        return client.paneHistory(
+          readStringPayload(payload, "sessionId"),
+          readStringPayload(payload, "paneId"),
+          readOptionalNumberPayload(payload, "fromEventSeq") ?? null,
+          readOptionalNumberPayload(payload, "maxSegments") ?? null,
+          readOptionalNumberPayload(payload, "maxBytes") ?? null,
+        );
+      }
       case "workspace_prune_saved_sessions": {
         const client = await this.#clientProvider.getClient();
         return client.pruneSavedSessions(readNumberPayload(payload, "keepLatest"));
@@ -909,6 +926,14 @@ function readNumberPayload(payload: GatewayPayloadRecord, key: string): number {
   }
 
   return parsed;
+}
+
+function readOptionalNumberPayload(payload: GatewayPayloadRecord, key: string): number | undefined {
+  if (payload[key] == null) {
+    return undefined;
+  }
+
+  return readNumberPayload(payload, key);
 }
 
 function readIntegerPayload(payload: GatewayPayloadRecord, key: string): number {
