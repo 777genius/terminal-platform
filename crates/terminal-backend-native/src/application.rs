@@ -4,16 +4,20 @@ use std::{
 };
 
 use terminal_backend_api::{
-    BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
-    BackendSessionSummary, BackendSubscription, BoxFuture, CreateSessionSpec, DiscoveredSession,
-    MuxBackendPort, MuxCommand, MuxCommandResult, SubscriptionSpec,
+    BackendCapabilities, BackendError, BackendRawOutputSubscription, BackendScope,
+    BackendSessionBinding, BackendSessionPort, BackendSessionSummary, BackendSubscription,
+    BoxFuture, CreateSessionSpec, DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult,
+    SubscriptionSpec,
 };
 use terminal_domain::{
     BackendKind, DegradedModeReason, SessionId, SessionRoute, local_native_route,
     local_native_session_id,
 };
 
-use crate::{engine::NativeSessionEngine, subscriptions::open_native_subscription};
+use crate::{
+    engine::NativeSessionEngine,
+    subscriptions::{open_native_raw_output_subscription, open_native_subscription},
+};
 
 #[derive(Default)]
 pub struct NativeBackend {
@@ -197,6 +201,14 @@ impl BackendSessionPort for NativeAttachedSession {
         let runtime = Arc::clone(&self.runtime);
         Box::pin(async move { open_native_subscription(runtime, spec) })
     }
+
+    fn subscribe_raw_output(
+        &self,
+        pane_id: terminal_domain::PaneId,
+    ) -> BoxFuture<'_, Result<BackendRawOutputSubscription, BackendError>> {
+        let runtime = Arc::clone(&self.runtime);
+        Box::pin(async move { open_native_raw_output_subscription(runtime, pane_id) })
+    }
 }
 
 fn native_capabilities() -> BackendCapabilities {
@@ -214,6 +226,7 @@ fn native_capabilities() -> BackendCapabilities {
         pane_focus: true,
         pane_input_write: true,
         pane_paste_write: true,
+        raw_output_stream: true,
         rendered_viewport_stream: true,
         rendered_viewport_snapshot: true,
         layout_dump: true,

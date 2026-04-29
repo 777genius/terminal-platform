@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use terminal_backend_api::{BackendCapabilities, ShellLaunchSpec};
 use terminal_domain::{BackendKind, SessionRoute};
+use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -701,6 +702,227 @@ impl TerminalPersistenceV2 {
         }
 
         Ok(())
+    }
+
+    pub fn record_terminal_output_event(
+        &self,
+        input: TerminalOutputEventInput,
+    ) -> Result<StreamSegmentReceipt, TerminalPersistenceV2Error> {
+        self.upsert_runtime_session(SessionInput {
+            id: Some(input.session_id.clone()),
+            route: input.route,
+            title: input.title,
+            launch: input.launch,
+            source: Some("runtime_output_capture".to_string()),
+            durability_profile: None,
+            retention_policy_id: None,
+            private_mode: false,
+            metadata: Some(serde_json::json!({
+                "capture_source": "backend_output",
+                "capture_semantics": input.capture_semantics
+                    .as_deref()
+                    .unwrap_or("raw_vt_stream")
+            })),
+        })?;
+        self.upsert_runtime_pane(PaneInput {
+            id: Some(input.pane_id.clone()),
+            session_id: input.session_id.clone(),
+            tab_id: input.tab_id.clone(),
+            stream_id: None,
+            title: None,
+            rows: input.rows.unwrap_or(24),
+            cols: input.cols.unwrap_or(80),
+            metadata: Some(serde_json::json!({
+                "capture_source": "backend_output",
+                "dimensions": if input.rows.is_some() && input.cols.is_some() {
+                    "observed"
+                } else {
+                    "provisional"
+                }
+            })),
+        })?;
+
+        let lease = self.acquire_writer_generation_with_retry("runtime-output-capture", 60_000)?;
+        let append_result = self.append_stream_segment(StreamSegmentInput {
+            session_id: input.session_id,
+            pane_id: input.pane_id,
+            stream_id: None,
+            writer_generation: lease.id.clone(),
+            payload: input.payload,
+            event_type: Some("terminal_output".to_string()),
+            event_count: 1,
+            occurred_at_ms: input.occurred_at_ms,
+            capture_semantics: input.capture_semantics,
+            trust_level: Some("captured".to_string()),
+            payload_json: None,
+            source_event_id_hash: input
+                .source_sequence
+                .map(|sequence| blake3_hash_text(&format!("raw-output-seq:{sequence}"))),
+            metadata: Some(serde_json::json!({
+                "backend_source": "runtime_capture",
+                "source_sequence": input.source_sequence
+            })),
+        });
+        let release_result = self.release_writer_generation(&lease.id);
+
+        match (append_result, release_result) {
+            (Ok(receipt), Ok(())) => Ok(receipt),
+            (Ok(_), Err(error)) => Err(error),
+            (Err(error), _) => Err(error),
+        }
+    }
+
+    pub fn record_history_gap_event(
+        &self,
+        input: HistoryGapEventInput,
+    ) -> Result<JournalEventReceipt, TerminalPersistenceV2Error> {
+        self.upsert_runtime_session(SessionInput {
+            id: Some(input.session_id.clone()),
+            route: input.route,
+            title: input.title,
+            launch: input.launch,
+            source: Some("runtime_output_capture".to_string()),
+            durability_profile: None,
+            retention_policy_id: None,
+            private_mode: false,
+            metadata: Some(serde_json::json!({ "capture_source": "backend_output_gap" })),
+        })?;
+        self.upsert_runtime_pane(PaneInput {
+            id: Some(input.pane_id.clone()),
+            session_id: input.session_id.clone(),
+            tab_id: input.tab_id.clone(),
+            stream_id: None,
+            title: None,
+            rows: input.rows.unwrap_or(24),
+            cols: input.cols.unwrap_or(80),
+            metadata: Some(serde_json::json!({ "capture_source": "backend_output_gap" })),
+        })?;
+
+        let lease = self.acquire_writer_generation_with_retry("runtime-output-gap", 60_000)?;
+        let append_result = self.append_journal_event(JournalEventInput {
+            session_id: input.session_id,
+            pane_id: Some(input.pane_id),
+            stream_id: None,
+            writer_generation: lease.id.clone(),
+            event_type: "history_gap".to_string(),
+            commit_kind: Some("history_gap".to_string()),
+            payload_json: Some(serde_json::json!({
+                "reason": input.reason,
+                "skipped_events": input.skipped_events,
+                "estimated_dropped_bytes": input.estimated_dropped_bytes
+            })),
+            source_event_id_hash: None,
+            occurred_at_ms: input.occurred_at_ms,
+            capture_semantics: Some("raw_vt_stream".to_string()),
+            trust_level: Some("system".to_string()),
+            metadata: None,
+        });
+        let release_result = self.release_writer_generation(&lease.id);
+
+        match (append_result, release_result) {
+            (Ok(receipt), Ok(())) => Ok(receipt),
+            (Ok(_), Err(error)) => Err(error),
+            (Err(error), _) => Err(error),
+        }
+    }
+
+    pub fn record_screen_snapshot_event(
+        &self,
+        input: ScreenSnapshotEventInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
+        self.upsert_runtime_session(SessionInput {
+            id: Some(input.session_id.clone()),
+            route: input.route,
+            title: input.title,
+            launch: input.launch,
+            source: Some("runtime_screen_snapshot".to_string()),
+            durability_profile: None,
+            retention_policy_id: None,
+            private_mode: false,
+            metadata: Some(serde_json::json!({ "capture_source": "rendered_screen_snapshot" })),
+        })?;
+        self.upsert_runtime_pane(PaneInput {
+            id: Some(input.screen.pane_id.0.to_string()),
+            session_id: input.session_id.clone(),
+            tab_id: input.tab_id.clone(),
+            stream_id: None,
+            title: input.screen.surface.title.clone(),
+            rows: i32::from(input.screen.rows),
+            cols: i32::from(input.screen.cols),
+            metadata: Some(serde_json::json!({
+                "capture_source": "rendered_screen_snapshot"
+            })),
+        })?;
+
+        let lease = self.acquire_writer_generation_with_retry("runtime-screen-snapshot", 60_000)?;
+        let high_water_event_seq = u64_to_i64(input.screen.sequence, "screen sequence")?;
+        let write_result = self.write_screen_snapshot(ScreenSnapshotInput {
+            id: None,
+            session_id: input.session_id,
+            pane_id: input.screen.pane_id.0.to_string(),
+            writer_generation: lease.id.clone(),
+            projection_source: Some(format!("{:?}", input.screen.source).to_lowercase()),
+            buffer_kind: Some(input.buffer_kind.unwrap_or_else(|| "normal".to_string())),
+            rows: i32::from(input.screen.rows),
+            cols: i32::from(input.screen.cols),
+            base_event_seq: 0,
+            high_water_event_seq,
+            high_water_byte_seq: None,
+            screen: serde_json::to_value(&input.screen)?,
+            parser_version: Some("runtime_screen_snapshot_v1".to_string()),
+            projection_version: Some("runtime_screen_snapshot_v1".to_string()),
+            metadata: Some(serde_json::json!({
+                "capture_source": "rendered_screen_snapshot",
+                "capture_semantics": input.capture_semantics
+                    .unwrap_or_else(|| "rendered_plaintext_snapshot".to_string())
+            })),
+        });
+        let release_result = self.release_writer_generation(&lease.id);
+
+        match (write_result, release_result) {
+            (Ok(id), Ok(())) => Ok(id),
+            (Ok(_), Err(error)) => Err(error),
+            (Err(error), _) => Err(error),
+        }
+    }
+
+    pub fn record_topology_snapshot_event(
+        &self,
+        input: TopologySnapshotEventInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
+        self.upsert_runtime_session(SessionInput {
+            id: Some(input.session_id.clone()),
+            route: input.route,
+            title: input.title,
+            launch: input.launch,
+            source: Some("runtime_topology_snapshot".to_string()),
+            durability_profile: None,
+            retention_policy_id: None,
+            private_mode: false,
+            metadata: Some(serde_json::json!({ "capture_source": "topology_snapshot" })),
+        })?;
+
+        let pane_high_water = topology_pane_high_water(&input.topology);
+        let lease =
+            self.acquire_writer_generation_with_retry("runtime-topology-snapshot", 60_000)?;
+        let write_result = self.write_topology_snapshot(TopologySnapshotInput {
+            id: None,
+            session_id: input.session_id,
+            writer_generation: lease.id.clone(),
+            pane_high_water,
+            topology: serde_json::to_value(&input.topology)?,
+            source: Some("runtime_topology_snapshot".to_string()),
+            metadata: Some(serde_json::json!({
+                "capture_source": "topology_snapshot"
+            })),
+        });
+        let release_result = self.release_writer_generation(&lease.id);
+
+        match (write_result, release_result) {
+            (Ok(id), Ok(())) => Ok(id),
+            (Ok(_), Err(error)) => Err(error),
+            (Err(error), _) => Err(error),
+        }
     }
 
     fn upsert_legacy_visual_session(
@@ -1656,6 +1878,59 @@ pub struct UiInputEventInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalOutputEventInput {
+    pub session_id: String,
+    pub route: SessionRoute,
+    pub title: Option<String>,
+    pub launch: Option<ShellLaunchSpec>,
+    pub pane_id: String,
+    pub tab_id: Option<String>,
+    pub payload: Vec<u8>,
+    pub rows: Option<i32>,
+    pub cols: Option<i32>,
+    pub source_sequence: Option<u64>,
+    pub occurred_at_ms: Option<i64>,
+    pub capture_semantics: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryGapEventInput {
+    pub session_id: String,
+    pub route: SessionRoute,
+    pub title: Option<String>,
+    pub launch: Option<ShellLaunchSpec>,
+    pub pane_id: String,
+    pub tab_id: Option<String>,
+    pub rows: Option<i32>,
+    pub cols: Option<i32>,
+    pub skipped_events: u64,
+    pub estimated_dropped_bytes: Option<i64>,
+    pub reason: String,
+    pub occurred_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScreenSnapshotEventInput {
+    pub session_id: String,
+    pub route: SessionRoute,
+    pub title: Option<String>,
+    pub launch: Option<ShellLaunchSpec>,
+    pub tab_id: Option<String>,
+    pub screen: ScreenSnapshot,
+    pub buffer_kind: Option<String>,
+    pub capture_semantics: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopologySnapshotEventInput {
+    pub session_id: String,
+    pub route: SessionRoute,
+    pub title: Option<String>,
+    pub launch: Option<ShellLaunchSpec>,
+    pub topology: TopologySnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandBlockInput {
     pub id: Option<String>,
     pub session_id: String,
@@ -2484,6 +2759,29 @@ fn legacy_pane_high_water(saved: &SavedNativeSession) -> Value {
         map.insert(screen.pane_id.0.to_string(), Value::from(screen.sequence));
     }
     Value::Object(map)
+}
+
+fn topology_pane_high_water(topology: &TopologySnapshot) -> Value {
+    let mut map = serde_json::Map::new();
+    for tab in &topology.tabs {
+        collect_topology_pane_high_water(&tab.root, &mut map);
+    }
+    Value::Object(map)
+}
+
+fn collect_topology_pane_high_water(
+    node: &terminal_mux_domain::PaneTreeNode,
+    map: &mut serde_json::Map<String, Value>,
+) {
+    match node {
+        terminal_mux_domain::PaneTreeNode::Leaf { pane_id } => {
+            map.entry(pane_id.0.to_string()).or_insert(Value::from(0));
+        }
+        terminal_mux_domain::PaneTreeNode::Split(split) => {
+            collect_topology_pane_high_water(&split.first, map);
+            collect_topology_pane_high_water(&split.second, map);
+        }
+    }
 }
 
 fn stream_cursor_id(pane_id: &str, stream_id: &str) -> String {

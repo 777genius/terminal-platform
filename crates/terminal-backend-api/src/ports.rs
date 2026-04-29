@@ -7,8 +7,8 @@ use terminal_domain::{BackendKind, SessionId, SessionRoute};
 use terminal_projection::{ScreenDelta, ScreenSnapshot, TopologySnapshot};
 
 use crate::{
-    BackendCapabilities, BackendError, BackendSubscription, MuxCommand, MuxCommandResult,
-    SubscriptionSpec,
+    BackendCapabilities, BackendError, BackendRawOutputSubscription, BackendSubscription,
+    MuxCommand, MuxCommandResult, SubscriptionSpec,
 };
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -123,4 +123,16 @@ pub trait BackendSessionPort: Send + Sync {
         &self,
         spec: SubscriptionSpec,
     ) -> BoxFuture<'_, Result<BackendSubscription, BackendError>>;
+
+    fn subscribe_raw_output(
+        &self,
+        _pane_id: terminal_domain::PaneId,
+    ) -> BoxFuture<'_, Result<BackendRawOutputSubscription, BackendError>> {
+        Box::pin(async {
+            Err(BackendError::unsupported(
+                "backend does not expose raw output capture",
+                terminal_domain::DegradedModeReason::MissingCapability,
+            ))
+        })
+    }
 }

@@ -1,4 +1,4 @@
-use std::{io, sync::Arc};
+use std::{io, sync::Arc, time::Duration};
 
 use futures_util::{SinkExt as _, StreamExt as _};
 use interprocess::local_socket::{
@@ -9,6 +9,7 @@ use interprocess::local_socket::{
 use tokio::{
     sync::{oneshot, watch},
     task::{JoinError, JoinHandle, JoinSet},
+    time::timeout,
 };
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
@@ -19,6 +20,8 @@ use terminal_protocol::{
 };
 
 use crate::{TransportRequestHandler, TransportSubscriptionHandler};
+
+const CONNECTION_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct LocalSocketServerHandle {
     address: LocalSocketAddress,
@@ -79,7 +82,7 @@ where
         };
 
         let _ = connection_shutdown_tx.send(true);
-        drain_connection_tasks(&mut connection_tasks).await?;
+        drain_or_abort_connection_tasks(&mut connection_tasks).await?;
 
         result
     });
@@ -241,6 +244,20 @@ async fn drain_connection_tasks(connection_tasks: &mut JoinSet<()>) -> io::Resul
     }
 
     Ok(())
+}
+
+async fn drain_or_abort_connection_tasks(connection_tasks: &mut JoinSet<()>) -> io::Result<()> {
+    if connection_tasks.is_empty() {
+        return Ok(());
+    }
+
+    match timeout(CONNECTION_DRAIN_TIMEOUT, drain_connection_tasks(connection_tasks)).await {
+        Ok(result) => result,
+        Err(_) => {
+            connection_tasks.abort_all();
+            drain_connection_tasks(connection_tasks).await
+        }
+    }
 }
 
 fn join_error_to_io(error: JoinError) -> io::Error {

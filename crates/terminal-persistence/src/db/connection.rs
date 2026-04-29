@@ -1,6 +1,8 @@
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
 };
 
 use diesel::{
@@ -26,12 +28,13 @@ pub fn establish_initialized_connection(
 
     let database_url = path_to_database_url(path)?;
     let mut connection = SqliteConnection::establish(&database_url)?;
-    initialize_connection(&mut connection, config)?;
+    initialize_connection(&mut connection, path, config)?;
     Ok(connection)
 }
 
 pub fn initialize_connection(
     connection: &mut SqliteConnection,
+    path: &Path,
     config: &TerminalPersistenceV2Config,
 ) -> Result<(), TerminalPersistenceV2Error> {
     connection.batch_execute(&format!("PRAGMA busy_timeout = {};", config.busy_timeout_ms))?;
@@ -54,10 +57,57 @@ pub fn initialize_connection(
         config.durability_profile.sqlite_synchronous()
     ))?;
 
+    let init_key = database_init_key(path)?;
+    if is_process_initialized(&init_key) {
+        return Ok(());
+    }
+
+    let _guard = connection_init_lock().lock().map_err(|_| {
+        TerminalPersistenceV2Error::InvalidData(
+            "terminal persistence init lock poisoned".to_string(),
+        )
+    })?;
+    if is_process_initialized(&init_key) {
+        return Ok(());
+    }
+
     run_embedded_migrations(connection)?;
     ensure_db_identity(connection, config)?;
+    mark_process_initialized(init_key)?;
 
     Ok(())
+}
+
+fn connection_init_lock() -> &'static Mutex<()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    &LOCK
+}
+
+fn initialized_databases() -> &'static Mutex<HashSet<PathBuf>> {
+    static INITIALIZED_DATABASES: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    INITIALIZED_DATABASES.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn is_process_initialized(path: &Path) -> bool {
+    initialized_databases().lock().map(|initialized| initialized.contains(path)).unwrap_or(false)
+}
+
+fn mark_process_initialized(path: PathBuf) -> Result<(), TerminalPersistenceV2Error> {
+    initialized_databases()
+        .lock()
+        .map_err(|_| {
+            TerminalPersistenceV2Error::InvalidData(
+                "terminal persistence init registry poisoned".to_string(),
+            )
+        })?
+        .insert(path);
+    Ok(())
+}
+
+fn database_init_key(path: &Path) -> Result<PathBuf, TerminalPersistenceV2Error> {
+    path.canonicalize()
+        .or_else(|_| Ok::<PathBuf, std::io::Error>(path.to_path_buf()))
+        .map_err(Into::into)
 }
 
 fn ensure_db_identity(
@@ -77,12 +127,10 @@ fn ensure_db_identity(
             if identity.product == "terminal-platform"
                 && identity.schema_family == "terminal_persistence_v2" =>
         {
-            diesel::update(terminal_db_identity::table.filter(terminal_db_identity::id.eq(1)))
-                .set((
-                    terminal_db_identity::updated_at_ms.eq(now),
-                    terminal_db_identity::sqlite_version.eq(sqlite_version(connection)?),
-                ))
-                .execute(connection)?;
+            // Opening a hot terminal-history database must stay read-only after
+            // identity is established. Raw output capture opens short-lived
+            // Diesel connections often, and an identity heartbeat would contend
+            // with real history writes under SQLite's single-writer lock.
         }
         Some(identity) => {
             return Err(TerminalPersistenceV2Error::IdentityMismatch {

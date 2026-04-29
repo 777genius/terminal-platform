@@ -459,17 +459,63 @@ mod tests {
             .await
             .expect("send input should dispatch");
 
-        let v2 = terminal_persistence::TerminalPersistenceV2::open_with_config(
-            &path,
-            terminal_persistence::TerminalPersistenceV2Config::test(),
-        )
-        .expect("v2 store should open");
-        let history = v2
-            .list_command_history(Some(&created.session_id.0.to_string()), 10)
-            .expect("history should load");
+        let history = wait_for_v2_command_history(&path, created.session_id)
+            .await
+            .expect("command history should be captured");
 
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].display_text, "git status");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn native_runtime_capture_persists_raw_output_to_v2() {
+        let path = unique_runtime_store_path("v2-native-output");
+        let store = SqliteSessionStore::open(&path).expect("isolated sqlite store should open");
+        let runtime = TerminalRuntime::with_persistence(
+            BackendCatalog::new([Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>]),
+            store,
+        );
+        let created = runtime
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("capture-shell".to_string()),
+                    launch: Some(capture_shell_launch_spec()),
+                },
+            )
+            .await
+            .expect("native session should create");
+        let topology =
+            runtime.topology_snapshot(created.session_id).await.expect("topology should load");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+        wait_for_v2_snapshot(&path, created.session_id)
+            .await
+            .expect("capture task should write initial snapshot");
+        wait_for_runtime_screen_line(&runtime, created.session_id, pane_id, "ready")
+            .await
+            .expect("native shell should become ready");
+
+        let marker = format!("TERMINAL_PERSISTENCE_V2_CAPTURE_{}", created.session_id.0.simple());
+        runtime
+            .dispatch(
+                created.session_id,
+                MuxCommand::SendInput(SendInputSpec {
+                    pane_id,
+                    data: capture_shell_echo_input(&marker),
+                }),
+            )
+            .await
+            .expect("marker command should dispatch");
+        wait_for_runtime_screen_line(&runtime, created.session_id, pane_id, &marker)
+            .await
+            .expect("native shell should render marker output");
+
+        let payload = wait_for_v2_payload(&path, created.session_id, pane_id, marker.as_bytes())
+            .await
+            .expect("v2 raw output capture should persist marker");
+
+        assert!(payload.windows(marker.len()).any(|window| window == marker.as_bytes()));
     }
 
     fn runtime_backends(imported_backend: Arc<FakeImportedBackend>) -> BackendCatalog {
@@ -497,6 +543,126 @@ mod tests {
             .unwrap_or_default();
         std::env::temp_dir()
             .join(format!("terminal-runtime-{label}-{}-{nanos}.sqlite3", std::process::id()))
+    }
+
+    fn capture_shell_launch_spec() -> terminal_backend_api::ShellLaunchSpec {
+        #[cfg(windows)]
+        {
+            let program = std::env::var("COMSPEC")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "cmd.exe".to_string());
+
+            terminal_backend_api::ShellLaunchSpec::new(program).with_args([
+                "/D",
+                "/Q",
+                "/K",
+                "echo ready",
+            ])
+        }
+
+        #[cfg(not(windows))]
+        {
+            terminal_backend_api::ShellLaunchSpec::new("/bin/sh")
+                .with_args(["-lc", "printf 'ready\\n'; exec cat"])
+        }
+    }
+
+    fn capture_shell_echo_input(text: &str) -> String {
+        #[cfg(windows)]
+        {
+            format!("echo {text}\r")
+        }
+
+        #[cfg(not(windows))]
+        {
+            format!("{text}\r")
+        }
+    }
+
+    async fn wait_for_runtime_screen_line(
+        runtime: &TerminalRuntime,
+        session_id: SessionId,
+        pane_id: PaneId,
+        needle: &str,
+    ) -> Option<()> {
+        for _ in 0..120 {
+            if let Ok(screen) = runtime.screen_snapshot(session_id, pane_id).await
+                && screen.surface.lines.iter().any(|line| line.text.contains(needle))
+            {
+                return Some(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        None
+    }
+
+    async fn wait_for_v2_snapshot(
+        path: &Path,
+        session_id: SessionId,
+    ) -> Option<terminal_persistence::RestorePlan> {
+        for _ in 0..80 {
+            if let Ok(store) = terminal_persistence::TerminalPersistenceV2::open_with_config(
+                path,
+                terminal_persistence::TerminalPersistenceV2Config::test(),
+            ) && let Ok(plan) = store.restore_plan(&session_id.0.to_string())
+                && plan.latest_screen_snapshot_id.is_some()
+            {
+                return Some(plan);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        None
+    }
+
+    async fn wait_for_v2_payload(
+        path: &Path,
+        session_id: SessionId,
+        pane_id: PaneId,
+        needle: &[u8],
+    ) -> Option<Vec<u8>> {
+        for _ in 0..120 {
+            if let Ok(store) = terminal_persistence::TerminalPersistenceV2::open_with_config(
+                path,
+                terminal_persistence::TerminalPersistenceV2Config::test(),
+            ) && let Ok(segments) = store.list_stream_segments(
+                &session_id.0.to_string(),
+                &pane_id.0.to_string(),
+                1,
+                512,
+            ) {
+                let payload =
+                    segments.into_iter().flat_map(|segment| segment.payload).collect::<Vec<_>>();
+                if payload.windows(needle.len()).any(|window| window == needle) {
+                    return Some(payload);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        None
+    }
+
+    async fn wait_for_v2_command_history(
+        path: &Path,
+        session_id: SessionId,
+    ) -> Option<Vec<terminal_persistence::CommandHistoryEntryRecord>> {
+        for _ in 0..80 {
+            if let Ok(store) = terminal_persistence::TerminalPersistenceV2::open_with_config(
+                path,
+                terminal_persistence::TerminalPersistenceV2Config::test(),
+            ) && let Ok(history) =
+                store.list_command_history(Some(&session_id.0.to_string()), 10)
+                && !history.is_empty()
+            {
+                return Some(history);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        None
     }
 
     fn seed_legacy_saved_session_schema(path: &Path) {

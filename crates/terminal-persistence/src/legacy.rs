@@ -1,7 +1,9 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    sync::Mutex,
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use directories::ProjectDirs;
@@ -16,8 +18,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::v2::{
-    RestorePlan, TerminalPersistenceV2, TerminalPersistenceV2Config, TerminalPersistenceV2Error,
-    UiInputEventInput,
+    HistoryGapEventInput, RestorePlan, ScreenSnapshotEventInput, TerminalOutputEventInput,
+    TerminalPersistenceV2, TerminalPersistenceV2Config, TerminalPersistenceV2Error,
+    TopologySnapshotEventInput, UiInputEventInput,
 };
 
 fn migrations() -> Migrations<'static> {
@@ -121,7 +124,7 @@ impl SqliteSessionStore {
         }
 
         let store = Self { path };
-        store.ensure_schema()?;
+        retry_persistence_operation(|| store.ensure_schema())?;
         Ok(store)
     }
 
@@ -129,22 +132,82 @@ impl SqliteSessionStore {
         &self,
         session: &SavedNativeSession,
     ) -> Result<RestorePlan, TerminalPersistenceV2Error> {
-        let store = TerminalPersistenceV2::open_with_config(
-            &self.path,
-            TerminalPersistenceV2Config::default(),
-        )?;
-        store.import_saved_native_session_snapshot(session)
+        retry_v2_write(|| {
+            let store = TerminalPersistenceV2::open_with_config(
+                &self.path,
+                TerminalPersistenceV2Config::default(),
+            )?;
+            store.import_saved_native_session_snapshot(session)
+        })
     }
 
     pub fn record_v2_ui_input(
         &self,
         input: UiInputEventInput,
     ) -> Result<(), TerminalPersistenceV2Error> {
-        let store = TerminalPersistenceV2::open_with_config(
-            &self.path,
-            TerminalPersistenceV2Config::default(),
-        )?;
-        store.record_ui_input_event(input)
+        retry_v2_write(|| {
+            let store = TerminalPersistenceV2::open_with_config(
+                &self.path,
+                TerminalPersistenceV2Config::default(),
+            )?;
+            store.record_ui_input_event(input.clone())
+        })
+    }
+
+    pub fn record_v2_terminal_output(
+        &self,
+        input: TerminalOutputEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let store = TerminalPersistenceV2::open_with_config(
+                &self.path,
+                TerminalPersistenceV2Config::default(),
+            )?;
+            store.record_terminal_output_event(input.clone())?;
+            Ok(())
+        })
+    }
+
+    pub fn record_v2_history_gap(
+        &self,
+        input: HistoryGapEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let store = TerminalPersistenceV2::open_with_config(
+                &self.path,
+                TerminalPersistenceV2Config::default(),
+            )?;
+            store.record_history_gap_event(input.clone())?;
+            Ok(())
+        })
+    }
+
+    pub fn record_v2_screen_snapshot(
+        &self,
+        input: ScreenSnapshotEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let store = TerminalPersistenceV2::open_with_config(
+                &self.path,
+                TerminalPersistenceV2Config::default(),
+            )?;
+            store.record_screen_snapshot_event(input.clone())?;
+            Ok(())
+        })
+    }
+
+    pub fn record_v2_topology_snapshot(
+        &self,
+        input: TopologySnapshotEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let store = TerminalPersistenceV2::open_with_config(
+                &self.path,
+                TerminalPersistenceV2Config::default(),
+            )?;
+            store.record_topology_snapshot_event(input.clone())?;
+            Ok(())
+        })
     }
 
     pub fn open_default() -> Result<Self, PersistenceError> {
@@ -413,16 +476,27 @@ impl SqliteSessionStore {
     }
 
     fn ensure_schema(&self) -> Result<(), PersistenceError> {
+        let _guard = legacy_schema_lock().lock().map_err(|_| {
+            PersistenceError::InvalidData("legacy schema lock poisoned".to_string())
+        })?;
         let mut connection = Connection::open(&self.path)?;
+        connection.busy_timeout(Duration::from_millis(5_000))?;
         migrations().to_latest(&mut connection)?;
         ensure_manifest_column(&connection)?;
         Ok(())
     }
 
     fn open_connection(&self) -> Result<Connection, PersistenceError> {
-        self.ensure_schema()?;
-        Ok(Connection::open(&self.path)?)
+        retry_persistence_operation(|| self.ensure_schema())?;
+        let connection = Connection::open(&self.path)?;
+        connection.busy_timeout(Duration::from_millis(5_000))?;
+        Ok(connection)
     }
+}
+
+fn legacy_schema_lock() -> &'static Mutex<()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    &LOCK
 }
 
 fn ensure_manifest_column(connection: &Connection) -> Result<(), PersistenceError> {
@@ -488,6 +562,72 @@ fn pane_count(root: &PaneTreeNode) -> usize {
         PaneTreeNode::Leaf { .. } => 1,
         PaneTreeNode::Split(split) => pane_count(&split.first) + pane_count(&split.second),
     }
+}
+
+fn retry_persistence_operation<T>(
+    mut operation: impl FnMut() -> Result<T, PersistenceError>,
+) -> Result<T, PersistenceError> {
+    let mut last_error = None;
+    for attempt in 0..80 {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) if is_retryable_persistence_error(&error) => {
+                last_error = Some(error);
+                let backoff_ms = 10 + i64::from(attempt.min(20)) * 5;
+                thread::sleep(Duration::from_millis(backoff_ms as u64));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| {
+        PersistenceError::InvalidData("sqlite operation retry exhausted".to_string())
+    }))
+}
+
+fn is_retryable_persistence_error(error: &PersistenceError) -> bool {
+    let text = error.to_string().to_ascii_lowercase();
+    text.contains("database is locked")
+        || text.contains("database table is locked")
+        || text.contains("database busy")
+        || text.contains("locking protocol")
+}
+
+fn retry_v2_write<T>(
+    mut operation: impl FnMut() -> Result<T, TerminalPersistenceV2Error>,
+) -> Result<T, TerminalPersistenceV2Error> {
+    let mut last_error = None;
+    for attempt in 0..80 {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) if is_retryable_v2_write_error(&error) => {
+                last_error = Some(error);
+                let backoff_ms = 10 + i64::from(attempt.min(20)) * 5;
+                thread::sleep(Duration::from_millis(backoff_ms as u64));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| {
+        TerminalPersistenceV2Error::InvalidData("v2 write retry exhausted".to_string())
+    }))
+}
+
+fn is_retryable_v2_write_error(error: &TerminalPersistenceV2Error) -> bool {
+    if matches!(
+        error,
+        TerminalPersistenceV2Error::WriterAlreadyActive | TerminalPersistenceV2Error::Connection(_)
+    ) {
+        return true;
+    }
+
+    let text = error.to_string().to_ascii_lowercase();
+    text.contains("database is locked")
+        || text.contains("database table is locked")
+        || text.contains("database busy")
+        || text.contains("locking protocol")
+        || text.contains("active terminal writer generation")
 }
 
 #[cfg(test)]

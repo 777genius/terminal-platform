@@ -2,19 +2,23 @@ use std::{
     borrow::Cow,
     collections::{HashSet, VecDeque},
     io::{Read as _, Write as _},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     thread,
 };
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use terminal_backend_api::{
-    BackendError, BackendSessionSummary, CreateSessionSpec, NewTabSpec, OverrideLayoutSpec,
-    ResizePaneSpec, SendInputSpec, SendPasteSpec, ShellLaunchSpec, SplitPaneSpec,
+    BackendError, BackendRawOutputBytes, BackendRawOutputEvent, BackendSessionSummary,
+    CreateSessionSpec, NewTabSpec, OverrideLayoutSpec, ResizePaneSpec, SendInputSpec,
+    SendPasteSpec, ShellLaunchSpec, SplitPaneSpec,
 };
 use terminal_domain::{PaneId, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 use terminal_projection::{ProjectionSource, ScreenDelta, ScreenSnapshot, TopologySnapshot};
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 
 use crate::{emulator::EmulatorBuffer, transcript::TranscriptBuffer};
 
@@ -63,6 +67,7 @@ struct NativePaneRuntime {
     pane_id: PaneId,
     emulator: Arc<EmulatorBuffer>,
     _transcript: Arc<TranscriptBuffer>,
+    raw_output_tick: broadcast::Sender<BackendRawOutputEvent>,
     projection: Mutex<NativeProjectionState>,
     geometry: Mutex<PaneGeometry>,
     surface_tick: watch::Sender<u64>,
@@ -262,6 +267,20 @@ impl NativeSessionEngine {
         Ok(pane.surface_tick.subscribe())
     }
 
+    pub(crate) fn subscribe_pane_raw_output(
+        &self,
+        pane_id: PaneId,
+    ) -> Result<broadcast::Receiver<BackendRawOutputEvent>, BackendError> {
+        let state = self.lock_state()?;
+        let pane = state
+            .tabs
+            .iter()
+            .find_map(|tab| tab.pane(pane_id))
+            .ok_or_else(|| BackendError::not_found(format!("unknown pane {pane_id:?}")))?;
+
+        Ok(pane.raw_output_tick.subscribe())
+    }
+
     fn finish_mutation(
         &self,
         state: &NativeSessionState,
@@ -364,13 +383,18 @@ fn spawn_pane(
     let emulator = Arc::new(EmulatorBuffer::new(rows, cols));
     let transcript = Arc::new(TranscriptBuffer::default());
     let pane_id = PaneId::new();
+    let raw_output_sequence = Arc::new(AtomicU64::new(0));
+    let (raw_output_tick, _) = broadcast::channel(1024);
     let (surface_tick, _) = watch::channel(0_u64);
 
     spawn_reader_thread(
+        pane_id,
         reader,
         Arc::clone(&writer),
         Arc::clone(&transcript),
         Arc::clone(&emulator),
+        Arc::clone(&raw_output_sequence),
+        raw_output_tick.clone(),
         surface_tick.clone(),
     );
 
@@ -378,6 +402,7 @@ fn spawn_pane(
         pane_id,
         emulator,
         _transcript: transcript,
+        raw_output_tick,
         projection: Mutex::new(NativeProjectionState::default()),
         geometry: Mutex::new(PaneGeometry { rows, cols }),
         surface_tick,
@@ -397,10 +422,13 @@ fn build_command(launch: &ShellLaunchSpec) -> CommandBuilder {
 }
 
 fn spawn_reader_thread(
+    pane_id: PaneId,
     mut reader: Box<dyn std::io::Read + Send>,
     writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
     transcript: Arc<TranscriptBuffer>,
     emulator: Arc<EmulatorBuffer>,
+    raw_output_sequence: Arc<AtomicU64>,
+    raw_output_tick: broadcast::Sender<BackendRawOutputEvent>,
     surface_tick: watch::Sender<u64>,
 ) {
     thread::spawn(move || {
@@ -412,6 +440,13 @@ fn spawn_reader_thread(
                     respond_to_cursor_inherit_query(&chunk[..read], &writer);
                     transcript.append(&chunk[..read]);
                     emulator.advance(&chunk[..read]);
+                    let sequence = raw_output_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+                    let _ =
+                        raw_output_tick.send(BackendRawOutputEvent::Bytes(BackendRawOutputBytes {
+                            pane_id,
+                            sequence,
+                            payload: chunk[..read].to_vec(),
+                        }));
                     bump_watch(&surface_tick);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,

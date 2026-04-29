@@ -7,10 +7,12 @@ pub use legacy::{
     SessionRouteRecord, SqliteSessionStore,
 };
 pub use v2::{
-    BackendCapabilityReportInput, CommandBlockInput, CommandHistoryEntryInput, DurabilityProfile,
-    FeatureGateName, FeatureGateState, JournalEventInput, JournalEventReceipt, PaneInput,
-    RestoreEvidence, RestoreGuaranteeLevel, RestorePlan, ScreenSnapshotInput, SessionInput,
-    StreamSegmentInput, StreamSegmentReceipt, StreamSegmentRecord, TerminalPersistenceV2,
-    TerminalPersistenceV2Config, TerminalPersistenceV2Error, TopologySnapshotInput,
+    BackendCapabilityReportInput, CommandBlockInput, CommandHistoryEntryInput,
+    CommandHistoryEntryRecord, DurabilityProfile, FeatureGateName, FeatureGateState,
+    HistoryGapEventInput, JournalEventInput, JournalEventReceipt, PaneInput, RestoreEvidence,
+    RestoreGuaranteeLevel, RestorePlan, ScreenSnapshotEventInput, ScreenSnapshotInput,
+    SessionInput, StreamSegmentInput, StreamSegmentReceipt, StreamSegmentRecord,
+    TerminalOutputEventInput, TerminalPersistenceV2, TerminalPersistenceV2Config,
+    TerminalPersistenceV2Error, TopologySnapshotEventInput, TopologySnapshotInput,
     UiInputEventInput, WriterGenerationLease,
 };

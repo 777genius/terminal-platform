@@ -58,7 +58,10 @@ impl<'a> ActiveSessionService<'a> {
         let refresh_summary_title = command_updates_summary_title(&command);
         let result = session.dispatch(command).await?;
         if let Some(input_capture) = input_capture {
-            let _ = self.runtime.persistence().record_v2_ui_input(input_capture);
+            let store = self.runtime.persistence().clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = store.record_v2_ui_input(input_capture);
+            });
         }
         if result.changed && refresh_summary_title {
             self.runtime.refresh_session_summary_title(session_id, &*session).await;
