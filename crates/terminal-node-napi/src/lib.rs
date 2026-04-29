@@ -185,6 +185,37 @@ impl TerminalNodeBinding {
             .and_then(to_json)
     }
 
+    #[napi(js_name = "paneHistory")]
+    pub async fn pane_history(
+        &self,
+        session_id: String,
+        pane_id: String,
+        from_event_seq: Option<i64>,
+        max_segments: Option<i64>,
+        max_bytes: Option<i64>,
+    ) -> Result<Value> {
+        let client = self.inner.clone();
+        client
+            .pane_history(&session_id, &pane_id, from_event_seq, max_segments, max_bytes)
+            .await
+            .map_err(protocol_error)
+            .and_then(to_json)
+    }
+
+    #[napi(js_name = "commandHistory")]
+    pub async fn command_history(
+        &self,
+        session_id: Option<String>,
+        limit: Option<i64>,
+    ) -> Result<Value> {
+        let client = self.inner.clone();
+        client
+            .command_history(session_id.as_deref(), limit)
+            .await
+            .map_err(protocol_error)
+            .and_then(to_json)
+    }
+
     #[napi(js_name = "dispatchMuxCommand")]
     pub async fn dispatch_mux_command(&self, session_id: String, command: Value) -> Result<Value> {
         let client = self.inner.clone();

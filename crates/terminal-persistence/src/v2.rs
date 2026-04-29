@@ -25,7 +25,7 @@ use crate::{
         schema::{
             terminal_backend_capability_reports, terminal_command_blocks,
             terminal_command_history_entries, terminal_commit_log, terminal_db_identity,
-            terminal_feature_gates, terminal_journal_events, terminal_panes,
+            terminal_feature_gates, terminal_history_gaps, terminal_journal_events, terminal_panes,
             terminal_restore_drills, terminal_screen_snapshots, terminal_session_cursors,
             terminal_sessions, terminal_stream_cursors, terminal_stream_segments,
             terminal_topology_snapshots, terminal_writer_generations,
@@ -37,6 +37,13 @@ use crate::{
 pub const TERMINAL_PERSISTENCE_APP_ID: i32 = 0x5450_5632;
 const DEFAULT_RETENTION_POLICY_ID: &str = "default_full_history";
 const DEFAULT_STREAM_ID: &str = "primary";
+const DEFAULT_HISTORY_SEGMENT_LIMIT: i64 = 256;
+const MAX_HISTORY_SEGMENT_LIMIT: i64 = 2_000;
+const DEFAULT_HISTORY_BYTE_LIMIT: i64 = 1024 * 1024;
+const MAX_HISTORY_BYTE_LIMIT: i64 = 16 * 1024 * 1024;
+const MAX_HISTORY_GAP_LIMIT: i64 = 256;
+const DEFAULT_COMMAND_HISTORY_LIMIT: i64 = 100;
+const MAX_COMMAND_HISTORY_LIMIT: i64 = 1_000;
 
 #[derive(Debug, Error)]
 pub enum TerminalPersistenceV2Error {
@@ -776,6 +783,12 @@ impl TerminalPersistenceV2 {
         &self,
         input: HistoryGapEventInput,
     ) -> Result<JournalEventReceipt, TerminalPersistenceV2Error> {
+        let session_id = input.session_id.clone();
+        let pane_id = input.pane_id.clone();
+        let reason = input.reason.clone();
+        let skipped_events = input.skipped_events;
+        let estimated_dropped_bytes = input.estimated_dropped_bytes;
+        let occurred_at_ms = input.occurred_at_ms;
         self.upsert_runtime_session(SessionInput {
             id: Some(input.session_id.clone()),
             route: input.route,
@@ -799,24 +812,15 @@ impl TerminalPersistenceV2 {
         })?;
 
         let lease = self.acquire_writer_generation_with_retry("runtime-output-gap", 60_000)?;
-        let append_result = self.append_journal_event(JournalEventInput {
-            session_id: input.session_id,
-            pane_id: Some(input.pane_id),
-            stream_id: None,
-            writer_generation: lease.id.clone(),
-            event_type: "history_gap".to_string(),
-            commit_kind: Some("history_gap".to_string()),
-            payload_json: Some(serde_json::json!({
-                "reason": input.reason,
-                "skipped_events": input.skipped_events,
-                "estimated_dropped_bytes": input.estimated_dropped_bytes
-            })),
-            source_event_id_hash: None,
-            occurred_at_ms: input.occurred_at_ms,
-            capture_semantics: Some("raw_vt_stream".to_string()),
-            trust_level: Some("system".to_string()),
-            metadata: None,
-        });
+        let append_result = self.append_history_gap_event(
+            &session_id,
+            &pane_id,
+            &lease.id,
+            skipped_events,
+            estimated_dropped_bytes,
+            &reason,
+            occurred_at_ms,
+        );
         let release_result = self.release_writer_generation(&lease.id);
 
         match (append_result, release_result) {
@@ -824,6 +828,107 @@ impl TerminalPersistenceV2 {
             (Ok(_), Err(error)) => Err(error),
             (Err(error), _) => Err(error),
         }
+    }
+
+    fn append_history_gap_event(
+        &self,
+        session_id: &str,
+        pane_id: &str,
+        writer_generation: &str,
+        skipped_events: u64,
+        estimated_dropped_bytes: Option<i64>,
+        reason: &str,
+        occurred_at_ms: Option<i64>,
+    ) -> Result<JournalEventReceipt, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let occurred_at_ms = occurred_at_ms.unwrap_or(now);
+        let stream_id = DEFAULT_STREAM_ID.to_string();
+        let gap_width = u64_to_i64(skipped_events.max(1), "history gap skipped events")?;
+        let estimated_dropped_bytes = estimated_dropped_bytes.map(|value| value.max(0));
+        let payload_json = serde_json::to_string(&serde_json::json!({
+            "reason": reason,
+            "skipped_events": skipped_events,
+            "estimated_dropped_bytes": estimated_dropped_bytes
+        }))?;
+
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            ensure_active_writer(connection, writer_generation, now)?;
+            let commit = allocate_commit(
+                connection,
+                session_id,
+                "history_gap",
+                writer_generation,
+                occurred_at_ms,
+                now,
+                None,
+            )?;
+            let cursor = load_stream_cursor(connection, session_id, pane_id, &stream_id)?;
+            let event_seq_low = cursor.next_event_seq;
+            let event_seq_high = event_seq_low + gap_width - 1;
+            let scope = event_scope(session_id, Some(pane_id));
+            let event_id = new_id();
+            let event = NewJournalEventRow {
+                id: event_id.clone(),
+                session_id: session_id.to_string(),
+                pane_id: Some(pane_id.to_string()),
+                commit_id: commit.id.clone(),
+                stream_id: stream_id.clone(),
+                event_scope_kind: scope.kind,
+                event_scope_id: scope.id,
+                event_seq: event_seq_low,
+                event_type: "history_gap".to_string(),
+                byte_low: None,
+                byte_high: None,
+                payload_json: Some(payload_json),
+                payload_schema_id: None,
+                source_event_id_hash: None,
+                occurred_at_ms,
+                created_at_ms: now,
+                capture_semantics: "raw_vt_stream".to_string(),
+                trust_level: "system".to_string(),
+                metadata_json: None,
+            };
+            insert_into(terminal_journal_events::table).values(&event).execute(connection)?;
+
+            let gap = NewHistoryGapRow {
+                id: new_id(),
+                session_id: session_id.to_string(),
+                pane_id: Some(pane_id.to_string()),
+                stream_id: stream_id.clone(),
+                gap_kind: "capture_gap".to_string(),
+                event_seq_low: Some(event_seq_low),
+                event_seq_high: Some(event_seq_high),
+                byte_low: None,
+                byte_high: None,
+                estimated_dropped_bytes,
+                estimated_dropped_events: Some(gap_width),
+                reason: reason.to_string(),
+                writer_generation: Some(writer_generation.to_string()),
+                opened_at_ms: occurred_at_ms,
+                closed_at_ms: Some(occurred_at_ms),
+                metadata_json: None,
+            };
+            insert_into(terminal_history_gaps::table).values(&gap).execute(connection)?;
+
+            advance_stream_cursor(
+                connection,
+                &cursor.id,
+                event_seq_high + 1,
+                cursor.next_byte_seq,
+                now,
+            )?;
+            diesel::update(terminal_panes::table.filter(terminal_panes::id.eq(pane_id)))
+                .set(terminal_panes::last_event_seq.eq(event_seq_high))
+                .execute(connection)?;
+
+            Ok(JournalEventReceipt {
+                commit_id: commit.id,
+                commit_seq: commit.commit_seq,
+                event_id,
+                event_seq: event_seq_low,
+            })
+        })
     }
 
     pub fn record_screen_snapshot_event(
@@ -1594,7 +1699,7 @@ impl TerminalPersistenceV2 {
 
         let guarantee_level = match (segment_count > 0, latest_screen.is_some(), gap_count > 0) {
             (true, true, false) => RestoreGuaranteeLevel::BasicHistory,
-            (true, _, true) => RestoreGuaranteeLevel::DegradedHistory,
+            (_, _, true) => RestoreGuaranteeLevel::DegradedHistory,
             (false, true, _) => RestoreGuaranteeLevel::VisualSnapshotOnly,
             _ => RestoreGuaranteeLevel::None,
         };
@@ -1672,12 +1777,107 @@ impl TerminalPersistenceV2 {
             .map_err(Into::into)
     }
 
+    pub fn hydrate_pane_history(
+        &self,
+        session_id: &str,
+        pane_id: &str,
+        from_event_seq: Option<i64>,
+        max_segments: Option<i64>,
+        max_bytes: Option<i64>,
+    ) -> Result<PaneHistoryHydrationRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let from_event_seq = from_event_seq.unwrap_or(1).max(1);
+        let max_segments = max_segments
+            .unwrap_or(DEFAULT_HISTORY_SEGMENT_LIMIT)
+            .clamp(1, MAX_HISTORY_SEGMENT_LIMIT);
+        let max_bytes =
+            max_bytes.unwrap_or(DEFAULT_HISTORY_BYTE_LIMIT).clamp(1, MAX_HISTORY_BYTE_LIMIT);
+
+        let latest_screen_snapshot = terminal_screen_snapshots::table
+            .filter(terminal_screen_snapshots::session_id.eq(session_id))
+            .filter(terminal_screen_snapshots::pane_id.eq(pane_id))
+            .order((
+                terminal_screen_snapshots::high_water_event_seq.desc(),
+                terminal_screen_snapshots::created_at_ms.desc(),
+            ))
+            .select(ScreenSnapshotRow::as_select())
+            .first::<ScreenSnapshotRow>(&mut connection)
+            .optional()?
+            .map(ScreenSnapshotRecord::from);
+
+        let fetched_segments = terminal_stream_segments::table
+            .filter(terminal_stream_segments::session_id.eq(session_id))
+            .filter(terminal_stream_segments::pane_id.eq(pane_id))
+            .filter(terminal_stream_segments::event_seq_high.ge(from_event_seq))
+            .order(terminal_stream_segments::event_seq_low.asc())
+            .limit(max_segments + 1)
+            .select(StreamSegmentRow::as_select())
+            .load::<StreamSegmentRow>(&mut connection)?;
+
+        let mut segments = Vec::new();
+        let mut total_payload_bytes = 0_i64;
+        let mut has_more_segments = fetched_segments.len() > max_segments as usize;
+        for row in fetched_segments.into_iter().take(max_segments as usize) {
+            let row_payload_bytes = row.payload_len.max(0);
+            if total_payload_bytes > 0 && total_payload_bytes + row_payload_bytes > max_bytes {
+                has_more_segments = true;
+                break;
+            }
+            total_payload_bytes += row_payload_bytes;
+            segments.push(StreamSegmentRecord::from(row));
+        }
+
+        let gaps = terminal_history_gaps::table
+            .filter(terminal_history_gaps::session_id.eq(session_id))
+            .filter(
+                terminal_history_gaps::pane_id
+                    .is_null()
+                    .or(terminal_history_gaps::pane_id.eq(pane_id)),
+            )
+            .order(terminal_history_gaps::opened_at_ms.asc())
+            .limit(MAX_HISTORY_GAP_LIMIT)
+            .select(HistoryGapRow::as_select())
+            .load::<HistoryGapRow>(&mut connection)?
+            .into_iter()
+            .map(HistoryGapRecord::from)
+            .collect::<Vec<_>>();
+
+        let restore_plan = self.restore_plan(session_id)?;
+        let replay_strategy = PaneHistoryReplayStrategy::from_evidence(
+            &segments,
+            latest_screen_snapshot.as_ref(),
+            &gaps,
+        );
+        let next_event_seq = segments.last().map(|segment| segment.event_seq_high + 1);
+
+        Ok(PaneHistoryHydrationRecord {
+            session_id: session_id.to_string(),
+            pane_id: pane_id.to_string(),
+            from_event_seq,
+            max_segments,
+            max_bytes,
+            restore_plan,
+            latest_screen_snapshot,
+            segments,
+            gaps,
+            replay_strategy,
+            has_more_segments,
+            next_event_seq,
+            total_payload_bytes,
+        })
+    }
+
     pub fn list_command_history(
         &self,
         session_id: Option<&str>,
         limit: i64,
     ) -> Result<Vec<CommandHistoryEntryRecord>, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        let limit = if limit <= 0 {
+            DEFAULT_COMMAND_HISTORY_LIMIT
+        } else {
+            limit.min(MAX_COMMAND_HISTORY_LIMIT)
+        };
         let mut query = terminal_command_history_entries::table.into_boxed();
         if let Some(session_id) = session_id {
             query = query.filter(terminal_command_history_entries::session_id.eq(session_id));
@@ -2052,6 +2252,147 @@ pub struct RestorePlan {
     pub evidence: Vec<RestoreEvidence>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaneHistoryReplayStrategy {
+    Empty,
+    RawVtStream,
+    RenderedSnapshot,
+    Mixed,
+    Degraded,
+}
+
+impl PaneHistoryReplayStrategy {
+    #[must_use]
+    fn from_evidence(
+        segments: &[StreamSegmentRecord],
+        latest_screen_snapshot: Option<&ScreenSnapshotRecord>,
+        gaps: &[HistoryGapRecord],
+    ) -> Self {
+        if !gaps.is_empty() {
+            return Self::Degraded;
+        }
+        let has_raw = segments.iter().any(|segment| segment.capture_semantics == "raw_vt_stream");
+        let has_rendered =
+            segments.iter().any(|segment| segment.capture_semantics != "raw_vt_stream")
+                || latest_screen_snapshot.is_some();
+        match (has_raw, has_rendered) {
+            (true, false) => Self::RawVtStream,
+            (false, true) => Self::RenderedSnapshot,
+            (true, true) => Self::Mixed,
+            (false, false) => Self::Empty,
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::RawVtStream => "raw_vt_stream",
+            Self::RenderedSnapshot => "rendered_snapshot",
+            Self::Mixed => "mixed",
+            Self::Degraded => "degraded",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenSnapshotRecord {
+    pub id: String,
+    pub session_id: String,
+    pub pane_id: String,
+    pub projection_source: String,
+    pub buffer_kind: String,
+    pub rows: i32,
+    pub cols: i32,
+    pub base_event_seq: i64,
+    pub high_water_event_seq: i64,
+    pub high_water_byte_seq: Option<i64>,
+    pub screen_json: String,
+    pub parser_version: String,
+    pub projection_version: String,
+    pub checksum: String,
+    pub created_at_ms: i64,
+}
+
+impl From<ScreenSnapshotRow> for ScreenSnapshotRecord {
+    fn from(row: ScreenSnapshotRow) -> Self {
+        Self {
+            id: row.id,
+            session_id: row.session_id,
+            pane_id: row.pane_id,
+            projection_source: row.projection_source,
+            buffer_kind: row.buffer_kind,
+            rows: row.rows,
+            cols: row.cols,
+            base_event_seq: row.base_event_seq,
+            high_water_event_seq: row.high_water_event_seq,
+            high_water_byte_seq: row.high_water_byte_seq,
+            screen_json: row.screen_json,
+            parser_version: row.parser_version,
+            projection_version: row.projection_version,
+            checksum: row.checksum,
+            created_at_ms: row.created_at_ms,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryGapRecord {
+    pub id: String,
+    pub session_id: String,
+    pub pane_id: Option<String>,
+    pub stream_id: String,
+    pub gap_kind: String,
+    pub event_seq_low: Option<i64>,
+    pub event_seq_high: Option<i64>,
+    pub byte_low: Option<i64>,
+    pub byte_high: Option<i64>,
+    pub estimated_dropped_bytes: Option<i64>,
+    pub estimated_dropped_events: Option<i64>,
+    pub reason: String,
+    pub opened_at_ms: i64,
+    pub closed_at_ms: Option<i64>,
+}
+
+impl From<HistoryGapRow> for HistoryGapRecord {
+    fn from(row: HistoryGapRow) -> Self {
+        Self {
+            id: row.id,
+            session_id: row.session_id,
+            pane_id: row.pane_id,
+            stream_id: row.stream_id,
+            gap_kind: row.gap_kind,
+            event_seq_low: row.event_seq_low,
+            event_seq_high: row.event_seq_high,
+            byte_low: row.byte_low,
+            byte_high: row.byte_high,
+            estimated_dropped_bytes: row.estimated_dropped_bytes,
+            estimated_dropped_events: row.estimated_dropped_events,
+            reason: row.reason,
+            opened_at_ms: row.opened_at_ms,
+            closed_at_ms: row.closed_at_ms,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneHistoryHydrationRecord {
+    pub session_id: String,
+    pub pane_id: String,
+    pub from_event_seq: i64,
+    pub max_segments: i64,
+    pub max_bytes: i64,
+    pub restore_plan: RestorePlan,
+    pub latest_screen_snapshot: Option<ScreenSnapshotRecord>,
+    pub segments: Vec<StreamSegmentRecord>,
+    pub gaps: Vec<HistoryGapRecord>,
+    pub replay_strategy: PaneHistoryReplayStrategy,
+    pub has_more_segments: bool,
+    pub next_event_seq: Option<i64>,
+    pub total_payload_bytes: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriterGenerationLease {
     pub id: String,
@@ -2081,7 +2422,7 @@ pub struct JournalEventReceipt {
     pub event_seq: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamSegmentRecord {
     pub id: String,
     pub event_seq_low: i64,
@@ -2090,6 +2431,8 @@ pub struct StreamSegmentRecord {
     pub byte_high: i64,
     pub payload: Vec<u8>,
     pub checksum: String,
+    pub capture_semantics: String,
+    pub created_at_ms: i64,
 }
 
 impl From<StreamSegmentRow> for StreamSegmentRecord {
@@ -2102,11 +2445,13 @@ impl From<StreamSegmentRow> for StreamSegmentRecord {
             byte_high: row.byte_high,
             payload: row.payload,
             checksum: row.checksum,
+            capture_semantics: row.capture_semantics,
+            created_at_ms: row.created_at_ms,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandHistoryEntryRecord {
     pub id: String,
     pub session_id: Option<String>,
@@ -2387,6 +2732,50 @@ struct NewJournalEventRow {
     created_at_ms: i64,
     capture_semantics: String,
     trust_level: String,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_history_gaps)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct HistoryGapRow {
+    id: String,
+    session_id: String,
+    pane_id: Option<String>,
+    stream_id: String,
+    gap_kind: String,
+    event_seq_low: Option<i64>,
+    event_seq_high: Option<i64>,
+    byte_low: Option<i64>,
+    byte_high: Option<i64>,
+    estimated_dropped_bytes: Option<i64>,
+    estimated_dropped_events: Option<i64>,
+    reason: String,
+    writer_generation: Option<String>,
+    opened_at_ms: i64,
+    closed_at_ms: Option<i64>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_history_gaps)]
+struct NewHistoryGapRow {
+    id: String,
+    session_id: String,
+    pane_id: Option<String>,
+    stream_id: String,
+    gap_kind: String,
+    event_seq_low: Option<i64>,
+    event_seq_high: Option<i64>,
+    byte_low: Option<i64>,
+    byte_high: Option<i64>,
+    estimated_dropped_bytes: Option<i64>,
+    estimated_dropped_events: Option<i64>,
+    reason: String,
+    writer_generation: Option<String>,
+    opened_at_ms: i64,
+    closed_at_ms: Option<i64>,
     metadata_json: Option<String>,
 }
 
@@ -2959,6 +3348,58 @@ mod tests {
         let payload: Vec<u8> = segments.into_iter().flat_map(|segment| segment.payload).collect();
 
         assert_eq!(payload, b"git status\r\nfatal: not a git repository\r\n");
+
+        let hydrated = reopened
+            .hydrate_pane_history(&session_id, &pane_id, Some(1), Some(10), Some(1024))
+            .expect("pane history should hydrate");
+
+        assert_eq!(hydrated.segments.len(), 2);
+        assert_eq!(hydrated.gaps.len(), 0);
+        assert_eq!(hydrated.replay_strategy, PaneHistoryReplayStrategy::RawVtStream);
+        assert_eq!(
+            hydrated
+                .segments
+                .iter()
+                .flat_map(|segment| segment.payload.clone())
+                .collect::<Vec<_>>(),
+            b"git status\r\nfatal: not a git repository\r\n"
+        );
+    }
+
+    #[test]
+    fn records_history_gaps_as_readable_restore_evidence() {
+        let store = test_store("history-gap");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store.release_writer_generation(&writer.id).expect("writer should release");
+
+        store
+            .record_history_gap_event(HistoryGapEventInput {
+                session_id: session_id.clone(),
+                route: route(),
+                title: Some("shell".to_string()),
+                launch: None,
+                pane_id: pane_id.clone(),
+                tab_id: None,
+                rows: Some(24),
+                cols: Some(80),
+                skipped_events: 3,
+                estimated_dropped_bytes: Some(128),
+                reason: "test_receiver_lag".to_string(),
+                occurred_at_ms: Some(42),
+            })
+            .expect("history gap should persist");
+
+        let hydrated = store
+            .hydrate_pane_history(&session_id, &pane_id, Some(1), Some(10), Some(1024))
+            .expect("pane history should hydrate");
+
+        assert_eq!(hydrated.gaps.len(), 1);
+        assert_eq!(hydrated.gaps[0].event_seq_low, Some(1));
+        assert_eq!(hydrated.gaps[0].event_seq_high, Some(3));
+        assert_eq!(hydrated.gaps[0].estimated_dropped_events, Some(3));
+        assert_eq!(hydrated.gaps[0].reason, "test_receiver_lag");
+        assert_eq!(hydrated.replay_strategy, PaneHistoryReplayStrategy::Degraded);
+        assert_eq!(hydrated.restore_plan.guarantee_level, RestoreGuaranteeLevel::DegradedHistory);
     }
 
     #[test]
@@ -3032,6 +3473,11 @@ mod tests {
         assert_eq!(listed[0].id, history_id);
         assert_eq!(listed[0].display_text, "echo hello");
         assert_eq!(listed[0].use_count, 1);
+
+        let fallback_limit = store
+            .list_command_history(Some(&session_id), -1)
+            .expect("invalid history limit should fall back");
+        assert_eq!(fallback_limit.len(), 1);
     }
 
     #[test]

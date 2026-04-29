@@ -13,7 +13,8 @@ use terminal_domain::{
     SessionId, SessionRoute,
 };
 use terminal_persistence::{
-    PrunedSavedSessions, SavedNativeSession, SavedSessionSummary, SqliteSessionStore,
+    CommandHistoryEntryRecord, PaneHistoryHydrationRecord, PrunedSavedSessions, SavedNativeSession,
+    SavedSessionSummary, SqliteSessionStore,
 };
 use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 
@@ -196,6 +197,27 @@ impl TerminalRuntime {
         from_sequence: u64,
     ) -> Result<ScreenDelta, BackendError> {
         self.sessions.screen_delta(session_id, pane_id, from_sequence).await
+    }
+
+    pub async fn pane_history(
+        &self,
+        session_id: SessionId,
+        pane_id: PaneId,
+        from_event_seq: Option<i64>,
+        max_segments: Option<i64>,
+        max_bytes: Option<i64>,
+    ) -> Result<PaneHistoryHydrationRecord, BackendError> {
+        self.sessions
+            .pane_history(session_id, pane_id, from_event_seq, max_segments, max_bytes)
+            .await
+    }
+
+    pub async fn command_history(
+        &self,
+        session_id: Option<SessionId>,
+        limit: Option<i64>,
+    ) -> Result<Vec<CommandHistoryEntryRecord>, BackendError> {
+        self.sessions.command_history(session_id, limit).await
     }
 
     pub async fn dispatch(

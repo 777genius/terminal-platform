@@ -18,9 +18,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::v2::{
-    HistoryGapEventInput, RestorePlan, ScreenSnapshotEventInput, TerminalOutputEventInput,
-    TerminalPersistenceV2, TerminalPersistenceV2Config, TerminalPersistenceV2Error,
-    TopologySnapshotEventInput, UiInputEventInput,
+    CommandHistoryEntryRecord, HistoryGapEventInput, PaneHistoryHydrationRecord, RestorePlan,
+    ScreenSnapshotEventInput, TerminalOutputEventInput, TerminalPersistenceV2,
+    TerminalPersistenceV2Config, TerminalPersistenceV2Error, TopologySnapshotEventInput,
+    UiInputEventInput,
 };
 
 fn migrations() -> Migrations<'static> {
@@ -207,6 +208,37 @@ impl SqliteSessionStore {
             )?;
             store.record_topology_snapshot_event(input.clone())?;
             Ok(())
+        })
+    }
+
+    pub fn hydrate_v2_pane_history(
+        &self,
+        session_id: &str,
+        pane_id: &str,
+        from_event_seq: Option<i64>,
+        max_segments: Option<i64>,
+        max_bytes: Option<i64>,
+    ) -> Result<PaneHistoryHydrationRecord, TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let store = TerminalPersistenceV2::open_with_config(
+                &self.path,
+                TerminalPersistenceV2Config::default(),
+            )?;
+            store.hydrate_pane_history(session_id, pane_id, from_event_seq, max_segments, max_bytes)
+        })
+    }
+
+    pub fn list_v2_command_history(
+        &self,
+        session_id: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<CommandHistoryEntryRecord>, TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let store = TerminalPersistenceV2::open_with_config(
+                &self.path,
+                TerminalPersistenceV2Config::default(),
+            )?;
+            store.list_command_history(session_id, limit)
         })
     }
 

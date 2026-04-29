@@ -3,6 +3,7 @@ export type { NodeBackendCapabilities } from "./bindings/NodeBackendCapabilities
 export type { NodeBackendCapabilitiesInfo } from "./bindings/NodeBackendCapabilitiesInfo";
 export type { NodeBackendKind } from "./bindings/NodeBackendKind";
 export type { NodeBindingVersion } from "./bindings/NodeBindingVersion";
+export type { NodeCommandHistoryEntry } from "./bindings/NodeCommandHistoryEntry";
 export type { NodeCreateSessionRequest } from "./bindings/NodeCreateSessionRequest";
 export type { NodeDaemonCapabilities } from "./bindings/NodeDaemonCapabilities";
 export type { NodeDaemonPhase } from "./bindings/NodeDaemonPhase";
@@ -15,6 +16,13 @@ export type { NodeHandshakeAssessmentStatus } from "./bindings/NodeHandshakeAsse
 export type { NodeHandshakeInfo } from "./bindings/NodeHandshakeInfo";
 export type { NodeMuxCommand } from "./bindings/NodeMuxCommand";
 export type { NodeMuxCommandResult } from "./bindings/NodeMuxCommandResult";
+export type { NodePaneHistory } from "./bindings/NodePaneHistory";
+export type { NodePaneHistoryGap } from "./bindings/NodePaneHistoryGap";
+export type { NodePaneHistoryReplayStrategy } from "./bindings/NodePaneHistoryReplayStrategy";
+export type { NodePaneHistoryRestoreEvidence } from "./bindings/NodePaneHistoryRestoreEvidence";
+export type { NodePaneHistoryRestorePlan } from "./bindings/NodePaneHistoryRestorePlan";
+export type { NodePaneHistoryScreenSnapshot } from "./bindings/NodePaneHistoryScreenSnapshot";
+export type { NodePaneHistorySegment } from "./bindings/NodePaneHistorySegment";
 export type { NodePaneSplit } from "./bindings/NodePaneSplit";
 export type { NodePaneTreeNode } from "./bindings/NodePaneTreeNode";
 export type { NodeProjectionSource } from "./bindings/NodeProjectionSource";
@@ -54,12 +62,14 @@ import type { NodeAttachedSession } from "./bindings/NodeAttachedSession";
 import type { NodeBackendCapabilitiesInfo } from "./bindings/NodeBackendCapabilitiesInfo";
 import type { NodeBackendKind } from "./bindings/NodeBackendKind";
 import type { NodeBindingVersion } from "./bindings/NodeBindingVersion";
+import type { NodeCommandHistoryEntry } from "./bindings/NodeCommandHistoryEntry";
 import type { NodeCreateSessionRequest } from "./bindings/NodeCreateSessionRequest";
 import type { NodeDeleteSavedSessionResult } from "./bindings/NodeDeleteSavedSessionResult";
 import type { NodeDiscoveredSession } from "./bindings/NodeDiscoveredSession";
 import type { NodeHandshakeInfo } from "./bindings/NodeHandshakeInfo";
 import type { NodeMuxCommand } from "./bindings/NodeMuxCommand";
 import type { NodeMuxCommandResult } from "./bindings/NodeMuxCommandResult";
+import type { NodePaneHistory } from "./bindings/NodePaneHistory";
 import type { NodePruneSavedSessionsResult } from "./bindings/NodePruneSavedSessionsResult";
 import type { NodeRestoredSession } from "./bindings/NodeRestoredSession";
 import type { NodeScreenDelta } from "./bindings/NodeScreenDelta";
@@ -153,6 +163,7 @@ export type ElectronTerminalNodeInvokeMethod =
   | "attachSession"
   | "backendCapabilities"
   | "bindingVersion"
+  | "commandHistory"
   | "createNativeSession"
   | "deleteSavedSession"
   | "discoverSessions"
@@ -164,6 +175,7 @@ export type ElectronTerminalNodeInvokeMethod =
   | "pruneSavedSessions"
   | "restoreSavedSession"
   | "savedSession"
+  | "paneHistory"
   | "screenDelta"
   | "screenSnapshot"
   | "sessionHealthSnapshot"
@@ -286,6 +298,17 @@ export interface ElectronTerminalNodePreloadApi {
     paneId: string,
     fromSequence: number,
   ): Promise<NodeScreenDelta>;
+  paneHistory(
+    sessionId: string,
+    paneId: string,
+    fromEventSeq?: bigint | number | null,
+    maxSegments?: bigint | number | null,
+    maxBytes?: bigint | number | null,
+  ): Promise<NodePaneHistory>;
+  commandHistory(
+    sessionId?: string | null,
+    limit?: bigint | number | null,
+  ): Promise<NodeCommandHistoryEntry[]>;
   dispatchMuxCommand(
     sessionId: string,
     command: NodeMuxCommand,
@@ -362,6 +385,17 @@ export interface NativeTerminalNodeClientHandle {
     paneId: string,
     fromSequence: number,
   ): Promise<NodeScreenDelta>;
+  paneHistory(
+    sessionId: string,
+    paneId: string,
+    fromEventSeq?: bigint | number | null,
+    maxSegments?: bigint | number | null,
+    maxBytes?: bigint | number | null,
+  ): Promise<NodePaneHistory>;
+  commandHistory(
+    sessionId?: string | null,
+    limit?: bigint | number | null,
+  ): Promise<NodeCommandHistoryEntry[]>;
   dispatchMuxCommand(
     sessionId: string,
     command: NodeMuxCommand,
@@ -478,6 +512,17 @@ export declare class TerminalNodeClient
     paneId: string,
     fromSequence: number,
   ): Promise<NodeScreenDelta>;
+  paneHistory(
+    sessionId: string,
+    paneId: string,
+    fromEventSeq?: bigint | number | null,
+    maxSegments?: bigint | number | null,
+    maxBytes?: bigint | number | null,
+  ): Promise<NodePaneHistory>;
+  commandHistory(
+    sessionId?: string | null,
+    limit?: bigint | number | null,
+  ): Promise<NodeCommandHistoryEntry[]>;
   dispatchMuxCommand(
     sessionId: string,
     command: NodeMuxCommand,
@@ -555,6 +600,17 @@ export declare class ElectronTerminalNodeClient {
     paneId: string,
     fromSequence: number,
   ): Promise<NodeScreenDelta>;
+  paneHistory(
+    sessionId: string,
+    paneId: string,
+    fromEventSeq?: bigint | number | null,
+    maxSegments?: bigint | number | null,
+    maxBytes?: bigint | number | null,
+  ): Promise<NodePaneHistory>;
+  commandHistory(
+    sessionId?: string | null,
+    limit?: bigint | number | null,
+  ): Promise<NodeCommandHistoryEntry[]>;
   dispatchMuxCommand(
     sessionId: string,
     command: NodeMuxCommand,

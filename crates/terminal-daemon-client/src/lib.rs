@@ -7,15 +7,17 @@ use terminal_transport::{LocalSocketTransportClient, LocalSocketTransportSubscri
 
 use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 use terminal_protocol::{
-    BackendCapabilitiesResponse, CreateSessionRequest, CreateSessionResponse,
-    DeleteSavedSessionRequest, DeleteSavedSessionResponse, DiscoverSessionsRequest,
-    DiscoverSessionsResponse, DispatchMuxCommandRequest, GetBackendCapabilitiesRequest,
-    GetSavedSessionRequest, GetScreenDeltaRequest, GetScreenSnapshotRequest,
-    GetSessionHealthSnapshotRequest, GetTopologySnapshotRequest, Handshake, ImportSessionRequest,
-    ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse, LocalSocketAddress,
-    OpenSubscriptionRequest, ProtocolError, ProtocolVersion, PruneSavedSessionsRequest,
-    PruneSavedSessionsResponse, RequestPayload, ResponsePayload, RestoreSavedSessionRequest,
-    RestoreSavedSessionResponse, SavedSessionResponse, SubscriptionEvent,
+    BackendCapabilitiesResponse, CommandHistoryResponse, CreateSessionRequest,
+    CreateSessionResponse, DeleteSavedSessionRequest, DeleteSavedSessionResponse,
+    DiscoverSessionsRequest, DiscoverSessionsResponse, DispatchMuxCommandRequest,
+    GetBackendCapabilitiesRequest, GetPaneHistoryRequest, GetSavedSessionRequest,
+    GetScreenDeltaRequest, GetScreenSnapshotRequest, GetSessionHealthSnapshotRequest,
+    GetTopologySnapshotRequest, Handshake, ImportSessionRequest, ImportSessionResponse,
+    ListCommandHistoryRequest, ListSavedSessionsResponse, ListSessionsResponse, LocalSocketAddress,
+    OpenSubscriptionRequest, PaneHistoryResponse, ProtocolError, ProtocolVersion,
+    PruneSavedSessionsRequest, PruneSavedSessionsResponse, RequestPayload, ResponsePayload,
+    RestoreSavedSessionRequest, RestoreSavedSessionResponse, SavedSessionResponse,
+    SubscriptionEvent,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -342,6 +344,48 @@ impl LocalSocketDaemonClient {
         match response.payload {
             ResponsePayload::ScreenDelta(delta) => Ok(delta),
             other => Err(ProtocolError::unexpected_payload("screen_delta", &other)),
+        }
+    }
+
+    pub async fn pane_history(
+        &self,
+        session_id: terminal_domain::SessionId,
+        pane_id: terminal_domain::PaneId,
+        from_event_seq: Option<i64>,
+        max_segments: Option<i64>,
+        max_bytes: Option<i64>,
+    ) -> Result<PaneHistoryResponse, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::GetPaneHistory(GetPaneHistoryRequest {
+                session_id,
+                pane_id,
+                from_event_seq,
+                max_segments,
+                max_bytes,
+            }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::PaneHistory(history) => Ok(history),
+            other => Err(ProtocolError::unexpected_payload("pane_history", &other)),
+        }
+    }
+
+    pub async fn command_history(
+        &self,
+        session_id: Option<terminal_domain::SessionId>,
+        limit: Option<i64>,
+    ) -> Result<CommandHistoryResponse, ProtocolError> {
+        let response = self
+            .send_request(RequestPayload::ListCommandHistory(ListCommandHistoryRequest {
+                session_id,
+                limit,
+            }))
+            .await?;
+
+        match response.payload {
+            ResponsePayload::CommandHistory(history) => Ok(history),
+            other => Err(ProtocolError::unexpected_payload("command_history", &other)),
         }
     }
 

@@ -11,17 +11,20 @@ pub use errors::ProtocolError;
 pub use handshake::{DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion};
 pub use requests::{
     CreateSessionRequest, DeleteSavedSessionRequest, DiscoverSessionsRequest,
-    DispatchMuxCommandRequest, GetBackendCapabilitiesRequest, GetSavedSessionRequest,
-    GetScreenDeltaRequest, GetScreenSnapshotRequest, GetSessionHealthSnapshotRequest,
-    GetTopologySnapshotRequest, ImportSessionRequest, OpenSubscriptionRequest,
-    PruneSavedSessionsRequest, RequestPayload, RestoreSavedSessionRequest,
+    DispatchMuxCommandRequest, GetBackendCapabilitiesRequest, GetPaneHistoryRequest,
+    GetSavedSessionRequest, GetScreenDeltaRequest, GetScreenSnapshotRequest,
+    GetSessionHealthSnapshotRequest, GetTopologySnapshotRequest, ImportSessionRequest,
+    ListCommandHistoryRequest, OpenSubscriptionRequest, PruneSavedSessionsRequest, RequestPayload,
+    RestoreSavedSessionRequest,
 };
 pub use responses::{
-    BackendCapabilitiesResponse, CreateSessionResponse, DeleteSavedSessionResponse,
-    DiscoverSessionsResponse, ImportSessionResponse, ListSavedSessionsResponse,
-    ListSessionsResponse, OpenSubscriptionResponse, PruneSavedSessionsResponse, ResponsePayload,
-    RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionResponse,
-    SavedSessionRestoreSemantics, SavedSessionSummary,
+    BackendCapabilitiesResponse, CommandHistoryEntry, CommandHistoryResponse,
+    CreateSessionResponse, DeleteSavedSessionResponse, DiscoverSessionsResponse,
+    ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse,
+    OpenSubscriptionResponse, PaneHistoryGap, PaneHistoryReplayStrategy, PaneHistoryResponse,
+    PaneHistoryRestoreEvidence, PaneHistoryRestorePlan, PaneHistoryScreenSnapshot,
+    PaneHistorySegment, PruneSavedSessionsResponse, ResponsePayload, RestoreSavedSessionResponse,
+    SavedSessionRecord, SavedSessionResponse, SavedSessionRestoreSemantics, SavedSessionSummary,
 };
 pub use subscriptions::{SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope};
 pub use transport::{LocalSocketAddress, TransportResponse, decode_json_frame, encode_json_frame};

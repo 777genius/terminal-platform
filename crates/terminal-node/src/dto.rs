@@ -17,10 +17,12 @@ use terminal_projection::{
     TopologySnapshot,
 };
 use terminal_protocol::{
-    BackendCapabilitiesResponse, DaemonCapabilities, DaemonPhase, DeleteSavedSessionResponse,
-    Handshake, ProtocolError, ProtocolVersion, PruneSavedSessionsResponse,
-    RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionRestoreSemantics,
-    SavedSessionSummary, SubscriptionEvent,
+    BackendCapabilitiesResponse, CommandHistoryEntry, DaemonCapabilities, DaemonPhase,
+    DeleteSavedSessionResponse, Handshake, PaneHistoryGap, PaneHistoryReplayStrategy,
+    PaneHistoryResponse, PaneHistoryRestoreEvidence, PaneHistoryRestorePlan,
+    PaneHistoryScreenSnapshot, PaneHistorySegment, ProtocolError, ProtocolVersion,
+    PruneSavedSessionsResponse, RestoreSavedSessionResponse, SavedSessionRecord,
+    SavedSessionRestoreSemantics, SavedSessionSummary, SubscriptionEvent,
 };
 use ts_rs::TS;
 use uuid::Uuid;
@@ -304,6 +306,115 @@ pub struct NodeDeleteSavedSessionResult {
 pub struct NodePruneSavedSessionsResult {
     pub deleted_count: usize,
     pub kept_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodePaneHistoryReplayStrategy {
+    Empty,
+    RawVtStream,
+    RenderedSnapshot,
+    Mixed,
+    Degraded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodePaneHistoryRestoreEvidence {
+    pub kind: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodePaneHistoryRestorePlan {
+    pub session_id: String,
+    pub restore_guarantee_level: String,
+    pub latest_screen_snapshot_id: Option<String>,
+    pub latest_topology_snapshot_id: Option<String>,
+    pub high_water_commit_seq: i64,
+    pub evidence: Vec<NodePaneHistoryRestoreEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodePaneHistoryScreenSnapshot {
+    pub id: String,
+    pub pane_id: String,
+    pub projection_source: String,
+    pub buffer_kind: String,
+    pub rows: i32,
+    pub cols: i32,
+    pub base_event_seq: i64,
+    pub high_water_event_seq: i64,
+    pub high_water_byte_seq: Option<i64>,
+    pub screen_json: String,
+    pub parser_version: String,
+    pub projection_version: String,
+    pub checksum: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodePaneHistorySegment {
+    pub id: String,
+    pub event_seq_low: i64,
+    pub event_seq_high: i64,
+    pub byte_low: i64,
+    pub byte_high: i64,
+    pub payload: Vec<u8>,
+    pub checksum: String,
+    pub capture_semantics: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodePaneHistoryGap {
+    pub id: String,
+    pub pane_id: Option<String>,
+    pub stream_id: String,
+    pub gap_kind: String,
+    pub event_seq_low: Option<i64>,
+    pub event_seq_high: Option<i64>,
+    pub byte_low: Option<i64>,
+    pub byte_high: Option<i64>,
+    pub estimated_dropped_bytes: Option<i64>,
+    pub estimated_dropped_events: Option<i64>,
+    pub reason: String,
+    pub opened_at_ms: i64,
+    pub closed_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodePaneHistory {
+    pub session_id: String,
+    pub pane_id: String,
+    pub from_event_seq: i64,
+    pub max_segments: i64,
+    pub max_bytes: i64,
+    pub restore_plan: NodePaneHistoryRestorePlan,
+    pub latest_screen_snapshot: Option<NodePaneHistoryScreenSnapshot>,
+    pub segments: Vec<NodePaneHistorySegment>,
+    pub gaps: Vec<NodePaneHistoryGap>,
+    pub replay_strategy: NodePaneHistoryReplayStrategy,
+    pub has_more_segments: bool,
+    pub next_event_seq: Option<i64>,
+    pub total_payload_bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeCommandHistoryEntry {
+    pub id: String,
+    pub session_id: Option<String>,
+    pub pane_id: Option<String>,
+    pub display_text: String,
+    pub last_used_at_ms: i64,
+    pub use_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -903,6 +1014,127 @@ impl From<&DeleteSavedSessionResponse> for NodeDeleteSavedSessionResult {
 impl From<&PruneSavedSessionsResponse> for NodePruneSavedSessionsResult {
     fn from(value: &PruneSavedSessionsResponse) -> Self {
         Self { deleted_count: value.deleted_count, kept_count: value.kept_count }
+    }
+}
+
+impl From<&PaneHistoryReplayStrategy> for NodePaneHistoryReplayStrategy {
+    fn from(value: &PaneHistoryReplayStrategy) -> Self {
+        match value {
+            PaneHistoryReplayStrategy::Empty => Self::Empty,
+            PaneHistoryReplayStrategy::RawVtStream => Self::RawVtStream,
+            PaneHistoryReplayStrategy::RenderedSnapshot => Self::RenderedSnapshot,
+            PaneHistoryReplayStrategy::Mixed => Self::Mixed,
+            PaneHistoryReplayStrategy::Degraded => Self::Degraded,
+        }
+    }
+}
+
+impl From<&PaneHistoryRestoreEvidence> for NodePaneHistoryRestoreEvidence {
+    fn from(value: &PaneHistoryRestoreEvidence) -> Self {
+        Self { kind: value.kind.clone(), value: value.value.clone() }
+    }
+}
+
+impl From<&PaneHistoryRestorePlan> for NodePaneHistoryRestorePlan {
+    fn from(value: &PaneHistoryRestorePlan) -> Self {
+        Self {
+            session_id: value.session_id.0.to_string(),
+            restore_guarantee_level: value.restore_guarantee_level.clone(),
+            latest_screen_snapshot_id: value.latest_screen_snapshot_id.clone(),
+            latest_topology_snapshot_id: value.latest_topology_snapshot_id.clone(),
+            high_water_commit_seq: value.high_water_commit_seq,
+            evidence: value.evidence.iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<&PaneHistoryScreenSnapshot> for NodePaneHistoryScreenSnapshot {
+    fn from(value: &PaneHistoryScreenSnapshot) -> Self {
+        Self {
+            id: value.id.clone(),
+            pane_id: value.pane_id.0.to_string(),
+            projection_source: value.projection_source.clone(),
+            buffer_kind: value.buffer_kind.clone(),
+            rows: value.rows,
+            cols: value.cols,
+            base_event_seq: value.base_event_seq,
+            high_water_event_seq: value.high_water_event_seq,
+            high_water_byte_seq: value.high_water_byte_seq,
+            screen_json: value.screen_json.clone(),
+            parser_version: value.parser_version.clone(),
+            projection_version: value.projection_version.clone(),
+            checksum: value.checksum.clone(),
+            created_at_ms: value.created_at_ms,
+        }
+    }
+}
+
+impl From<&PaneHistorySegment> for NodePaneHistorySegment {
+    fn from(value: &PaneHistorySegment) -> Self {
+        Self {
+            id: value.id.clone(),
+            event_seq_low: value.event_seq_low,
+            event_seq_high: value.event_seq_high,
+            byte_low: value.byte_low,
+            byte_high: value.byte_high,
+            payload: value.payload.clone(),
+            checksum: value.checksum.clone(),
+            capture_semantics: value.capture_semantics.clone(),
+            created_at_ms: value.created_at_ms,
+        }
+    }
+}
+
+impl From<&PaneHistoryGap> for NodePaneHistoryGap {
+    fn from(value: &PaneHistoryGap) -> Self {
+        Self {
+            id: value.id.clone(),
+            pane_id: value.pane_id.map(|pane_id| pane_id.0.to_string()),
+            stream_id: value.stream_id.clone(),
+            gap_kind: value.gap_kind.clone(),
+            event_seq_low: value.event_seq_low,
+            event_seq_high: value.event_seq_high,
+            byte_low: value.byte_low,
+            byte_high: value.byte_high,
+            estimated_dropped_bytes: value.estimated_dropped_bytes,
+            estimated_dropped_events: value.estimated_dropped_events,
+            reason: value.reason.clone(),
+            opened_at_ms: value.opened_at_ms,
+            closed_at_ms: value.closed_at_ms,
+        }
+    }
+}
+
+impl From<&PaneHistoryResponse> for NodePaneHistory {
+    fn from(value: &PaneHistoryResponse) -> Self {
+        Self {
+            session_id: value.session_id.0.to_string(),
+            pane_id: value.pane_id.0.to_string(),
+            from_event_seq: value.from_event_seq,
+            max_segments: value.max_segments,
+            max_bytes: value.max_bytes,
+            restore_plan: (&value.restore_plan).into(),
+            latest_screen_snapshot: value.latest_screen_snapshot.as_ref().map(Into::into),
+            segments: value.segments.iter().map(Into::into).collect(),
+            gaps: value.gaps.iter().map(Into::into).collect(),
+            replay_strategy: (&value.replay_strategy).into(),
+            has_more_segments: value.has_more_segments,
+            next_event_seq: value.next_event_seq,
+            total_payload_bytes: value.total_payload_bytes,
+        }
+    }
+}
+
+impl From<&CommandHistoryEntry> for NodeCommandHistoryEntry {
+    fn from(value: &CommandHistoryEntry) -> Self {
+        Self {
+            id: value.id.clone(),
+            session_id: value.session_id.map(|session_id| session_id.0.to_string()),
+            pane_id: value.pane_id.map(|pane_id| pane_id.0.to_string()),
+            display_text: value.display_text.clone(),
+            last_used_at_ms: value.last_used_at_ms,
+            use_count: value.use_count,
+        }
     }
 }
 

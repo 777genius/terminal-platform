@@ -8,8 +8,8 @@ use terminal_protocol::{
 
 use crate::{
     adapters::{
-        map_backend_error, map_restore_saved_session_response, map_saved_session_record,
-        map_saved_session_summary,
+        map_backend_error, map_command_history, map_pane_history,
+        map_restore_saved_session_response, map_saved_session_record, map_saved_session_summary,
     },
     application::{
         TerminalDaemonActiveSessionPort, TerminalDaemonCatalogPort,
@@ -172,6 +172,28 @@ where
                     .await
                     .map_err(map_backend_error)?,
             ),
+            RequestPayload::GetPaneHistory(request) => {
+                ResponsePayload::PaneHistory(map_pane_history(
+                    self.active_sessions
+                        .pane_history(
+                            request.session_id,
+                            request.pane_id,
+                            request.from_event_seq,
+                            request.max_segments,
+                            request.max_bytes,
+                        )
+                        .await
+                        .map_err(map_backend_error)?,
+                )?)
+            }
+            RequestPayload::ListCommandHistory(request) => {
+                ResponsePayload::CommandHistory(map_command_history(
+                    self.active_sessions
+                        .command_history(request.session_id, request.limit)
+                        .await
+                        .map_err(map_backend_error)?,
+                )?)
+            }
             RequestPayload::DispatchMuxCommand(request) => ResponsePayload::DispatchMuxCommand(
                 self.active_sessions
                     .dispatch(request.session_id, request.command)
@@ -197,6 +219,7 @@ mod tests {
         BackendKind, CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
         DegradedModeReason, OperationId, PaneId, RouteAuthority, SessionId, SessionRoute,
     };
+    use terminal_persistence::{CommandHistoryEntryRecord, PaneHistoryHydrationRecord};
     use terminal_projection::{
         ProjectionSource, ScreenDelta, ScreenSnapshot, ScreenSurface, SessionHealthSnapshot,
         TopologySnapshot,
@@ -365,6 +388,25 @@ mod tests {
             _from_sequence: u64,
         ) -> Result<ScreenDelta, BackendError> {
             Err(BackendError::not_found("screen delta not exercised in this unit test"))
+        }
+
+        async fn pane_history(
+            &self,
+            _session_id: SessionId,
+            _pane_id: PaneId,
+            _from_event_seq: Option<i64>,
+            _max_segments: Option<i64>,
+            _max_bytes: Option<i64>,
+        ) -> Result<PaneHistoryHydrationRecord, BackendError> {
+            Err(BackendError::not_found("pane history not exercised in this unit test"))
+        }
+
+        async fn command_history(
+            &self,
+            _session_id: Option<SessionId>,
+            _limit: Option<i64>,
+        ) -> Result<Vec<CommandHistoryEntryRecord>, BackendError> {
+            Ok(Vec::new())
         }
 
         async fn dispatch(

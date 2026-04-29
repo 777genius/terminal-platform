@@ -3,6 +3,7 @@ use terminal_backend_api::{
     CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult, SubscriptionSpec,
 };
 use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
+use terminal_persistence::{CommandHistoryEntryRecord, PaneHistoryHydrationRecord};
 use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 use terminal_protocol::Handshake;
 
@@ -70,6 +71,19 @@ pub trait TerminalDaemonActiveSessionPort {
         pane_id: PaneId,
         from_sequence: u64,
     ) -> Result<ScreenDelta, BackendError>;
+    async fn pane_history(
+        &self,
+        session_id: SessionId,
+        pane_id: PaneId,
+        from_event_seq: Option<i64>,
+        max_segments: Option<i64>,
+        max_bytes: Option<i64>,
+    ) -> Result<PaneHistoryHydrationRecord, BackendError>;
+    async fn command_history(
+        &self,
+        session_id: Option<SessionId>,
+        limit: Option<i64>,
+    ) -> Result<Vec<CommandHistoryEntryRecord>, BackendError>;
     async fn dispatch(
         &self,
         session_id: SessionId,

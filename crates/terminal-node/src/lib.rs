@@ -12,21 +12,23 @@ use uuid::Uuid;
 
 pub use dto::{
     NodeAttachedSession, NodeBackendCapabilities, NodeBackendCapabilitiesInfo, NodeBackendKind,
-    NodeBindingVersion, NodeCreateSessionRequest, NodeDaemonCapabilities, NodeDaemonPhase,
-    NodeDeleteSavedSessionResult, NodeDiscoveredSession, NodeExternalSessionRef, NodeHandshake,
-    NodeHandshakeAssessment, NodeHandshakeAssessmentStatus, NodeHandshakeInfo, NodeMuxCommand,
-    NodeMuxCommandResult, NodeNewTabCommand, NodeOverrideLayoutCommand, NodePaneSplit,
-    NodePaneTreeNode, NodeProjectionSource, NodeProtocolCompatibility,
-    NodeProtocolCompatibilityStatus, NodeProtocolVersion, NodePruneSavedSessionsResult,
-    NodeRenameTabCommand, NodeResizePaneCommand, NodeRestoredSession, NodeRouteAuthority,
-    NodeSavedSessionCompatibility, NodeSavedSessionCompatibilityStatus, NodeSavedSessionManifest,
-    NodeSavedSessionRecord, NodeSavedSessionRestoreSemantics, NodeSavedSessionSummary,
-    NodeScreenCursor, NodeScreenDelta, NodeScreenLine, NodeScreenLinePatch, NodeScreenPatch,
-    NodeScreenSnapshot, NodeScreenSurface, NodeSendInputCommand, NodeSendPasteCommand,
-    NodeSessionHealthPhase, NodeSessionHealthReason, NodeSessionHealthSnapshot, NodeSessionRoute,
-    NodeSessionSummary, NodeShellLaunchSpec, NodeSplitDirection, NodeSplitPaneCommand,
-    NodeSubscriptionEvent, NodeSubscriptionMeta, NodeSubscriptionSpec, NodeTabSnapshot,
-    NodeTopologySnapshot,
+    NodeBindingVersion, NodeCommandHistoryEntry, NodeCreateSessionRequest, NodeDaemonCapabilities,
+    NodeDaemonPhase, NodeDeleteSavedSessionResult, NodeDiscoveredSession, NodeExternalSessionRef,
+    NodeHandshake, NodeHandshakeAssessment, NodeHandshakeAssessmentStatus, NodeHandshakeInfo,
+    NodeMuxCommand, NodeMuxCommandResult, NodeNewTabCommand, NodeOverrideLayoutCommand,
+    NodePaneHistory, NodePaneHistoryGap, NodePaneHistoryReplayStrategy,
+    NodePaneHistoryRestoreEvidence, NodePaneHistoryRestorePlan, NodePaneHistoryScreenSnapshot,
+    NodePaneHistorySegment, NodePaneSplit, NodePaneTreeNode, NodeProjectionSource,
+    NodeProtocolCompatibility, NodeProtocolCompatibilityStatus, NodeProtocolVersion,
+    NodePruneSavedSessionsResult, NodeRenameTabCommand, NodeResizePaneCommand, NodeRestoredSession,
+    NodeRouteAuthority, NodeSavedSessionCompatibility, NodeSavedSessionCompatibilityStatus,
+    NodeSavedSessionManifest, NodeSavedSessionRecord, NodeSavedSessionRestoreSemantics,
+    NodeSavedSessionSummary, NodeScreenCursor, NodeScreenDelta, NodeScreenLine,
+    NodeScreenLinePatch, NodeScreenPatch, NodeScreenSnapshot, NodeScreenSurface,
+    NodeSendInputCommand, NodeSendPasteCommand, NodeSessionHealthPhase, NodeSessionHealthReason,
+    NodeSessionHealthSnapshot, NodeSessionRoute, NodeSessionSummary, NodeShellLaunchSpec,
+    NodeSplitDirection, NodeSplitPaneCommand, NodeSubscriptionEvent, NodeSubscriptionMeta,
+    NodeSubscriptionSpec, NodeTabSnapshot, NodeTopologySnapshot,
 };
 
 #[derive(Debug, Clone)]
@@ -351,6 +353,37 @@ impl NodeHostClient {
         Ok((&delta).into())
     }
 
+    pub async fn pane_history(
+        &self,
+        session_id: &str,
+        pane_id: &str,
+        from_event_seq: Option<i64>,
+        max_segments: Option<i64>,
+        max_bytes: Option<i64>,
+    ) -> Result<NodePaneHistory, ProtocolError> {
+        let history = self
+            .client
+            .pane_history(
+                parse_session_id(session_id)?,
+                parse_pane_id(pane_id)?,
+                from_event_seq,
+                max_segments,
+                max_bytes,
+            )
+            .await?;
+        Ok((&history).into())
+    }
+
+    pub async fn command_history(
+        &self,
+        session_id: Option<&str>,
+        limit: Option<i64>,
+    ) -> Result<Vec<NodeCommandHistoryEntry>, ProtocolError> {
+        let session_id = session_id.map(parse_session_id).transpose()?;
+        let history = self.client.command_history(session_id, limit).await?;
+        Ok(history.entries.iter().map(Into::into).collect())
+    }
+
     pub async fn dispatch_mux_command(
         &self,
         session_id: &str,
@@ -386,6 +419,14 @@ pub fn export_typescript_bindings_to(out_dir: impl AsRef<Path>) -> std::io::Resu
     NodeRestoredSession::export_all(&cfg).map_err(export_error)?;
     NodeDeleteSavedSessionResult::export_all(&cfg).map_err(export_error)?;
     NodePruneSavedSessionsResult::export_all(&cfg).map_err(export_error)?;
+    NodePaneHistoryReplayStrategy::export_all(&cfg).map_err(export_error)?;
+    NodePaneHistoryRestoreEvidence::export_all(&cfg).map_err(export_error)?;
+    NodePaneHistoryRestorePlan::export_all(&cfg).map_err(export_error)?;
+    NodePaneHistoryScreenSnapshot::export_all(&cfg).map_err(export_error)?;
+    NodePaneHistorySegment::export_all(&cfg).map_err(export_error)?;
+    NodePaneHistoryGap::export_all(&cfg).map_err(export_error)?;
+    NodePaneHistory::export_all(&cfg).map_err(export_error)?;
+    NodeCommandHistoryEntry::export_all(&cfg).map_err(export_error)?;
     NodeTopologySnapshot::export_all(&cfg).map_err(export_error)?;
     NodeScreenSnapshot::export_all(&cfg).map_err(export_error)?;
     NodeScreenDelta::export_all(&cfg).map_err(export_error)?;

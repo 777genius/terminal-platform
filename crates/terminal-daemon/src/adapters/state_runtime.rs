@@ -3,6 +3,7 @@ use terminal_backend_api::{
     CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult, SubscriptionSpec,
 };
 use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
+use terminal_persistence::{CommandHistoryEntryRecord, PaneHistoryHydrationRecord};
 use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 use terminal_protocol::{DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion};
 use terminal_runtime::{RuntimeHandshake, RuntimePhase, TerminalRuntime};
@@ -131,6 +132,27 @@ impl TerminalDaemonActiveSessionPort for TerminalRuntimeAdapter<'_> {
         from_sequence: u64,
     ) -> Result<ScreenDelta, BackendError> {
         self.runtime.screen_delta(session_id, pane_id, from_sequence).await
+    }
+
+    async fn pane_history(
+        &self,
+        session_id: SessionId,
+        pane_id: PaneId,
+        from_event_seq: Option<i64>,
+        max_segments: Option<i64>,
+        max_bytes: Option<i64>,
+    ) -> Result<PaneHistoryHydrationRecord, BackendError> {
+        self.runtime
+            .pane_history(session_id, pane_id, from_event_seq, max_segments, max_bytes)
+            .await
+    }
+
+    async fn command_history(
+        &self,
+        session_id: Option<SessionId>,
+        limit: Option<i64>,
+    ) -> Result<Vec<CommandHistoryEntryRecord>, BackendError> {
+        self.runtime.command_history(session_id, limit).await
     }
 
     async fn dispatch(

@@ -460,6 +460,7 @@ const electronInvokeMethodNames = new Set([
   "attachSession",
   "backendCapabilities",
   "bindingVersion",
+  "commandHistory",
   "createNativeSession",
   "deleteSavedSession",
   "discoverSessions",
@@ -471,6 +472,7 @@ const electronInvokeMethodNames = new Set([
   "pruneSavedSessions",
   "restoreSavedSession",
   "savedSession",
+  "paneHistory",
   "screenDelta",
   "screenSnapshot",
   "sessionHealthSnapshot",
@@ -738,6 +740,26 @@ class TerminalNodeClient {
 
   screenDelta(sessionId, paneId, fromSequence) {
     return this.#inner.screenDelta(sessionId, paneId, fromSequence);
+  }
+
+  paneHistory(
+    sessionId,
+    paneId,
+    fromEventSeq = null,
+    maxSegments = null,
+    maxBytes = null,
+  ) {
+    return this.#inner.paneHistory(
+      sessionId,
+      paneId,
+      fromEventSeq,
+      maxSegments,
+      maxBytes,
+    );
+  }
+
+  commandHistory(sessionId = null, limit = null) {
+    return this.#inner.commandHistory(sessionId, limit);
   }
 
   dispatchMuxCommand(sessionId, command) {
@@ -1019,6 +1041,27 @@ class ElectronTerminalNodeClient {
     return this.#invoke("screenDelta", sessionId, paneId, fromSequence);
   }
 
+  paneHistory(
+    sessionId,
+    paneId,
+    fromEventSeq = null,
+    maxSegments = null,
+    maxBytes = null,
+  ) {
+    return this.#invoke(
+      "paneHistory",
+      sessionId,
+      paneId,
+      fromEventSeq,
+      maxSegments,
+      maxBytes,
+    );
+  }
+
+  commandHistory(sessionId = null, limit = null) {
+    return this.#invoke("commandHistory", sessionId, limit);
+  }
+
   dispatchMuxCommand(sessionId, command) {
     return this.#invoke("dispatchMuxCommand", sessionId, command);
   }
@@ -1199,6 +1242,26 @@ function createElectronPreloadApi(options = {}) {
 
     screenDelta(sessionId, paneId, fromSequence) {
       return client.screenDelta(sessionId, paneId, fromSequence);
+    },
+
+    paneHistory(
+      sessionId,
+      paneId,
+      fromEventSeq = null,
+      maxSegments = null,
+      maxBytes = null,
+    ) {
+      return client.paneHistory(
+        sessionId,
+        paneId,
+        fromEventSeq,
+        maxSegments,
+        maxBytes,
+      );
+    },
+
+    commandHistory(sessionId = null, limit = null) {
+      return client.commandHistory(sessionId, limit);
     },
 
     dispatchMuxCommand(sessionId, command) {
