@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   buildBrowserBootstrapPayload,
   clearBrowserBootstrapConfig,
+  isRetriableWindowsBootstrapFileError,
   normalizeBrowserBootstrapScope,
   resolveBrowserBootstrapTargets,
   writeBrowserBootstrapConfig,
@@ -47,6 +48,14 @@ test("browser bootstrap payload is stable JSON with a trailing newline", () => {
 
   assert.equal(payload.endsWith("\n"), true);
   assert.deepEqual(JSON.parse(payload), bootstrapConfig);
+});
+
+test("browser bootstrap classifies transient Windows file lock errors", () => {
+  assert.equal(isRetriableWindowsBootstrapFileError({ code: "EPERM" }, "win32"), true);
+  assert.equal(isRetriableWindowsBootstrapFileError({ code: "EBUSY" }, "win32"), true);
+  assert.equal(isRetriableWindowsBootstrapFileError({ code: "ENOTEMPTY" }, "win32"), true);
+  assert.equal(isRetriableWindowsBootstrapFileError({ code: "ENOENT" }, "win32"), false);
+  assert.equal(isRetriableWindowsBootstrapFileError({ code: "EPERM" }, "linux"), false);
 });
 
 test("browser bootstrap writer updates and clears public and dist bootstrap files", async () => {

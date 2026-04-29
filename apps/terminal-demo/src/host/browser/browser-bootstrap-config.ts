@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import {
   TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH,
@@ -87,6 +88,8 @@ async function writeFileAtomically(targetPath: string, payload: string): Promise
     process.pid,
     ".",
     Date.now(),
+    ".",
+    randomUUID(),
     ".tmp",
   ].join("");
 
@@ -94,7 +97,7 @@ async function writeFileAtomically(targetPath: string, payload: string): Promise
     await fs.writeFile(tempPath, payload, "utf8");
     await renameWithWindowsRetries(tempPath, targetPath);
   } catch (error) {
-    await removeFileWithWindowsRetries(tempPath);
+    await removeFileWithWindowsRetries(tempPath).catch(() => undefined);
     throw error;
   }
 }
@@ -123,9 +126,12 @@ async function removeBrowserBootstrapTarget(
 
 async function readOptionalFile(filePath: string): Promise<string | null> {
   try {
-    return await fs.readFile(filePath, "utf8");
+    return await retryWindowsFileOperation(() => fs.readFile(filePath, "utf8"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if (
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+      || isRetriableWindowsFileError(error)
+    ) {
       return null;
     }
 
@@ -133,13 +139,12 @@ async function readOptionalFile(filePath: string): Promise<string | null> {
   }
 }
 
-async function retryWindowsFileOperation(operation: () => Promise<void>): Promise<void> {
+async function retryWindowsFileOperation<T>(operation: () => Promise<T>): Promise<T> {
   let lastError: unknown = null;
   const maxAttempts = process.platform === "win32" ? WINDOWS_FILE_OPERATION_RETRIES + 1 : 1;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
-      await operation();
-      return;
+      return await operation();
     } catch (error) {
       lastError = error;
       if (!isRetriableWindowsFileError(error) || attempt === maxAttempts - 1) {
@@ -153,13 +158,20 @@ async function retryWindowsFileOperation(operation: () => Promise<void>): Promis
   throw lastError;
 }
 
-function isRetriableWindowsFileError(error: unknown): boolean {
-  if (process.platform !== "win32" || typeof error !== "object" || error === null) {
+export function isRetriableWindowsBootstrapFileError(
+  error: unknown,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform !== "win32" || typeof error !== "object" || error === null) {
     return false;
   }
 
   const code = (error as NodeJS.ErrnoException).code;
   return code === "EBUSY" || code === "ENOTEMPTY" || code === "EPERM";
+}
+
+function isRetriableWindowsFileError(error: unknown): boolean {
+  return isRetriableWindowsBootstrapFileError(error);
 }
 
 function sleep(ms: number): Promise<void> {
