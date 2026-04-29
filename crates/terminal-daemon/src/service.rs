@@ -366,7 +366,7 @@ mod tests {
                 assert!(listed.sessions[0].restore_semantics.restores_focus_state);
                 assert!(listed.sessions[0].restore_semantics.restores_tab_titles);
                 assert!(listed.sessions[0].restore_semantics.uses_saved_launch_spec);
-                assert!(!listed.sessions[0].restore_semantics.replays_saved_screen_buffers);
+                assert!(listed.sessions[0].restore_semantics.replays_saved_screen_buffers);
                 assert!(!listed.sessions[0].restore_semantics.preserves_process_state);
             }
             other => panic!("unexpected payload: {other:?}"),
@@ -385,7 +385,7 @@ mod tests {
                 assert!(saved.session.restore_semantics.restores_focus_state);
                 assert!(saved.session.restore_semantics.restores_tab_titles);
                 assert!(saved.session.restore_semantics.uses_saved_launch_spec);
-                assert!(!saved.session.restore_semantics.replays_saved_screen_buffers);
+                assert!(saved.session.restore_semantics.replays_saved_screen_buffers);
                 assert!(!saved.session.restore_semantics.preserves_process_state);
             }
             other => panic!("unexpected payload: {other:?}"),
@@ -513,7 +513,7 @@ mod tests {
                 assert!(response.restore_semantics.restores_focus_state);
                 assert!(response.restore_semantics.restores_tab_titles);
                 assert!(response.restore_semantics.uses_saved_launch_spec);
-                assert!(!response.restore_semantics.replays_saved_screen_buffers);
+                assert!(response.restore_semantics.replays_saved_screen_buffers);
                 assert!(!response.restore_semantics.preserves_process_state);
             }
             other => panic!("unexpected payload: {other:?}"),

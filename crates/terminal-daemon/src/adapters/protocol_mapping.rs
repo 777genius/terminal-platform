@@ -46,12 +46,16 @@ pub fn map_saved_session_summary(session: RuntimeSavedSessionSummary) -> SavedSe
         has_launch: session.has_launch,
         tab_count: session.tab_count,
         pane_count: session.pane_count,
-        restore_semantics: saved_session_restore_semantics(session.has_launch),
+        restore_semantics: saved_session_restore_semantics(
+            session.has_launch,
+            session.pane_count > 0,
+        ),
     }
 }
 
 pub fn map_saved_session_record(session: RuntimeSavedSessionRecord) -> SavedSessionRecord {
     let has_launch = session.launch.is_some();
+    let has_screen_buffers = !session.screens.is_empty();
     let compatibility = saved_session_compatibility(&session.manifest);
 
     SavedSessionRecord {
@@ -64,7 +68,7 @@ pub fn map_saved_session_record(session: RuntimeSavedSessionRecord) -> SavedSess
         topology: session.topology,
         screens: session.screens,
         saved_at_ms: session.saved_at_ms,
-        restore_semantics: saved_session_restore_semantics(has_launch),
+        restore_semantics: saved_session_restore_semantics(has_launch, has_screen_buffers),
     }
 }
 
@@ -78,17 +82,23 @@ pub fn map_restore_saved_session_response(
         manifest: saved_session.manifest.clone(),
         compatibility: saved_session_compatibility(&saved_session.manifest),
         session: restored_session,
-        restore_semantics: saved_session_restore_semantics(saved_session.launch.is_some()),
+        restore_semantics: saved_session_restore_semantics(
+            saved_session.launch.is_some(),
+            !saved_session.screens.is_empty(),
+        ),
     }
 }
 
-fn saved_session_restore_semantics(has_launch: bool) -> SavedSessionRestoreSemantics {
+fn saved_session_restore_semantics(
+    has_launch: bool,
+    has_screen_buffers: bool,
+) -> SavedSessionRestoreSemantics {
     SavedSessionRestoreSemantics {
         restores_topology: true,
         restores_focus_state: true,
         restores_tab_titles: true,
         uses_saved_launch_spec: has_launch,
-        replays_saved_screen_buffers: false,
+        replays_saved_screen_buffers: has_screen_buffers,
         preserves_process_state: false,
     }
 }
