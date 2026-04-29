@@ -72,6 +72,42 @@ describe("terminal screen controls", () => {
     expect(controls.canUseDirectInput).toBe(false);
     expect(controls.canUseDirectPaste).toBe(false);
   });
+
+  it("exposes restored pane history only for the active live session", () => {
+    const controls = resolveTerminalScreenControlState(createWorkspaceSnapshot({
+      historicalPanes: {
+        "pane-1": {
+          sessionId: "session-1",
+          paneId: "pane-1",
+          sourceSessionId: "saved-session-1",
+          sourcePaneId: "saved-pane-1",
+          source: "saved_session_restore",
+          replayStrategy: "rendered_snapshot",
+          restoreGuaranteeLevel: "visual_snapshot_only",
+          lines: ["saved output"],
+          capturedAtMs: 1000n,
+          hasGaps: false,
+          hasMoreSegments: false,
+        },
+        "pane-2": {
+          sessionId: "other-session",
+          paneId: "pane-2",
+          sourceSessionId: "saved-session-2",
+          sourcePaneId: "saved-pane-2",
+          source: "saved_session_restore",
+          replayStrategy: "rendered_snapshot",
+          restoreGuaranteeLevel: "visual_snapshot_only",
+          lines: ["stale output"],
+          capturedAtMs: 1000n,
+          hasGaps: false,
+          hasMoreSegments: false,
+        },
+      },
+    }));
+
+    expect(controls.history?.lines).toEqual(["saved output"]);
+    expect(controls.canCopyVisibleOutput).toBe(true);
+  });
 });
 
 function createWorkspaceSnapshot(overrides: Partial<WorkspaceSnapshot> = {}): WorkspaceSnapshot {

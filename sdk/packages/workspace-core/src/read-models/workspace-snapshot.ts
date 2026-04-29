@@ -73,6 +73,20 @@ export interface WorkspaceCommandHistorySnapshot {
   limit: number;
 }
 
+export interface WorkspaceHistoricalPaneSnapshot {
+  sessionId: SessionId;
+  paneId: PaneId;
+  sourceSessionId: SessionId;
+  sourcePaneId: PaneId;
+  source: "saved_session_restore";
+  replayStrategy: "rendered_snapshot";
+  restoreGuaranteeLevel: "visual_snapshot_only";
+  lines: string[];
+  capturedAtMs: bigint;
+  hasGaps: boolean;
+  hasMoreSegments: boolean;
+}
+
 export interface WorkspaceSnapshot {
   connection: WorkspaceConnectionSnapshot;
   catalog: WorkspaceCatalogSnapshot;
@@ -81,6 +95,7 @@ export interface WorkspaceSnapshot {
   diagnostics: WorkspaceDiagnosticRecord[];
   drafts: Record<string, string>;
   commandHistory: WorkspaceCommandHistorySnapshot;
+  historicalPanes?: Record<string, WorkspaceHistoricalPaneSnapshot>;
   theme: WorkspaceThemeSnapshot;
   terminalDisplay: WorkspaceTerminalDisplaySnapshot;
 }
@@ -121,6 +136,7 @@ export function createInitialWorkspaceSnapshot(
       entries: normalizeCommandHistoryEntries(options.commandHistoryEntries, commandHistoryLimit),
       limit: commandHistoryLimit,
     },
+    historicalPanes: {},
     theme: {
       themeId: options.themeId ?? DEFAULT_WORKSPACE_THEME_ID,
     },

@@ -10,6 +10,7 @@ import type {
   PaneId,
   PaneTreeNode,
   PruneSavedSessionsResult,
+  SavedSessionRecord,
   ScreenDelta,
   ScreenSnapshot,
   SessionId,
@@ -21,6 +22,7 @@ import type {
 import type { WorkspaceSubscription } from "@terminal-platform/workspace-contracts";
 
 import type { WorkspaceSnapshot } from "../read-models/workspace-snapshot.js";
+import type { WorkspaceHistoricalPaneSnapshot } from "../read-models/workspace-snapshot.js";
 import type { CatalogService } from "./catalog-service.js";
 import type { ServiceContext } from "./service-context.js";
 
@@ -114,7 +116,15 @@ export class SessionCommandService {
         }
 
         const transport = await this.#context.ensureTransport();
+        const savedSession = await this.#loadSavedSessionForHistory(transport, sessionId);
         const restored = await transport.restoreSavedSession(sessionId);
+        const attachedSession = await this.#attachRestoredSessionForHistory(
+          transport,
+          restored.session.session_id,
+        );
+        const historicalPanes = savedSession && attachedSession
+          ? buildRestoredHistoricalPanes(savedSession, attachedSession, this.#context.now())
+          : {};
 
         this.#context.updateSnapshot((snapshot) => ({
           ...snapshot,
@@ -122,12 +132,20 @@ export class SessionCommandService {
             ...snapshot.catalog,
             sessions: mergeSession(snapshot.catalog.sessions, restored.session),
           },
+          attachedSession: attachedSession ?? snapshot.attachedSession,
+          historicalPanes: {
+            ...(snapshot.historicalPanes ?? {}),
+            ...historicalPanes,
+          },
           selection: {
-            ...snapshot.selection,
             activeSessionId: restored.session.session_id,
+            activePaneId: attachedSession?.focused_screen?.pane_id ?? snapshot.selection.activePaneId,
           },
         }));
 
+        if (attachedSession) {
+          this.#syncLiveSessionSubscriptions(attachedSession);
+        }
         await this.#catalogService.refreshSavedSessions();
       } catch (error) {
         throw this.#handleTransportError(error, "failed to restore saved session");
@@ -460,6 +478,42 @@ export class SessionCommandService {
 
     return workspaceError;
   }
+
+  async #loadSavedSessionForHistory(
+    transport: Awaited<ReturnType<ServiceContext["ensureTransport"]>>,
+    sessionId: SessionId,
+  ): Promise<SavedSessionRecord | null> {
+    try {
+      return await transport.getSavedSession(sessionId);
+    } catch (error) {
+      this.#context.recordDiagnostic({
+        code: "saved_history_prefetch_failed",
+        message: `failed to prefetch saved session history for ${sessionId}`,
+        severity: "warn",
+        recoverable: true,
+        cause: error,
+      });
+      return null;
+    }
+  }
+
+  async #attachRestoredSessionForHistory(
+    transport: Awaited<ReturnType<ServiceContext["ensureTransport"]>>,
+    sessionId: SessionId,
+  ): Promise<NonNullable<WorkspaceSnapshot["attachedSession"]> | null> {
+    try {
+      return await transport.attachSession(sessionId);
+    } catch (error) {
+      this.#context.recordDiagnostic({
+        code: "restored_session_attach_failed",
+        message: `failed to attach restored session ${sessionId}`,
+        severity: "warn",
+        recoverable: true,
+        cause: error,
+      });
+      return null;
+    }
+  }
 }
 
 interface LiveTopologySubscription {
@@ -609,4 +663,77 @@ function mergeSession<TSession extends { session_id: string }>(
 ): TSession[] {
   const remaining = sessions.filter((session) => session.session_id !== nextSession.session_id);
   return [...remaining, nextSession];
+}
+
+function buildRestoredHistoricalPanes(
+  saved: SavedSessionRecord,
+  attachedSession: NonNullable<WorkspaceSnapshot["attachedSession"]>,
+  loadedAtMs: number,
+): Record<string, WorkspaceHistoricalPaneSnapshot> {
+  const paneMap = mapSavedPaneIdsToLivePaneIds(saved.topology, attachedSession.topology);
+  const savedScreensByPane = new Map(saved.screens.map((screen) => [screen.pane_id, screen]));
+  const historicalPanes: Record<string, WorkspaceHistoricalPaneSnapshot> = {};
+
+  for (const [sourcePaneId, livePaneId] of paneMap.entries()) {
+    const savedScreen = savedScreensByPane.get(sourcePaneId);
+    if (!savedScreen) {
+      continue;
+    }
+
+    const lines = savedScreen.surface.lines
+      .map((line) => line.text)
+      .filter((line, index, source) => line.length > 0 || index < source.length - 1);
+    if (lines.length === 0) {
+      continue;
+    }
+
+    historicalPanes[livePaneId] = {
+      sessionId: attachedSession.session.session_id,
+      paneId: livePaneId,
+      sourceSessionId: saved.session_id,
+      sourcePaneId,
+      source: "saved_session_restore",
+      replayStrategy: "rendered_snapshot",
+      restoreGuaranteeLevel: "visual_snapshot_only",
+      lines,
+      capturedAtMs: saved.saved_at_ms || BigInt(Math.trunc(loadedAtMs)),
+      hasGaps: false,
+      hasMoreSegments: false,
+    };
+  }
+
+  return historicalPanes;
+}
+
+function mapSavedPaneIdsToLivePaneIds(
+  savedTopology: SavedSessionRecord["topology"],
+  liveTopology: NonNullable<WorkspaceSnapshot["attachedSession"]>["topology"],
+): Map<PaneId, PaneId> {
+  const pairs = new Map<PaneId, PaneId>();
+  const tabCount = Math.min(savedTopology.tabs.length, liveTopology.tabs.length);
+
+  for (let tabIndex = 0; tabIndex < tabCount; tabIndex += 1) {
+    const savedTab = savedTopology.tabs[tabIndex];
+    const liveTab = liveTopology.tabs[tabIndex];
+    if (!savedTab || !liveTab) {
+      continue;
+    }
+
+    const savedPanes = collectPaneTreeIds(savedTab.root);
+    const livePanes = collectPaneTreeIds(liveTab.root);
+    const paneCount = Math.min(savedPanes.length, livePanes.length);
+    for (let paneIndex = 0; paneIndex < paneCount; paneIndex += 1) {
+      pairs.set(savedPanes[paneIndex]!, livePanes[paneIndex]!);
+    }
+  }
+
+  return pairs;
+}
+
+function collectPaneTreeIds(node: PaneTreeNode): PaneId[] {
+  if (node.kind === "leaf") {
+    return [node.pane_id];
+  }
+
+  return [...collectPaneTreeIds(node.first), ...collectPaneTreeIds(node.second)];
 }

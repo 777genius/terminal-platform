@@ -11,6 +11,7 @@ import type {
   PaneId,
   ScreenDelta,
   ScreenSnapshot,
+  SavedSessionRecord,
   SavedSessionSummary,
   SessionId,
   SubscriptionEvent,
@@ -499,6 +500,107 @@ describe("createWorkspaceKernel saved session maintenance", () => {
     await kernel.dispose();
   });
 
+  it("attaches restored sessions with saved visible history", async () => {
+    const savedRecord = createSavedSessionRecord("saved-1", "saved-pane-1", "historical output");
+    const restoredSessionId = "restored-session-1";
+    const livePaneId = "live-pane-1";
+    const liveTopology = createLiveTopology(restoredSessionId, livePaneId);
+    const attachedSession = createAttachedSession(
+      restoredSessionId,
+      livePaneId,
+      liveTopology,
+      "new live prompt",
+      1n,
+    );
+
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
+        getSavedSession: async () => savedRecord,
+        restoreSavedSession: async () => ({
+          saved_session_id: savedRecord.session_id,
+          manifest: savedRecord.manifest,
+          compatibility: savedRecord.compatibility,
+          session: {
+            session_id: restoredSessionId,
+            route: savedRecord.route,
+            title: savedRecord.title,
+          },
+          restore_semantics: savedRecord.restore_semantics,
+        }),
+        attachSession: async () => attachedSession,
+      } as WorkspaceTransportClient,
+      now: () => 5_000,
+    });
+
+    await kernel.commands.refreshSavedSessions();
+    await kernel.commands.restoreSavedSession(savedRecord.session_id);
+
+    const snapshot = kernel.getSnapshot();
+    expect(snapshot.attachedSession?.session.session_id).toBe(restoredSessionId);
+    expect(snapshot.selection).toEqual({
+      activeSessionId: restoredSessionId,
+      activePaneId: livePaneId,
+    });
+    expect(snapshot.historicalPanes?.[livePaneId]).toMatchObject({
+      sessionId: restoredSessionId,
+      paneId: livePaneId,
+      sourceSessionId: savedRecord.session_id,
+      sourcePaneId: "saved-pane-1",
+      lines: ["historical output"],
+      replayStrategy: "rendered_snapshot",
+      restoreGuaranteeLevel: "visual_snapshot_only",
+    });
+
+    await kernel.dispose();
+  });
+
+  it("keeps restore successful when immediate attach for history fails", async () => {
+    const savedRecord = createSavedSessionRecord("saved-attach-fails", "saved-pane-1", "historical output");
+    const restoredSessionId = "restored-attach-fails";
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
+        getSavedSession: async () => savedRecord,
+        restoreSavedSession: async () => ({
+          saved_session_id: savedRecord.session_id,
+          manifest: savedRecord.manifest,
+          compatibility: savedRecord.compatibility,
+          session: {
+            session_id: restoredSessionId,
+            route: savedRecord.route,
+            title: savedRecord.title,
+          },
+          restore_semantics: savedRecord.restore_semantics,
+        }),
+        attachSession: async () => {
+          throw new Error("attach unavailable");
+        },
+      } as WorkspaceTransportClient,
+      now: () => 6_000,
+    });
+
+    await kernel.commands.refreshSavedSessions();
+    await kernel.commands.restoreSavedSession(savedRecord.session_id);
+
+    expect(kernel.getSnapshot().selection.activeSessionId).toBe(restoredSessionId);
+    expect(kernel.getSnapshot().catalog.sessions.map((session) => session.session_id)).toContain(restoredSessionId);
+    expect(kernel.diagnostics.list()).toEqual([
+      {
+        code: "restored_session_attach_failed",
+        message: `failed to attach restored session ${restoredSessionId}`,
+        recoverable: true,
+        severity: "warn",
+        timestampMs: 6_000,
+        cause: expect.any(Error),
+      },
+    ]);
+
+    await kernel.dispose();
+  });
+
   it("blocks invalid saved session prune limits before calling transport", async () => {
     let pruneCalls = 0;
     const kernel = createWorkspaceKernel({
@@ -834,6 +936,48 @@ function createCommandHistoryEntry(displayText: string, lastUsedAtMs: bigint): C
     display_text: displayText,
     last_used_at_ms: lastUsedAtMs,
     use_count: 1n,
+  };
+}
+
+function createSavedSessionRecord(
+  sessionId: string,
+  paneId: string,
+  line: string,
+): SavedSessionRecord {
+  const summary = createSavedSessionSummary(sessionId, 1_000n);
+  const topology = createLiveTopology(sessionId, paneId);
+  const screen = createLiveScreen(paneId, line, 10n);
+
+  return {
+    session_id: summary.session_id,
+    route: summary.route,
+    title: summary.title,
+    launch: {
+      program: "cmd.exe",
+      args: [],
+      cwd: null,
+    },
+    manifest: summary.manifest,
+    compatibility: summary.compatibility,
+    topology,
+    screens: [screen],
+    saved_at_ms: summary.saved_at_ms,
+    restore_semantics: summary.restore_semantics,
+  };
+}
+
+function savedSessionRecordToSummary(record: SavedSessionRecord): SavedSessionSummary {
+  return {
+    session_id: record.session_id,
+    route: record.route,
+    title: record.title,
+    saved_at_ms: record.saved_at_ms,
+    manifest: record.manifest,
+    compatibility: record.compatibility,
+    has_launch: record.launch !== null,
+    tab_count: record.topology.tabs.length,
+    pane_count: record.screens.length,
+    restore_semantics: record.restore_semantics,
   };
 }
 

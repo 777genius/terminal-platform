@@ -18,6 +18,7 @@ export {
   terminalPlatformWorkspaceThemeIds,
   type CreateInitialWorkspaceSnapshotOptions,
   type WorkspaceCommandHistorySnapshot,
+  type WorkspaceHistoricalPaneSnapshot,
   type TerminalPlatformTerminalFontScale,
   type TerminalPlatformWorkspaceThemeId,
   type WorkspaceCatalogSnapshot,

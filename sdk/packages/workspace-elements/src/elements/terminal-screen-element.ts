@@ -52,8 +52,15 @@ import {
 } from "./terminal-screen-events.js";
 
 type TerminalScreenPlacement = "panel" | "terminal";
+type VisibleOutputLineSource = "history" | "boundary" | "live";
+
+interface VisibleOutputLine {
+  text: string;
+  source: VisibleOutputLineSource;
+}
 
 const TERMINAL_SCREEN_SEARCH_COUNT_ID = "tp-screen-search-count";
+const RESTORED_HISTORY_BOUNDARY_TEXT = "--- restored history above; live process below ---";
 
 export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -401,6 +408,21 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         min-height: 1.35rem;
       }
 
+      .line[data-line-source="history"] {
+        color: color-mix(in srgb, var(--tp-terminal-color-text) 82%, var(--tp-terminal-color-text-muted));
+      }
+
+      .line[data-line-source="boundary"] {
+        margin: 0.45rem 0;
+        color: color-mix(in srgb, var(--tp-terminal-color-accent) 72%, var(--tp-terminal-color-text));
+        font-size: 0.82em;
+        text-transform: uppercase;
+      }
+
+      .line[data-line-source="boundary"] .gutter {
+        color: transparent;
+      }
+
       .gutter {
         border-right: 1px solid color-mix(in srgb, var(--tp-color-border) 42%, transparent);
         color: color-mix(in srgb, var(--tp-color-text-muted) 48%, transparent);
@@ -656,7 +678,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     const controls = resolveTerminalScreenControlState(this.snapshot);
     const screen = controls.screen;
     const inputStatus = resolveTerminalScreenInputStatus(controls, this.directInputActivity);
-    const searchResult = this.createSearchResult();
+    const outputLines = createVisibleOutputLines(controls.history, screen);
+    const searchResult = this.createSearchResult(undefined, outputLines.map((line) => line.text));
     const terminalDisplay = this.snapshot.terminalDisplay;
     const isTerminalPlacement = this.placement === "terminal";
     const chrome = screen
@@ -703,7 +726,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 @paste=${(event: ClipboardEvent) => this.handleViewportPaste(event)}
                 @scroll=${(event: Event) => this.handleViewportScroll(event)}
               >
-                ${searchResult.lines.map((line) => renderLine(line.lineIndex + 1, line.segments))}
+                ${searchResult.lines.map((line) => renderLine(
+                  line.lineIndex + 1,
+                  line.segments,
+                  outputLines[line.lineIndex]?.source ?? "live",
+                ))}
               </div>
             `
           : html`<div class="empty-state" part="empty">No active screen yet. Start or attach a session to see output here.</div>`}
@@ -975,7 +1002,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
-    const output = serializeTerminalOutputLines(screen.surface.lines.map((line) => line.text));
+    const outputLines = createVisibleOutputLines(controls.history, screen);
+    const output = serializeTerminalOutputLines(outputLines.map((line) => line.text));
     try {
       await writeClipboardText(output);
       this.setCopyState("copied");
@@ -983,7 +1011,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         new CustomEvent<TerminalScreenCopiedDetail>(TERMINAL_SCREEN_EVENTS.copied, {
           bubbles: true,
           composed: true,
-          detail: { paneId: screen.pane_id, lineCount: screen.surface.lines.length },
+          detail: { paneId: screen.pane_id, lineCount: outputLines.length },
         }),
       );
     } catch (error) {
@@ -1063,10 +1091,17 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     });
   }
 
-  private createSearchResult(searchQuery = this.searchQuery): TerminalOutputSearchResult {
-    const screen = this.snapshot.attachedSession?.focused_screen;
+  private createSearchResult(
+    searchQuery = this.searchQuery,
+    lines?: readonly string[],
+  ): TerminalOutputSearchResult {
+    const fallbackControls = resolveTerminalScreenControlState(this.snapshot);
+    const fallbackLines = createVisibleOutputLines(
+      fallbackControls.history,
+      fallbackControls.screen,
+    ).map((line) => line.text);
     return createTerminalOutputSearchResult(
-      screen ? screen.surface.lines.map((line) => line.text) : [],
+      lines ?? fallbackLines,
       searchQuery,
       { activeMatchIndex: this.activeSearchMatchIndex },
     );
@@ -1268,13 +1303,44 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 function renderLine(
   index: number,
   segments: readonly TerminalOutputSearchSegment[],
+  source: VisibleOutputLineSource = "live",
 ): TemplateResult {
   return html`
-    <div class="line" part="screen-line">
+    <div class="line" part="screen-line" data-line-source=${source}>
       <span class="gutter" part="line-number" aria-hidden="true">${index}</span>
       <span class="text" part="line-text">${renderHighlightedSegments(segments)}</span>
     </div>
   `;
+}
+
+function createVisibleOutputLines(
+  history: ReturnType<typeof resolveTerminalScreenControlState>["history"],
+  screen: ReturnType<typeof resolveTerminalScreenControlState>["screen"],
+): VisibleOutputLine[] {
+  const liveLines = screen?.surface.lines.map((line) => ({
+    text: line.text,
+    source: "live" as const,
+  })) ?? [];
+  const historyLines = history?.lines
+    .filter((line, index, lines) => line.length > 0 || index < lines.length - 1)
+    .map((line) => ({
+      text: line,
+      source: "history" as const,
+    })) ?? [];
+
+  if (historyLines.length === 0) {
+    return liveLines;
+  }
+
+  if (liveLines.length === 0) {
+    return historyLines;
+  }
+
+  return [
+    ...historyLines,
+    { text: RESTORED_HISTORY_BOUNDARY_TEXT, source: "boundary" },
+    ...liveLines,
+  ];
 }
 
 function renderHighlightedSegments(
