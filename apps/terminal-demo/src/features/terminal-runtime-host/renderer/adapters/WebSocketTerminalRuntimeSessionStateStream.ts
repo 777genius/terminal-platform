@@ -38,6 +38,7 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
   #disposed = false;
   #reconnectLoopPromise: Promise<void> | null = null;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  #resolveReconnectWait: (() => void) | null = null;
   readonly #subscriptions = new Map<string, SessionStateSubscriptionRecord>();
 
   constructor(url: string) {
@@ -70,6 +71,7 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
       subscribed: createDeferred<void>(),
       closed: createDeferred<void>(),
     };
+    void record.subscribed.promise.catch(() => undefined);
     this.#subscriptions.set(subscriptionId, record);
 
     try {
@@ -107,7 +109,10 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
     this.clearReconnectTimer();
     this.#reconnectLoopPromise = null;
 
-    if (this.#socket && this.#socket.readyState === WebSocket.OPEN) {
+    if (
+      this.#socket
+      && (this.#socket.readyState === WebSocket.CONNECTING || this.#socket.readyState === WebSocket.OPEN)
+    ) {
       this.#socket.close(1000, "Disposed");
     }
 
@@ -165,24 +170,40 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
   }
 
   private async ensureConnected(): Promise<WebSocket> {
+    if (this.#disposed) {
+      throw new Error("Terminal session stream is disposed");
+    }
+
     if (this.#socket?.readyState === WebSocket.OPEN) {
       return this.#socket;
     }
 
     this.#connectPromise ??= new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(this.#url);
+      this.#socket = socket;
       const cleanup = () => {
         socket.removeEventListener("open", onOpen);
         socket.removeEventListener("error", onError);
       };
       const onOpen = () => {
         cleanup();
+        if (this.#disposed) {
+          this.#socket = null;
+          this.#connectPromise = null;
+          socket.close(1000, "Disposed");
+          reject(new Error("Terminal session stream is disposed"));
+          return;
+        }
+
         this.#socket = socket;
         this.#connectPromise = null;
         resolve(socket);
       };
       const onError = () => {
         cleanup();
+        if (this.#socket === socket) {
+          this.#socket = null;
+        }
         this.#connectPromise = null;
         reject(new Error("Failed to connect to terminal session stream"));
       };
@@ -360,8 +381,10 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
 
     await new Promise<void>((resolve) => {
       this.clearReconnectTimer();
+      this.#resolveReconnectWait = resolve;
       this.#reconnectTimer = setTimeout(() => {
         this.#reconnectTimer = null;
+        this.#resolveReconnectWait = null;
         resolve();
       }, backoffMs);
     });
@@ -372,6 +395,8 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
       clearTimeout(this.#reconnectTimer);
       this.#reconnectTimer = null;
     }
+    this.#resolveReconnectWait?.();
+    this.#resolveReconnectWait = null;
   }
 
   private send(socket: WebSocket, message: TerminalGatewayStreamClientMessage): void {

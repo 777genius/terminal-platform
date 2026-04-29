@@ -173,6 +173,42 @@ test("session stream reconnects and resubscribes after transient socket loss", l
   }
 });
 
+test("session stream dispose releases pending startup retry waits", loopbackTestOptions, async () => {
+  const port = await reserveLoopbackPort();
+  const adapter = new WebSocketTerminalRuntimeSessionStateStream(`ws://127.0.0.1:${port}/terminal-gateway/stream`);
+  const subscription = adapter.subscribeSessionState("session-1", {
+    onState: () => {},
+  });
+
+  await delay(25);
+  adapter.dispose();
+
+  await assert.rejects(
+    Promise.race([
+      subscription,
+      delay(500).then(() => {
+        throw new Error("session stream subscription did not settle after dispose");
+      }),
+    ]),
+  );
+});
+
+async function reserveLoopbackPort() {
+  const server = createServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Failed to reserve loopback port");
+  }
+
+  const port = address.port;
+  await new Promise((resolve) => {
+    server.close(() => resolve(undefined));
+  });
+  return port;
+}
+
 async function probeLoopbackTcp() {
   const server = createServer();
   return new Promise((resolve) => {
