@@ -1,6 +1,7 @@
 use std::{
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use diesel::{
@@ -524,7 +525,7 @@ impl TerminalPersistenceV2 {
         &self,
         saved: &SavedNativeSession,
     ) -> Result<RestorePlan, TerminalPersistenceV2Error> {
-        let lease = self.acquire_writer_generation("legacy-save-session", 60_000)?;
+        let lease = self.acquire_writer_generation_with_retry("legacy-save-session", 60_000)?;
         let import_result = self.import_saved_native_session_snapshot_with_writer(saved, &lease.id);
         let release_result = self.release_writer_generation(&lease.id);
 
@@ -617,7 +618,7 @@ impl TerminalPersistenceV2 {
             })),
         })?;
 
-        let lease = self.acquire_writer_generation("runtime-ui-input", 60_000)?;
+        let lease = self.acquire_writer_generation_with_retry("runtime-ui-input", 60_000)?;
         let event_result = self.append_journal_event(JournalEventInput {
             session_id: input.session_id.clone(),
             pane_id: Some(input.pane_id.clone()),
@@ -880,6 +881,27 @@ impl TerminalPersistenceV2 {
             lease_token,
             lease_expires_at_ms: now + lease_ms,
         })
+    }
+
+    fn acquire_writer_generation_with_retry(
+        &self,
+        process_id: &str,
+        lease_ms: i64,
+    ) -> Result<WriterGenerationLease, TerminalPersistenceV2Error> {
+        const ATTEMPTS: usize = 40;
+        const BACKOFF: Duration = Duration::from_millis(25);
+
+        for attempt in 0..ATTEMPTS {
+            match self.acquire_writer_generation(process_id, lease_ms) {
+                Ok(lease) => return Ok(lease),
+                Err(TerminalPersistenceV2Error::WriterAlreadyActive) if attempt + 1 < ATTEMPTS => {
+                    thread::sleep(BACKOFF);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(TerminalPersistenceV2Error::WriterAlreadyActive)
     }
 
     pub fn heartbeat_writer_generation(
