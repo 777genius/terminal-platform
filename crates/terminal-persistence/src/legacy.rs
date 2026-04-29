@@ -15,6 +15,10 @@ use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::v2::{
+    RestorePlan, TerminalPersistenceV2, TerminalPersistenceV2Config, TerminalPersistenceV2Error,
+};
+
 fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(
@@ -118,6 +122,17 @@ impl SqliteSessionStore {
         let store = Self { path };
         store.ensure_schema()?;
         Ok(store)
+    }
+
+    pub fn save_native_session_v2_snapshot(
+        &self,
+        session: &SavedNativeSession,
+    ) -> Result<RestorePlan, TerminalPersistenceV2Error> {
+        let store = TerminalPersistenceV2::open_with_config(
+            &self.path,
+            TerminalPersistenceV2Config::default(),
+        )?;
+        store.import_saved_native_session_snapshot(session)
     }
 
     pub fn open_default() -> Result<Self, PersistenceError> {
@@ -475,6 +490,8 @@ mod tests {
         ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
     };
 
+    use crate::v2::RestoreGuaranteeLevel;
+
     use super::{PersistenceError, SavedNativeSession, SessionRouteRecord, SqliteSessionStore};
 
     fn sample_snapshot(session_id: SessionId, title: &str, line: &str) -> SavedNativeSession {
@@ -805,6 +822,27 @@ mod tests {
                 .expect("lookup by fingerprint should succeed"),
             Some(record)
         );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn saves_native_session_snapshot_into_v2_visual_history() {
+        let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+        let path =
+            std::env::temp_dir().join(format!("terminal-platform-v2-visual-save-{nonce}.sqlite3"));
+        let store = SqliteSessionStore::open(&path).expect("store should open");
+        let session_id = SessionId::new();
+        let snapshot = sample_snapshot(session_id, "shell", "visible history");
+
+        let plan = store
+            .save_native_session_v2_snapshot(&snapshot)
+            .expect("v2 visual snapshot should save");
+
+        assert_eq!(plan.session_id, session_id.0.to_string());
+        assert_eq!(plan.guarantee_level, RestoreGuaranteeLevel::VisualSnapshotOnly);
+        assert!(plan.latest_screen_snapshot_id.is_some());
+        assert!(plan.latest_topology_snapshot_id.is_some());
 
         let _ = std::fs::remove_file(path);
     }

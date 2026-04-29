@@ -17,16 +17,19 @@ use terminal_domain::{BackendKind, SessionRoute};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::db::{
-    connection::establish_initialized_connection,
-    schema::{
-        terminal_backend_capability_reports, terminal_command_blocks,
-        terminal_command_history_entries, terminal_commit_log, terminal_db_identity,
-        terminal_feature_gates, terminal_journal_events, terminal_panes, terminal_restore_drills,
-        terminal_screen_snapshots, terminal_session_cursors, terminal_sessions,
-        terminal_stream_cursors, terminal_stream_segments, terminal_topology_snapshots,
-        terminal_writer_generations,
+use crate::{
+    db::{
+        connection::establish_initialized_connection,
+        schema::{
+            terminal_backend_capability_reports, terminal_command_blocks,
+            terminal_command_history_entries, terminal_commit_log, terminal_db_identity,
+            terminal_feature_gates, terminal_journal_events, terminal_panes,
+            terminal_restore_drills, terminal_screen_snapshots, terminal_session_cursors,
+            terminal_sessions, terminal_stream_cursors, terminal_stream_segments,
+            terminal_topology_snapshots, terminal_writer_generations,
+        },
     },
+    legacy::SavedNativeSession,
 };
 
 pub const TERMINAL_PERSISTENCE_APP_ID: i32 = 0x5450_5632;
@@ -392,6 +395,180 @@ impl TerminalPersistenceV2 {
             .values(&row)
             .execute(&mut connection)?;
         Ok(id)
+    }
+
+    pub fn import_saved_native_session_snapshot(
+        &self,
+        saved: &SavedNativeSession,
+    ) -> Result<RestorePlan, TerminalPersistenceV2Error> {
+        let lease = self.acquire_writer_generation("legacy-save-session", 60_000)?;
+        let import_result = self.import_saved_native_session_snapshot_with_writer(saved, &lease.id);
+        let release_result = self.release_writer_generation(&lease.id);
+
+        match (import_result, release_result) {
+            (Ok(()), Ok(())) => self.restore_plan(&saved.session_id.0.to_string()),
+            (Ok(()), Err(error)) => Err(error),
+            (Err(error), _) => Err(error),
+        }
+    }
+
+    fn import_saved_native_session_snapshot_with_writer(
+        &self,
+        saved: &SavedNativeSession,
+        writer_generation: &str,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        self.upsert_legacy_visual_session(saved)?;
+        for screen in &saved.screens {
+            self.upsert_legacy_visual_pane(saved, screen)?;
+            self.write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: saved.session_id.0.to_string(),
+                pane_id: screen.pane_id.0.to_string(),
+                writer_generation: writer_generation.to_string(),
+                projection_source: Some(format!("{:?}", screen.source).to_lowercase()),
+                buffer_kind: Some("normal".to_string()),
+                rows: i32::from(screen.rows),
+                cols: i32::from(screen.cols),
+                base_event_seq: 0,
+                high_water_event_seq: u64_to_i64(screen.sequence, "screen sequence")?,
+                high_water_byte_seq: None,
+                screen: serde_json::to_value(screen)?,
+                parser_version: Some("legacy_saved_screen_snapshot_v1".to_string()),
+                projection_version: Some("legacy_visual_snapshot_v1".to_string()),
+                metadata: Some(serde_json::json!({
+                    "source": "legacy_save_session",
+                    "saved_at_ms": saved.saved_at_ms
+                })),
+            })?;
+        }
+
+        self.write_topology_snapshot(TopologySnapshotInput {
+            id: None,
+            session_id: saved.session_id.0.to_string(),
+            writer_generation: writer_generation.to_string(),
+            pane_high_water: legacy_pane_high_water(saved),
+            topology: serde_json::to_value(&saved.topology)?,
+            source: Some("legacy_save_session".to_string()),
+            metadata: Some(serde_json::json!({
+                "visual_restore_only": true,
+                "saved_at_ms": saved.saved_at_ms
+            })),
+        })?;
+
+        Ok(())
+    }
+
+    fn upsert_legacy_visual_session(
+        &self,
+        saved: &SavedNativeSession,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let row = NewTerminalSessionRow {
+            id: saved.session_id.0.to_string(),
+            route_json: serde_json::to_string(&saved.route)?,
+            title: saved.title.clone(),
+            launch_json: saved.launch.as_ref().map(serde_json::to_string).transpose()?,
+            source: "legacy_save_session".to_string(),
+            durability_profile: self.config.durability_profile.as_str().to_string(),
+            retention_policy_id: DEFAULT_RETENTION_POLICY_ID.to_string(),
+            private_mode: 0,
+            created_at_ms: saved.saved_at_ms,
+            updated_at_ms: now,
+            closed_at_ms: None,
+            state: "legacy_visual_only".to_string(),
+            metadata_json: Some(serde_json::to_string(&serde_json::json!({
+                "manifest": saved.manifest,
+                "visual_restore_only": true
+            }))?),
+        };
+        insert_into(terminal_sessions::table)
+            .values(&row)
+            .on_conflict(terminal_sessions::id)
+            .do_update()
+            .set((
+                terminal_sessions::route_json.eq(row.route_json.clone()),
+                terminal_sessions::title.eq(row.title.clone()),
+                terminal_sessions::launch_json.eq(row.launch_json.clone()),
+                terminal_sessions::source.eq(row.source.clone()),
+                terminal_sessions::updated_at_ms.eq(row.updated_at_ms),
+                terminal_sessions::state.eq(row.state.clone()),
+                terminal_sessions::metadata_json.eq(row.metadata_json.clone()),
+            ))
+            .execute(&mut connection)?;
+
+        let cursor = NewSessionCursorRow {
+            session_id: saved.session_id.0.to_string(),
+            next_commit_seq: 1,
+            writer_generation: None,
+            updated_at_ms: now,
+        };
+        insert_into(terminal_session_cursors::table)
+            .values(&cursor)
+            .on_conflict(terminal_session_cursors::session_id)
+            .do_nothing()
+            .execute(&mut connection)?;
+
+        Ok(())
+    }
+
+    fn upsert_legacy_visual_pane(
+        &self,
+        saved: &SavedNativeSession,
+        screen: &terminal_projection::ScreenSnapshot,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let pane_id = screen.pane_id.0.to_string();
+        let stream_id = DEFAULT_STREAM_ID.to_string();
+        let row = NewTerminalPaneRow {
+            id: pane_id.clone(),
+            session_id: saved.session_id.0.to_string(),
+            tab_id: None,
+            stream_id: stream_id.clone(),
+            title: screen.surface.title.clone(),
+            rows: i32::from(screen.rows),
+            cols: i32::from(screen.cols),
+            last_event_seq: u64_to_i64(screen.sequence, "screen sequence")?,
+            created_at_ms: saved.saved_at_ms,
+            closed_at_ms: None,
+            metadata_json: Some(serde_json::to_string(&serde_json::json!({
+                "source": "legacy_save_session"
+            }))?),
+        };
+        insert_into(terminal_panes::table)
+            .values(&row)
+            .on_conflict(terminal_panes::id)
+            .do_update()
+            .set((
+                terminal_panes::title.eq(row.title.clone()),
+                terminal_panes::rows.eq(row.rows),
+                terminal_panes::cols.eq(row.cols),
+                terminal_panes::last_event_seq.eq(row.last_event_seq),
+                terminal_panes::metadata_json.eq(row.metadata_json.clone()),
+            ))
+            .execute(&mut connection)?;
+
+        let cursor = NewStreamCursorRow {
+            id: stream_cursor_id(&pane_id, &stream_id),
+            session_id: saved.session_id.0.to_string(),
+            pane_id,
+            stream_id,
+            next_event_seq: row.last_event_seq + 1,
+            next_byte_seq: 0,
+            updated_at_ms: now,
+        };
+        insert_into(terminal_stream_cursors::table)
+            .values(&cursor)
+            .on_conflict(terminal_stream_cursors::id)
+            .do_update()
+            .set((
+                terminal_stream_cursors::next_event_seq.eq(cursor.next_event_seq),
+                terminal_stream_cursors::updated_at_ms.eq(cursor.updated_at_ms),
+            ))
+            .execute(&mut connection)?;
+
+        Ok(())
     }
 
     pub fn acquire_writer_generation(
@@ -2013,6 +2190,20 @@ fn checked_len(len: usize, label: &str) -> Result<i64, TerminalPersistenceV2Erro
     i64::try_from(len).map_err(|_| {
         TerminalPersistenceV2Error::InvalidData(format!("{label} does not fit in i64"))
     })
+}
+
+fn u64_to_i64(value: u64, label: &str) -> Result<i64, TerminalPersistenceV2Error> {
+    i64::try_from(value).map_err(|_| {
+        TerminalPersistenceV2Error::InvalidData(format!("{label} does not fit in i64"))
+    })
+}
+
+fn legacy_pane_high_water(saved: &SavedNativeSession) -> Value {
+    let mut map = serde_json::Map::new();
+    for screen in &saved.screens {
+        map.insert(screen.pane_id.0.to_string(), Value::from(screen.sequence));
+    }
+    Value::Object(map)
 }
 
 fn stream_cursor_id(pane_id: &str, stream_id: &str) -> String {

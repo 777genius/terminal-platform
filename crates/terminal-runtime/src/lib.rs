@@ -280,7 +280,7 @@ mod tests {
     use terminal_backend_native::NativeBackend;
     use terminal_domain::{
         BackendKind, ExternalSessionRef, PaneId, RouteAuthority, SessionId, SessionRoute,
-        SubscriptionId, TabId,
+        SubscriptionId, TabId, local_native_route,
     };
     use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
     use terminal_persistence::SqliteSessionStore;
@@ -389,6 +389,45 @@ mod tests {
         assert_eq!(record.route, route);
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn save_session_dual_writes_v2_visual_snapshot() {
+        let path = unique_runtime_store_path("v2-save-session");
+        let store = SqliteSessionStore::open(&path).expect("isolated sqlite store should open");
+        let runtime = TerminalRuntime::with_persistence(
+            BackendCatalog::new([Arc::new(FakeNativeBackend) as Arc<dyn MuxBackendPort>]),
+            store,
+        );
+        let created = runtime
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    launch: Some(terminal_backend_api::ShellLaunchSpec::new("cmd.exe")),
+                },
+            )
+            .await
+            .expect("fake native session should create");
+
+        runtime
+            .dispatch(created.session_id, MuxCommand::SaveSession)
+            .await
+            .expect("save session should dual-write");
+
+        let v2 = terminal_persistence::TerminalPersistenceV2::open_with_config(
+            &path,
+            terminal_persistence::TerminalPersistenceV2Config::test(),
+        )
+        .expect("v2 store should open");
+        let plan = v2.restore_plan(&created.session_id.0.to_string()).expect("plan should load");
+
+        assert_eq!(
+            plan.guarantee_level,
+            terminal_persistence::RestoreGuaranteeLevel::VisualSnapshotOnly
+        );
+        assert!(plan.latest_screen_snapshot_id.is_some());
+        assert!(plan.latest_topology_snapshot_id.is_some());
+    }
+
     fn runtime_backends(imported_backend: Arc<FakeImportedBackend>) -> BackendCatalog {
         BackendCatalog::new([
             Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
@@ -447,6 +486,54 @@ mod tests {
     #[derive(Debug, Default)]
     struct FakeImportedBackend {
         attached_session_ids: Mutex<Vec<SessionId>>,
+    }
+
+    #[derive(Debug)]
+    struct FakeNativeBackend;
+
+    impl MuxBackendPort for FakeNativeBackend {
+        fn kind(&self) -> BackendKind {
+            BackendKind::Native
+        }
+
+        fn capabilities(&self) -> BoxFuture<'_, Result<BackendCapabilities, BackendError>> {
+            Box::pin(async { Ok(BackendCapabilities::default()) })
+        }
+
+        fn discover_sessions(
+            &self,
+            _scope: terminal_backend_api::BackendScope,
+        ) -> BoxFuture<'_, Result<Vec<DiscoveredSession>, BackendError>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn create_session(
+            &self,
+            _spec: CreateSessionSpec,
+        ) -> BoxFuture<'_, Result<BackendSessionBinding, BackendError>> {
+            Box::pin(async {
+                let session_id = SessionId::new();
+                Ok(BackendSessionBinding { session_id, route: local_native_route(session_id) })
+            })
+        }
+
+        fn attach_session(
+            &self,
+            session_id: SessionId,
+            route: SessionRoute,
+        ) -> BoxFuture<'_, Result<Box<dyn BackendSessionPort>, BackendError>> {
+            Box::pin(async move {
+                Ok(Box::new(FakeImportedSession::new(session_id, route))
+                    as Box<dyn BackendSessionPort>)
+            })
+        }
+
+        fn list_sessions(
+            &self,
+            _scope: terminal_backend_api::BackendScope,
+        ) -> BoxFuture<'_, Result<Vec<BackendSessionSummary>, BackendError>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
     }
 
     impl FakeImportedBackend {
