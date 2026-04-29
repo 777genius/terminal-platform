@@ -41,6 +41,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    terminal_integrity_checks (id) {
+        id -> Text,
+        check_kind -> Text,
+        scope_kind -> Text,
+        scope_ref -> Nullable<Text>,
+        result -> Text,
+        checked_at_ms -> BigInt,
+        details_json -> Nullable<Text>,
+        error -> Nullable<Text>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     terminal_sessions (id) {
         id -> Text,
         route_json -> Text,
@@ -327,6 +341,24 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    terminal_backup_records (id) {
+        id -> Text,
+        backup_kind -> Text,
+        state -> Text,
+        target_ref_hash -> Nullable<Text>,
+        manifest_json -> Nullable<Text>,
+        checksum_algorithm -> Nullable<Text>,
+        checksum -> Nullable<Text>,
+        source_db_path_hash -> Nullable<Text>,
+        started_at_ms -> BigInt,
+        finished_at_ms -> Nullable<BigInt>,
+        quick_check_result -> Nullable<Text>,
+        error -> Nullable<Text>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
 diesel::joinable!(terminal_panes -> terminal_sessions (session_id));
 diesel::joinable!(terminal_sessions -> terminal_retention_policies (retention_policy_id));
 diesel::joinable!(terminal_stream_cursors -> terminal_panes (pane_id));
@@ -337,6 +369,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     terminal_db_identity,
     terminal_feature_gates,
     terminal_retention_policies,
+    terminal_integrity_checks,
     terminal_sessions,
     terminal_panes,
     terminal_backend_capability_reports,
@@ -352,4 +385,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     terminal_screen_snapshots,
     terminal_history_gaps,
     terminal_restore_drills,
+    terminal_backup_records,
 );

@@ -1,4 +1,6 @@
 use std::{
+    fs,
+    io::Read,
     path::{Path, PathBuf},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -23,12 +25,13 @@ use crate::{
     db::{
         connection::establish_initialized_connection,
         schema::{
-            terminal_backend_capability_reports, terminal_command_blocks,
+            terminal_backend_capability_reports, terminal_backup_records, terminal_command_blocks,
             terminal_command_history_entries, terminal_commit_log, terminal_db_identity,
-            terminal_feature_gates, terminal_history_gaps, terminal_journal_events, terminal_panes,
-            terminal_restore_drills, terminal_screen_snapshots, terminal_session_cursors,
-            terminal_sessions, terminal_stream_cursors, terminal_stream_segments,
-            terminal_topology_snapshots, terminal_writer_generations,
+            terminal_feature_gates, terminal_history_gaps, terminal_integrity_checks,
+            terminal_journal_events, terminal_panes, terminal_restore_drills,
+            terminal_screen_snapshots, terminal_session_cursors, terminal_sessions,
+            terminal_stream_cursors, terminal_stream_segments, terminal_topology_snapshots,
+            terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -1757,6 +1760,254 @@ impl TerminalPersistenceV2 {
         Ok(id)
     }
 
+    pub fn run_restore_drill(
+        &self,
+        session_id: &str,
+    ) -> Result<RestoreDrillRecord, TerminalPersistenceV2Error> {
+        let started_at_ms = self.config.clock.now_ms();
+        let plan = self.restore_plan(session_id)?;
+        let mut connection = self.connection()?;
+        let validation = validate_history_checksums(&mut connection, Some(session_id))?;
+        let finished_at_ms = self.config.clock.now_ms();
+        let result =
+            if validation.has_failures() {
+                "failed"
+            } else {
+                match &plan.guarantee_level {
+                    RestoreGuaranteeLevel::BasicHistory
+                    | RestoreGuaranteeLevel::VisualSnapshotOnly => "passed",
+                    RestoreGuaranteeLevel::RawStreamReplay
+                    | RestoreGuaranteeLevel::LiveMuxAttach => "passed",
+                    RestoreGuaranteeLevel::DegradedHistory => "degraded",
+                    RestoreGuaranteeLevel::None => "skipped",
+                }
+            };
+        let error = validation.has_failures().then(|| validation.summary());
+        let mut evidence = plan.evidence.clone();
+        evidence.extend(validation.to_restore_evidence());
+        let evidence_json = Some(serde_json::to_string(&evidence)?);
+        let metadata_json = Some(serde_json::to_string(&serde_json::json!({
+            "started_at_ms": started_at_ms,
+            "validation": validation.to_json(),
+        }))?);
+        let id = new_id();
+        let row = NewRestoreDrillRow {
+            id: id.clone(),
+            session_id: session_id.to_string(),
+            drill_kind: "restore_drill".to_string(),
+            result: result.to_string(),
+            restore_guarantee_level: plan.guarantee_level.as_str().to_string(),
+            checked_at_ms: finished_at_ms,
+            duration_ms: Some((finished_at_ms - started_at_ms).max(0)),
+            source_snapshot_id: plan.latest_screen_snapshot_id.clone(),
+            evidence_json,
+            error: error.clone(),
+            metadata_json,
+        };
+        insert_into(terminal_restore_drills::table).values(&row).execute(&mut connection)?;
+
+        Ok(RestoreDrillRecord {
+            id,
+            session_id: session_id.to_string(),
+            drill_kind: "restore_drill".to_string(),
+            result: result.to_string(),
+            restore_guarantee_level: plan.guarantee_level.as_str().to_string(),
+            checked_at_ms: finished_at_ms,
+            duration_ms: Some((finished_at_ms - started_at_ms).max(0)),
+            source_snapshot_id: plan.latest_screen_snapshot_id,
+            error,
+        })
+    }
+
+    pub fn run_integrity_check(&self) -> Result<IntegrityCheckRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let checked_at_ms = self.config.clock.now_ms();
+        let quick_check = run_quick_check(&mut connection)?;
+        let foreign_key_violations = run_foreign_key_check(&mut connection)?;
+        let validation = validate_history_checksums(&mut connection, None)?;
+        let result = if quick_check.iter().all(|value| value == "ok")
+            && foreign_key_violations.is_empty()
+            && !validation.has_failures()
+        {
+            "passed"
+        } else {
+            "failed"
+        };
+        let details = serde_json::json!({
+            "quick_check": quick_check,
+            "foreign_key_violations": foreign_key_violations,
+            "history_validation": validation.to_json(),
+        });
+        let error = (result != "passed").then(|| {
+            format!(
+                "quick_check={}, foreign_key_violations={}, checksum_failures={}",
+                details["quick_check"],
+                details["foreign_key_violations"].as_array().map_or(0, Vec::len),
+                validation.failure_count()
+            )
+        });
+        let id = new_id();
+        let row = NewIntegrityCheckRow {
+            id: id.clone(),
+            check_kind: "sqlite_and_history_invariants".to_string(),
+            scope_kind: "database".to_string(),
+            scope_ref: None,
+            result: result.to_string(),
+            checked_at_ms,
+            details_json: Some(serde_json::to_string(&details)?),
+            error: error.clone(),
+            metadata_json: None,
+        };
+        insert_into(terminal_integrity_checks::table).values(&row).execute(&mut connection)?;
+
+        Ok(IntegrityCheckRecord {
+            id,
+            check_kind: "sqlite_and_history_invariants".to_string(),
+            scope_kind: "database".to_string(),
+            scope_ref: None,
+            result: result.to_string(),
+            checked_at_ms,
+            details_json: Some(details),
+            error,
+        })
+    }
+
+    pub fn vacuum_into_backup(
+        &self,
+        target_path: impl AsRef<Path>,
+    ) -> Result<BackupRecord, TerminalPersistenceV2Error> {
+        let target_path = target_path.as_ref().to_path_buf();
+        if target_path.exists() {
+            return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                "backup target already exists: {}",
+                target_path.display()
+            )));
+        }
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let id = new_id();
+        let started_at_ms = self.config.clock.now_ms();
+        let target_ref_hash = path_hash(&target_path);
+        let source_db_path_hash = path_hash(&self.path);
+        let mut connection = self.connection()?;
+        let running = NewBackupRecordRow {
+            id: id.clone(),
+            backup_kind: "vacuum_into".to_string(),
+            state: "running".to_string(),
+            target_ref_hash: Some(target_ref_hash.clone()),
+            manifest_json: None,
+            checksum_algorithm: None,
+            checksum: None,
+            source_db_path_hash: Some(source_db_path_hash.clone()),
+            started_at_ms,
+            finished_at_ms: None,
+            quick_check_result: None,
+            error: None,
+            metadata_json: None,
+        };
+        insert_into(terminal_backup_records::table).values(&running).execute(&mut connection)?;
+
+        let backup_result = self.finish_vacuum_into_backup(
+            &id,
+            &target_path,
+            started_at_ms,
+            target_ref_hash,
+            source_db_path_hash,
+        );
+        if let Err(error) = &backup_result {
+            let _ = self.mark_backup_failed(&id, error.to_string());
+        }
+        backup_result
+    }
+
+    fn finish_vacuum_into_backup(
+        &self,
+        id: &str,
+        target_path: &Path,
+        started_at_ms: i64,
+        target_ref_hash: String,
+        source_db_path_hash: String,
+    ) -> Result<BackupRecord, TerminalPersistenceV2Error> {
+        let target_arg = target_path.to_str().ok_or_else(|| {
+            TerminalPersistenceV2Error::InvalidData("backup target path is not UTF-8".to_string())
+        })?;
+        let mut vacuum_connection = self.connection()?;
+        diesel::sql_query("VACUUM INTO ?")
+            .bind::<diesel::sql_types::Text, _>(target_arg.to_string())
+            .execute(&mut vacuum_connection)?;
+
+        let checksum = blake3_hash_file(target_path)?;
+        let file_bytes = u64_to_i64(fs::metadata(target_path)?.len(), "backup file size")?;
+        let mut backup_connection = establish_initialized_connection(target_path, &self.config)?;
+        let quick_check = run_quick_check(&mut backup_connection)?;
+        let quick_check_result = quick_check.join("; ");
+        if !quick_check.iter().all(|value| value == "ok") {
+            return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                "backup quick_check failed: {quick_check_result}"
+            )));
+        }
+
+        let finished_at_ms = self.config.clock.now_ms();
+        let manifest = serde_json::json!({
+            "backup_kind": "vacuum_into",
+            "file_bytes": file_bytes,
+            "target_ref_hash": target_ref_hash,
+            "source_db_path_hash": source_db_path_hash,
+            "checksum_algorithm": "blake3",
+            "checksum": checksum,
+            "quick_check_result": quick_check_result,
+            "started_at_ms": started_at_ms,
+            "finished_at_ms": finished_at_ms,
+        });
+        let manifest_json = serde_json::to_string(&manifest)?;
+
+        let mut connection = self.connection()?;
+        diesel::update(terminal_backup_records::table.filter(terminal_backup_records::id.eq(id)))
+            .set((
+                terminal_backup_records::state.eq("succeeded"),
+                terminal_backup_records::manifest_json.eq(Some(manifest_json.clone())),
+                terminal_backup_records::checksum_algorithm.eq(Some("blake3".to_string())),
+                terminal_backup_records::checksum.eq(Some(checksum.clone())),
+                terminal_backup_records::finished_at_ms.eq(Some(finished_at_ms)),
+                terminal_backup_records::quick_check_result.eq(Some(quick_check_result.clone())),
+                terminal_backup_records::error.eq::<Option<String>>(None),
+            ))
+            .execute(&mut connection)?;
+
+        Ok(BackupRecord {
+            id: id.to_string(),
+            backup_kind: "vacuum_into".to_string(),
+            state: "succeeded".to_string(),
+            target_ref_hash: Some(target_ref_hash),
+            manifest_json: Some(manifest),
+            checksum_algorithm: Some("blake3".to_string()),
+            checksum: Some(checksum),
+            source_db_path_hash: Some(source_db_path_hash),
+            started_at_ms,
+            finished_at_ms: Some(finished_at_ms),
+            quick_check_result: Some(quick_check_result),
+            error: None,
+        })
+    }
+
+    fn mark_backup_failed(
+        &self,
+        id: &str,
+        error: String,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        diesel::update(terminal_backup_records::table.filter(terminal_backup_records::id.eq(id)))
+            .set((
+                terminal_backup_records::state.eq("failed"),
+                terminal_backup_records::finished_at_ms.eq(Some(self.config.clock.now_ms())),
+                terminal_backup_records::error.eq(Some(error)),
+            ))
+            .execute(&mut connection)?;
+        Ok(())
+    }
+
     pub fn list_stream_segments(
         &self,
         session_id: &str,
@@ -2393,6 +2644,47 @@ pub struct PaneHistoryHydrationRecord {
     pub total_payload_bytes: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoreDrillRecord {
+    pub id: String,
+    pub session_id: String,
+    pub drill_kind: String,
+    pub result: String,
+    pub restore_guarantee_level: String,
+    pub checked_at_ms: i64,
+    pub duration_ms: Option<i64>,
+    pub source_snapshot_id: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntegrityCheckRecord {
+    pub id: String,
+    pub check_kind: String,
+    pub scope_kind: String,
+    pub scope_ref: Option<String>,
+    pub result: String,
+    pub checked_at_ms: i64,
+    pub details_json: Option<Value>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupRecord {
+    pub id: String,
+    pub backup_kind: String,
+    pub state: String,
+    pub target_ref_hash: Option<String>,
+    pub manifest_json: Option<Value>,
+    pub checksum_algorithm: Option<String>,
+    pub checksum: Option<String>,
+    pub source_db_path_hash: Option<String>,
+    pub started_at_ms: i64,
+    pub finished_at_ms: Option<i64>,
+    pub quick_check_result: Option<String>,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriterGenerationLease {
     pub id: String,
@@ -2964,12 +3256,118 @@ struct NewRestoreDrillRow {
     metadata_json: Option<String>,
 }
 
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_integrity_checks)]
+struct NewIntegrityCheckRow {
+    id: String,
+    check_kind: String,
+    scope_kind: String,
+    scope_ref: Option<String>,
+    result: String,
+    checked_at_ms: i64,
+    details_json: Option<String>,
+    error: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_backup_records)]
+struct NewBackupRecordRow {
+    id: String,
+    backup_kind: String,
+    state: String,
+    target_ref_hash: Option<String>,
+    manifest_json: Option<String>,
+    checksum_algorithm: Option<String>,
+    checksum: Option<String>,
+    source_db_path_hash: Option<String>,
+    started_at_ms: i64,
+    finished_at_ms: Option<i64>,
+    quick_check_result: Option<String>,
+    error: Option<String>,
+    metadata_json: Option<String>,
+}
+
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = terminal_db_identity)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 #[allow(dead_code)]
 struct DbIdentityProbeRow {
     id: i32,
+}
+
+#[derive(Debug, QueryableByName)]
+struct QuickCheckRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    quick_check: String,
+}
+
+#[derive(Debug, QueryableByName, Serialize)]
+struct ForeignKeyCheckRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    table_name: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::BigInt>)]
+    rowid: Option<i64>,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    parent: String,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    fkid: i32,
+}
+
+#[derive(Debug, Clone)]
+struct HistoryValidation {
+    stream_segments_checked: usize,
+    screen_snapshots_checked: usize,
+    topology_snapshots_checked: usize,
+    failures: Vec<String>,
+}
+
+impl HistoryValidation {
+    fn has_failures(&self) -> bool {
+        !self.failures.is_empty()
+    }
+
+    fn failure_count(&self) -> usize {
+        self.failures.len()
+    }
+
+    fn summary(&self) -> String {
+        if self.failures.is_empty() {
+            "history validation passed".to_string()
+        } else {
+            self.failures.join("; ")
+        }
+    }
+
+    fn to_json(&self) -> Value {
+        serde_json::json!({
+            "stream_segments_checked": self.stream_segments_checked,
+            "screen_snapshots_checked": self.screen_snapshots_checked,
+            "topology_snapshots_checked": self.topology_snapshots_checked,
+            "failures": self.failures,
+        })
+    }
+
+    fn to_restore_evidence(&self) -> Vec<RestoreEvidence> {
+        vec![
+            RestoreEvidence {
+                kind: "stream_segments_checked".to_string(),
+                value: self.stream_segments_checked.to_string(),
+            },
+            RestoreEvidence {
+                kind: "screen_snapshots_checked".to_string(),
+                value: self.screen_snapshots_checked.to_string(),
+            },
+            RestoreEvidence {
+                kind: "topology_snapshots_checked".to_string(),
+                value: self.topology_snapshots_checked.to_string(),
+            },
+            RestoreEvidence {
+                kind: "history_validation_failures".to_string(),
+                value: self.failures.len().to_string(),
+            },
+        ]
+    }
 }
 
 fn verify_seeded_defaults(
@@ -2993,6 +3391,124 @@ fn verify_seeded_defaults(
     }
 
     Ok(())
+}
+
+fn run_quick_check(
+    connection: &mut SqliteConnection,
+) -> Result<Vec<String>, TerminalPersistenceV2Error> {
+    diesel::sql_query("PRAGMA quick_check")
+        .load::<QuickCheckRow>(connection)
+        .map(|rows| rows.into_iter().map(|row| row.quick_check).collect())
+        .map_err(Into::into)
+}
+
+fn run_foreign_key_check(
+    connection: &mut SqliteConnection,
+) -> Result<Vec<ForeignKeyCheckRow>, TerminalPersistenceV2Error> {
+    diesel::sql_query(
+        "SELECT \"table\" AS table_name, rowid, parent, fkid FROM pragma_foreign_key_check",
+    )
+    .load::<ForeignKeyCheckRow>(connection)
+    .map_err(Into::into)
+}
+
+fn validate_history_checksums(
+    connection: &mut SqliteConnection,
+    session_id: Option<&str>,
+) -> Result<HistoryValidation, TerminalPersistenceV2Error> {
+    let mut failures = Vec::new();
+
+    let mut segment_query = terminal_stream_segments::table.into_boxed();
+    if let Some(session_id) = session_id {
+        segment_query = segment_query.filter(terminal_stream_segments::session_id.eq(session_id));
+    }
+    let segment_rows = segment_query
+        .select((
+            terminal_stream_segments::id,
+            terminal_stream_segments::payload,
+            terminal_stream_segments::checksum_algorithm,
+            terminal_stream_segments::checksum,
+        ))
+        .load::<(String, Vec<u8>, String, String)>(connection)?;
+    for (id, payload, algorithm, checksum) in &segment_rows {
+        validate_checksum_bytes("stream_segment", id, payload, algorithm, checksum, &mut failures);
+    }
+
+    let mut screen_query = terminal_screen_snapshots::table.into_boxed();
+    if let Some(session_id) = session_id {
+        screen_query = screen_query.filter(terminal_screen_snapshots::session_id.eq(session_id));
+    }
+    let screen_rows = screen_query
+        .select((
+            terminal_screen_snapshots::id,
+            terminal_screen_snapshots::screen_json,
+            terminal_screen_snapshots::checksum_algorithm,
+            terminal_screen_snapshots::checksum,
+        ))
+        .load::<(String, String, String, String)>(connection)?;
+    for (id, payload, algorithm, checksum) in &screen_rows {
+        validate_checksum_text("screen_snapshot", id, payload, algorithm, checksum, &mut failures);
+    }
+
+    let mut topology_query = terminal_topology_snapshots::table.into_boxed();
+    if let Some(session_id) = session_id {
+        topology_query =
+            topology_query.filter(terminal_topology_snapshots::session_id.eq(session_id));
+    }
+    let topology_rows = topology_query
+        .select((
+            terminal_topology_snapshots::id,
+            terminal_topology_snapshots::topology_json,
+            terminal_topology_snapshots::checksum_algorithm,
+            terminal_topology_snapshots::checksum,
+        ))
+        .load::<(String, String, String, String)>(connection)?;
+    for (id, payload, algorithm, checksum) in &topology_rows {
+        validate_checksum_text(
+            "topology_snapshot",
+            id,
+            payload,
+            algorithm,
+            checksum,
+            &mut failures,
+        );
+    }
+
+    Ok(HistoryValidation {
+        stream_segments_checked: segment_rows.len(),
+        screen_snapshots_checked: screen_rows.len(),
+        topology_snapshots_checked: topology_rows.len(),
+        failures,
+    })
+}
+
+fn validate_checksum_bytes(
+    row_kind: &str,
+    id: &str,
+    payload: &[u8],
+    algorithm: &str,
+    expected: &str,
+    failures: &mut Vec<String>,
+) {
+    if algorithm != "blake3" {
+        failures.push(format!("{row_kind}:{id} uses unsupported checksum algorithm {algorithm}"));
+        return;
+    }
+    let actual = blake3_hash_bytes(payload);
+    if actual != expected {
+        failures.push(format!("{row_kind}:{id} checksum mismatch"));
+    }
+}
+
+fn validate_checksum_text(
+    row_kind: &str,
+    id: &str,
+    payload: &str,
+    algorithm: &str,
+    expected: &str,
+    failures: &mut Vec<String>,
+) {
+    validate_checksum_bytes(row_kind, id, payload.as_bytes(), algorithm, expected, failures);
 }
 
 fn allocate_commit(
@@ -3220,6 +3736,24 @@ fn blake3_hash_bytes(value: &[u8]) -> String {
 
 fn blake3_hash_text(value: &str) -> String {
     blake3_hash_bytes(value.as_bytes())
+}
+
+fn blake3_hash_file(path: &Path) -> Result<String, TerminalPersistenceV2Error> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn path_hash(path: &Path) -> String {
+    blake3_hash_text(&path.to_string_lossy())
 }
 
 fn current_time_ms() -> i64 {
@@ -3561,6 +4095,106 @@ mod tests {
         assert_eq!(plan.latest_screen_snapshot_id, Some(screen_id));
         assert_eq!(plan.latest_topology_snapshot_id, Some(topology_id));
         assert!(plan.high_water_commit_seq >= 3);
+    }
+
+    #[test]
+    fn runs_integrity_check_and_restore_drill() {
+        let store = test_store("integrity-drill");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let output = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"durable history\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                writer_generation: writer.id.clone(),
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: output.event_seq_low,
+                high_water_event_seq: output.event_seq_high,
+                high_water_byte_seq: Some(output.byte_high),
+                screen: serde_json::json!({"lines":["durable history"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("screen snapshot should persist");
+
+        let integrity = store.run_integrity_check().expect("integrity check should run");
+        let drill = store.run_restore_drill(&session_id).expect("restore drill should run");
+
+        assert_eq!(integrity.result, "passed");
+        assert_eq!(drill.result, "passed");
+        assert_eq!(drill.restore_guarantee_level, "basic_history");
+        assert!(drill.error.is_none());
+    }
+
+    #[test]
+    fn integrity_check_detects_checksum_mismatch() {
+        let store = test_store("integrity-mismatch");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id,
+                pane_id,
+                writer.id,
+                b"tamper target\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(terminal_stream_segments::table)
+            .set(terminal_stream_segments::checksum.eq("not-the-real-checksum"))
+            .execute(&mut connection)
+            .expect("test should corrupt checksum");
+
+        let integrity = store.run_integrity_check().expect("integrity check should run");
+
+        assert_eq!(integrity.result, "failed");
+        assert!(integrity.error.as_deref().unwrap_or_default().contains("checksum_failures=1"));
+    }
+
+    #[test]
+    fn creates_vacuum_backup_that_reopens_with_history() {
+        let store = test_store("vacuum-backup");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id,
+                b"backup history\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        let target_path = std::env::temp_dir()
+            .join(format!("terminal-persistence-v2-backup-{}.sqlite3", Uuid::new_v4()));
+
+        let backup = store.vacuum_into_backup(&target_path).expect("backup should succeed");
+        let backup_store = TerminalPersistenceV2::open_with_config(
+            &target_path,
+            TerminalPersistenceV2Config::test(),
+        )
+        .expect("backup should reopen");
+        let segments = backup_store
+            .list_stream_segments(&session_id, &pane_id, 1, 10)
+            .expect("backup should contain history");
+        let payload = segments.into_iter().flat_map(|segment| segment.payload).collect::<Vec<_>>();
+
+        assert_eq!(backup.state, "succeeded");
+        assert_eq!(backup.quick_check_result.as_deref(), Some("ok"));
+        assert_eq!(payload, b"backup history\r\n");
+
+        let _ = std::fs::remove_file(&target_path);
+        let _ = std::fs::remove_file(target_path.with_extension("sqlite3-wal"));
+        let _ = std::fs::remove_file(target_path.with_extension("sqlite3-shm"));
     }
 
     #[test]
