@@ -275,7 +275,8 @@ mod tests {
     use terminal_backend_api::{
         BackendCapabilities, BackendError, BackendSessionBinding, BackendSessionPort,
         BackendSessionSummary, BackendSubscription, BoxFuture, CreateSessionSpec,
-        DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult, SubscriptionSpec,
+        DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult, SendInputSpec,
+        SubscriptionSpec,
     };
     use terminal_backend_native::NativeBackend;
     use terminal_domain::{
@@ -426,6 +427,49 @@ mod tests {
         );
         assert!(plan.latest_screen_snapshot_id.is_some());
         assert!(plan.latest_topology_snapshot_id.is_some());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dispatch_send_input_records_v2_command_history() {
+        let path = unique_runtime_store_path("v2-ui-input");
+        let store = SqliteSessionStore::open(&path).expect("isolated sqlite store should open");
+        let runtime = TerminalRuntime::with_persistence(
+            BackendCatalog::new([Arc::new(FakeNativeBackend) as Arc<dyn MuxBackendPort>]),
+            store,
+        );
+        let created = runtime
+            .create_session(
+                BackendKind::Native,
+                CreateSessionSpec {
+                    title: Some("shell".to_string()),
+                    launch: Some(terminal_backend_api::ShellLaunchSpec::new("cmd.exe")),
+                },
+            )
+            .await
+            .expect("fake native session should create");
+        let topology =
+            runtime.topology_snapshot(created.session_id).await.expect("topology should load");
+        let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+        runtime
+            .dispatch(
+                created.session_id,
+                MuxCommand::SendInput(SendInputSpec { pane_id, data: "git status\r".to_string() }),
+            )
+            .await
+            .expect("send input should dispatch");
+
+        let v2 = terminal_persistence::TerminalPersistenceV2::open_with_config(
+            &path,
+            terminal_persistence::TerminalPersistenceV2Config::test(),
+        )
+        .expect("v2 store should open");
+        let history = v2
+            .list_command_history(Some(&created.session_id.0.to_string()), 10)
+            .expect("history should load");
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].display_text, "git status");
     }
 
     fn runtime_backends(imported_backend: Arc<FakeImportedBackend>) -> BackendCatalog {

@@ -324,6 +324,71 @@ impl TerminalPersistenceV2 {
         Ok(session_id)
     }
 
+    pub fn upsert_runtime_session(
+        &self,
+        input: SessionInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let session_id = input.id.unwrap_or_else(new_id);
+        let route_json = serde_json::to_string(&input.route)?;
+        let launch_json = input.launch.as_ref().map(serde_json::to_string).transpose()?;
+        let metadata_json = json_metadata(&input.metadata)?;
+        let durability_profile = input.durability_profile.unwrap_or(self.config.durability_profile);
+        let retention_policy_id =
+            input.retention_policy_id.unwrap_or_else(|| DEFAULT_RETENTION_POLICY_ID.to_string());
+
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let row = NewTerminalSessionRow {
+                id: session_id.clone(),
+                route_json,
+                title: input.title,
+                launch_json,
+                source: input.source.unwrap_or_else(|| "runtime".to_string()),
+                durability_profile: durability_profile.as_str().to_string(),
+                retention_policy_id,
+                private_mode: bool_to_int(input.private_mode),
+                created_at_ms: now,
+                updated_at_ms: now,
+                closed_at_ms: None,
+                state: "active".to_string(),
+                metadata_json,
+            };
+            insert_into(terminal_sessions::table)
+                .values(&row)
+                .on_conflict(terminal_sessions::id)
+                .do_update()
+                .set((
+                    terminal_sessions::route_json.eq(row.route_json.clone()),
+                    terminal_sessions::title.eq(row.title.clone()),
+                    terminal_sessions::launch_json.eq(row.launch_json.clone()),
+                    terminal_sessions::source.eq(row.source.clone()),
+                    terminal_sessions::durability_profile.eq(row.durability_profile.clone()),
+                    terminal_sessions::private_mode.eq(row.private_mode),
+                    terminal_sessions::updated_at_ms.eq(row.updated_at_ms),
+                    terminal_sessions::state.eq(row.state.clone()),
+                    terminal_sessions::metadata_json.eq(row.metadata_json.clone()),
+                ))
+                .execute(connection)?;
+
+            let cursor = NewSessionCursorRow {
+                session_id: session_id.clone(),
+                next_commit_seq: 1,
+                writer_generation: None,
+                updated_at_ms: now,
+            };
+            insert_into(terminal_session_cursors::table)
+                .values(&cursor)
+                .on_conflict(terminal_session_cursors::session_id)
+                .do_nothing()
+                .execute(connection)?;
+
+            Ok(())
+        })?;
+
+        Ok(session_id)
+    }
+
     pub fn create_pane(&self, input: PaneInput) -> Result<String, TerminalPersistenceV2Error> {
         validate_positive_dimensions(input.rows, input.cols)?;
         let mut connection = self.connection()?;
@@ -358,6 +423,64 @@ impl TerminalPersistenceV2 {
                 updated_at_ms: now,
             };
             insert_into(terminal_stream_cursors::table).values(&cursor).execute(connection)?;
+
+            Ok(())
+        })?;
+
+        Ok(pane_id)
+    }
+
+    pub fn upsert_runtime_pane(
+        &self,
+        input: PaneInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
+        validate_positive_dimensions(input.rows, input.cols)?;
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let pane_id = input.id.unwrap_or_else(new_id);
+        let stream_id = input.stream_id.unwrap_or_else(|| DEFAULT_STREAM_ID.to_string());
+        let metadata_json = json_metadata(&input.metadata)?;
+
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let row = NewTerminalPaneRow {
+                id: pane_id.clone(),
+                session_id: input.session_id.clone(),
+                tab_id: input.tab_id,
+                stream_id: stream_id.clone(),
+                title: input.title,
+                rows: input.rows,
+                cols: input.cols,
+                last_event_seq: 0,
+                created_at_ms: now,
+                closed_at_ms: None,
+                metadata_json,
+            };
+            insert_into(terminal_panes::table)
+                .values(&row)
+                .on_conflict(terminal_panes::id)
+                .do_update()
+                .set((
+                    terminal_panes::title.eq(row.title.clone()),
+                    terminal_panes::rows.eq(row.rows),
+                    terminal_panes::cols.eq(row.cols),
+                    terminal_panes::metadata_json.eq(row.metadata_json.clone()),
+                ))
+                .execute(connection)?;
+
+            let cursor = NewStreamCursorRow {
+                id: stream_cursor_id(&pane_id, &stream_id),
+                session_id: input.session_id,
+                pane_id: pane_id.clone(),
+                stream_id,
+                next_event_seq: 1,
+                next_byte_seq: 0,
+                updated_at_ms: now,
+            };
+            insert_into(terminal_stream_cursors::table)
+                .values(&cursor)
+                .on_conflict(terminal_stream_cursors::id)
+                .do_nothing()
+                .execute(connection)?;
 
             Ok(())
         })?;
@@ -454,6 +577,127 @@ impl TerminalPersistenceV2 {
                 "saved_at_ms": saved.saved_at_ms
             })),
         })?;
+
+        Ok(())
+    }
+
+    pub fn record_ui_input_event(
+        &self,
+        input: UiInputEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        self.upsert_runtime_session(SessionInput {
+            id: Some(input.session_id.clone()),
+            route: input.route,
+            title: input.title,
+            launch: input.launch,
+            source: Some("runtime_ui_input".to_string()),
+            durability_profile: None,
+            retention_policy_id: None,
+            private_mode: false,
+            metadata: Some(serde_json::json!({
+                "capture_source": "ui_input",
+                "trusted_command_source": true
+            })),
+        })?;
+        self.upsert_runtime_pane(PaneInput {
+            id: Some(input.pane_id.clone()),
+            session_id: input.session_id.clone(),
+            tab_id: None,
+            stream_id: None,
+            title: None,
+            rows: input.rows.unwrap_or(24),
+            cols: input.cols.unwrap_or(80),
+            metadata: Some(serde_json::json!({
+                "capture_source": "ui_input",
+                "dimensions": if input.rows.is_some() && input.cols.is_some() {
+                    "observed"
+                } else {
+                    "provisional"
+                }
+            })),
+        })?;
+
+        let lease = self.acquire_writer_generation("runtime-ui-input", 60_000)?;
+        let event_result = self.append_journal_event(JournalEventInput {
+            session_id: input.session_id.clone(),
+            pane_id: Some(input.pane_id.clone()),
+            stream_id: None,
+            writer_generation: lease.id.clone(),
+            event_type: if input.is_paste {
+                "terminal_paste_input".to_string()
+            } else {
+                "terminal_input".to_string()
+            },
+            commit_kind: Some("ui_input".to_string()),
+            payload_json: Some(serde_json::json!({
+                "data": input.data.clone(),
+                "is_paste": input.is_paste
+            })),
+            source_event_id_hash: None,
+            occurred_at_ms: None,
+            capture_semantics: Some("ui_input".to_string()),
+            trust_level: Some("verified".to_string()),
+            metadata: None,
+        });
+        let release_result = self.release_writer_generation(&lease.id);
+        let event = match (event_result, release_result) {
+            (Ok(event), Ok(())) => event,
+            (Ok(_), Err(error)) => return Err(error),
+            (Err(error), _) => return Err(error),
+        };
+
+        if let Some(command_text) = command_text_from_ui_input(&input.data) {
+            let command_block_id = self.write_command_block(CommandBlockInput {
+                id: None,
+                session_id: input.session_id.clone(),
+                pane_id: input.pane_id.clone(),
+                commit_id: Some(event.commit_id),
+                command_text: Some(command_text.clone()),
+                display_text: Some(command_text.clone()),
+                redacted_text: None,
+                command_text_source: Some("ui_submit".to_string()),
+                trust_level: Some("verified".to_string()),
+                state: Some("submitted".to_string()),
+                cwd: None,
+                cwd_source: None,
+                exit_code: None,
+                started_event_seq: Some(event.event_seq),
+                submitted_event_seq: Some(event.event_seq),
+                finished_event_seq: None,
+                output_event_seq_low: None,
+                output_event_seq_high: None,
+                output_byte_low: None,
+                output_byte_high: None,
+                sensitivity_class: Some("unknown".to_string()),
+                created_at_ms: None,
+                metadata: Some(serde_json::json!({
+                    "capture_source": "ui_input",
+                    "rerun_policy": "confirm"
+                })),
+            })?;
+            self.upsert_command_history_entry(CommandHistoryEntryInput {
+                id: None,
+                session_id: Some(input.session_id),
+                pane_id: Some(input.pane_id),
+                command_block_id: Some(command_block_id),
+                scope_kind: "session".to_string(),
+                command_text: Some(command_text.clone()),
+                display_text: command_text,
+                redacted_text: None,
+                command_hash: None,
+                cwd: None,
+                shell_kind: input.shell_kind,
+                trust_level: Some("verified".to_string()),
+                source: Some("ui_submit".to_string()),
+                sensitivity_class: Some("unknown".to_string()),
+                redaction_state: Some("unscanned".to_string()),
+                rerun_policy: Some("confirm".to_string()),
+                first_used_at_ms: None,
+                last_used_at_ms: None,
+                use_count: None,
+                metadata: None,
+            })?;
+        }
 
         Ok(())
     }
@@ -1376,6 +1620,20 @@ pub struct JournalEventInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiInputEventInput {
+    pub session_id: String,
+    pub route: SessionRoute,
+    pub title: Option<String>,
+    pub launch: Option<ShellLaunchSpec>,
+    pub pane_id: String,
+    pub data: String,
+    pub is_paste: bool,
+    pub rows: Option<i32>,
+    pub cols: Option<i32>,
+    pub shell_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandBlockInput {
     pub id: Option<String>,
     pub session_id: String,
@@ -2226,6 +2484,15 @@ fn stable_history_id(
     format!("command-history-{}", blake3_hash_text(&material))
 }
 
+fn command_text_from_ui_input(data: &str) -> Option<String> {
+    let trimmed_end = data.trim_end_matches(['\r', '\n']);
+    if trimmed_end.len() == data.len() {
+        return None;
+    }
+    let command = trimmed_end.trim();
+    if command.is_empty() { None } else { Some(command.to_string()) }
+}
+
 fn new_id() -> String {
     Uuid::now_v7().to_string()
 }
@@ -2445,6 +2712,38 @@ mod tests {
         assert_eq!(listed[0].id, history_id);
         assert_eq!(listed[0].display_text, "echo hello");
         assert_eq!(listed[0].use_count, 1);
+    }
+
+    #[test]
+    fn records_ui_input_as_verified_command_history() {
+        let store = test_store("ui-input");
+        let session_id = Uuid::new_v4().to_string();
+        let pane_id = Uuid::new_v4().to_string();
+
+        store
+            .record_ui_input_event(UiInputEventInput {
+                session_id: session_id.clone(),
+                route: route(),
+                title: Some("shell".to_string()),
+                launch: None,
+                pane_id: pane_id.clone(),
+                data: "git status\r".to_string(),
+                is_paste: false,
+                rows: None,
+                cols: None,
+                shell_kind: Some("cmd".to_string()),
+            })
+            .expect("ui input should persist");
+
+        let history =
+            store.list_command_history(Some(&session_id), 10).expect("command history should load");
+        let segments = store
+            .list_stream_segments(&session_id, &pane_id, 1, 10)
+            .expect("rendered/raw segments query should be valid");
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].display_text, "git status");
+        assert!(segments.is_empty());
     }
 
     #[test]

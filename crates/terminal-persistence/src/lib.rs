@@ -12,5 +12,5 @@ pub use v2::{
     RestoreEvidence, RestoreGuaranteeLevel, RestorePlan, ScreenSnapshotInput, SessionInput,
     StreamSegmentInput, StreamSegmentReceipt, StreamSegmentRecord, TerminalPersistenceV2,
     TerminalPersistenceV2Config, TerminalPersistenceV2Error, TopologySnapshotInput,
-    WriterGenerationLease,
+    UiInputEventInput, WriterGenerationLease,
 };

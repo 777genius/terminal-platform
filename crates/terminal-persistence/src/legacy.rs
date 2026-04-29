@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::v2::{
     RestorePlan, TerminalPersistenceV2, TerminalPersistenceV2Config, TerminalPersistenceV2Error,
+    UiInputEventInput,
 };
 
 fn migrations() -> Migrations<'static> {
@@ -133,6 +134,17 @@ impl SqliteSessionStore {
             TerminalPersistenceV2Config::default(),
         )?;
         store.import_saved_native_session_snapshot(session)
+    }
+
+    pub fn record_v2_ui_input(
+        &self,
+        input: UiInputEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        let store = TerminalPersistenceV2::open_with_config(
+            &self.path,
+            TerminalPersistenceV2Config::default(),
+        )?;
+        store.record_ui_input_event(input)
     }
 
     pub fn open_default() -> Result<Self, PersistenceError> {

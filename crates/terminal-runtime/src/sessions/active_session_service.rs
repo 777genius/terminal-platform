@@ -1,5 +1,6 @@
 use terminal_backend_api::{BackendError, MuxCommand, MuxCommandResult};
 use terminal_domain::{PaneId, SessionId};
+use terminal_persistence::UiInputEventInput;
 use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 
 use super::{
@@ -52,9 +53,13 @@ impl<'a> ActiveSessionService<'a> {
         if matches!(command, MuxCommand::SaveSession) {
             return SavedSessionsService::new(self.runtime.clone()).save_session(session_id).await;
         }
+        let input_capture = self.v2_input_capture(session_id, &command);
         let session = self.runtime.attach_session(session_id).await?;
         let refresh_summary_title = command_updates_summary_title(&command);
         let result = session.dispatch(command).await?;
+        if let Some(input_capture) = input_capture {
+            let _ = self.runtime.persistence().record_v2_ui_input(input_capture);
+        }
         if result.changed && refresh_summary_title {
             self.runtime.refresh_session_summary_title(session_id, &*session).await;
         }
@@ -66,5 +71,40 @@ impl<'a> ActiveSessionService<'a> {
         session_id: SessionId,
     ) -> Result<SessionHealthSnapshot, BackendError> {
         self.runtime.session_health_snapshot(session_id)
+    }
+
+    fn v2_input_capture(
+        &self,
+        session_id: SessionId,
+        command: &MuxCommand,
+    ) -> Option<UiInputEventInput> {
+        let descriptor = self.runtime.registry().get(session_id)?;
+        match command {
+            MuxCommand::SendInput(spec) => Some(UiInputEventInput {
+                session_id: session_id.0.to_string(),
+                route: descriptor.route,
+                title: descriptor.title,
+                launch: descriptor.launch,
+                pane_id: spec.pane_id.0.to_string(),
+                data: spec.data.clone(),
+                is_paste: false,
+                rows: None,
+                cols: None,
+                shell_kind: None,
+            }),
+            MuxCommand::SendPaste(spec) => Some(UiInputEventInput {
+                session_id: session_id.0.to_string(),
+                route: descriptor.route,
+                title: descriptor.title,
+                launch: descriptor.launch,
+                pane_id: spec.pane_id.0.to_string(),
+                data: spec.data.clone(),
+                is_paste: true,
+                rows: None,
+                cols: None,
+                shell_kind: None,
+            }),
+            _ => None,
+        }
     }
 }
