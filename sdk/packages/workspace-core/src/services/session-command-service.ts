@@ -7,6 +7,7 @@ import type {
   CreateSessionRequest,
   MuxCommand,
   MuxCommandResult,
+  PaneHistory,
   PaneId,
   PaneTreeNode,
   PruneSavedSessionsResult,
@@ -101,6 +102,11 @@ export class SessionCommandService {
         }));
 
         this.#syncLiveSessionSubscriptions(attachedSession);
+        void this.#hydratePaneHistory(
+          transport,
+          attachedSession.session.session_id,
+          attachedSession.focused_screen?.pane_id ?? focusedPaneId(attachedSession.topology),
+        );
       } catch (error) {
         throw this.#handleTransportError(error, "failed to attach session");
       }
@@ -324,6 +330,7 @@ export class SessionCommandService {
 
       this.#paneSubscription = record;
       void this.#consumeLiveSubscription(record);
+      void this.#hydratePaneHistory(transport, sessionId, paneId);
     } catch (error) {
       if (!this.#disposed) {
         this.#handleTransportError(error, "failed to open pane surface subscription");
@@ -447,6 +454,63 @@ export class SessionCommandService {
     return record.kind === "topology"
       ? this.#topologySubscription === record
       : this.#paneSubscription === record;
+  }
+
+  async #hydratePaneHistory(
+    transport: Awaited<ReturnType<ServiceContext["ensureTransport"]>>,
+    sessionId: SessionId,
+    paneId: PaneId | null,
+  ): Promise<void> {
+    if (!paneId || !transport.getPaneHistory) {
+      return;
+    }
+
+    try {
+      const history = await transport.getPaneHistory(sessionId, paneId, {
+        fromEventSeq: 1n,
+        maxSegments: 256,
+        maxBytes: 1024 * 1024,
+      });
+      const historicalPane = buildHydratedHistoricalPane(history, this.#context.now());
+      if (!historicalPane) {
+        return;
+      }
+
+      this.#context.updateSnapshot((snapshot) => {
+        const attachedSession = snapshot.attachedSession;
+        if (
+          !attachedSession
+          || attachedSession.session.session_id !== sessionId
+          || snapshot.selection.activePaneId !== paneId
+        ) {
+          return snapshot;
+        }
+
+        const existingHistory = snapshot.historicalPanes?.[paneId];
+        if (
+          existingHistory?.sessionId === sessionId
+          && existingHistory.source === "saved_session_restore"
+        ) {
+          return snapshot;
+        }
+
+        return {
+          ...snapshot,
+          historicalPanes: {
+            ...(snapshot.historicalPanes ?? {}),
+            [paneId]: historicalPane,
+          },
+        };
+      });
+    } catch (error) {
+      this.#context.recordDiagnostic({
+        code: "pane_history_hydration_failed",
+        message: `failed to hydrate pane history for ${paneId}`,
+        severity: "warn",
+        recoverable: true,
+        cause: error,
+      });
+    }
   }
 
   async #closeTopologySubscription(): Promise<void> {
@@ -703,6 +767,107 @@ function buildRestoredHistoricalPanes(
   }
 
   return historicalPanes;
+}
+
+function buildHydratedHistoricalPane(
+  history: PaneHistory,
+  loadedAtMs: number,
+): WorkspaceHistoricalPaneSnapshot | null {
+  const segmentLines = linesFromHistorySegments(history.segments);
+  const snapshotLines = history.latest_screen_snapshot
+    ? linesFromScreenSnapshotJson(history.latest_screen_snapshot.screen_json)
+    : [];
+  const gapLines = history.gaps.map((gap) => {
+    const eventRange = gap.event_seq_low && gap.event_seq_high
+      ? ` events ${gap.event_seq_low}-${gap.event_seq_high}`
+      : "";
+    return `--- history gap${eventRange}: ${gap.reason} ---`;
+  });
+  const lines = normalizeHistoryLines([
+    ...(segmentLines.length > 0 ? segmentLines : snapshotLines),
+    ...gapLines,
+  ]);
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const latestSegment = history.segments.at(-1);
+  const capturedAtMs =
+    latestSegment?.created_at_ms
+    ?? history.latest_screen_snapshot?.created_at_ms
+    ?? BigInt(Math.trunc(loadedAtMs));
+
+  return {
+    sessionId: history.session_id,
+    paneId: history.pane_id,
+    sourceSessionId: history.session_id,
+    sourcePaneId: history.pane_id,
+    source: "v2_pane_history",
+    replayStrategy: history.replay_strategy,
+    restoreGuaranteeLevel: history.restore_plan.restore_guarantee_level,
+    lines,
+    capturedAtMs,
+    hasGaps: history.gaps.length > 0,
+    hasMoreSegments: history.has_more_segments,
+  };
+}
+
+function linesFromHistorySegments(segments: PaneHistory["segments"]): string[] {
+  if (segments.length === 0) {
+    return [];
+  }
+
+  const bytes = segments.flatMap((segment) => segment.payload);
+  const text = sanitizeTerminalHistoryText(new TextDecoder().decode(Uint8Array.from(bytes)));
+  return normalizeHistoryLines(text.split("\n"));
+}
+
+function linesFromScreenSnapshotJson(screenJson: string): string[] {
+  try {
+    const parsed = JSON.parse(screenJson) as unknown;
+    if (isRecord(parsed)) {
+      if (Array.isArray(parsed.lines)) {
+        return normalizeHistoryLines(parsed.lines.filter((line): line is string => typeof line === "string"));
+      }
+
+      const surface = parsed.surface;
+      if (isRecord(surface) && Array.isArray(surface.lines)) {
+        return normalizeHistoryLines(surface.lines.map((line) => {
+          if (isRecord(line) && typeof line.text === "string") {
+            return line.text;
+          }
+          return "";
+        }));
+      }
+    }
+  } catch {
+    return [];
+  }
+
+  return [];
+}
+
+function sanitizeTerminalHistoryText(text: string): string {
+  return text
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, "")
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1B[@-Z\\-_]/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+}
+
+function normalizeHistoryLines(lines: readonly string[]): string[] {
+  const normalized = lines.map((line) => line.trimEnd());
+  while (normalized.length > 0 && normalized[normalized.length - 1] === "") {
+    normalized.pop();
+  }
+  return normalized;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function mapSavedPaneIdsToLivePaneIds(

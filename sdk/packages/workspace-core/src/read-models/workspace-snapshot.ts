@@ -78,9 +78,9 @@ export interface WorkspaceHistoricalPaneSnapshot {
   paneId: PaneId;
   sourceSessionId: SessionId;
   sourcePaneId: PaneId;
-  source: "saved_session_restore";
-  replayStrategy: "rendered_snapshot";
-  restoreGuaranteeLevel: "visual_snapshot_only";
+  source: "saved_session_restore" | "v2_pane_history";
+  replayStrategy: "empty" | "raw_vt_stream" | "rendered_snapshot" | "mixed" | "degraded";
+  restoreGuaranteeLevel: string;
   lines: string[];
   capturedAtMs: bigint;
   hasGaps: boolean;

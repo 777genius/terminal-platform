@@ -8,6 +8,7 @@ import type {
   DiscoveredSession,
   Handshake,
   MuxCommand,
+  PaneHistory,
   PaneId,
   ScreenDelta,
   ScreenSnapshot,
@@ -392,6 +393,44 @@ describe("createWorkspaceKernel live session subscriptions", () => {
 
     expect(attachedScreenText(kernel)).toContain("live output");
     expect(live.attachCalls()).toBe(1);
+
+    await kernel.dispose();
+  });
+
+  it("hydrates pane history from persistence when attaching a session", async () => {
+    const sessionId = "history-session-1";
+    const paneId = "history-pane-1";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
+    const subscription = new TestWorkspaceSubscription("history-pane-subscription");
+    let historyCalls = 0;
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async () => {
+          historyCalls += 1;
+          return createPaneHistory(sessionId, paneId, "\x1B[31mgit status\x1B[0m\r\nfatal\r\n");
+        },
+      } as WorkspaceTransportClient,
+      now: () => 7000,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.lines.includes("fatal") ?? false);
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      sessionId,
+      paneId,
+      source: "v2_pane_history",
+      replayStrategy: "raw_vt_stream",
+      restoreGuaranteeLevel: "basic_history",
+      lines: ["git status", "fatal"],
+      hasGaps: false,
+      hasMoreSegments: false,
+    });
+    expect(historyCalls).toBeGreaterThan(0);
 
     await kernel.dispose();
   });
@@ -813,6 +852,48 @@ function createLiveScreen(paneId: PaneId, line: string, sequence: bigint): Scree
       },
       lines: line.split("\n").map((text) => ({ text })),
     },
+  };
+}
+
+function createPaneHistory(sessionId: SessionId, paneId: PaneId, text: string): PaneHistory {
+  return {
+    session_id: sessionId,
+    pane_id: paneId,
+    from_event_seq: 1n,
+    max_segments: 256n,
+    max_bytes: 1_048_576n,
+    restore_plan: {
+      session_id: sessionId,
+      restore_guarantee_level: "basic_history",
+      latest_screen_snapshot_id: null,
+      latest_topology_snapshot_id: null,
+      high_water_commit_seq: 1n,
+      evidence: [
+        {
+          kind: "stream_segment_count",
+          value: "1",
+        },
+      ],
+    },
+    latest_screen_snapshot: null,
+    segments: [
+      {
+        id: "segment-1",
+        event_seq_low: 1n,
+        event_seq_high: 1n,
+        byte_low: 0n,
+        byte_high: BigInt(new TextEncoder().encode(text).byteLength),
+        payload: Array.from(new TextEncoder().encode(text)),
+        checksum: "test-checksum",
+        capture_semantics: "raw_vt_stream",
+        created_at_ms: 7_000n,
+      },
+    ],
+    gaps: [],
+    replay_strategy: "raw_vt_stream",
+    has_more_segments: false,
+    next_event_seq: null,
+    total_payload_bytes: BigInt(new TextEncoder().encode(text).byteLength),
   };
 }
 
