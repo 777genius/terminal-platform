@@ -34,6 +34,7 @@ pub fn initialize_connection(
     connection: &mut SqliteConnection,
     config: &TerminalPersistenceV2Config,
 ) -> Result<(), TerminalPersistenceV2Error> {
+    connection.batch_execute(&format!("PRAGMA busy_timeout = {};", config.busy_timeout_ms))?;
     connection.batch_execute("PRAGMA foreign_keys = ON;")?;
     let app_id = sqlite_application_id(connection)?;
     if app_id != 0 && app_id != TERMINAL_PERSISTENCE_APP_ID {
@@ -42,12 +43,11 @@ pub fn initialize_connection(
 
     connection.batch_execute(&format!(
         "
-        PRAGMA busy_timeout = {};
         PRAGMA journal_mode = WAL;
         PRAGMA wal_autocheckpoint = {};
         PRAGMA temp_store = MEMORY;
         ",
-        config.busy_timeout_ms, config.wal_autocheckpoint_pages
+        config.wal_autocheckpoint_pages
     ))?;
     connection.batch_execute(&format!(
         "PRAGMA synchronous = {};",
