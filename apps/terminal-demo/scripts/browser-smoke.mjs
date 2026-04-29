@@ -667,9 +667,9 @@ async function main() {
       || result.afterSaveLayout.firstSavedRestoreDisabled !== false
       || !result.afterSaveLayout.firstSavedRestoreTitle?.includes("Restore saved layout")
       || !result.afterSaveLayout.firstSavedSemanticsCodes?.includes("process_state_not_preserved")
-      || !result.afterSaveLayout.firstSavedSemanticsCodes?.includes("screen_buffers_not_replayed")
+      || !result.afterSaveLayout.firstSavedSemanticsCodes?.includes("screen_buffers_replayed")
       || !result.afterSaveLayout.firstSavedSemanticsLabels?.includes("processes restart")
-      || !result.afterSaveLayout.firstSavedSemanticsLabels?.includes("no screen replay")
+      || !result.afterSaveLayout.firstSavedSemanticsLabels?.includes("screen replay")
       || !result.afterSaveLayout.deletePrompted
       || result.afterSaveLayout.savedSessionCountAfterDeletePrompt !== result.afterSaveLayout.savedSessionCount
       || result.afterSaveLayout.saveEventDetail?.savedSessionCount !== result.afterSaveLayout.savedSessionCount

@@ -180,6 +180,12 @@ describe("terminal saved sessions controls", () => {
         detail: "Pane and tab topology is not restored by this saved layout.",
         tone: "warning",
       },
+      {
+        code: "screen_buffers_replayed",
+        label: "screen replay",
+        detail: "Saved viewport history is reconstructed as historical output.",
+        tone: "ok",
+      },
     ]);
   });
 

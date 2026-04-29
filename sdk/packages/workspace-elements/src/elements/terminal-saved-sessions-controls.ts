@@ -268,7 +268,14 @@ function restoreSemanticsNotes(session: SavedSessionSummary): TerminalSavedSessi
     });
   }
 
-  if (!semantics.replays_saved_screen_buffers) {
+  if (semantics.replays_saved_screen_buffers) {
+    notes.push({
+      code: "screen_buffers_replayed",
+      label: "screen replay",
+      detail: "Saved viewport history is reconstructed as historical output.",
+      tone: "ok",
+    });
+  } else {
     notes.push({
       code: "screen_buffers_not_replayed",
       label: "no screen replay",
