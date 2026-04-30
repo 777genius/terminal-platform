@@ -603,6 +603,9 @@ pub struct NodeRenameTabCommand {
 pub struct NodeSendInputCommand {
     pub pane_id: String,
     pub data: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub client_event_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -610,6 +613,9 @@ pub struct NodeSendInputCommand {
 pub struct NodeSendPasteCommand {
     pub pane_id: String,
     pub data: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub client_event_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1387,10 +1393,12 @@ impl TryFrom<&NodeMuxCommand> for MuxCommand {
             NodeMuxCommand::SendInput(command) => Self::SendInput(SendInputSpec {
                 pane_id: parse_pane_id(&command.pane_id)?,
                 data: command.data.clone(),
+                client_event_id: command.client_event_id.clone(),
             }),
             NodeMuxCommand::SendPaste(command) => Self::SendPaste(SendPasteSpec {
                 pane_id: parse_pane_id(&command.pane_id)?,
                 data: command.data.clone(),
+                client_event_id: command.client_event_id.clone(),
             }),
             NodeMuxCommand::Detach => Self::Detach,
             NodeMuxCommand::SaveSession => Self::SaveSession,

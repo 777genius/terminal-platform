@@ -1925,6 +1925,7 @@ mod tests {
                 MuxCommand::SendInput(SendInputSpec {
                     pane_id: terminal_pane,
                     data: "echo\tok\r\u{1b}[A\u{0003}\u{007f}\r\n".to_string(),
+                    client_event_id: None,
                 }),
             )
             .expect("send-input should map");
@@ -1979,6 +1980,7 @@ mod tests {
                 MuxCommand::SendInput(SendInputSpec {
                     pane_id: terminal_pane,
                     data: "\u{0002}".to_string(),
+                    client_event_id: None,
                 }),
             )
             .expect_err("unmapped control input should stay explicit");
@@ -1997,6 +1999,7 @@ mod tests {
                 MuxCommand::SendPaste(SendPasteSpec {
                     pane_id: terminal_pane,
                     data: "hello\nworld".to_string(),
+                    client_event_id: None,
                 }),
             )
             .expect("send-paste should map");
@@ -2021,6 +2024,7 @@ mod tests {
                 MuxCommand::SendInput(SendInputSpec {
                     pane_id: plugin_pane,
                     data: "hello".to_string(),
+                    client_event_id: None,
                 }),
             )
             .expect_err("plugin input should fail");

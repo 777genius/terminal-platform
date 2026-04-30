@@ -1601,6 +1601,7 @@ mod tests {
                 MuxCommand::SendInput(SendInputSpec {
                     pane_id,
                     data: submitted_input("hello from subscription"),
+                    client_event_id: None,
                 }),
             )
             .await

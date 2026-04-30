@@ -599,9 +599,9 @@ impl TerminalPersistenceV2 {
     ) -> Result<(), TerminalPersistenceV2Error> {
         self.upsert_runtime_session(SessionInput {
             id: Some(input.session_id.clone()),
-            route: input.route,
-            title: input.title,
-            launch: input.launch,
+            route: input.route.clone(),
+            title: input.title.clone(),
+            launch: input.launch.clone(),
             source: Some("runtime_ui_input".to_string()),
             durability_profile: None,
             retention_policy_id: None,
@@ -630,88 +630,217 @@ impl TerminalPersistenceV2 {
         })?;
 
         let lease = self.acquire_writer_generation_with_retry("runtime-ui-input", 60_000)?;
-        let event_result = self.append_journal_event(JournalEventInput {
-            session_id: input.session_id.clone(),
-            pane_id: Some(input.pane_id.clone()),
-            stream_id: None,
-            writer_generation: lease.id.clone(),
-            event_type: if input.is_paste {
-                "terminal_paste_input".to_string()
-            } else {
-                "terminal_input".to_string()
-            },
-            commit_kind: Some("ui_input".to_string()),
-            payload_json: Some(serde_json::json!({
-                "data": input.data.clone(),
-                "is_paste": input.is_paste
-            })),
-            source_event_id_hash: None,
-            occurred_at_ms: None,
-            capture_semantics: Some("ui_input".to_string()),
-            trust_level: Some("verified".to_string()),
-            metadata: None,
-        });
+        let event_result = self.append_ui_input_event_and_command(&input, &lease.id);
         let release_result = self.release_writer_generation(&lease.id);
-        let event = match (event_result, release_result) {
-            (Ok(event), Ok(())) => event,
-            (Ok(_), Err(error)) => return Err(error),
-            (Err(error), _) => return Err(error),
-        };
 
-        if let Some(command_text) = command_text_from_ui_input(&input.data) {
-            let command_block_id = self.write_command_block(CommandBlockInput {
-                id: None,
-                session_id: input.session_id.clone(),
-                pane_id: input.pane_id.clone(),
-                commit_id: Some(event.commit_id),
-                command_text: Some(command_text.clone()),
-                display_text: Some(command_text.clone()),
-                redacted_text: None,
-                command_text_source: Some("ui_submit".to_string()),
-                trust_level: Some("verified".to_string()),
-                state: Some("submitted".to_string()),
-                cwd: None,
-                cwd_source: None,
-                exit_code: None,
-                started_event_seq: Some(event.event_seq),
-                submitted_event_seq: Some(event.event_seq),
-                finished_event_seq: None,
-                output_event_seq_low: None,
-                output_event_seq_high: None,
-                output_byte_low: None,
-                output_byte_high: None,
-                sensitivity_class: Some("unknown".to_string()),
-                created_at_ms: None,
-                metadata: Some(serde_json::json!({
-                    "capture_source": "ui_input",
-                    "rerun_policy": "confirm"
-                })),
-            })?;
-            self.upsert_command_history_entry(CommandHistoryEntryInput {
-                id: None,
-                session_id: Some(input.session_id),
-                pane_id: Some(input.pane_id),
-                command_block_id: Some(command_block_id),
-                scope_kind: "session".to_string(),
-                command_text: Some(command_text.clone()),
-                display_text: command_text,
-                redacted_text: None,
-                command_hash: None,
-                cwd: None,
-                shell_kind: input.shell_kind,
-                trust_level: Some("verified".to_string()),
-                source: Some("ui_submit".to_string()),
-                sensitivity_class: Some("unknown".to_string()),
-                redaction_state: Some("unscanned".to_string()),
-                rerun_policy: Some("confirm".to_string()),
-                first_used_at_ms: None,
-                last_used_at_ms: None,
-                use_count: None,
-                metadata: None,
-            })?;
+        match (event_result, release_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Ok(()), Err(error)) => Err(error),
+            (Err(error), _) => Err(error),
         }
+    }
 
-        Ok(())
+    fn append_ui_input_event_and_command(
+        &self,
+        input: &UiInputEventInput,
+        writer_generation: &str,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let stream_id = DEFAULT_STREAM_ID.to_string();
+        let event_type = if input.is_paste { "terminal_paste_input" } else { "terminal_input" };
+        let payload_json = serde_json::json!({
+            "data": input.data.clone(),
+            "is_paste": input.is_paste
+        });
+        let payload_json = serde_json::to_string(&payload_json)?;
+        let payload_hash = blake3_hash_text(&payload_json);
+        let source_event_id_hash = input.source_event_id.as_ref().map(|source_event_id| {
+            blake3_hash_text(&format!("ui-input-client-event:{source_event_id}"))
+        });
+        let capture_source_kind =
+            source_event_id_hash.as_ref().map(|_| ui_input_capture_source_kind(&input.pane_id));
+        let command_text = command_text_from_ui_input(&input.data);
+        let command_metadata_json = Some(serde_json::to_string(&serde_json::json!({
+            "capture_source": "ui_input",
+            "rerun_policy": "confirm"
+        }))?);
+
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            if let (Some(source_kind), Some(source_event_id_hash)) =
+                (capture_source_kind.as_deref(), source_event_id_hash.as_deref())
+            {
+                if let Some(receipt) = load_capture_receipt(
+                    connection,
+                    &input.session_id,
+                    source_kind,
+                    source_event_id_hash,
+                )? {
+                    if receipt.source_payload_hash != payload_hash {
+                        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                            "ui input receipt payload hash mismatch for source_kind={source_kind}"
+                        )));
+                    }
+                    return Ok(());
+                }
+            }
+
+            ensure_active_writer(connection, writer_generation, now)?;
+            let commit = allocate_commit(
+                connection,
+                &input.session_id,
+                "ui_input",
+                writer_generation,
+                now,
+                now,
+                None,
+            )?;
+            let cursor =
+                load_stream_cursor(connection, &input.session_id, &input.pane_id, &stream_id)?;
+            let event_seq = cursor.next_event_seq;
+            let scope = event_scope(&input.session_id, Some(&input.pane_id));
+            let event_id = new_id();
+            let event = NewJournalEventRow {
+                id: event_id,
+                session_id: input.session_id.clone(),
+                pane_id: Some(input.pane_id.clone()),
+                commit_id: commit.id.clone(),
+                stream_id: stream_id.clone(),
+                event_scope_kind: scope.kind,
+                event_scope_id: scope.id,
+                event_seq,
+                event_type: event_type.to_string(),
+                byte_low: None,
+                byte_high: None,
+                payload_json: Some(payload_json.clone()),
+                payload_schema_id: None,
+                source_event_id_hash: source_event_id_hash.clone(),
+                occurred_at_ms: now,
+                created_at_ms: now,
+                capture_semantics: "ui_input".to_string(),
+                trust_level: "verified".to_string(),
+                metadata_json: None,
+            };
+            insert_into(terminal_journal_events::table).values(&event).execute(connection)?;
+
+            advance_stream_cursor(
+                connection,
+                &cursor.id,
+                cursor.next_event_seq + 1,
+                cursor.next_byte_seq,
+                now,
+            )?;
+            diesel::update(terminal_panes::table.filter(terminal_panes::id.eq(&input.pane_id)))
+                .set(terminal_panes::last_event_seq.eq(event_seq))
+                .execute(connection)?;
+
+            if let Some(command_text) = command_text.as_ref() {
+                let command_block_id = source_event_id_hash
+                    .as_ref()
+                    .map(|hash| stable_ui_command_block_id(&input.session_id, &input.pane_id, hash))
+                    .unwrap_or_else(new_id);
+                let block = NewCommandBlockRow {
+                    id: command_block_id.clone(),
+                    session_id: input.session_id.clone(),
+                    pane_id: input.pane_id.clone(),
+                    commit_id: Some(commit.id.clone()),
+                    command_text: Some(command_text.clone()),
+                    display_text: Some(command_text.clone()),
+                    redacted_text: None,
+                    command_text_source: "ui_submit".to_string(),
+                    trust_level: "verified".to_string(),
+                    state: "submitted".to_string(),
+                    cwd: None,
+                    cwd_source: None,
+                    exit_code: None,
+                    started_event_seq: Some(event_seq),
+                    submitted_event_seq: Some(event_seq),
+                    finished_event_seq: None,
+                    output_event_seq_low: None,
+                    output_event_seq_high: None,
+                    output_byte_low: None,
+                    output_byte_high: None,
+                    sensitivity_class: "unknown".to_string(),
+                    created_at_ms: now,
+                    updated_at_ms: now,
+                    metadata_json: command_metadata_json.clone(),
+                };
+                insert_into(terminal_command_blocks::table)
+                    .values(&block)
+                    .on_conflict(terminal_command_blocks::id)
+                    .do_nothing()
+                    .execute(connection)?;
+
+                let command_hash = blake3_hash_text(command_text);
+                let history_id = stable_history_id(
+                    "session",
+                    Some(&input.session_id),
+                    Some(&input.pane_id),
+                    &command_hash,
+                );
+                let history = NewCommandHistoryEntryRow {
+                    id: history_id,
+                    session_id: Some(input.session_id.clone()),
+                    pane_id: Some(input.pane_id.clone()),
+                    command_block_id: Some(command_block_id),
+                    scope_kind: "session".to_string(),
+                    command_text: Some(command_text.clone()),
+                    display_text: command_text.clone(),
+                    redacted_text: None,
+                    command_hash_algorithm: "blake3".to_string(),
+                    command_hash_scope: "local_profile".to_string(),
+                    command_hash,
+                    cwd: None,
+                    shell_kind: input.shell_kind.clone(),
+                    trust_level: "verified".to_string(),
+                    source: "ui_submit".to_string(),
+                    sensitivity_class: "unknown".to_string(),
+                    redaction_state: "unscanned".to_string(),
+                    rerun_policy: "confirm".to_string(),
+                    first_used_at_ms: now,
+                    last_used_at_ms: now,
+                    use_count: 1,
+                    metadata_json: None,
+                };
+                insert_into(terminal_command_history_entries::table)
+                    .values(&history)
+                    .on_conflict(terminal_command_history_entries::id)
+                    .do_update()
+                    .set((
+                        terminal_command_history_entries::last_used_at_ms
+                            .eq(history.last_used_at_ms),
+                        terminal_command_history_entries::use_count
+                            .eq(terminal_command_history_entries::use_count + 1),
+                        terminal_command_history_entries::command_block_id
+                            .eq(history.command_block_id.clone()),
+                        terminal_command_history_entries::cwd.eq(history.cwd.clone()),
+                        terminal_command_history_entries::metadata_json
+                            .eq(history.metadata_json.clone()),
+                    ))
+                    .execute(connection)?;
+            }
+
+            if let (Some(source_kind), Some(source_event_id_hash)) =
+                (capture_source_kind.as_deref(), source_event_id_hash.as_deref())
+            {
+                let receipt = NewCaptureReceiptRow {
+                    id: new_id(),
+                    session_id: input.session_id.clone(),
+                    commit_id: Some(commit.id),
+                    source_kind: source_kind.to_string(),
+                    source_event_id_hash: source_event_id_hash.to_string(),
+                    source_payload_hash: payload_hash.clone(),
+                    received_at_ms: now,
+                    created_at_ms: now,
+                    metadata_json: None,
+                };
+                insert_into(terminal_capture_receipts::table)
+                    .values(&receipt)
+                    .execute(connection)?;
+            }
+
+            Ok(())
+        })
     }
 
     pub fn record_terminal_output_event(
@@ -2364,6 +2493,8 @@ pub struct UiInputEventInput {
     pub pane_id: String,
     pub data: String,
     pub is_paste: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_event_id: Option<String>,
     pub rows: Option<i32>,
     pub cols: Option<i32>,
     pub shell_kind: Option<String>,
@@ -3827,6 +3958,21 @@ fn stream_capture_source_kind(pane_id: &str, stream_id: &str) -> String {
     format!("stream-segment-{}", blake3_hash_text(&format!("{pane_id}\0{stream_id}")))
 }
 
+fn ui_input_capture_source_kind(pane_id: &str) -> String {
+    format!("ui-input-{}", blake3_hash_text(pane_id))
+}
+
+fn stable_ui_command_block_id(
+    session_id: &str,
+    pane_id: &str,
+    source_event_id_hash: &str,
+) -> String {
+    format!(
+        "command-block-{}",
+        blake3_hash_text(&format!("{session_id}\0{pane_id}\0{source_event_id_hash}"))
+    )
+}
+
 fn stable_history_id(
     scope_kind: &str,
     session_id: Option<&str>,
@@ -4213,6 +4359,7 @@ mod tests {
                 pane_id: pane_id.clone(),
                 data: "git status\r".to_string(),
                 is_paste: false,
+                source_event_id: None,
                 rows: None,
                 cols: None,
                 shell_kind: Some("cmd".to_string()),
@@ -4228,6 +4375,91 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].display_text, "git status");
         assert!(segments.is_empty());
+    }
+
+    #[test]
+    fn dedupes_retried_ui_input_by_client_event_id() {
+        let store = test_store("ui-input-retry");
+        let session_id = Uuid::new_v4().to_string();
+        let pane_id = Uuid::new_v4().to_string();
+        let input = UiInputEventInput {
+            session_id: session_id.clone(),
+            route: route(),
+            title: Some("shell".to_string()),
+            launch: None,
+            pane_id: pane_id.clone(),
+            data: "git status\r".to_string(),
+            is_paste: false,
+            source_event_id: Some("browser-submit-1".to_string()),
+            rows: None,
+            cols: None,
+            shell_kind: Some("cmd".to_string()),
+        };
+
+        store.record_ui_input_event(input.clone()).expect("first ui input should persist");
+        store.record_ui_input_event(input).expect("retry should be deduped");
+
+        let history =
+            store.list_command_history(Some(&session_id), 10).expect("command history should load");
+        let mut connection = store.connection().expect("connection should open");
+        let event_count = terminal_journal_events::table
+            .filter(terminal_journal_events::session_id.eq(&session_id))
+            .filter(terminal_journal_events::pane_id.eq(Some(pane_id.clone())))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("journal count should load");
+        let command_block_count = terminal_command_blocks::table
+            .filter(terminal_command_blocks::session_id.eq(&session_id))
+            .filter(terminal_command_blocks::pane_id.eq(&pane_id))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("command block count should load");
+        let receipt_count = terminal_capture_receipts::table
+            .filter(terminal_capture_receipts::session_id.eq(&session_id))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("receipt count should load");
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].display_text, "git status");
+        assert_eq!(history[0].use_count, 1);
+        assert_eq!(event_count, 1);
+        assert_eq!(command_block_count, 1);
+        assert_eq!(receipt_count, 1);
+    }
+
+    #[test]
+    fn rejects_ui_input_retry_with_same_client_event_id_and_different_payload() {
+        let store = test_store("ui-input-retry-conflict");
+        let session_id = Uuid::new_v4().to_string();
+        let pane_id = Uuid::new_v4().to_string();
+        let input = UiInputEventInput {
+            session_id: session_id.clone(),
+            route: route(),
+            title: Some("shell".to_string()),
+            launch: None,
+            pane_id: pane_id.clone(),
+            data: "git status\r".to_string(),
+            is_paste: false,
+            source_event_id: Some("browser-submit-2".to_string()),
+            rows: None,
+            cols: None,
+            shell_kind: Some("cmd".to_string()),
+        };
+        store.record_ui_input_event(input.clone()).expect("first ui input should persist");
+
+        let mut conflicting = input;
+        conflicting.data = "git branch\r".to_string();
+        let error =
+            store.record_ui_input_event(conflicting).expect_err("conflicting retry should fail");
+        let history =
+            store.list_command_history(Some(&session_id), 10).expect("command history should load");
+
+        assert!(
+            matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("payload hash mismatch"))
+        );
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].display_text, "git status");
     }
 
     #[test]

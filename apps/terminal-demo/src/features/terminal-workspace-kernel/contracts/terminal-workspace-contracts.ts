@@ -325,11 +325,13 @@ export type TerminalMuxCommand =
       kind: "send_input";
       pane_id: string;
       data: string;
+      client_event_id?: string;
     }
   | {
       kind: "send_paste";
       pane_id: string;
       data: string;
+      client_event_id?: string;
     }
   | {
       kind: "detach";

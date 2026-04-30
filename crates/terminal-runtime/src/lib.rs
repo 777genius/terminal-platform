@@ -476,7 +476,11 @@ mod tests {
         runtime
             .dispatch(
                 created.session_id,
-                MuxCommand::SendInput(SendInputSpec { pane_id, data: "git status\r".to_string() }),
+                MuxCommand::SendInput(SendInputSpec {
+                    pane_id,
+                    data: "git status\r".to_string(),
+                    client_event_id: None,
+                }),
             )
             .await
             .expect("send input should dispatch");
@@ -525,6 +529,7 @@ mod tests {
                 MuxCommand::SendInput(SendInputSpec {
                     pane_id,
                     data: capture_shell_echo_input(&marker),
+                    client_event_id: None,
                 }),
             )
             .await

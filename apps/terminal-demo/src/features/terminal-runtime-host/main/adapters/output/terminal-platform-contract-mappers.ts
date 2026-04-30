@@ -243,12 +243,14 @@ export function toSdkMuxCommand(
         kind: command.kind,
         pane_id: command.pane_id,
         data: command.data,
+        ...(command.client_event_id ? { client_event_id: command.client_event_id } : {}),
       };
     case "send_paste":
       return {
         kind: command.kind,
         pane_id: command.pane_id,
         data: command.data,
+        ...(command.client_event_id ? { client_event_id: command.client_event_id } : {}),
       };
     case "detach":
       return {

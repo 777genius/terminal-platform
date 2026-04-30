@@ -348,6 +348,7 @@ async fn bootstrap_smoke_streams_live_pane_surface_updates() {
             MuxCommand::SendInput(SendInputSpec {
                 pane_id,
                 data: submitted_input("hello from pane stream"),
+                client_event_id: None,
             }),
         )
         .await
@@ -402,6 +403,7 @@ async fn bootstrap_smoke_roundtrips_live_pty_io() {
             MuxCommand::SendInput(SendInputSpec {
                 pane_id,
                 data: submitted_input("hello from smoke"),
+                client_event_id: None,
             }),
         )
         .await
@@ -1457,6 +1459,7 @@ async fn bootstrap_smoke_discovers_and_imports_tmux_session() {
             MuxCommand::SendInput(SendInputSpec {
                 pane_id: focused_pane,
                 data: submitted_input("hello from tmux dispatch"),
+                client_event_id: None,
             }),
         )
         .await
@@ -1923,6 +1926,7 @@ async fn bootstrap_smoke_streams_tmux_pane_surface_updates() {
             MuxCommand::SendInput(SendInputSpec {
                 pane_id,
                 data: submitted_input("hello from tmux subscription"),
+                client_event_id: None,
             }),
         )
         .await
@@ -2074,7 +2078,10 @@ async fn send_pane_input(
 ) {
     fixture
         .client
-        .dispatch(session_id, MuxCommand::SendInput(SendInputSpec { pane_id, data }))
+        .dispatch(
+            session_id,
+            MuxCommand::SendInput(SendInputSpec { pane_id, data, client_event_id: None }),
+        )
         .await
         .expect("pane input should succeed");
 }

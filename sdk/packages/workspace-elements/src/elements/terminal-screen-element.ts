@@ -1186,6 +1186,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         kind: "send_input",
         pane_id: controls.activePaneId,
         data: input,
+        client_event_id: createTerminalClientEventId("screen-input"),
       });
       if (shouldRefreshAfterTerminalDirectInput(input)) {
         await this.kernel?.commands.attachSession(controls.activeSessionId);
@@ -1231,6 +1232,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         kind: "send_paste",
         pane_id: controls.activePaneId,
         data,
+        client_event_id: createTerminalClientEventId("screen-paste"),
       });
       await this.kernel?.commands.attachSession(controls.activeSessionId);
       if (this.directInputActivity !== "idle") {
@@ -1361,4 +1363,8 @@ function renderHighlightedSegments(
 
 function isViewportAtBottom(viewport: HTMLElement): boolean {
   return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2;
+}
+
+function createTerminalClientEventId(prefix: string): string {
+  return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }

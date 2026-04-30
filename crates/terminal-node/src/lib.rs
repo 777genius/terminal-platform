@@ -574,6 +574,7 @@ mod tests {
                 &NodeMuxCommand::SendInput(NodeSendInputCommand {
                     pane_id: focused_pane_id.clone(),
                     data: submitted_input("node host input"),
+                    client_event_id: None,
                 }),
             )
             .await
@@ -1063,6 +1064,7 @@ mod tests {
             &NodeMuxCommand::SendInput(NodeSendInputCommand {
                 pane_id: pane_id.clone(),
                 data: submitted_input("node subscription input"),
+                client_event_id: None,
             }),
         )
         .await
@@ -1237,6 +1239,7 @@ mod tests {
                     &NodeMuxCommand::SendInput(NodeSendInputCommand {
                         pane_id: pane_id.clone(),
                         data: submitted_input(&marker),
+                        client_event_id: None,
                     }),
                 )
                 .await
@@ -1510,6 +1513,7 @@ mod tests {
                         &NodeMuxCommand::SendInput(NodeSendInputCommand {
                             pane_id: pane_id.to_string(),
                             data: submitted_input(&marker),
+                            client_event_id: None,
                         }),
                     ),
                 )

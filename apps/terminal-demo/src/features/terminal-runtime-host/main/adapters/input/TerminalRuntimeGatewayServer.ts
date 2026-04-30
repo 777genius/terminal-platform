@@ -1058,13 +1058,24 @@ function readMuxCommandPayload(payload: GatewayPayloadRecord): TerminalMuxComman
         tab_id: readStringPayload(command, "tab_id"),
         title: readStringPayload(command, "title"),
       };
-    case "send_input":
-    case "send_paste":
+    case "send_input": {
+      const clientEventId = readOptionalStringPayload(command, "client_event_id");
       return {
         kind,
         pane_id: readStringPayload(command, "pane_id"),
         data: readStringPayload(command, "data"),
+        ...(clientEventId ? { client_event_id: clientEventId } : {}),
       };
+    }
+    case "send_paste": {
+      const clientEventId = readOptionalStringPayload(command, "client_event_id");
+      return {
+        kind,
+        pane_id: readStringPayload(command, "pane_id"),
+        data: readStringPayload(command, "data"),
+        ...(clientEventId ? { client_event_id: clientEventId } : {}),
+      };
+    }
     case "detach":
     case "save_session":
       return { kind };

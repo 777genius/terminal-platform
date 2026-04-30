@@ -349,6 +349,7 @@ async fn writes_input_into_live_pty_backed_session() {
         .dispatch(MuxCommand::SendInput(SendInputSpec {
             pane_id,
             data: echo_input("hello from backend test"),
+            client_event_id: None,
         }))
         .await
         .expect("send input should succeed");
@@ -391,7 +392,11 @@ async fn streams_raw_output_for_live_pty_backed_session() {
         session.subscribe_raw_output(pane_id).await.expect("raw output should subscribe");
     let marker = "hello from native raw output";
     session
-        .dispatch(MuxCommand::SendInput(SendInputSpec { pane_id, data: echo_input(marker) }))
+        .dispatch(MuxCommand::SendInput(SendInputSpec {
+            pane_id,
+            data: echo_input(marker),
+            client_event_id: None,
+        }))
         .await
         .expect("send input should succeed");
 

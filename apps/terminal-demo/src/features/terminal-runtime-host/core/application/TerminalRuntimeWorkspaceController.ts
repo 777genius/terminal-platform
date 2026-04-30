@@ -317,6 +317,7 @@ export class TerminalRuntimeWorkspaceController {
       kind: "send_input",
       pane_id: paneId,
       data,
+      client_event_id: createTerminalClientEventId("runtime-input"),
     });
   }
 
@@ -442,6 +443,10 @@ export class TerminalRuntimeWorkspaceController {
 
     this.#store.patch(nextPatch);
   }
+}
+
+function createTerminalClientEventId(prefix: string): string {
+  return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
 function toMessage(error: unknown): string {
