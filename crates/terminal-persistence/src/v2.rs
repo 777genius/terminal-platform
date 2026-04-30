@@ -199,6 +199,7 @@ pub struct TerminalPersistenceV2Config {
     pub busy_timeout_ms: u32,
     pub wal_autocheckpoint_pages: u32,
     pub clock: PersistenceClock,
+    pub failpoints: PersistenceFailpoints,
 }
 
 impl TerminalPersistenceV2Config {
@@ -214,6 +215,7 @@ impl TerminalPersistenceV2Config {
             busy_timeout_ms: 1_000,
             wal_autocheckpoint_pages: 64,
             clock: PersistenceClock,
+            failpoints: PersistenceFailpoints::default(),
         }
     }
 }
@@ -225,8 +227,14 @@ impl Default for TerminalPersistenceV2Config {
             busy_timeout_ms: 5_000,
             wal_autocheckpoint_pages: 1_000,
             clock: PersistenceClock,
+            failpoints: PersistenceFailpoints::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PersistenceFailpoints {
+    pub stream_segment_after_segment_insert: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1530,6 +1538,11 @@ impl TerminalPersistenceV2 {
                 metadata_json: metadata_json.clone(),
             };
             insert_into(terminal_stream_segments::table).values(&segment).execute(connection)?;
+            if self.config.failpoints.stream_segment_after_segment_insert {
+                return Err(TerminalPersistenceV2Error::InvalidData(
+                    "failpoint stream_segment_after_segment_insert".to_string(),
+                ));
+            }
 
             let event = NewJournalEventRow {
                 id: event_id.clone(),
@@ -6782,6 +6795,59 @@ mod tests {
         );
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].payload, b"first\r\n");
+    }
+
+    #[test]
+    fn stream_segment_failpoint_rolls_back_partial_writer_transaction() {
+        let mut config = TerminalPersistenceV2Config::test();
+        config.failpoints.stream_segment_after_segment_insert = true;
+        let path = std::env::temp_dir()
+            .join(format!("terminal-persistence-v2-stream-failpoint-{}.sqlite3", Uuid::new_v4()));
+        let store = TerminalPersistenceV2::open_with_config(path, config)
+            .expect("store should open with failpoint config");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+
+        let error = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id,
+                b"partial write should roll back\r\n".to_vec(),
+            ))
+            .expect_err("failpoint should abort stream segment append");
+
+        assert!(
+            matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("stream_segment_after_segment_insert"))
+        );
+        let mut connection = store.connection().expect("connection should open");
+        let segment_count = terminal_stream_segments::table
+            .filter(terminal_stream_segments::session_id.eq(&session_id))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("segment count should load");
+        let event_count = terminal_journal_events::table
+            .filter(terminal_journal_events::session_id.eq(&session_id))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("event count should load");
+        let outbox_count = terminal_outbox_messages::table
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("outbox count should load");
+        let cursor = load_stream_cursor(&mut connection, &session_id, &pane_id, DEFAULT_STREAM_ID)
+            .expect("stream cursor should load");
+        let pane_last_event_seq = terminal_panes::table
+            .filter(terminal_panes::id.eq(&pane_id))
+            .select(terminal_panes::last_event_seq)
+            .first::<i64>(&mut connection)
+            .expect("pane cursor should load");
+
+        assert_eq!(segment_count, 0);
+        assert_eq!(event_count, 0);
+        assert_eq!(outbox_count, 0);
+        assert_eq!(cursor.next_event_seq, 1);
+        assert_eq!(cursor.next_byte_seq, 0);
+        assert_eq!(pane_last_event_seq, 0);
     }
 
     #[test]
