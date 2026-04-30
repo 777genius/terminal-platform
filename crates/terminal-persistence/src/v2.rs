@@ -2237,6 +2237,13 @@ impl TerminalPersistenceV2 {
         collect_outbox_diagnostics(&mut connection, self.config.clock.now_ms())
     }
 
+    pub fn compression_diagnostics(
+        &self,
+    ) -> Result<CompressionDiagnosticsRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        collect_compression_diagnostics(&mut connection, self.config.clock.now_ms())
+    }
+
     pub fn write_screen_snapshot(
         &self,
         input: ScreenSnapshotInput,
@@ -2854,6 +2861,8 @@ impl TerminalPersistenceV2 {
         let mut connection = self.connection()?;
         let recovery = recover_expired_maintenance_leases(&mut connection, started_at_ms)?;
         let outbox_diagnostics = collect_outbox_diagnostics(&mut connection, started_at_ms)?;
+        let compression_diagnostics =
+            collect_compression_diagnostics(&mut connection, started_at_ms)?;
         let wal_checkpoint = if run_wal_checkpoint {
             Some(run_passive_wal_checkpoint(&mut connection)?)
         } else {
@@ -2880,6 +2889,7 @@ impl TerminalPersistenceV2 {
                 "stale_writer_generations_marked": recovery.stale_writer_generations_marked
             },
             "outbox": outbox_diagnostics,
+            "compression": compression_diagnostics,
             "storage": {
                 "db_file_bytes": db_file_bytes,
                 "wal_file_bytes": wal_file_bytes,
@@ -4533,6 +4543,19 @@ pub struct OutboxDiagnosticsRecord {
     pub quarantined_count: i64,
     pub oldest_due_pending_age_ms: Option<i64>,
     pub next_pending_due_in_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompressionDiagnosticsRecord {
+    pub generated_at_ms: i64,
+    pub feature_gate_state: String,
+    pub raw_segment_count: i64,
+    pub zstd_segment_count: i64,
+    pub unsupported_segment_count: i64,
+    pub rewrite_candidate_count: i64,
+    pub segments_rewritten: i64,
+    pub restore_drill_required: bool,
+    pub action_taken: String,
 }
 
 impl TryFrom<OutboxMessageRow> for OutboxMessageRecord {
@@ -6841,6 +6864,61 @@ fn count_outbox_state(
 ) -> Result<i64, TerminalPersistenceV2Error> {
     Ok(terminal_outbox_messages::table
         .filter(terminal_outbox_messages::state.eq(state_name))
+        .count()
+        .get_result::<i64>(connection)?)
+}
+
+fn collect_compression_diagnostics(
+    connection: &mut SqliteConnection,
+    now: i64,
+) -> Result<CompressionDiagnosticsRecord, TerminalPersistenceV2Error> {
+    let feature_gate_state = terminal_feature_gates::table
+        .filter(
+            terminal_feature_gates::feature_name
+                .eq(FeatureGateName::SegmentCompressionZstd.as_str()),
+        )
+        .select(terminal_feature_gates::state)
+        .first::<String>(connection)
+        .optional()?
+        .unwrap_or_else(|| FeatureGateState::Disabled.as_str().to_string());
+    let raw_segment_count = count_stream_segments_by_compression(connection, "none")?;
+    let zstd_segment_count = count_stream_segments_by_compression(connection, "zstd")?;
+    let unsupported_segment_count = terminal_stream_segments::table
+        .filter(terminal_stream_segments::compression.ne("none"))
+        .filter(terminal_stream_segments::compression.ne("zstd"))
+        .count()
+        .get_result::<i64>(connection)?;
+    let rewrite_candidate_count = if feature_gate_state == FeatureGateState::Enabled.as_str() {
+        raw_segment_count
+    } else {
+        0
+    };
+    let action_taken = if feature_gate_state == FeatureGateState::Enabled.as_str() {
+        "skipped_restore_drill_guard"
+    } else {
+        "skipped_feature_disabled"
+    }
+    .to_string();
+
+    Ok(CompressionDiagnosticsRecord {
+        generated_at_ms: now,
+        feature_gate_state,
+        raw_segment_count,
+        zstd_segment_count,
+        unsupported_segment_count,
+        rewrite_candidate_count,
+        segments_rewritten: 0,
+        restore_drill_required: true,
+        action_taken,
+    })
+}
+
+fn count_stream_segments_by_compression(
+    connection: &mut SqliteConnection,
+    compression: &str,
+) -> Result<i64, TerminalPersistenceV2Error> {
+    Ok(terminal_stream_segments::table
+        .filter(terminal_stream_segments::compression.eq(compression))
         .count()
         .get_result::<i64>(connection)?)
 }
@@ -9550,7 +9628,60 @@ mod tests {
         assert_eq!(summary["optimize"]["ran"], true);
         assert_eq!(summary["outbox"]["pending_count"], 1);
         assert_eq!(summary["outbox"]["due_pending_count"], 1);
+        assert_eq!(summary["compression"]["feature_gate_state"], "disabled");
+        assert_eq!(summary["compression"]["raw_segment_count"], 1);
+        assert_eq!(summary["compression"]["segments_rewritten"], 0);
+        assert_eq!(summary["compression"]["action_taken"], "skipped_feature_disabled");
         assert_eq!(summary["storage"]["no_silent_delete"], true);
+    }
+
+    #[test]
+    fn compression_diagnostics_never_rewrites_segments_without_restore_guard() {
+        let store = test_store("compression-placeholder");
+        store
+            .set_feature_gate_state(
+                FeatureGateName::SegmentCompressionZstd,
+                FeatureGateState::Enabled,
+                Some("test"),
+            )
+            .expect("compression gate should enable");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let receipt = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id,
+                b"raw segment remains raw\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+
+        let diagnostics =
+            store.compression_diagnostics().expect("compression diagnostics should load");
+        let run = store
+            .run_maintenance(MaintenanceRunInput {
+                run_wal_checkpoint: false,
+                run_optimize: false,
+                ..MaintenanceRunInput::default()
+            })
+            .expect("maintenance should run");
+        let summary = run.summary_json.as_ref().expect("maintenance summary should exist");
+        let mut connection = store.connection().expect("connection should open");
+        let compression = terminal_stream_segments::table
+            .filter(terminal_stream_segments::id.eq(&receipt.segment_id))
+            .select(terminal_stream_segments::compression)
+            .first::<String>(&mut connection)
+            .expect("segment compression should load");
+
+        assert_eq!(diagnostics.feature_gate_state, "enabled");
+        assert_eq!(diagnostics.raw_segment_count, 1);
+        assert_eq!(diagnostics.rewrite_candidate_count, 1);
+        assert_eq!(diagnostics.segments_rewritten, 0);
+        assert_eq!(diagnostics.action_taken, "skipped_restore_drill_guard");
+        assert_eq!(summary["compression"]["feature_gate_state"], "enabled");
+        assert_eq!(summary["compression"]["rewrite_candidate_count"], 1);
+        assert_eq!(summary["compression"]["segments_rewritten"], 0);
+        assert_eq!(summary["compression"]["action_taken"], "skipped_restore_drill_guard");
+        assert_eq!(compression, "none");
     }
 
     #[test]
