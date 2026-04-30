@@ -357,6 +357,12 @@ impl TerminalPersistenceV2 {
             input.retention_policy_id.unwrap_or_else(|| DEFAULT_RETENTION_POLICY_ID.to_string());
 
         connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let existing_private_mode = terminal_sessions::table
+                .filter(terminal_sessions::id.eq(&session_id))
+                .select(terminal_sessions::private_mode)
+                .first::<i32>(connection)
+                .optional()?
+                .unwrap_or(0);
             let row = NewTerminalSessionRow {
                 id: session_id.clone(),
                 route_json,
@@ -365,7 +371,7 @@ impl TerminalPersistenceV2 {
                 source: input.source.unwrap_or_else(|| "runtime".to_string()),
                 durability_profile: durability_profile.as_str().to_string(),
                 retention_policy_id,
-                private_mode: bool_to_int(input.private_mode),
+                private_mode: bool_to_int(input.private_mode || existing_private_mode != 0),
                 created_at_ms: now,
                 updated_at_ms: now,
                 closed_at_ms: None,
@@ -634,6 +640,11 @@ impl TerminalPersistenceV2 {
                 }
             })),
         })?;
+        if self.is_session_private(&input.session_id)? {
+            return Err(TerminalPersistenceV2Error::InvalidData(
+                "private mode suppresses durable ui input history".to_string(),
+            ));
+        }
 
         let lease = self.acquire_writer_generation_with_retry("runtime-ui-input", 60_000)?;
         let event_result = self.append_ui_input_event_and_command(&input, &lease.id);
@@ -886,6 +897,11 @@ impl TerminalPersistenceV2 {
                 }
             })),
         })?;
+        if self.is_session_private(&input.session_id)? {
+            return Err(TerminalPersistenceV2Error::InvalidData(
+                "private mode suppresses durable terminal output capture".to_string(),
+            ));
+        }
 
         let lease = self.acquire_writer_generation_with_retry("runtime-output-capture", 60_000)?;
         let append_result = self.append_stream_segment(StreamSegmentInput {
@@ -2301,6 +2317,22 @@ impl TerminalPersistenceV2 {
         if authoritative_reads_gate == FeatureGateState::ForceDisabled.as_str() {
             guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
         }
+        let now = self.config.clock.now_ms();
+        let latest_capability_report =
+            latest_backend_capability_report(&mut connection, session_id)?;
+        if let Some(report) = latest_capability_report.as_ref() {
+            let stale = report.expires_at_ms <= now
+                || report.stale_reason.is_some()
+                || report.probe_status != "passed";
+            if stale {
+                guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
+            }
+            if report.capture_semantics != "raw_vt_stream"
+                && matches!(guarantee_level, RestoreGuaranteeLevel::RawStreamReplay)
+            {
+                guarantee_level = RestoreGuaranteeLevel::BasicHistory;
+            }
+        }
 
         let mut evidence = vec![
             RestoreEvidence {
@@ -2318,6 +2350,33 @@ impl TerminalPersistenceV2 {
                 kind: "latest_restore_drill_status".to_string(),
                 value: status.clone(),
             });
+        }
+        if let Some(report) = latest_capability_report {
+            let stale = report.expires_at_ms <= now
+                || report.stale_reason.is_some()
+                || report.probe_status != "passed";
+            evidence.push(RestoreEvidence {
+                kind: "backend_capability_probe_status".to_string(),
+                value: report.probe_status,
+            });
+            evidence.push(RestoreEvidence {
+                kind: "backend_capture_strategy".to_string(),
+                value: report.capture_strategy,
+            });
+            evidence.push(RestoreEvidence {
+                kind: "backend_capture_semantics".to_string(),
+                value: report.capture_semantics,
+            });
+            evidence.push(RestoreEvidence {
+                kind: "backend_capability_stale".to_string(),
+                value: stale.to_string(),
+            });
+            if let Some(reason) = report.stale_reason {
+                evidence.push(RestoreEvidence {
+                    kind: "backend_capability_stale_reason".to_string(),
+                    value: reason,
+                });
+            }
         }
 
         Ok(RestorePlan {
@@ -3060,6 +3119,11 @@ impl TerminalPersistenceV2 {
             .load::<CommandHistoryEntryRow>(&mut connection)
             .map(|rows| rows.into_iter().map(CommandHistoryEntryRecord::from).collect())
             .map_err(Into::into)
+    }
+
+    fn is_session_private(&self, session_id: &str) -> Result<bool, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        session_private_mode(&mut connection, session_id)
     }
 }
 
@@ -4266,6 +4330,29 @@ struct NewTerminalPaneRow {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = terminal_backend_capability_reports)]
 struct NewBackendCapabilityReportRow {
+    id: String,
+    session_id: Option<String>,
+    backend_kind: String,
+    backend_version: Option<String>,
+    backend_binary_path_hash: Option<String>,
+    route_kind: String,
+    probe_status: String,
+    capture_strategy: String,
+    capture_semantics: String,
+    can_preserve_process_when_live: i32,
+    can_capture_scrollback: i32,
+    command_boundary_confidence: String,
+    evidence_json: Option<String>,
+    created_at_ms: i64,
+    expires_at_ms: i64,
+    stale_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_backend_capability_reports)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct BackendCapabilityReportRow {
     id: String,
     session_id: Option<String>,
     backend_kind: String,
@@ -5520,6 +5607,32 @@ fn has_history_gap_in_range(
     Ok(count > 0)
 }
 
+fn session_private_mode(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+) -> Result<bool, TerminalPersistenceV2Error> {
+    terminal_sessions::table
+        .filter(terminal_sessions::id.eq(session_id))
+        .select(terminal_sessions::private_mode)
+        .first::<i32>(connection)
+        .optional()
+        .map(|value| value.unwrap_or(0) != 0)
+        .map_err(Into::into)
+}
+
+fn latest_backend_capability_report(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+) -> Result<Option<BackendCapabilityReportRow>, TerminalPersistenceV2Error> {
+    terminal_backend_capability_reports::table
+        .filter(terminal_backend_capability_reports::session_id.eq(Some(session_id.to_string())))
+        .order(terminal_backend_capability_reports::created_at_ms.desc())
+        .select(BackendCapabilityReportRow::as_select())
+        .first::<BackendCapabilityReportRow>(connection)
+        .optional()
+        .map_err(Into::into)
+}
+
 fn load_outbox_message(
     connection: &mut SqliteConnection,
     id: &str,
@@ -6483,6 +6596,78 @@ mod tests {
     }
 
     #[test]
+    fn private_mode_suppresses_raw_output_and_command_history() {
+        let store = test_store("private-mode");
+        let session_id = store
+            .create_session(SessionInput {
+                id: None,
+                route: route(),
+                title: Some("private shell".to_string()),
+                launch: None,
+                source: Some("test".to_string()),
+                durability_profile: None,
+                retention_policy_id: None,
+                private_mode: true,
+                metadata: None,
+            })
+            .expect("private session should persist");
+        let pane_id = store
+            .create_pane(PaneInput::new(session_id.clone(), 24, 80))
+            .expect("pane should persist");
+
+        let output = store.record_terminal_output_event(TerminalOutputEventInput {
+            session_id: session_id.clone(),
+            route: route(),
+            title: Some("private shell".to_string()),
+            launch: None,
+            pane_id: pane_id.clone(),
+            tab_id: None,
+            payload: b"secret-token-output\r\n".to_vec(),
+            rows: Some(24),
+            cols: Some(80),
+            source_sequence: Some(1),
+            occurred_at_ms: None,
+            capture_semantics: Some("raw_vt_stream".to_string()),
+        });
+        let command = store.record_ui_input_event(UiInputEventInput {
+            session_id: session_id.clone(),
+            route: route(),
+            title: Some("private shell".to_string()),
+            launch: None,
+            pane_id: pane_id.clone(),
+            data: "echo secret-token-input\r".to_string(),
+            is_paste: false,
+            source_event_id: Some("private-submit".to_string()),
+            rows: Some(24),
+            cols: Some(80),
+            shell_kind: Some("cmd".to_string()),
+        });
+
+        assert!(
+            matches!(output, Err(TerminalPersistenceV2Error::InvalidData(message)) if message.contains("private mode suppresses durable terminal output capture"))
+        );
+        assert!(
+            matches!(command, Err(TerminalPersistenceV2Error::InvalidData(message)) if message.contains("private mode suppresses durable ui input history"))
+        );
+
+        let segments = store
+            .list_stream_segments(&session_id, &pane_id, 1, 10)
+            .expect("segment query should succeed");
+        let history =
+            store.list_command_history(Some(&session_id), 10).expect("history query should load");
+        let mut connection = store.connection().expect("connection should open");
+        let private_mode = terminal_sessions::table
+            .filter(terminal_sessions::id.eq(&session_id))
+            .select(terminal_sessions::private_mode)
+            .first::<i32>(&mut connection)
+            .expect("session should load");
+
+        assert_eq!(private_mode, 1);
+        assert!(segments.is_empty());
+        assert!(history.is_empty());
+    }
+
+    #[test]
     fn dedupes_retried_ui_input_by_client_event_id() {
         let store = test_store("ui-input-retry");
         let session_id = Uuid::new_v4().to_string();
@@ -6619,6 +6804,68 @@ mod tests {
         assert_eq!(plan.latest_restore_drill_status, None);
         assert!(plan.evidence.iter().any(|evidence| {
             evidence.kind == "authoritative_reads_gate_state" && evidence.value == "disabled"
+        }));
+    }
+
+    #[test]
+    fn stale_backend_capability_report_downgrades_restore_plan() {
+        let store = test_store("capability-downgrade");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"mux rendered history\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id,
+                writer_generation: writer.id,
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: 1,
+                high_water_event_seq: 1,
+                high_water_byte_seq: Some(22),
+                screen: serde_json::json!({"lines":["mux rendered history"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("screen snapshot should persist");
+        store
+            .record_backend_capability_report(BackendCapabilityReportInput {
+                id: None,
+                session_id: Some(session_id.clone()),
+                backend_kind: "zellij".to_string(),
+                backend_version: Some("test".to_string()),
+                backend_binary_path_hash: Some("test-path-hash".to_string()),
+                route_kind: "imported_foreign".to_string(),
+                probe_status: "passed".to_string(),
+                capture_strategy: "rendered_stream".to_string(),
+                capture_semantics: "rendered_plaintext_snapshot".to_string(),
+                can_preserve_process_when_live: true,
+                can_capture_scrollback: true,
+                command_boundary_confidence: "low".to_string(),
+                evidence: Some(serde_json::json!({"probe": "test"})),
+                expires_at_ms: Some(1),
+            })
+            .expect("capability report should persist");
+
+        let plan = store.restore_plan(&session_id).expect("restore plan should load");
+
+        assert_eq!(plan.guarantee_level, RestoreGuaranteeLevel::DegradedHistory);
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "backend_capture_semantics"
+                && evidence.value == "rendered_plaintext_snapshot"
+        }));
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "backend_capability_stale" && evidence.value == "true"
         }));
     }
 
