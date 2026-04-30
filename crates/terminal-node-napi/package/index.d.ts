@@ -357,6 +357,7 @@ export interface NativeAddonManifest {
 
 export interface NativeTerminalNodeClientHandle {
   readonly address: string;
+  close?(): Promise<void>;
   bindingVersion(): NodeBindingVersion;
   handshakeInfo(): Promise<NodeHandshakeInfo>;
   listSessions(): Promise<NodeSessionSummary[]>;
@@ -482,6 +483,7 @@ export declare class TerminalNodeClient
   ): TerminalNodeClient;
 
   get address(): string;
+  close(): Promise<void>;
   bindingVersion(): NodeBindingVersion;
   handshakeInfo(): Promise<NodeHandshakeInfo>;
   listSessions(): Promise<NodeSessionSummary[]>;
