@@ -56,9 +56,9 @@ const directScreenInputCommand = process.platform === "win32"
 const directScreenPasteCommand = process.platform === "win32"
   ? "echo screen-paste-ok\r"
   : "printf \"screen-paste-ok\\n\"\n";
-const expectedQuickCommandLabels = process.platform === "win32"
-  ? "cd|dir|git status|node -v|hello"
-  : "pwd|ls -la|git status|node -v|hello";
+const expectedQuickCommandLabels = resolveExpectedQuickCommandLabels(
+  process.env.TERMINAL_DEMO_DEFAULT_SHELL,
+);
 
 let previewProcess = null;
 let browserHostProcess = null;
@@ -66,6 +66,31 @@ let chromeProcess = null;
 let chromeUserDataDir = null;
 
 await withTerminalDemoSmokeLock("browser-smoke", main);
+
+function resolveExpectedQuickCommandLabels(defaultShellProgram) {
+  if (process.platform !== "win32") {
+    return "pwd|ls -la|git status|node -v|hello";
+  }
+
+  if (isPowerShellProgram(defaultShellProgram)) {
+    return "Get-Location|Get-ChildItem|git status|node -v|hello";
+  }
+
+  return "cd|dir|git status|node -v|hello";
+}
+
+function isPowerShellProgram(value) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    return false;
+  }
+
+  const executableName = path.basename(normalized).toLowerCase();
+  return executableName === "powershell"
+    || executableName === "powershell.exe"
+    || executableName === "pwsh"
+    || executableName === "pwsh.exe";
+}
 
 async function main() {
   try {
