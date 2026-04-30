@@ -8083,6 +8083,9 @@ fn validate_screen_snapshot_topology_high_water(
     if topology_pane_high_water.is_empty() {
         return;
     }
+    if row.high_water_byte_seq.is_none() {
+        return;
+    }
     let Some(max_event_seq) = topology_pane_high_water.get(&row.pane_id) else {
         failures.push(format!(
             "screen_snapshot:{} pane_id={} is not present in topology high-water vector",
