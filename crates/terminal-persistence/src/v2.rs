@@ -260,6 +260,7 @@ impl Default for StoragePressureConfig {
 #[derive(Debug, Clone, Default)]
 pub struct PersistenceFailpoints {
     pub stream_segment_after_segment_insert: bool,
+    pub stream_segment_before_transaction_storage_full: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1497,6 +1498,16 @@ impl TerminalPersistenceV2 {
                 "stream segment MVP accepts exactly one journal event per segment".to_string(),
             ));
         }
+        if self.config.failpoints.stream_segment_before_transaction_storage_full {
+            self.record_storage_pressure_write_failure(
+                "append_stream_segment",
+                "synthetic_sqlite_full",
+                None,
+            )?;
+            return Err(TerminalPersistenceV2Error::InvalidData(
+                "failpoint stream_segment_before_transaction_storage_full".to_string(),
+            ));
+        }
 
         let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
@@ -1510,7 +1521,7 @@ impl TerminalPersistenceV2 {
             .as_ref()
             .map(|_| stream_capture_source_kind(&input.pane_id, &stream_id));
 
-        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+        let append_result = connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
             if let (Some(source_kind), Some(source_event_id_hash)) =
                 (capture_source_kind.as_deref(), source_event_id_hash.as_deref())
             {
@@ -1676,7 +1687,17 @@ impl TerminalPersistenceV2 {
                 byte_high,
                 checksum: payload_checksum,
             })
-        })
+        });
+        if let Err(error) = &append_result
+            && is_storage_full_like_error(error)
+        {
+            let _ = self.record_storage_pressure_write_failure(
+                "append_stream_segment",
+                "sqlite_full",
+                Some(error.to_string()),
+            );
+        }
+        append_result
     }
 
     pub fn append_journal_event(
@@ -2823,6 +2844,33 @@ impl TerminalPersistenceV2 {
                 "db_over_budget": classification.db_over_budget,
                 "wal_over_budget": classification.wal_over_budget,
                 "no_silent_delete": true,
+            })),
+        })
+    }
+
+    fn record_storage_pressure_write_failure(
+        &self,
+        operation: &str,
+        reason: &str,
+        error: Option<String>,
+    ) -> Result<StoragePressureRecord, TerminalPersistenceV2Error> {
+        let db_file_bytes = file_len_i64(&self.path)?;
+        let wal_file_bytes = file_len_i64(&sqlite_sidecar_path(&self.path, "-wal"))?;
+        self.record_storage_pressure_event(StoragePressureEventInput {
+            id: None,
+            state: Some("full".to_string()),
+            db_file_bytes,
+            wal_file_bytes,
+            disk_free_bytes: None,
+            temp_free_bytes: None,
+            quota_bytes: None,
+            action_taken: Some("fail_closed".to_string()),
+            reason: Some(reason.to_string()),
+            metadata: Some(serde_json::json!({
+                "operation": operation,
+                "error": error,
+                "no_silent_delete": true,
+                "canonical_history_preserved": true,
             })),
         })
     }
@@ -7487,6 +7535,25 @@ fn validate_storage_pressure_domain(
     Ok(())
 }
 
+fn is_storage_full_like_error(error: &TerminalPersistenceV2Error) -> bool {
+    match error {
+        TerminalPersistenceV2Error::Query(DieselError::DatabaseError(_, info)) => {
+            let message = info.message().to_ascii_lowercase();
+            message.contains("sqlite_full")
+                || message.contains("database or disk is full")
+                || message.contains("disk is full")
+                || message.contains("database is full")
+        }
+        TerminalPersistenceV2Error::Io(error) => {
+            let message = error.to_string().to_ascii_lowercase();
+            message.contains("disk full")
+                || message.contains("disk is full")
+                || message.contains("not enough space")
+        }
+        _ => false,
+    }
+}
+
 fn validate_capture_semantics_domain(value: &str) -> Result<(), TerminalPersistenceV2Error> {
     const CAPTURE_SEMANTICS: &[&str] = &[
         "raw_vt_stream",
@@ -8276,6 +8343,64 @@ mod tests {
         assert_eq!(cursor.next_event_seq, 1);
         assert_eq!(cursor.next_byte_seq, 0);
         assert_eq!(pane_last_event_seq, 0);
+    }
+
+    #[test]
+    fn stream_segment_storage_full_failpoint_records_pressure_without_history_mutation() {
+        let mut config = TerminalPersistenceV2Config::test();
+        config.failpoints.stream_segment_before_transaction_storage_full = true;
+        let path = std::env::temp_dir().join(format!(
+            "terminal-persistence-v2-stream-storage-full-{}.sqlite3",
+            Uuid::new_v4()
+        ));
+        let store = TerminalPersistenceV2::open_with_config(path, config)
+            .expect("store should open with failpoint config");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+
+        let error = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id,
+                writer.id,
+                b"storage full should fail closed\r\n".to_vec(),
+            ))
+            .expect_err("storage-full failpoint should abort stream segment append");
+        let mut connection = store.connection().expect("connection should open");
+        let segment_count = terminal_stream_segments::table
+            .filter(terminal_stream_segments::session_id.eq(&session_id))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("segment count should load");
+        let outbox_count = terminal_outbox_messages::table
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("outbox count should load");
+        let (state, action_taken, reason, metadata_json) = terminal_storage_pressure_events::table
+            .order(terminal_storage_pressure_events::created_at_ms.desc())
+            .select((
+                terminal_storage_pressure_events::state,
+                terminal_storage_pressure_events::action_taken,
+                terminal_storage_pressure_events::reason,
+                terminal_storage_pressure_events::metadata_json,
+            ))
+            .first::<(String, String, Option<String>, Option<String>)>(&mut connection)
+            .expect("storage pressure event should persist");
+        let metadata: Value = serde_json::from_str(
+            metadata_json.as_deref().expect("storage pressure metadata should exist"),
+        )
+        .expect("storage pressure metadata should be json");
+
+        assert!(
+            matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("stream_segment_before_transaction_storage_full"))
+        );
+        assert_eq!(segment_count, 0);
+        assert_eq!(outbox_count, 0);
+        assert_eq!(state, "full");
+        assert_eq!(action_taken, "fail_closed");
+        assert_eq!(reason.as_deref(), Some("synthetic_sqlite_full"));
+        assert_eq!(metadata["operation"], "append_stream_segment");
+        assert_eq!(metadata["no_silent_delete"], true);
+        assert_eq!(metadata["canonical_history_preserved"], true);
     }
 
     #[test]
