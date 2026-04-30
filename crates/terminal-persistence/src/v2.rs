@@ -2712,6 +2712,13 @@ impl TerminalPersistenceV2 {
             self.ensure_raw_history_export_enabled()?;
         }
         let mut connection = self.connection()?;
+        if input.include_raw {
+            ensure_no_open_critical_health_records(
+                &mut connection,
+                input.session_id.as_deref(),
+                "raw export",
+            )?;
+        }
         let now = self.config.clock.now_ms();
         let manifest = privacy_manifest("export", input.include_raw, input.session_id.as_deref());
         let row = NewExportRequestRow {
@@ -2743,6 +2750,9 @@ impl TerminalPersistenceV2 {
             self.ensure_raw_history_export_enabled()?;
         }
         let mut connection = self.connection()?;
+        if input.include_raw {
+            ensure_no_open_critical_health_records(&mut connection, None, "raw support bundle")?;
+        }
         let now = self.config.clock.now_ms();
         let manifest = privacy_manifest("support_bundle", input.include_raw, None);
         let row = NewSupportBundleRow {
@@ -5323,6 +5333,38 @@ fn validate_feature_gate_transition(
     Ok(())
 }
 
+fn ensure_no_open_critical_health_records(
+    connection: &mut SqliteConnection,
+    session_id: Option<&str>,
+    operation_kind: &str,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let mut query = terminal_data_health_records::table
+        .filter(terminal_data_health_records::severity.eq("critical"))
+        .filter(terminal_data_health_records::action_state.ne("resolved"))
+        .filter(terminal_data_health_records::action_state.ne("ignored"))
+        .into_boxed();
+    if let Some(session_id) = session_id {
+        query = query.filter(
+            terminal_data_health_records::session_id
+                .is_null()
+                .or(terminal_data_health_records::session_id.eq(Some(session_id.to_string()))),
+        );
+    }
+
+    let record = query
+        .select(DataHealthRecordRow::as_select())
+        .first::<DataHealthRecordRow>(connection)
+        .optional()?;
+    if let Some(record) = record {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "{operation_kind} is blocked by open critical data health record {}",
+            record.id
+        )));
+    }
+
+    Ok(())
+}
+
 fn seed_payload_schemas(
     connection: &mut SqliteConnection,
     now: i64,
@@ -7883,6 +7925,76 @@ mod tests {
             })
             .expect("raw export should persist when gate is enabled");
         assert!(approved_raw_export.include_raw);
+    }
+
+    #[test]
+    fn raw_export_and_support_bundle_are_blocked_by_critical_health_records() {
+        let store = test_store("raw-export-health-block");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let output = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id,
+                writer.id,
+                b"secret bearing output\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        store
+            .set_feature_gate_state(
+                FeatureGateName::RawHistoryExport,
+                FeatureGateState::Enabled,
+                Some("test raw export approval"),
+            )
+            .expect("raw export gate should enable");
+
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(
+            terminal_stream_segments::table
+                .filter(terminal_stream_segments::id.eq(&output.segment_id)),
+        )
+        .set(terminal_stream_segments::checksum.eq("not-the-real-checksum"))
+        .execute(&mut connection)
+        .expect("test should corrupt checksum");
+        let integrity = store.run_integrity_check().expect("integrity check should run");
+        assert_eq!(integrity.result, "failed");
+
+        let redacted_export = store
+            .create_export_request(ExportRequestInput {
+                id: None,
+                session_id: Some(session_id.clone()),
+                export_kind: None,
+                redaction_profile_id: None,
+                include_raw: false,
+                output_ref: None,
+                metadata: None,
+            })
+            .expect("redacted export should still be allowed");
+        assert!(!redacted_export.include_raw);
+
+        let raw_export = store.create_export_request(ExportRequestInput {
+            id: None,
+            session_id: Some(session_id.clone()),
+            export_kind: Some("raw_transcript".to_string()),
+            redaction_profile_id: None,
+            include_raw: true,
+            output_ref: None,
+            metadata: None,
+        });
+        assert!(
+            matches!(raw_export, Err(TerminalPersistenceV2Error::InvalidData(message)) if message.contains("raw export is blocked by open critical data health record"))
+        );
+
+        let raw_support = store.create_support_bundle(SupportBundleInput {
+            id: None,
+            scope: serde_json::json!({"session_id": session_id}),
+            redaction_profile_id: None,
+            include_raw: true,
+            output_ref: None,
+            metadata: None,
+        });
+        assert!(
+            matches!(raw_support, Err(TerminalPersistenceV2Error::InvalidData(message)) if message.contains("raw support bundle is blocked by open critical data health record"))
+        );
     }
 
     #[test]
