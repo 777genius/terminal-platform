@@ -5476,16 +5476,18 @@ fn validate_history_checksums(
     if let Some(session_id) = session_id {
         segment_query = segment_query.filter(terminal_stream_segments::session_id.eq(session_id));
     }
-    let segment_rows = segment_query
-        .select((
-            terminal_stream_segments::id,
-            terminal_stream_segments::payload,
-            terminal_stream_segments::checksum_algorithm,
-            terminal_stream_segments::checksum,
-        ))
-        .load::<(String, Vec<u8>, String, String)>(connection)?;
-    for (id, payload, algorithm, checksum) in &segment_rows {
-        validate_checksum_bytes("stream_segment", id, payload, algorithm, checksum, &mut failures);
+    let segment_rows =
+        segment_query.select(StreamSegmentRow::as_select()).load::<StreamSegmentRow>(connection)?;
+    for row in &segment_rows {
+        validate_stream_segment_ranges(row, &mut failures);
+        validate_checksum_bytes(
+            "stream_segment",
+            &row.id,
+            &row.payload,
+            &row.checksum_algorithm,
+            &row.checksum,
+            &mut failures,
+        );
     }
 
     let mut screen_query = terminal_screen_snapshots::table.into_boxed();
@@ -5537,6 +5539,8 @@ fn validate_history_checksums(
         );
     }
 
+    validate_sequence_invariants(connection, session_id, &mut failures)?;
+
     Ok(HistoryValidation {
         journal_events_checked: journal_rows.len(),
         stream_segments_checked: segment_rows.len(),
@@ -5558,6 +5562,11 @@ fn persist_history_validation_health_records(
             "checksum_mismatch"
         } else if failure.contains("payload_schema_id") {
             "migration_mismatch"
+        } else if failure.starts_with("stream_cursor:")
+            || failure.starts_with("pane:")
+            || failure.starts_with("stream_segment:")
+        {
+            "missing_segment"
         } else {
             "manual"
         };
@@ -5657,6 +5666,203 @@ fn validate_payload_schema_ref(
             "{row_kind}:{id} references unknown payload_schema_id {payload_schema_id}"
         ));
     }
+}
+
+fn validate_stream_segment_ranges(row: &StreamSegmentRow, failures: &mut Vec<String>) {
+    if row.event_seq_high < row.event_seq_low {
+        failures.push(format!(
+            "stream_segment:{} invalid event range {}..{}",
+            row.id, row.event_seq_low, row.event_seq_high
+        ));
+    }
+    if row.byte_high < row.byte_low {
+        failures.push(format!(
+            "stream_segment:{} invalid byte range {}..{}",
+            row.id, row.byte_low, row.byte_high
+        ));
+        return;
+    }
+    let expected_payload_len = row.byte_high - row.byte_low;
+    if row.payload_len != expected_payload_len {
+        failures.push(format!(
+            "stream_segment:{} payload_len={} expected={}",
+            row.id, row.payload_len, expected_payload_len
+        ));
+    }
+    if row.stored_byte_len != i64::try_from(row.payload.len()).unwrap_or(i64::MAX) {
+        failures.push(format!(
+            "stream_segment:{} stored_byte_len={} actual={}",
+            row.id,
+            row.stored_byte_len,
+            row.payload.len()
+        ));
+    }
+}
+
+fn validate_sequence_invariants(
+    connection: &mut SqliteConnection,
+    session_id: Option<&str>,
+    failures: &mut Vec<String>,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let mut cursor_query = terminal_stream_cursors::table.into_boxed();
+    if let Some(session_id) = session_id {
+        cursor_query = cursor_query.filter(terminal_stream_cursors::session_id.eq(session_id));
+    }
+    let cursors =
+        cursor_query.select(StreamCursorRow::as_select()).load::<StreamCursorRow>(connection)?;
+    for cursor in cursors {
+        let segment_event_high = max_stream_segment_event_high(
+            connection,
+            &cursor.session_id,
+            &cursor.pane_id,
+            Some(&cursor.stream_id),
+        )?;
+        let journal_event_high = max_journal_event_seq(
+            connection,
+            &cursor.session_id,
+            &cursor.pane_id,
+            Some(&cursor.stream_id),
+        )?;
+        let gap_event_high = max_history_gap_event_high(
+            connection,
+            &cursor.session_id,
+            &cursor.pane_id,
+            Some(&cursor.stream_id),
+        )?;
+        if let Some(observed_event_high) =
+            max_optional_i64(&[segment_event_high, journal_event_high, gap_event_high])
+        {
+            let expected_next_event_seq = observed_event_high + 1;
+            if cursor.next_event_seq != expected_next_event_seq {
+                failures.push(format!(
+                    "stream_cursor:{} next_event_seq={} expected={}",
+                    cursor.id, cursor.next_event_seq, expected_next_event_seq
+                ));
+            }
+        }
+
+        let expected_next_byte_seq = max_stream_segment_byte_high(
+            connection,
+            &cursor.session_id,
+            &cursor.pane_id,
+            Some(&cursor.stream_id),
+        )?
+        .unwrap_or(0);
+        if cursor.next_byte_seq != expected_next_byte_seq {
+            failures.push(format!(
+                "stream_cursor:{} next_byte_seq={} expected={}",
+                cursor.id, cursor.next_byte_seq, expected_next_byte_seq
+            ));
+        }
+    }
+
+    let mut pane_query = terminal_panes::table.into_boxed();
+    if let Some(session_id) = session_id {
+        pane_query = pane_query.filter(terminal_panes::session_id.eq(session_id));
+    }
+    let panes = pane_query
+        .select((terminal_panes::id, terminal_panes::session_id, terminal_panes::last_event_seq))
+        .load::<(String, String, i64)>(connection)?;
+    for (pane_id, pane_session_id, last_event_seq) in panes {
+        let segment_event_high =
+            max_stream_segment_event_high(connection, &pane_session_id, &pane_id, None)?;
+        let journal_event_high =
+            max_journal_event_seq(connection, &pane_session_id, &pane_id, None)?;
+        let gap_event_high =
+            max_history_gap_event_high(connection, &pane_session_id, &pane_id, None)?;
+        if let Some(expected_last_event_seq) =
+            max_optional_i64(&[segment_event_high, journal_event_high, gap_event_high])
+        {
+            if last_event_seq != expected_last_event_seq {
+                failures.push(format!(
+                    "pane:{} last_event_seq={} expected={}",
+                    pane_id, last_event_seq, expected_last_event_seq
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn max_stream_segment_event_high(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    pane_id: &str,
+    stream_id: Option<&str>,
+) -> Result<Option<i64>, TerminalPersistenceV2Error> {
+    let mut query = terminal_stream_segments::table
+        .filter(terminal_stream_segments::session_id.eq(session_id))
+        .filter(terminal_stream_segments::pane_id.eq(pane_id))
+        .into_boxed();
+    if let Some(stream_id) = stream_id {
+        query = query.filter(terminal_stream_segments::stream_id.eq(stream_id));
+    }
+    query
+        .select(max(terminal_stream_segments::event_seq_high))
+        .first::<Option<i64>>(connection)
+        .map_err(Into::into)
+}
+
+fn max_stream_segment_byte_high(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    pane_id: &str,
+    stream_id: Option<&str>,
+) -> Result<Option<i64>, TerminalPersistenceV2Error> {
+    let mut query = terminal_stream_segments::table
+        .filter(terminal_stream_segments::session_id.eq(session_id))
+        .filter(terminal_stream_segments::pane_id.eq(pane_id))
+        .into_boxed();
+    if let Some(stream_id) = stream_id {
+        query = query.filter(terminal_stream_segments::stream_id.eq(stream_id));
+    }
+    query
+        .select(max(terminal_stream_segments::byte_high))
+        .first::<Option<i64>>(connection)
+        .map_err(Into::into)
+}
+
+fn max_journal_event_seq(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    pane_id: &str,
+    stream_id: Option<&str>,
+) -> Result<Option<i64>, TerminalPersistenceV2Error> {
+    let mut query = terminal_journal_events::table
+        .filter(terminal_journal_events::session_id.eq(session_id))
+        .filter(terminal_journal_events::pane_id.eq(Some(pane_id.to_string())))
+        .into_boxed();
+    if let Some(stream_id) = stream_id {
+        query = query.filter(terminal_journal_events::stream_id.eq(stream_id));
+    }
+    query
+        .select(max(terminal_journal_events::event_seq))
+        .first::<Option<i64>>(connection)
+        .map_err(Into::into)
+}
+
+fn max_history_gap_event_high(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    pane_id: &str,
+    stream_id: Option<&str>,
+) -> Result<Option<i64>, TerminalPersistenceV2Error> {
+    let mut query = terminal_history_gaps::table
+        .filter(terminal_history_gaps::session_id.eq(session_id))
+        .filter(terminal_history_gaps::pane_id.eq(Some(pane_id.to_string())))
+        .into_boxed();
+    if let Some(stream_id) = stream_id {
+        query = query.filter(terminal_history_gaps::stream_id.eq(stream_id));
+    }
+    query
+        .select(max(terminal_history_gaps::event_seq_high))
+        .first::<Option<i64>>(connection)
+        .map_err(Into::into)
+}
+
+fn max_optional_i64(values: &[Option<i64>]) -> Option<i64> {
+    values.iter().filter_map(|value| *value).max()
 }
 
 fn allocate_commit(
@@ -7437,6 +7643,49 @@ mod tests {
                 .as_deref()
                 .unwrap_or_default()
                 .contains("missing payload_schema_id")
+        );
+    }
+
+    #[test]
+    fn integrity_check_flags_stream_cursor_drift() {
+        let store = test_store("stream-cursor-drift");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id,
+                b"cursor target\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(
+            terminal_stream_cursors::table
+                .filter(terminal_stream_cursors::pane_id.eq(&pane_id))
+                .filter(terminal_stream_cursors::stream_id.eq(DEFAULT_STREAM_ID)),
+        )
+        .set(terminal_stream_cursors::next_event_seq.eq(99))
+        .execute(&mut connection)
+        .expect("test should corrupt cursor");
+
+        let integrity = store.run_integrity_check().expect("integrity check should run");
+
+        assert_eq!(integrity.result, "failed");
+        let error = integrity.error.as_deref().unwrap_or_default();
+        assert!(error.contains("history_validation_failures=1"));
+        assert!(error.contains("checksum_failures=0"));
+        let health = store.list_open_data_health_records(None).expect("health records should list");
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].detection_kind, "missing_segment");
+        assert_eq!(health[0].severity, "error");
+        assert_eq!(health[0].action_state, "rebuild_pending");
+        assert!(
+            health[0]
+                .affected_ref
+                .as_deref()
+                .unwrap_or_default()
+                .contains("next_event_seq=99 expected=2")
         );
     }
 
