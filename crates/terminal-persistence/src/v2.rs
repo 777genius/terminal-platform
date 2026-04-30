@@ -31,11 +31,11 @@ use crate::{
             terminal_db_identity, terminal_delete_requests, terminal_deletion_tombstones,
             terminal_delivery_offsets, terminal_export_requests, terminal_feature_gates,
             terminal_history_gaps, terminal_integrity_checks, terminal_journal_events,
-            terminal_outbox_messages, terminal_panes, terminal_restore_drills,
-            terminal_screen_snapshots, terminal_search_documents, terminal_session_cursors,
-            terminal_sessions, terminal_storage_pressure_events, terminal_stream_cursors,
-            terminal_stream_segments, terminal_support_bundles, terminal_topology_snapshots,
-            terminal_writer_generations,
+            terminal_outbox_messages, terminal_panes, terminal_payload_schemas,
+            terminal_restore_drills, terminal_screen_snapshots, terminal_search_documents,
+            terminal_session_cursors, terminal_sessions, terminal_storage_pressure_events,
+            terminal_stream_cursors, terminal_stream_segments, terminal_support_bundles,
+            terminal_topology_snapshots, terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -51,6 +51,10 @@ const MAX_HISTORY_BYTE_LIMIT: i64 = 16 * 1024 * 1024;
 const MAX_HISTORY_GAP_LIMIT: i64 = 256;
 const DEFAULT_COMMAND_HISTORY_LIMIT: i64 = 100;
 const MAX_COMMAND_HISTORY_LIMIT: i64 = 1_000;
+const PAYLOAD_SCHEMA_UI_INPUT_V1: &str = "terminal.ui_input.v1";
+const PAYLOAD_SCHEMA_HISTORY_GAP_V1: &str = "terminal.history_gap.v1";
+const PAYLOAD_SCHEMA_JOURNAL_EVENT_V1: &str = "terminal.journal_event.v1";
+const PAYLOAD_SCHEMA_TOPOLOGY_SNAPSHOT_V1: &str = "terminal.topology_snapshot.v1";
 
 #[derive(Debug, Error)]
 pub enum TerminalPersistenceV2Error {
@@ -730,7 +734,7 @@ impl TerminalPersistenceV2 {
                 byte_low: None,
                 byte_high: None,
                 payload_json: Some(payload_json.clone()),
-                payload_schema_id: None,
+                payload_schema_id: Some(PAYLOAD_SCHEMA_UI_INPUT_V1.to_string()),
                 source_event_id_hash: source_event_id_hash.clone(),
                 occurred_at_ms: now,
                 created_at_ms: now,
@@ -1035,7 +1039,7 @@ impl TerminalPersistenceV2 {
                 byte_low: None,
                 byte_high: None,
                 payload_json: Some(payload_json),
-                payload_schema_id: None,
+                payload_schema_id: Some(PAYLOAD_SCHEMA_HISTORY_GAP_V1.to_string()),
                 source_event_id_hash: None,
                 occurred_at_ms,
                 created_at_ms: now,
@@ -1495,6 +1499,12 @@ impl TerminalPersistenceV2 {
             let event_id = new_id();
             let capture_semantics =
                 input.capture_semantics.unwrap_or_else(|| "raw_vt_stream".to_string());
+            let event_type = input.event_type.unwrap_or_else(|| "terminal_output".to_string());
+            let payload_json =
+                input.payload_json.as_ref().map(serde_json::to_string).transpose()?;
+            let payload_schema_id = payload_json
+                .as_ref()
+                .map(|_| payload_schema_id_for_journal_event(&event_type).to_string());
 
             let segment = NewStreamSegmentRow {
                 id: segment_id.clone(),
@@ -1531,11 +1541,11 @@ impl TerminalPersistenceV2 {
                 event_scope_kind: "pane".to_string(),
                 event_scope_id: input.pane_id.clone(),
                 event_seq: event_seq_low,
-                event_type: input.event_type.unwrap_or_else(|| "terminal_output".to_string()),
+                event_type,
                 byte_low: Some(byte_low),
                 byte_high: Some(byte_high),
-                payload_json: input.payload_json.as_ref().map(serde_json::to_string).transpose()?,
-                payload_schema_id: None,
+                payload_json,
+                payload_schema_id,
                 source_event_id_hash: source_event_id_hash.clone(),
                 occurred_at_ms,
                 created_at_ms: now,
@@ -1622,6 +1632,9 @@ impl TerminalPersistenceV2 {
         let occurred_at_ms = input.occurred_at_ms.unwrap_or(now);
         let stream_id = input.stream_id.unwrap_or_else(|| DEFAULT_STREAM_ID.to_string());
         let payload_json = input.payload_json.as_ref().map(serde_json::to_string).transpose()?;
+        let payload_schema_id = payload_json
+            .as_ref()
+            .map(|_| payload_schema_id_for_journal_event(&input.event_type).to_string());
         let metadata_json = json_metadata(&input.metadata)?;
 
         connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
@@ -1667,7 +1680,7 @@ impl TerminalPersistenceV2 {
                 byte_low: None,
                 byte_high: None,
                 payload_json,
-                payload_schema_id: None,
+                payload_schema_id,
                 source_event_id_hash: input.source_event_id_hash,
                 occurred_at_ms,
                 created_at_ms: now,
@@ -2243,7 +2256,7 @@ impl TerminalPersistenceV2 {
                 high_water_commit_seq: commit.commit_seq,
                 pane_high_water_json,
                 topology_json,
-                payload_schema_id: None,
+                payload_schema_id: Some(PAYLOAD_SCHEMA_TOPOLOGY_SNAPSHOT_V1.to_string()),
                 checksum_algorithm: "blake3".to_string(),
                 checksum,
                 source: input.source.unwrap_or_else(|| "runtime".to_string()),
@@ -2506,10 +2519,11 @@ impl TerminalPersistenceV2 {
         });
         let error = (result != "passed").then(|| {
             format!(
-                "quick_check={}, foreign_key_violations={}, checksum_failures={}",
+                "quick_check={}, foreign_key_violations={}, history_validation_failures={}, checksum_failures={}",
                 details["quick_check"],
                 details["foreign_key_violations"].as_array().map_or(0, Vec::len),
-                validation.failure_count()
+                validation.failure_count(),
+                validation.checksum_failure_count()
             )
         });
         let id = new_id();
@@ -5135,6 +5149,17 @@ struct NewSearchDocumentRow {
     metadata_json: Option<String>,
 }
 
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_payload_schemas)]
+struct NewPayloadSchemaRow {
+    id: String,
+    payload_kind: String,
+    schema_version: String,
+    schema_json: String,
+    schema_hash: String,
+    created_at_ms: i64,
+}
+
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = terminal_db_identity)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -5163,6 +5188,7 @@ struct ForeignKeyCheckRow {
 
 #[derive(Debug, Clone)]
 struct HistoryValidation {
+    journal_events_checked: usize,
     stream_segments_checked: usize,
     screen_snapshots_checked: usize,
     topology_snapshots_checked: usize,
@@ -5178,6 +5204,10 @@ impl HistoryValidation {
         self.failures.len()
     }
 
+    fn checksum_failure_count(&self) -> usize {
+        self.failures.iter().filter(|failure| failure.contains("checksum mismatch")).count()
+    }
+
     fn summary(&self) -> String {
         if self.failures.is_empty() {
             "history validation passed".to_string()
@@ -5188,6 +5218,7 @@ impl HistoryValidation {
 
     fn to_json(&self) -> Value {
         serde_json::json!({
+            "journal_events_checked": self.journal_events_checked,
             "stream_segments_checked": self.stream_segments_checked,
             "screen_snapshots_checked": self.screen_snapshots_checked,
             "topology_snapshots_checked": self.topology_snapshots_checked,
@@ -5197,6 +5228,10 @@ impl HistoryValidation {
 
     fn to_restore_evidence(&self) -> Vec<RestoreEvidence> {
         vec![
+            RestoreEvidence {
+                kind: "journal_events_checked".to_string(),
+                value: self.journal_events_checked.to_string(),
+            },
             RestoreEvidence {
                 kind: "stream_segments_checked".to_string(),
                 value: self.stream_segments_checked.to_string(),
@@ -5237,7 +5272,114 @@ fn verify_seeded_defaults(
         ));
     }
 
+    seed_payload_schemas(connection, current_time_ms())?;
+    let schema_count: i64 = terminal_payload_schemas::table.count().get_result(connection)?;
+    if schema_count == 0 {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "terminal_payload_schemas seed rows are missing".to_string(),
+        ));
+    }
+
     Ok(())
+}
+
+fn seed_payload_schemas(
+    connection: &mut SqliteConnection,
+    now: i64,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let rows = vec![
+        payload_schema_row(
+            PAYLOAD_SCHEMA_UI_INPUT_V1,
+            "journal_event_payload",
+            "1.0.0",
+            serde_json::json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "Terminal UI input journal payload",
+                "type": "object",
+                "required": ["data", "is_paste"],
+                "properties": {
+                    "data": { "type": "string" },
+                    "is_paste": { "type": "boolean" }
+                },
+                "additionalProperties": false
+            }),
+            now,
+        )?,
+        payload_schema_row(
+            PAYLOAD_SCHEMA_HISTORY_GAP_V1,
+            "journal_event_payload",
+            "1.0.0",
+            serde_json::json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "Terminal history gap journal payload",
+                "type": "object",
+                "required": ["reason", "skipped_events", "estimated_dropped_bytes"],
+                "properties": {
+                    "reason": { "type": "string" },
+                    "skipped_events": { "type": "integer", "minimum": 1 },
+                    "estimated_dropped_bytes": { "type": ["integer", "null"], "minimum": 0 }
+                },
+                "additionalProperties": false
+            }),
+            now,
+        )?,
+        payload_schema_row(
+            PAYLOAD_SCHEMA_JOURNAL_EVENT_V1,
+            "journal_event_payload",
+            "1.0.0",
+            serde_json::json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "Generic terminal journal payload",
+                "type": "object",
+                "additionalProperties": true
+            }),
+            now,
+        )?,
+        payload_schema_row(
+            PAYLOAD_SCHEMA_TOPOLOGY_SNAPSHOT_V1,
+            "topology_snapshot_payload",
+            "1.0.0",
+            serde_json::json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "Terminal topology snapshot payload",
+                "type": "object",
+                "required": ["tabs"],
+                "properties": {
+                    "tabs": { "type": "array" }
+                },
+                "additionalProperties": true
+            }),
+            now,
+        )?,
+    ];
+
+    for row in rows {
+        insert_into(terminal_payload_schemas::table)
+            .values(&row)
+            .on_conflict(terminal_payload_schemas::id)
+            .do_nothing()
+            .execute(connection)?;
+    }
+    Ok(())
+}
+
+fn payload_schema_row(
+    id: &str,
+    payload_kind: &str,
+    schema_version: &str,
+    schema: Value,
+    created_at_ms: i64,
+) -> Result<NewPayloadSchemaRow, TerminalPersistenceV2Error> {
+    let schema_json = serde_json::to_string(&schema)?;
+    let schema_hash = blake3_hash_text(&schema_json);
+    Ok(NewPayloadSchemaRow {
+        id: id.to_string(),
+        payload_kind: payload_kind.to_string(),
+        schema_version: schema_version.to_string(),
+        schema_json,
+        schema_hash,
+        created_at_ms,
+    })
 }
 
 fn run_quick_check(
@@ -5264,6 +5406,31 @@ fn validate_history_checksums(
     session_id: Option<&str>,
 ) -> Result<HistoryValidation, TerminalPersistenceV2Error> {
     let mut failures = Vec::new();
+    let schema_ids = terminal_payload_schemas::table
+        .select(terminal_payload_schemas::id)
+        .load::<String>(connection)?;
+
+    let mut journal_query = terminal_journal_events::table.into_boxed();
+    if let Some(session_id) = session_id {
+        journal_query = journal_query.filter(terminal_journal_events::session_id.eq(session_id));
+    }
+    let journal_rows = journal_query
+        .select((
+            terminal_journal_events::id,
+            terminal_journal_events::payload_json,
+            terminal_journal_events::payload_schema_id,
+        ))
+        .load::<(String, Option<String>, Option<String>)>(connection)?;
+    for (id, payload_json, payload_schema_id) in &journal_rows {
+        validate_payload_schema_ref(
+            "journal_event",
+            id,
+            payload_json.is_some(),
+            payload_schema_id.as_deref(),
+            &schema_ids,
+            &mut failures,
+        );
+    }
 
     let mut segment_query = terminal_stream_segments::table.into_boxed();
     if let Some(session_id) = session_id {
@@ -5306,11 +5473,20 @@ fn validate_history_checksums(
         .select((
             terminal_topology_snapshots::id,
             terminal_topology_snapshots::topology_json,
+            terminal_topology_snapshots::payload_schema_id,
             terminal_topology_snapshots::checksum_algorithm,
             terminal_topology_snapshots::checksum,
         ))
-        .load::<(String, String, String, String)>(connection)?;
-    for (id, payload, algorithm, checksum) in &topology_rows {
+        .load::<(String, String, Option<String>, String, String)>(connection)?;
+    for (id, payload, payload_schema_id, algorithm, checksum) in &topology_rows {
+        validate_payload_schema_ref(
+            "topology_snapshot",
+            id,
+            true,
+            payload_schema_id.as_deref(),
+            &schema_ids,
+            &mut failures,
+        );
         validate_checksum_text(
             "topology_snapshot",
             id,
@@ -5322,6 +5498,7 @@ fn validate_history_checksums(
     }
 
     Ok(HistoryValidation {
+        journal_events_checked: journal_rows.len(),
         stream_segments_checked: segment_rows.len(),
         screen_snapshots_checked: screen_rows.len(),
         topology_snapshots_checked: topology_rows.len(),
@@ -5337,11 +5514,18 @@ fn persist_history_validation_health_records(
     evidence_ref: Option<&str>,
 ) -> Result<(), TerminalPersistenceV2Error> {
     for failure in &validation.failures {
-        let detection_kind =
-            if failure.contains("checksum mismatch") { "checksum_mismatch" } else { "manual" };
-        let is_canonical_stream = failure.starts_with("stream_segment:");
-        let severity = if is_canonical_stream { "critical" } else { "error" };
-        let action_state = if is_canonical_stream { "quarantined" } else { "rebuild_pending" };
+        let detection_kind = if failure.contains("checksum mismatch") {
+            "checksum_mismatch"
+        } else if failure.contains("payload_schema_id") {
+            "migration_mismatch"
+        } else {
+            "manual"
+        };
+        let is_canonical_replay_source =
+            failure.starts_with("stream_segment:") || failure.starts_with("journal_event:");
+        let severity = if is_canonical_replay_source { "critical" } else { "error" };
+        let action_state =
+            if is_canonical_replay_source { "quarantined" } else { "rebuild_pending" };
         let affected_ref = Some(failure.clone());
         let existing = terminal_data_health_records::table
             .filter(terminal_data_health_records::affected_ref.eq(affected_ref.clone()))
@@ -5359,6 +5543,7 @@ fn persist_history_validation_health_records(
             "failure": failure,
             "evidence_ref": evidence_ref,
             "validation": {
+                "journal_events_checked": validation.journal_events_checked,
                 "stream_segments_checked": validation.stream_segments_checked,
                 "screen_snapshots_checked": validation.screen_snapshots_checked,
                 "topology_snapshots_checked": validation.topology_snapshots_checked
@@ -5410,6 +5595,28 @@ fn validate_checksum_text(
     failures: &mut Vec<String>,
 ) {
     validate_checksum_bytes(row_kind, id, payload.as_bytes(), algorithm, expected, failures);
+}
+
+fn validate_payload_schema_ref(
+    row_kind: &str,
+    id: &str,
+    payload_present: bool,
+    payload_schema_id: Option<&str>,
+    schema_ids: &[String],
+    failures: &mut Vec<String>,
+) {
+    if !payload_present {
+        return;
+    }
+    let Some(payload_schema_id) = payload_schema_id else {
+        failures.push(format!("{row_kind}:{id} missing payload_schema_id"));
+        return;
+    };
+    if !schema_ids.iter().any(|schema_id| schema_id == payload_schema_id) {
+        failures.push(format!(
+            "{row_kind}:{id} references unknown payload_schema_id {payload_schema_id}"
+        ));
+    }
 }
 
 fn allocate_commit(
@@ -5816,6 +6023,14 @@ fn stream_capture_source_kind(pane_id: &str, stream_id: &str) -> String {
     format!("stream-segment-{}", blake3_hash_text(&format!("{pane_id}\0{stream_id}")))
 }
 
+fn payload_schema_id_for_journal_event(event_type: &str) -> &'static str {
+    match event_type {
+        "terminal_input" | "terminal_paste_input" => PAYLOAD_SCHEMA_UI_INPUT_V1,
+        "history_gap" => PAYLOAD_SCHEMA_HISTORY_GAP_V1,
+        _ => PAYLOAD_SCHEMA_JOURNAL_EVENT_V1,
+    }
+}
+
 fn delivery_offset_id(client_id: &str, session_id: &str, pane_id: &str, stream_id: &str) -> String {
     format!(
         "delivery-offset-{}",
@@ -6039,7 +6254,7 @@ mod tests {
     }
 
     #[test]
-    fn opens_db_and_seeds_feature_gates() {
+    fn opens_db_and_seeds_feature_gates_and_payload_schemas() {
         let store = test_store("seeds");
 
         assert_eq!(
@@ -6048,6 +6263,24 @@ mod tests {
                 .expect("gate should load"),
             FeatureGateState::Disabled
         );
+
+        let mut connection = store.connection().expect("connection should open");
+        let schemas = terminal_payload_schemas::table
+            .select((
+                terminal_payload_schemas::id,
+                terminal_payload_schemas::schema_json,
+                terminal_payload_schemas::schema_hash,
+            ))
+            .load::<(String, String, String)>(&mut connection)
+            .expect("payload schemas should load");
+        assert_eq!(schemas.len(), 4);
+        assert!(schemas.iter().any(|(id, _, _)| id == PAYLOAD_SCHEMA_UI_INPUT_V1));
+        assert!(schemas.iter().any(|(id, _, _)| id == PAYLOAD_SCHEMA_HISTORY_GAP_V1));
+        assert!(schemas.iter().any(|(id, _, _)| id == PAYLOAD_SCHEMA_JOURNAL_EVENT_V1));
+        assert!(schemas.iter().any(|(id, _, _)| id == PAYLOAD_SCHEMA_TOPOLOGY_SNAPSHOT_V1));
+        for (_, schema_json, schema_hash) in schemas {
+            assert_eq!(schema_hash, blake3_hash_text(&schema_json));
+        }
     }
 
     #[test]
@@ -6914,6 +7147,101 @@ mod tests {
     }
 
     #[test]
+    fn canonical_json_payloads_are_versioned() {
+        let store = test_store("payload-schema-contracts");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+
+        store
+            .append_ui_input_event_and_command(
+                &UiInputEventInput {
+                    session_id: session_id.clone(),
+                    route: route(),
+                    title: None,
+                    launch: None,
+                    pane_id: pane_id.clone(),
+                    data: "git status\r".to_string(),
+                    is_paste: false,
+                    source_event_id: None,
+                    rows: Some(24),
+                    cols: Some(80),
+                    shell_kind: Some("cmd".to_string()),
+                },
+                &writer.id,
+            )
+            .expect("ui input event should persist");
+        store
+            .append_history_gap_event(
+                &session_id,
+                &pane_id,
+                &writer.id,
+                2,
+                Some(12),
+                "queue_pressure",
+                None,
+            )
+            .expect("history gap should persist");
+        store
+            .append_journal_event(JournalEventInput {
+                session_id: session_id.clone(),
+                pane_id: Some(pane_id.clone()),
+                stream_id: None,
+                writer_generation: writer.id.clone(),
+                event_type: "custom_event".to_string(),
+                commit_kind: None,
+                payload_json: Some(serde_json::json!({ "custom": true })),
+                source_event_id_hash: None,
+                occurred_at_ms: None,
+                capture_semantics: None,
+                trust_level: None,
+                metadata: None,
+            })
+            .expect("custom journal event should persist");
+        store
+            .write_topology_snapshot(TopologySnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                writer_generation: writer.id,
+                pane_high_water: serde_json::json!({ pane_id.clone(): 4 }),
+                topology: serde_json::json!({ "tabs": [] }),
+                source: None,
+                metadata: None,
+            })
+            .expect("topology snapshot should persist");
+
+        let mut connection = store.connection().expect("connection should open");
+        let events = terminal_journal_events::table
+            .filter(terminal_journal_events::session_id.eq(&session_id))
+            .select((
+                terminal_journal_events::event_type,
+                terminal_journal_events::payload_schema_id,
+            ))
+            .load::<(String, Option<String>)>(&mut connection)
+            .expect("journal schema ids should load");
+        assert!(events.iter().any(|(event_type, schema_id)| {
+            event_type == "terminal_input"
+                && schema_id.as_deref() == Some(PAYLOAD_SCHEMA_UI_INPUT_V1)
+        }));
+        assert!(events.iter().any(|(event_type, schema_id)| {
+            event_type == "history_gap"
+                && schema_id.as_deref() == Some(PAYLOAD_SCHEMA_HISTORY_GAP_V1)
+        }));
+        assert!(events.iter().any(|(event_type, schema_id)| {
+            event_type == "custom_event"
+                && schema_id.as_deref() == Some(PAYLOAD_SCHEMA_JOURNAL_EVENT_V1)
+        }));
+
+        let topology_schema_id = terminal_topology_snapshots::table
+            .filter(terminal_topology_snapshots::session_id.eq(&session_id))
+            .select(terminal_topology_snapshots::payload_schema_id)
+            .first::<Option<String>>(&mut connection)
+            .expect("topology schema id should load");
+        assert_eq!(topology_schema_id.as_deref(), Some(PAYLOAD_SCHEMA_TOPOLOGY_SNAPSHOT_V1));
+
+        let integrity = store.run_integrity_check().expect("integrity check should run");
+        assert_eq!(integrity.result, "passed");
+    }
+
+    #[test]
     fn integrity_check_detects_checksum_mismatch() {
         let store = test_store("integrity-mismatch");
         let (session_id, pane_id, writer) = session_and_pane(&store);
@@ -6934,7 +7262,9 @@ mod tests {
         let integrity = store.run_integrity_check().expect("integrity check should run");
 
         assert_eq!(integrity.result, "failed");
-        assert!(integrity.error.as_deref().unwrap_or_default().contains("checksum_failures=1"));
+        let error = integrity.error.as_deref().unwrap_or_default();
+        assert!(error.contains("history_validation_failures=1"));
+        assert!(error.contains("checksum_failures=1"));
         let health = store.list_open_data_health_records(None).expect("health records should list");
         assert_eq!(health.len(), 1);
         assert_eq!(health[0].detection_kind, "checksum_mismatch");
@@ -6947,6 +7277,55 @@ mod tests {
             store.list_open_data_health_records(None).expect("health records should list");
         assert_eq!(duplicate_integrity.result, "failed");
         assert_eq!(duplicate_health.len(), 1);
+    }
+
+    #[test]
+    fn integrity_check_flags_unversioned_canonical_json() {
+        let store = test_store("unversioned-payload-json");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let event = store
+            .append_journal_event(JournalEventInput {
+                session_id: session_id.clone(),
+                pane_id: Some(pane_id),
+                stream_id: None,
+                writer_generation: writer.id,
+                event_type: "custom_event".to_string(),
+                commit_kind: None,
+                payload_json: Some(serde_json::json!({ "custom": true })),
+                source_event_id_hash: None,
+                occurred_at_ms: None,
+                capture_semantics: None,
+                trust_level: None,
+                metadata: None,
+            })
+            .expect("custom journal event should persist");
+
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(
+            terminal_journal_events::table.filter(terminal_journal_events::id.eq(event.event_id)),
+        )
+        .set(terminal_journal_events::payload_schema_id.eq(None::<String>))
+        .execute(&mut connection)
+        .expect("test should remove payload schema id");
+
+        let integrity = store.run_integrity_check().expect("integrity check should run");
+
+        assert_eq!(integrity.result, "failed");
+        let error = integrity.error.as_deref().unwrap_or_default();
+        assert!(error.contains("history_validation_failures=1"));
+        assert!(error.contains("checksum_failures=0"));
+        let health = store.list_open_data_health_records(None).expect("health records should list");
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].detection_kind, "migration_mismatch");
+        assert_eq!(health[0].severity, "critical");
+        assert_eq!(health[0].action_state, "quarantined");
+        assert!(
+            health[0]
+                .affected_ref
+                .as_deref()
+                .unwrap_or_default()
+                .contains("missing payload_schema_id")
+        );
     }
 
     #[test]
