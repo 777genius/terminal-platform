@@ -54,6 +54,7 @@ const MAX_HISTORY_SEGMENT_LIMIT: i64 = 2_000;
 const DEFAULT_HISTORY_BYTE_LIMIT: i64 = 1024 * 1024;
 const MAX_HISTORY_BYTE_LIMIT: i64 = 16 * 1024 * 1024;
 const MAX_HISTORY_GAP_LIMIT: i64 = 256;
+const MAX_SNAPSHOT_FALLBACK_CANDIDATES: i64 = 64;
 const DEFAULT_COMMAND_HISTORY_LIMIT: i64 = 100;
 const MAX_COMMAND_HISTORY_LIMIT: i64 = 1_000;
 const DEFAULT_DB_PRESSURE_WARNING_BYTES: i64 = 4_i64 * 1024 * 1024 * 1024;
@@ -2491,18 +2492,16 @@ impl TerminalPersistenceV2 {
         session_id: &str,
     ) -> Result<RestorePlan, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
-        let latest_screen = terminal_screen_snapshots::table
-            .filter(terminal_screen_snapshots::session_id.eq(session_id))
-            .order(terminal_screen_snapshots::created_at_ms.desc())
-            .select(ScreenSnapshotRow::as_select())
-            .first::<ScreenSnapshotRow>(&mut connection)
-            .optional()?;
-        let latest_topology = terminal_topology_snapshots::table
-            .filter(terminal_topology_snapshots::session_id.eq(session_id))
-            .order(terminal_topology_snapshots::created_at_ms.desc())
-            .select(TopologySnapshotRow::as_select())
-            .first::<TopologySnapshotRow>(&mut connection)
-            .optional()?;
+        let now = self.config.clock.now_ms();
+        let latest_screen = load_latest_valid_screen_snapshot(
+            &mut connection,
+            session_id,
+            None,
+            now,
+            "restore_plan",
+        )?;
+        let latest_topology =
+            load_latest_valid_topology_snapshot(&mut connection, session_id, now, "restore_plan")?;
         let segment_count: i64 = terminal_stream_segments::table
             .filter(terminal_stream_segments::session_id.eq(session_id))
             .count()
@@ -2552,7 +2551,6 @@ impl TerminalPersistenceV2 {
             .first::<String>(&mut connection)
             .optional()?
             .unwrap_or_else(|| FeatureGateState::Disabled.as_str().to_string());
-        let now = self.config.clock.now_ms();
         let latest_capability_report =
             latest_backend_capability_report(&mut connection, session_id)?;
         let capability_stale = latest_capability_report.as_ref().map(|report| {
@@ -4225,18 +4223,16 @@ impl TerminalPersistenceV2 {
             .clamp(1, MAX_HISTORY_SEGMENT_LIMIT);
         let max_bytes =
             max_bytes.unwrap_or(DEFAULT_HISTORY_BYTE_LIMIT).clamp(1, MAX_HISTORY_BYTE_LIMIT);
+        let now = self.config.clock.now_ms();
 
-        let latest_screen_snapshot = terminal_screen_snapshots::table
-            .filter(terminal_screen_snapshots::session_id.eq(session_id))
-            .filter(terminal_screen_snapshots::pane_id.eq(pane_id))
-            .order((
-                terminal_screen_snapshots::high_water_event_seq.desc(),
-                terminal_screen_snapshots::created_at_ms.desc(),
-            ))
-            .select(ScreenSnapshotRow::as_select())
-            .first::<ScreenSnapshotRow>(&mut connection)
-            .optional()?
-            .map(ScreenSnapshotRecord::from);
+        let latest_screen_snapshot = load_latest_valid_screen_snapshot(
+            &mut connection,
+            session_id,
+            Some(pane_id),
+            now,
+            "hydrate_pane_history",
+        )?
+        .map(ScreenSnapshotRecord::from);
 
         let fetched_segments = terminal_stream_segments::table
             .filter(terminal_stream_segments::session_id.eq(session_id))
@@ -4247,7 +4243,6 @@ impl TerminalPersistenceV2 {
             .select(StreamSegmentRow::as_select())
             .load::<StreamSegmentRow>(&mut connection)?;
 
-        let now = self.config.clock.now_ms();
         let mut segments = Vec::new();
         let mut total_payload_bytes = 0_i64;
         let mut has_more_segments = fetched_segments.len() > max_segments as usize;
@@ -7952,6 +7947,142 @@ fn persist_history_validation_health_records(
         insert_into(terminal_data_health_records::table).values(&row).execute(connection)?;
     }
     Ok(())
+}
+
+fn load_latest_valid_screen_snapshot(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    pane_id: Option<&str>,
+    detected_at_ms: i64,
+    evidence_ref: &str,
+) -> Result<Option<ScreenSnapshotRow>, TerminalPersistenceV2Error> {
+    let mut query = terminal_screen_snapshots::table
+        .filter(terminal_screen_snapshots::session_id.eq(session_id))
+        .into_boxed();
+    if let Some(pane_id) = pane_id {
+        query = query.filter(terminal_screen_snapshots::pane_id.eq(pane_id));
+    }
+
+    let rows = query
+        .order((
+            terminal_screen_snapshots::high_water_event_seq.desc(),
+            terminal_screen_snapshots::created_at_ms.desc(),
+        ))
+        .limit(MAX_SNAPSHOT_FALLBACK_CANDIDATES)
+        .select(ScreenSnapshotRow::as_select())
+        .load::<ScreenSnapshotRow>(connection)?;
+
+    for row in rows {
+        if let Some(failure) = screen_snapshot_hydration_failure(&row) {
+            persist_projection_snapshot_failure(
+                connection,
+                Some(session_id),
+                &failure,
+                detected_at_ms,
+                evidence_ref,
+            )?;
+            continue;
+        }
+        return Ok(Some(row));
+    }
+
+    Ok(None)
+}
+
+fn load_latest_valid_topology_snapshot(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    detected_at_ms: i64,
+    evidence_ref: &str,
+) -> Result<Option<TopologySnapshotRow>, TerminalPersistenceV2Error> {
+    let schema_ids = terminal_payload_schemas::table
+        .select(terminal_payload_schemas::id)
+        .load::<String>(connection)?;
+    let rows = terminal_topology_snapshots::table
+        .filter(terminal_topology_snapshots::session_id.eq(session_id))
+        .order((
+            terminal_topology_snapshots::high_water_commit_seq.desc(),
+            terminal_topology_snapshots::created_at_ms.desc(),
+        ))
+        .limit(MAX_SNAPSHOT_FALLBACK_CANDIDATES)
+        .select(TopologySnapshotRow::as_select())
+        .load::<TopologySnapshotRow>(connection)?;
+
+    for row in rows {
+        if let Some(failure) = topology_snapshot_hydration_failure(&row, &schema_ids) {
+            persist_projection_snapshot_failure(
+                connection,
+                Some(session_id),
+                &failure,
+                detected_at_ms,
+                evidence_ref,
+            )?;
+            continue;
+        }
+        return Ok(Some(row));
+    }
+
+    Ok(None)
+}
+
+fn screen_snapshot_hydration_failure(row: &ScreenSnapshotRow) -> Option<String> {
+    let mut failures = Vec::new();
+    validate_checksum_text(
+        "screen_snapshot",
+        &row.id,
+        &row.screen_json,
+        &row.checksum_algorithm,
+        &row.checksum,
+        &mut failures,
+    );
+    failures.into_iter().next()
+}
+
+fn topology_snapshot_hydration_failure(
+    row: &TopologySnapshotRow,
+    schema_ids: &[String],
+) -> Option<String> {
+    let mut failures = Vec::new();
+    validate_payload_schema_ref(
+        "topology_snapshot",
+        &row.id,
+        true,
+        row.payload_schema_id.as_deref(),
+        schema_ids,
+        &mut failures,
+    );
+    validate_checksum_text(
+        "topology_snapshot",
+        &row.id,
+        &row.topology_json,
+        &row.checksum_algorithm,
+        &row.checksum,
+        &mut failures,
+    );
+    failures.into_iter().next()
+}
+
+fn persist_projection_snapshot_failure(
+    connection: &mut SqliteConnection,
+    session_id: Option<&str>,
+    failure: &str,
+    detected_at_ms: i64,
+    evidence_ref: &str,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let validation = HistoryValidation {
+        journal_events_checked: 0,
+        stream_segments_checked: 0,
+        screen_snapshots_checked: if failure.starts_with("screen_snapshot:") { 1 } else { 0 },
+        topology_snapshots_checked: if failure.starts_with("topology_snapshot:") { 1 } else { 0 },
+        failures: vec![failure.to_string()],
+    };
+    persist_history_validation_health_records(
+        connection,
+        session_id,
+        &validation,
+        detected_at_ms,
+        Some(evidence_ref),
+    )
 }
 
 fn stream_segment_hydration_failure(row: &StreamSegmentRow) -> Option<String> {
@@ -12225,6 +12356,179 @@ mod tests {
             evidence.kind == "topology_snapshot" && evidence.value == topology_id
         }));
         assert!(plan.evidence.iter().any(|evidence| evidence.kind == "journal_event_range"));
+    }
+
+    #[test]
+    fn hydrate_pane_history_skips_corrupt_latest_screen_snapshot() {
+        let store = test_store("restore-screen-snapshot-fallback");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let first = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"valid snapshot base\r\n".to_vec(),
+            ))
+            .expect("first segment should persist");
+        let valid_snapshot = store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                writer_generation: writer.id.clone(),
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: first.event_seq_low,
+                high_water_event_seq: first.event_seq_high,
+                high_water_byte_seq: Some(first.byte_high),
+                screen: serde_json::json!({"lines":["valid snapshot base"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("valid screen snapshot should persist");
+        let second = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"corrupt snapshot tip\r\n".to_vec(),
+            ))
+            .expect("second segment should persist");
+        let corrupt_snapshot = store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                writer_generation: writer.id,
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: second.event_seq_low,
+                high_water_event_seq: second.event_seq_high,
+                high_water_byte_seq: Some(second.byte_high),
+                screen: serde_json::json!({"lines":["corrupt snapshot tip"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("corrupt screen snapshot candidate should persist");
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(
+            terminal_screen_snapshots::table
+                .filter(terminal_screen_snapshots::id.eq(&corrupt_snapshot)),
+        )
+        .set(terminal_screen_snapshots::checksum.eq("not-the-real-checksum"))
+        .execute(&mut connection)
+        .expect("test should corrupt latest screen snapshot");
+
+        let hydrated = store
+            .hydrate_pane_history(&session_id, &pane_id, Some(1), Some(10), Some(1024))
+            .expect("hydration should skip corrupt latest snapshot");
+        let plan =
+            store.restore_plan(&session_id).expect("restore plan should skip corrupt snapshot");
+
+        assert_eq!(
+            hydrated.latest_screen_snapshot.as_ref().map(|snapshot| snapshot.id.as_str()),
+            Some(valid_snapshot.as_str())
+        );
+        assert_eq!(hydrated.segments.len(), 2);
+        assert_eq!(plan.latest_screen_snapshot_id.as_deref(), Some(valid_snapshot.as_str()));
+        assert!(!plan.evidence.iter().any(|evidence| {
+            evidence.kind == "screen_snapshot" && evidence.value == corrupt_snapshot
+        }));
+
+        let health = store
+            .list_open_data_health_records(Some(&session_id))
+            .expect("snapshot health records should list");
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].detection_kind, "checksum_mismatch");
+        assert_eq!(health[0].severity, "error");
+        assert_eq!(health[0].action_state, "rebuild_pending");
+        assert!(health[0].affected_ref.as_deref().unwrap_or_default().contains("screen_snapshot"));
+    }
+
+    #[test]
+    fn restore_plan_skips_corrupt_latest_topology_snapshot() {
+        let store = test_store("restore-topology-snapshot-fallback");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let segment = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"topology fallback\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                writer_generation: writer.id.clone(),
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: segment.event_seq_low,
+                high_water_event_seq: segment.event_seq_high,
+                high_water_byte_seq: Some(segment.byte_high),
+                screen: serde_json::json!({"lines":["topology fallback"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("screen snapshot should persist");
+        let valid_topology = store
+            .write_topology_snapshot(TopologySnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                writer_generation: writer.id.clone(),
+                pane_high_water: serde_json::json!({ pane_id.clone(): segment.event_seq_high }),
+                topology: serde_json::json!({"tabs":[{"active_pane_id": pane_id.clone()}]}),
+                source: None,
+                metadata: None,
+            })
+            .expect("valid topology snapshot should persist");
+        let corrupt_topology = store
+            .write_topology_snapshot(TopologySnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                writer_generation: writer.id,
+                pane_high_water: serde_json::json!({ pane_id.clone(): segment.event_seq_high }),
+                topology: serde_json::json!({"tabs":[{"active_pane_id": pane_id}],"tip":true}),
+                source: None,
+                metadata: None,
+            })
+            .expect("corrupt topology snapshot candidate should persist");
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(
+            terminal_topology_snapshots::table
+                .filter(terminal_topology_snapshots::id.eq(&corrupt_topology)),
+        )
+        .set(terminal_topology_snapshots::checksum.eq("not-the-real-checksum"))
+        .execute(&mut connection)
+        .expect("test should corrupt latest topology snapshot");
+
+        let plan = store.restore_plan(&session_id).expect("restore plan should load");
+
+        assert_eq!(plan.guarantee_level, RestoreGuaranteeLevel::BasicHistory);
+        assert_eq!(plan.latest_topology_snapshot_id.as_deref(), Some(valid_topology.as_str()));
+        assert!(!plan.evidence.iter().any(|evidence| {
+            evidence.kind == "topology_snapshot" && evidence.value == corrupt_topology
+        }));
+        let health = store
+            .list_open_data_health_records(Some(&session_id))
+            .expect("topology health records should list");
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].detection_kind, "checksum_mismatch");
+        assert_eq!(health[0].action_state, "rebuild_pending");
+        assert!(
+            health[0].affected_ref.as_deref().unwrap_or_default().contains("topology_snapshot")
+        );
     }
 
     #[test]
