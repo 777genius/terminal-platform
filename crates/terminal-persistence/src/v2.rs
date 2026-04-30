@@ -1565,6 +1565,7 @@ impl TerminalPersistenceV2 {
         let capture_source_kind = source_event_id_hash
             .as_ref()
             .map(|_| stream_capture_source_kind(&input.pane_id, &stream_id));
+        let buffer_mode_transitions = detect_buffer_mode_transitions(&input.payload);
 
         let append_result = connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
             if let (Some(source_kind), Some(source_event_id_hash)) =
@@ -1612,6 +1613,13 @@ impl TerminalPersistenceV2 {
             let payload_schema_id = payload_json
                 .as_ref()
                 .map(|_| payload_schema_id_for_journal_event(&event_type).to_string());
+            let transition_count =
+                checked_len(buffer_mode_transitions.len(), "buffer mode transition count")?;
+            let final_event_seq = event_seq_high.checked_add(transition_count).ok_or_else(|| {
+                TerminalPersistenceV2Error::InvalidData(
+                    "buffer mode transition event sequence overflow".to_string(),
+                )
+            })?;
 
             let segment = NewStreamSegmentRow {
                 id: segment_id.clone(),
@@ -1661,11 +1669,67 @@ impl TerminalPersistenceV2 {
                 source_event_id_hash: source_event_id_hash.clone(),
                 occurred_at_ms,
                 created_at_ms: now,
-                capture_semantics,
+                capture_semantics: capture_semantics.clone(),
                 trust_level: input.trust_level.unwrap_or_else(|| "captured".to_string()),
                 metadata_json: metadata_json.clone(),
             };
             insert_into(terminal_journal_events::table).values(&event).execute(connection)?;
+
+            for (transition_index, transition) in buffer_mode_transitions.iter().enumerate() {
+                let transition_offset =
+                    checked_len(transition_index + 1, "buffer mode transition offset")?;
+                let transition_event_seq =
+                    event_seq_low.checked_add(transition_offset).ok_or_else(|| {
+                        TerminalPersistenceV2Error::InvalidData(
+                            "buffer mode transition event sequence overflow".to_string(),
+                        )
+                    })?;
+                let transition_byte_low =
+                    byte_low.checked_add(transition.byte_offset).ok_or_else(|| {
+                        TerminalPersistenceV2Error::InvalidData(
+                            "buffer mode transition byte range overflow".to_string(),
+                        )
+                    })?;
+                let transition_byte_high =
+                    transition_byte_low.checked_add(transition.byte_len).ok_or_else(|| {
+                        TerminalPersistenceV2Error::InvalidData(
+                            "buffer mode transition byte range overflow".to_string(),
+                        )
+                    })?;
+                let payload_json = serde_json::to_string(&serde_json::json!({
+                    "action": transition.action,
+                    "mode": transition.mode,
+                    "target_buffer_kind": transition.target_buffer_kind,
+                    "derived_from_event_seq": event_seq_low
+                }))?;
+                let transition_event = NewJournalEventRow {
+                    id: new_id(),
+                    session_id: input.session_id.clone(),
+                    pane_id: Some(input.pane_id.clone()),
+                    commit_id: commit.id.clone(),
+                    stream_id: stream_id.clone(),
+                    event_scope_kind: "pane".to_string(),
+                    event_scope_id: input.pane_id.clone(),
+                    event_seq: transition_event_seq,
+                    event_type: "terminal_buffer_mode".to_string(),
+                    byte_low: Some(transition_byte_low),
+                    byte_high: Some(transition_byte_high.min(byte_high)),
+                    payload_json: Some(payload_json),
+                    payload_schema_id: Some(PAYLOAD_SCHEMA_JOURNAL_EVENT_V1.to_string()),
+                    source_event_id_hash: None,
+                    occurred_at_ms,
+                    created_at_ms: now,
+                    capture_semantics: capture_semantics.clone(),
+                    trust_level: "parser_derived".to_string(),
+                    metadata_json: Some(serde_json::to_string(&serde_json::json!({
+                        "parser": "terminal_buffer_mode_detector_v1",
+                        "source_segment_id": segment_id.clone()
+                    }))?),
+                };
+                insert_into(terminal_journal_events::table)
+                    .values(&transition_event)
+                    .execute(connection)?;
+            }
 
             let outbox = NewOutboxMessageRow {
                 id: new_id(),
@@ -1681,7 +1745,7 @@ impl TerminalPersistenceV2 {
                     "stream_id": stream_id.clone(),
                     "commit_id": commit.id.clone(),
                     "event_seq_low": event_seq_low,
-                    "event_seq_high": event_seq_high,
+                    "event_seq_high": final_event_seq,
                     "byte_low": byte_low,
                     "byte_high": byte_high
                 }))?,
@@ -1716,9 +1780,9 @@ impl TerminalPersistenceV2 {
                     .execute(connection)?;
             }
 
-            advance_stream_cursor(connection, &cursor.id, event_seq_high + 1, byte_high, now)?;
+            advance_stream_cursor(connection, &cursor.id, final_event_seq + 1, byte_high, now)?;
             diesel::update(terminal_panes::table.filter(terminal_panes::id.eq(&input.pane_id)))
-                .set(terminal_panes::last_event_seq.eq(event_seq_high))
+                .set(terminal_panes::last_event_seq.eq(final_event_seq))
                 .execute(connection)?;
 
             Ok(StreamSegmentReceipt {
@@ -9319,6 +9383,65 @@ struct EventScope {
     id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BufferModeTransition {
+    action: &'static str,
+    target_buffer_kind: &'static str,
+    mode: i32,
+    byte_offset: i64,
+    byte_len: i64,
+}
+
+fn detect_buffer_mode_transitions(payload: &[u8]) -> Vec<BufferModeTransition> {
+    let mut transitions = Vec::new();
+    let mut index = 0;
+    while index + 3 < payload.len() {
+        if payload[index] != 0x1b || payload[index + 1] != b'[' || payload[index + 2] != b'?' {
+            index += 1;
+            continue;
+        }
+
+        let params_start = index + 3;
+        let mut cursor = params_start;
+        while cursor < payload.len() && !is_csi_final_byte(payload[cursor]) {
+            cursor += 1;
+        }
+        if cursor >= payload.len() {
+            break;
+        }
+
+        let final_byte = payload[cursor];
+        if matches!(final_byte, b'h' | b'l') {
+            let action = if final_byte == b'h' { "enter" } else { "leave" };
+            let target_buffer_kind = if final_byte == b'h' { "alternate" } else { "normal" };
+            for mode in parse_private_mode_params(&payload[params_start..cursor]) {
+                if matches!(mode, 47 | 1047 | 1049) {
+                    transitions.push(BufferModeTransition {
+                        action,
+                        target_buffer_kind,
+                        mode,
+                        byte_offset: i64::try_from(index).unwrap_or(i64::MAX),
+                        byte_len: i64::try_from(cursor + 1 - index).unwrap_or(i64::MAX),
+                    });
+                }
+            }
+        }
+        index = cursor + 1;
+    }
+    transitions
+}
+
+fn is_csi_final_byte(byte: u8) -> bool {
+    (0x40..=0x7e).contains(&byte)
+}
+
+fn parse_private_mode_params(params: &[u8]) -> Vec<i32> {
+    params
+        .split(|byte| matches!(*byte, b';' | b':'))
+        .filter_map(|part| std::str::from_utf8(part).ok()?.parse::<i32>().ok())
+        .collect()
+}
+
 fn validate_positive_dimensions(rows: i32, cols: i32) -> Result<(), TerminalPersistenceV2Error> {
     if rows <= 0 || cols <= 0 {
         return Err(TerminalPersistenceV2Error::InvalidData(format!(
@@ -10236,6 +10359,20 @@ mod tests {
     }
 
     #[test]
+    fn detects_alternate_screen_buffer_mode_transitions() {
+        let transitions =
+            detect_buffer_mode_transitions(b"normal\x1b[?1049halt\x1b[?1049lnormal\x1b[?25h");
+
+        assert_eq!(transitions.len(), 2);
+        assert_eq!(transitions[0].action, "enter");
+        assert_eq!(transitions[0].target_buffer_kind, "alternate");
+        assert_eq!(transitions[0].mode, 1049);
+        assert_eq!(transitions[1].action, "leave");
+        assert_eq!(transitions[1].target_buffer_kind, "normal");
+        assert_eq!(transitions[1].mode, 1049);
+    }
+
+    #[test]
     fn opens_db_and_seeds_feature_gates_and_payload_schemas() {
         let store = test_store("seeds");
 
@@ -10728,6 +10865,83 @@ mod tests {
                 .collect::<Vec<_>>(),
             b"git status\r\nfatal: not a git repository\r\n"
         );
+    }
+
+    #[test]
+    fn raw_stream_persists_alternate_screen_events_without_replaying_tui_as_scrollback() {
+        let store = test_store("alternate-screen-events");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+
+        let tui = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"before\x1b[?1049hinside tui\x1b[?1049lafter\r\n".to_vec(),
+            ))
+            .expect("tui segment should persist");
+        let after = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id,
+                b"shell again\r\n".to_vec(),
+            ))
+            .expect("post-tui segment should persist after derived mode events");
+
+        assert_eq!(tui.event_seq_low, 1);
+        assert_eq!(tui.event_seq_high, 1);
+        assert_eq!(after.event_seq_low, 4);
+
+        let mut connection = store.connection().expect("connection should open");
+        let events = terminal_journal_events::table
+            .filter(terminal_journal_events::session_id.eq(&session_id))
+            .filter(terminal_journal_events::pane_id.eq(Some(pane_id.clone())))
+            .order(terminal_journal_events::event_seq.asc())
+            .select((
+                terminal_journal_events::event_type,
+                terminal_journal_events::event_seq,
+                terminal_journal_events::payload_json,
+                terminal_journal_events::byte_low,
+                terminal_journal_events::byte_high,
+            ))
+            .load::<(String, i64, Option<String>, Option<i64>, Option<i64>)>(&mut connection)
+            .expect("journal events should load");
+
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].0, "terminal_output");
+        assert_eq!(events[1].0, "terminal_buffer_mode");
+        assert_eq!(events[1].1, 2);
+        assert_eq!(events[2].0, "terminal_buffer_mode");
+        assert_eq!(events[2].1, 3);
+        assert_eq!(events[3].0, "terminal_output");
+        assert_eq!(events[3].1, 4);
+        assert!(events[1].3.expect("enter byte_low should exist") >= tui.byte_low);
+        assert!(events[1].4.expect("enter byte_high should exist") <= tui.byte_high);
+
+        let enter: Value = serde_json::from_str(
+            events[1].2.as_deref().expect("enter payload should be persisted"),
+        )
+        .expect("enter payload should be json");
+        let leave: Value = serde_json::from_str(
+            events[2].2.as_deref().expect("leave payload should be persisted"),
+        )
+        .expect("leave payload should be json");
+        assert_eq!(enter["action"], "enter");
+        assert_eq!(enter["target_buffer_kind"], "alternate");
+        assert_eq!(leave["action"], "leave");
+        assert_eq!(leave["target_buffer_kind"], "normal");
+
+        let cursor_next = terminal_stream_cursors::table
+            .filter(terminal_stream_cursors::session_id.eq(&session_id))
+            .filter(terminal_stream_cursors::pane_id.eq(&pane_id))
+            .select(terminal_stream_cursors::next_event_seq)
+            .first::<i64>(&mut connection)
+            .expect("stream cursor should load");
+        assert_eq!(cursor_next, 5);
+
+        let integrity = store.run_integrity_check().expect("integrity check should pass");
+        assert_eq!(integrity.result, "passed");
     }
 
     #[test]
