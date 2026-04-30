@@ -225,6 +225,9 @@ function restoreSemanticsNotes(session: SavedSessionSummary): TerminalSavedSessi
   if (semanticsV2) {
     notes.push(restoreGuaranteeNote(semanticsV2.restore_guarantee_level));
     notes.push(historyReplayStateNote(semanticsV2.history_replay_state));
+    if (semanticsV2.latest_restore_drill_status) {
+      notes.push(restoreDrillStatusNote(semanticsV2.latest_restore_drill_status));
+    }
 
     if (semanticsV2.has_known_gaps) {
       notes.push({
@@ -338,6 +341,50 @@ function restoreGuaranteeNote(
         label: "history degraded",
         detail: "Missing evidence or known gaps downgrade this saved layout.",
         tone: "warning",
+      };
+  }
+}
+
+function restoreDrillStatusNote(
+  status: NonNullable<
+    NonNullable<SavedSessionSummary["restore_semantics_v2"]>["latest_restore_drill_status"]
+  >,
+): TerminalSavedSessionRestoreSemanticsNote {
+  switch (status) {
+    case "passed":
+      return {
+        code: "restore_drill_passed",
+        label: "drill passed",
+        detail: "The latest restore drill completed successfully.",
+        tone: "ok",
+      };
+    case "failed":
+      return {
+        code: "restore_drill_failed",
+        label: "drill failed",
+        detail: "The latest restore drill failed and the saved layout is degraded.",
+        tone: "warning",
+      };
+    case "degraded":
+      return {
+        code: "restore_drill_degraded",
+        label: "drill degraded",
+        detail: "The latest restore drill completed with degraded history.",
+        tone: "warning",
+      };
+    case "skipped":
+      return {
+        code: "restore_drill_skipped",
+        label: "drill skipped",
+        detail: "No restore drill proof is available for this saved layout.",
+        tone: "info",
+      };
+    default:
+      return {
+        code: "restore_drill_unknown",
+        label: "drill unknown",
+        detail: "The latest restore drill returned an unknown status.",
+        tone: "info",
       };
   }
 }

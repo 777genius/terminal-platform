@@ -385,6 +385,7 @@ mod tests {
                 ));
                 assert_eq!(v2.source_session_id, session_id);
                 assert!(!v2.has_known_gaps);
+                assert_eq!(v2.latest_restore_drill_status.as_deref(), Some("passed"));
                 assert!(
                     v2.evidence_refs
                         .iter()
@@ -424,6 +425,7 @@ mod tests {
                         | HistoryReplayState::HydratedFromSnapshot
                 ));
                 assert_eq!(v2.source_session_id, session_id);
+                assert_eq!(v2.latest_restore_drill_status.as_deref(), Some("passed"));
             }
             other => panic!("unexpected payload: {other:?}"),
         }
@@ -567,6 +569,7 @@ mod tests {
                 ));
                 assert_eq!(v2.source_session_id, session_id);
                 assert_eq!(v2.restored_session_id, Some(response.session.session_id));
+                assert_eq!(v2.latest_restore_drill_status.as_deref(), Some("passed"));
                 assert!(!v2.preserves_process_state);
             }
             other => panic!("unexpected payload: {other:?}"),

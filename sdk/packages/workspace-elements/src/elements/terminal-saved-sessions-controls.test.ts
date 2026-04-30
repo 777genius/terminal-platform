@@ -152,6 +152,7 @@ describe("terminal saved sessions controls", () => {
         restoreSemanticsV2: {
           restore_guarantee_level: "history_degraded",
           history_replay_state: "partially_replayed_with_gaps",
+          latest_restore_drill_status: "failed",
           has_known_gaps: true,
           evidence_refs: ["history_gap_count:2"],
         },
@@ -161,6 +162,7 @@ describe("terminal saved sessions controls", () => {
         restoreSemanticsV2: {
           restore_guarantee_level: "rich_history",
           history_replay_state: "replayed_from_journal",
+          latest_restore_drill_status: "passed",
           evidence_refs: ["stream_segment_count:4"],
         },
       }),
@@ -171,7 +173,7 @@ describe("terminal saved sessions controls", () => {
       filterQuery: "rich_history journal",
     }));
 
-    expect(controls.items[0]?.restoreSemanticsNotes.slice(0, 3)).toEqual([
+    expect(controls.items[0]?.restoreSemanticsNotes.slice(0, 4)).toEqual([
       {
         code: "restore_guarantee_history_degraded",
         label: "history degraded",
@@ -182,6 +184,12 @@ describe("terminal saved sessions controls", () => {
         code: "history_replay_partially_replayed_with_gaps",
         label: "partial replay",
         detail: "History can be replayed with explicit missing ranges.",
+        tone: "warning",
+      },
+      {
+        code: "restore_drill_failed",
+        label: "drill failed",
+        detail: "The latest restore drill failed and the saved layout is degraded.",
         tone: "warning",
       },
       {
