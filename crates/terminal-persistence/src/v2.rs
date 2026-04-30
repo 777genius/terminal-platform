@@ -32,14 +32,14 @@ use crate::{
             terminal_command_blocks, terminal_command_history_entries, terminal_commit_log,
             terminal_crypto_key_events, terminal_crypto_keys, terminal_data_health_records,
             terminal_db_identity, terminal_delete_requests, terminal_deletion_tombstones,
-            terminal_delivery_offsets, terminal_export_requests, terminal_feature_gates,
-            terminal_history_gaps, terminal_integrity_checks, terminal_journal_events,
-            terminal_maintenance_runs, terminal_outbox_messages, terminal_panes,
-            terminal_payload_schemas, terminal_restore_drills, terminal_retention_policies,
-            terminal_screen_snapshots, terminal_search_documents, terminal_session_cursors,
-            terminal_sessions, terminal_storage_pressure_events, terminal_stream_cursors,
-            terminal_stream_segments, terminal_support_bundles, terminal_topology_snapshots,
-            terminal_writer_generations,
+            terminal_delivery_offsets, terminal_export_requests, terminal_external_artifacts,
+            terminal_feature_gates, terminal_history_gaps, terminal_integrity_checks,
+            terminal_journal_events, terminal_maintenance_runs, terminal_outbox_messages,
+            terminal_panes, terminal_payload_schemas, terminal_restore_drills,
+            terminal_retention_policies, terminal_screen_snapshots, terminal_search_documents,
+            terminal_session_cursors, terminal_sessions, terminal_storage_pressure_events,
+            terminal_stream_cursors, terminal_stream_segments, terminal_support_bundles,
+            terminal_topology_snapshots, terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -3206,6 +3206,44 @@ impl TerminalPersistenceV2 {
         encryption_capability_state_for_connection(&mut connection, &self.config)
     }
 
+    pub fn record_external_artifact(
+        &self,
+        input: ExternalArtifactInput,
+    ) -> Result<ExternalArtifactRecord, TerminalPersistenceV2Error> {
+        validate_external_artifact_domain(
+            &input.artifact_kind,
+            input.state.as_deref(),
+            input.encryption_state.as_deref(),
+        )?;
+        validate_external_artifact_ref(&input.artifact_ref)?;
+        if let Some(size_bytes) = input.size_bytes
+            && size_bytes < 0
+        {
+            return Err(TerminalPersistenceV2Error::InvalidData(
+                "external artifact size_bytes must not be negative".to_string(),
+            ));
+        }
+
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let row = NewExternalArtifactRow {
+            id: input.id.unwrap_or_else(new_id),
+            artifact_kind: input.artifact_kind,
+            artifact_ref_hash: blake3_hash_text(&input.artifact_ref),
+            state: input.state.unwrap_or_else(|| "planned".to_string()),
+            encryption_state: input.encryption_state.unwrap_or_else(|| "plaintext".to_string()),
+            key_ref: input.key_ref,
+            checksum_algorithm: input.checksum_algorithm,
+            checksum: input.checksum,
+            size_bytes: input.size_bytes,
+            created_at_ms: now,
+            verified_at_ms: input.verified_at_ms,
+            metadata_json: json_metadata(&input.metadata)?,
+        };
+        insert_into(terminal_external_artifacts::table).values(&row).execute(&mut connection)?;
+        Ok(ExternalArtifactRecord::try_from(row)?)
+    }
+
     pub fn upsert_redacted_search_document(
         &self,
         input: SearchDocumentInput,
@@ -3853,6 +3891,21 @@ pub struct CryptoKeyEventInput {
     pub error: Option<Value>,
     pub metadata: Option<Value>,
     pub occurred_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalArtifactInput {
+    pub id: Option<String>,
+    pub artifact_kind: String,
+    pub artifact_ref: String,
+    pub state: Option<String>,
+    pub encryption_state: Option<String>,
+    pub key_ref: Option<String>,
+    pub checksum_algorithm: Option<String>,
+    pub checksum: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub verified_at_ms: Option<i64>,
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4675,6 +4728,43 @@ pub struct EncryptionCapabilityRecord {
     pub plaintext_fallback_allowed: bool,
     pub key_material_exported: bool,
     pub action_required: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalArtifactRecord {
+    pub id: String,
+    pub artifact_kind: String,
+    pub artifact_ref_hash: String,
+    pub state: String,
+    pub encryption_state: String,
+    pub key_ref: Option<String>,
+    pub checksum_algorithm: Option<String>,
+    pub checksum: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub created_at_ms: i64,
+    pub verified_at_ms: Option<i64>,
+    pub metadata_json: Option<Value>,
+}
+
+impl TryFrom<NewExternalArtifactRow> for ExternalArtifactRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: NewExternalArtifactRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            artifact_kind: row.artifact_kind,
+            artifact_ref_hash: row.artifact_ref_hash,
+            state: row.state,
+            encryption_state: row.encryption_state,
+            key_ref: row.key_ref,
+            checksum_algorithm: row.checksum_algorithm,
+            checksum: row.checksum,
+            size_bytes: row.size_bytes,
+            created_at_ms: row.created_at_ms,
+            verified_at_ms: row.verified_at_ms,
+            metadata_json: row.metadata_json.as_deref().map(serde_json::from_str).transpose()?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5848,6 +5938,23 @@ struct NewCryptoKeyEventRow {
     occurred_at_ms: i64,
     status: String,
     error_json: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_external_artifacts)]
+struct NewExternalArtifactRow {
+    id: String,
+    artifact_kind: String,
+    artifact_ref_hash: String,
+    state: String,
+    encryption_state: String,
+    key_ref: Option<String>,
+    checksum_algorithm: Option<String>,
+    checksum: Option<String>,
+    size_bytes: Option<i64>,
+    created_at_ms: i64,
+    verified_at_ms: Option<i64>,
     metadata_json: Option<String>,
 }
 
@@ -7953,6 +8060,57 @@ fn validate_crypto_key_ref(key_ref: &str) -> Result<(), TerminalPersistenceV2Err
     Ok(())
 }
 
+fn validate_external_artifact_domain(
+    artifact_kind: &str,
+    state: Option<&str>,
+    encryption_state: Option<&str>,
+) -> Result<(), TerminalPersistenceV2Error> {
+    const ARTIFACT_KINDS: &[&str] =
+        &["backup_file", "large_segment", "export_file", "support_bundle", "future_external_store"];
+    const STATES: &[&str] =
+        &["planned", "available", "verified", "missing", "deleted", "quarantined"];
+    const ENCRYPTION_STATES: &[&str] = &["plaintext", "encrypted", "redacted", "crypto_erased"];
+    if !ARTIFACT_KINDS.contains(&artifact_kind) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown external artifact kind: {artifact_kind}"
+        )));
+    }
+    if let Some(state) = state
+        && !STATES.contains(&state)
+    {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown external artifact state: {state}"
+        )));
+    }
+    if let Some(encryption_state) = encryption_state
+        && !ENCRYPTION_STATES.contains(&encryption_state)
+    {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown external artifact encryption state: {encryption_state}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_external_artifact_ref(artifact_ref: &str) -> Result<(), TerminalPersistenceV2Error> {
+    if artifact_ref.trim().is_empty() {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "external artifact ref must not be empty".to_string(),
+        ));
+    }
+    if artifact_ref.len() > 2_048 {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "external artifact ref is too long".to_string(),
+        ));
+    }
+    if artifact_ref.contains('\n') || artifact_ref.contains('\r') {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "external artifact ref must be single-line before hashing".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn is_storage_full_like_error(error: &TerminalPersistenceV2Error) -> bool {
     match error {
         TerminalPersistenceV2Error::Query(DieselError::DatabaseError(_, info)) => {
@@ -8376,6 +8534,63 @@ mod tests {
         );
         assert!(
             matches!(material_ref_error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("key material"))
+        );
+    }
+
+    #[test]
+    fn external_artifact_metadata_hashes_refs_and_keeps_future_store_inert() {
+        let store = test_store("external-artifact-metadata");
+        let artifact_ref = r"C:\Users\User\PROJECT_IT\terminal-platform\backups\history.sqlite3";
+        let artifact = store
+            .record_external_artifact(ExternalArtifactInput {
+                id: Some("artifact-a".to_string()),
+                artifact_kind: "backup_file".to_string(),
+                artifact_ref: artifact_ref.to_string(),
+                state: Some("verified".to_string()),
+                encryption_state: Some("encrypted".to_string()),
+                key_ref: Some("dpapi:user:terminal-artifact-key".to_string()),
+                checksum_algorithm: Some("blake3".to_string()),
+                checksum: Some(blake3_hash_text("backup-bytes")),
+                size_bytes: Some(123),
+                verified_at_ms: Some(42),
+                metadata: Some(serde_json::json!({"path_safety": "hashed_ref_only"})),
+            })
+            .expect("external artifact metadata should persist");
+
+        assert_eq!(artifact.id, "artifact-a");
+        assert_eq!(artifact.artifact_kind, "backup_file");
+        assert_eq!(artifact.state, "verified");
+        assert_eq!(artifact.encryption_state, "encrypted");
+        assert_eq!(artifact.artifact_ref_hash, blake3_hash_text(artifact_ref));
+        assert_ne!(artifact.artifact_ref_hash, artifact_ref);
+        assert_eq!(
+            artifact.metadata_json.as_ref().and_then(|value| value["path_safety"].as_str()),
+            Some("hashed_ref_only")
+        );
+    }
+
+    #[test]
+    fn external_artifact_metadata_rejects_unknown_domains() {
+        let store = test_store("external-artifact-domains");
+
+        let error = store
+            .record_external_artifact(ExternalArtifactInput {
+                id: None,
+                artifact_kind: "raw_path".to_string(),
+                artifact_ref: "opaque-ref".to_string(),
+                state: Some("verified".to_string()),
+                encryption_state: Some("encrypted".to_string()),
+                key_ref: None,
+                checksum_algorithm: None,
+                checksum: None,
+                size_bytes: None,
+                verified_at_ms: None,
+                metadata: None,
+            })
+            .expect_err("unknown artifact kind should fail");
+
+        assert!(
+            matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("external artifact kind"))
         );
     }
 

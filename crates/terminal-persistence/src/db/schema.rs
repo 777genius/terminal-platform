@@ -610,6 +610,23 @@ diesel::table! {
 }
 
 diesel::table! {
+    terminal_external_artifacts (id) {
+        id -> Text,
+        artifact_kind -> Text,
+        artifact_ref_hash -> Text,
+        state -> Text,
+        encryption_state -> Text,
+        key_ref -> Nullable<Text>,
+        checksum_algorithm -> Nullable<Text>,
+        checksum -> Nullable<Text>,
+        size_bytes -> Nullable<BigInt>,
+        created_at_ms -> BigInt,
+        verified_at_ms -> Nullable<BigInt>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     terminal_search_documents (rowid) {
         rowid -> Integer,
         document_id -> Text,
@@ -693,6 +710,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     terminal_support_bundles,
     terminal_crypto_keys,
     terminal_crypto_key_events,
+    terminal_external_artifacts,
     terminal_search_documents,
     terminal_legacy_migration_records,
 );

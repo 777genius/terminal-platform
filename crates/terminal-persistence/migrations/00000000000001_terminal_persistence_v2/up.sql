@@ -622,6 +622,24 @@ CREATE TABLE IF NOT EXISTS terminal_crypto_key_events (
 CREATE INDEX IF NOT EXISTS idx_terminal_crypto_key_events_key_time
 ON terminal_crypto_key_events(key_id, occurred_at_ms DESC);
 
+CREATE TABLE IF NOT EXISTS terminal_external_artifacts (
+    id TEXT PRIMARY KEY,
+    artifact_kind TEXT NOT NULL CHECK(artifact_kind IN ('backup_file', 'large_segment', 'export_file', 'support_bundle', 'future_external_store')),
+    artifact_ref_hash TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('planned', 'available', 'verified', 'missing', 'deleted', 'quarantined')),
+    encryption_state TEXT NOT NULL CHECK(encryption_state IN ('plaintext', 'encrypted', 'redacted', 'crypto_erased')),
+    key_ref TEXT,
+    checksum_algorithm TEXT,
+    checksum TEXT,
+    size_bytes BIGINT,
+    created_at_ms BIGINT NOT NULL,
+    verified_at_ms BIGINT,
+    metadata_json TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_terminal_external_artifacts_ref
+ON terminal_external_artifacts(artifact_ref_hash);
+
 CREATE TABLE IF NOT EXISTS terminal_search_documents (
     rowid INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id TEXT NOT NULL UNIQUE,

@@ -1,5 +1,6 @@
 DROP TABLE IF EXISTS terminal_legacy_migration_records;
 DROP TABLE IF EXISTS terminal_search_documents;
+DROP TABLE IF EXISTS terminal_external_artifacts;
 DROP TABLE IF EXISTS terminal_crypto_key_events;
 DROP TABLE IF EXISTS terminal_crypto_keys;
 DROP TABLE IF EXISTS terminal_support_bundles;
