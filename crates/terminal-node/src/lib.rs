@@ -501,7 +501,7 @@ mod tests {
         unique_tmux_socket_name,
     };
     use terminal_testing::{
-        ZellijSessionGuard, ZellijTestLock, daemon, daemon_fixture, unique_socket_address,
+        ZellijSessionGuard, daemon, daemon_fixture, unique_socket_address,
         unique_zellij_session_name, wait_for_daemon_ready,
     };
     use tokio::time::{sleep, timeout};
@@ -715,7 +715,6 @@ mod tests {
     #[cfg(any(unix, windows))]
     #[tokio::test(flavor = "multi_thread")]
     async fn discovers_zellij_sessions_and_handles_import_surface_through_node_surface() {
-        let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
         let attempts = if cfg!(windows) { 1 } else { 3 };
         let mut last_error = None;
 

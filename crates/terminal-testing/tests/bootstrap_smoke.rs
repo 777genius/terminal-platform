@@ -42,8 +42,7 @@ use terminal_protocol::{DaemonPhase, SubscriptionEvent};
 #[cfg(unix)]
 use terminal_runtime::{BackendCatalog, TerminalRuntime};
 use terminal_testing::{
-    ZellijSessionGuard, ZellijTestLock, daemon, daemon_fixture, echo_shell_launch_spec,
-    unique_zellij_session_name,
+    ZellijSessionGuard, daemon, daemon_fixture, echo_shell_launch_spec, unique_zellij_session_name,
 };
 #[cfg(unix)]
 use terminal_testing::{daemon_fixture_with_daemon, isolated_daemon, unique_sqlite_path};
@@ -2383,7 +2382,6 @@ async fn bootstrap_smoke_preserves_native_fullscreen_viewports_for_vim_less_and_
 #[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
-    let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
     let attempts = if cfg!(windows) { 1 } else { 3 };
     let mut last_error = None;
 
