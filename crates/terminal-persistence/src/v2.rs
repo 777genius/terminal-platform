@@ -30,15 +30,16 @@ use crate::{
             terminal_backend_capability_reports, terminal_backup_records,
             terminal_capture_receipts, terminal_clients, terminal_clock_anchors,
             terminal_command_blocks, terminal_command_history_entries, terminal_commit_log,
-            terminal_data_health_records, terminal_db_identity, terminal_delete_requests,
-            terminal_deletion_tombstones, terminal_delivery_offsets, terminal_export_requests,
-            terminal_feature_gates, terminal_history_gaps, terminal_integrity_checks,
-            terminal_journal_events, terminal_maintenance_runs, terminal_outbox_messages,
-            terminal_panes, terminal_payload_schemas, terminal_restore_drills,
-            terminal_retention_policies, terminal_screen_snapshots, terminal_search_documents,
-            terminal_session_cursors, terminal_sessions, terminal_storage_pressure_events,
-            terminal_stream_cursors, terminal_stream_segments, terminal_support_bundles,
-            terminal_topology_snapshots, terminal_writer_generations,
+            terminal_crypto_key_events, terminal_crypto_keys, terminal_data_health_records,
+            terminal_db_identity, terminal_delete_requests, terminal_deletion_tombstones,
+            terminal_delivery_offsets, terminal_export_requests, terminal_feature_gates,
+            terminal_history_gaps, terminal_integrity_checks, terminal_journal_events,
+            terminal_maintenance_runs, terminal_outbox_messages, terminal_panes,
+            terminal_payload_schemas, terminal_restore_drills, terminal_retention_policies,
+            terminal_screen_snapshots, terminal_search_documents, terminal_session_cursors,
+            terminal_sessions, terminal_storage_pressure_events, terminal_stream_cursors,
+            terminal_stream_segments, terminal_support_bundles, terminal_topology_snapshots,
+            terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -208,6 +209,7 @@ pub struct TerminalPersistenceV2Config {
     pub clock: PersistenceClock,
     pub storage_pressure: StoragePressureConfig,
     pub failpoints: PersistenceFailpoints,
+    pub allow_test_plaintext_crypto_keys: bool,
 }
 
 impl TerminalPersistenceV2Config {
@@ -225,6 +227,7 @@ impl TerminalPersistenceV2Config {
             clock: PersistenceClock,
             storage_pressure: StoragePressureConfig::default(),
             failpoints: PersistenceFailpoints::default(),
+            allow_test_plaintext_crypto_keys: true,
         }
     }
 }
@@ -238,6 +241,7 @@ impl Default for TerminalPersistenceV2Config {
             clock: PersistenceClock,
             storage_pressure: StoragePressureConfig::default(),
             failpoints: PersistenceFailpoints::default(),
+            allow_test_plaintext_crypto_keys: false,
         }
     }
 }
@@ -281,6 +285,7 @@ impl TerminalPersistenceV2 {
         let path = path.into();
         let mut connection = establish_initialized_connection(&path, &config)?;
         verify_seeded_defaults(&mut connection)?;
+        enforce_encryption_startup_policy(&mut connection, &config)?;
         Ok(Self { path, config })
     }
 
@@ -316,7 +321,7 @@ impl TerminalPersistenceV2 {
                 .then_some(now);
 
         connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
-            validate_feature_gate_transition(connection, name, state)?;
+            validate_feature_gate_transition(connection, &self.config, name, state)?;
             diesel::update(
                 terminal_feature_gates::table
                     .filter(terminal_feature_gates::feature_name.eq(name.as_str())),
@@ -3132,6 +3137,75 @@ impl TerminalPersistenceV2 {
         Ok(SupportBundleRecord::try_from(row)?)
     }
 
+    pub fn register_crypto_key(
+        &self,
+        input: CryptoKeyInput,
+    ) -> Result<CryptoKeyRecord, TerminalPersistenceV2Error> {
+        validate_crypto_key_domain(
+            &input.key_kind,
+            &input.protection_kind,
+            input.state.as_deref(),
+        )?;
+        validate_crypto_key_ref(&input.key_ref)?;
+        if input.protection_kind == "test_plaintext"
+            && !self.config.allow_test_plaintext_crypto_keys
+        {
+            return Err(TerminalPersistenceV2Error::InvalidData(
+                "test_plaintext crypto keys are allowed only in test configuration".to_string(),
+            ));
+        }
+
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let state = input.state.unwrap_or_else(|| "active".to_string());
+        let row = NewCryptoKeyRow {
+            id: input.id.unwrap_or_else(new_id),
+            key_kind: input.key_kind,
+            key_ref: input.key_ref,
+            protection_kind: input.protection_kind,
+            state,
+            created_at_ms: now,
+            rotated_at_ms: None,
+            destroyed_at_ms: None,
+            capability_report_json: input
+                .capability_report
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+            error_json: input.error.as_ref().map(serde_json::to_string).transpose()?,
+            metadata_json: json_metadata(&input.metadata)?,
+        };
+        insert_into(terminal_crypto_keys::table).values(&row).execute(&mut connection)?;
+        Ok(CryptoKeyRecord::try_from(row)?)
+    }
+
+    pub fn record_crypto_key_event(
+        &self,
+        input: CryptoKeyEventInput,
+    ) -> Result<CryptoKeyEventRecord, TerminalPersistenceV2Error> {
+        validate_crypto_key_event_domain(&input.event_kind, &input.status)?;
+        let mut connection = self.connection()?;
+        let row = NewCryptoKeyEventRow {
+            id: input.id.unwrap_or_else(new_id),
+            key_id: input.key_id,
+            event_kind: input.event_kind,
+            actor: input.actor,
+            occurred_at_ms: input.occurred_at_ms.unwrap_or_else(|| self.config.clock.now_ms()),
+            status: input.status,
+            error_json: input.error.as_ref().map(serde_json::to_string).transpose()?,
+            metadata_json: json_metadata(&input.metadata)?,
+        };
+        insert_into(terminal_crypto_key_events::table).values(&row).execute(&mut connection)?;
+        Ok(CryptoKeyEventRecord::try_from(row)?)
+    }
+
+    pub fn encryption_capability_state(
+        &self,
+    ) -> Result<EncryptionCapabilityRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        encryption_capability_state_for_connection(&mut connection, &self.config)
+    }
+
     pub fn upsert_redacted_search_document(
         &self,
         input: SearchDocumentInput,
@@ -3755,6 +3829,30 @@ pub struct SupportBundleInput {
     pub include_raw: bool,
     pub output_ref: Option<String>,
     pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CryptoKeyInput {
+    pub id: Option<String>,
+    pub key_kind: String,
+    pub key_ref: String,
+    pub protection_kind: String,
+    pub state: Option<String>,
+    pub capability_report: Option<Value>,
+    pub error: Option<Value>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CryptoKeyEventInput {
+    pub id: Option<String>,
+    pub key_id: Option<String>,
+    pub event_kind: String,
+    pub actor: String,
+    pub status: String,
+    pub error: Option<Value>,
+    pub metadata: Option<Value>,
+    pub occurred_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4472,6 +4570,111 @@ impl TryFrom<NewSupportBundleRow> for SupportBundleRecord {
                 .transpose()?,
         })
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CryptoKeyRecord {
+    pub id: String,
+    pub key_kind: String,
+    pub key_ref_hash: String,
+    pub protection_kind: String,
+    pub state: String,
+    pub created_at_ms: i64,
+    pub rotated_at_ms: Option<i64>,
+    pub destroyed_at_ms: Option<i64>,
+    pub capability_report_json: Option<Value>,
+    pub error_json: Option<Value>,
+    pub metadata_json: Option<Value>,
+}
+
+impl TryFrom<CryptoKeyRow> for CryptoKeyRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: CryptoKeyRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            key_kind: row.key_kind,
+            key_ref_hash: blake3_hash_text(&row.key_ref),
+            protection_kind: row.protection_kind,
+            state: row.state,
+            created_at_ms: row.created_at_ms,
+            rotated_at_ms: row.rotated_at_ms,
+            destroyed_at_ms: row.destroyed_at_ms,
+            capability_report_json: row
+                .capability_report_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
+            error_json: row.error_json.as_deref().map(serde_json::from_str).transpose()?,
+            metadata_json: row.metadata_json.as_deref().map(serde_json::from_str).transpose()?,
+        })
+    }
+}
+
+impl TryFrom<NewCryptoKeyRow> for CryptoKeyRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: NewCryptoKeyRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            key_kind: row.key_kind,
+            key_ref_hash: blake3_hash_text(&row.key_ref),
+            protection_kind: row.protection_kind,
+            state: row.state,
+            created_at_ms: row.created_at_ms,
+            rotated_at_ms: row.rotated_at_ms,
+            destroyed_at_ms: row.destroyed_at_ms,
+            capability_report_json: row
+                .capability_report_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
+            error_json: row.error_json.as_deref().map(serde_json::from_str).transpose()?,
+            metadata_json: row.metadata_json.as_deref().map(serde_json::from_str).transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CryptoKeyEventRecord {
+    pub id: String,
+    pub key_id: Option<String>,
+    pub event_kind: String,
+    pub actor: String,
+    pub occurred_at_ms: i64,
+    pub status: String,
+    pub error_json: Option<Value>,
+    pub metadata_json: Option<Value>,
+}
+
+impl TryFrom<NewCryptoKeyEventRow> for CryptoKeyEventRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: NewCryptoKeyEventRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            key_id: row.key_id,
+            event_kind: row.event_kind,
+            actor: row.actor,
+            occurred_at_ms: row.occurred_at_ms,
+            status: row.status,
+            error_json: row.error_json.as_deref().map(serde_json::from_str).transpose()?,
+            metadata_json: row.metadata_json.as_deref().map(serde_json::from_str).transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncryptionCapabilityRecord {
+    pub feature_gate_state: String,
+    pub active_database_key_count: i64,
+    pub active_non_test_database_key_count: i64,
+    pub test_plaintext_database_key_count: i64,
+    pub unavailable_key_count: i64,
+    pub can_enable_encrypted_history: bool,
+    pub plaintext_fallback_allowed: bool,
+    pub key_material_exported: bool,
+    pub action_required: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5602,6 +5805,53 @@ struct NewSupportBundleRow {
 }
 
 #[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_crypto_keys)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct CryptoKeyRow {
+    id: String,
+    key_kind: String,
+    key_ref: String,
+    protection_kind: String,
+    state: String,
+    created_at_ms: i64,
+    rotated_at_ms: Option<i64>,
+    destroyed_at_ms: Option<i64>,
+    capability_report_json: Option<String>,
+    error_json: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_crypto_keys)]
+struct NewCryptoKeyRow {
+    id: String,
+    key_kind: String,
+    key_ref: String,
+    protection_kind: String,
+    state: String,
+    created_at_ms: i64,
+    rotated_at_ms: Option<i64>,
+    destroyed_at_ms: Option<i64>,
+    capability_report_json: Option<String>,
+    error_json: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_crypto_key_events)]
+struct NewCryptoKeyEventRow {
+    id: String,
+    key_id: Option<String>,
+    event_kind: String,
+    actor: String,
+    occurred_at_ms: i64,
+    status: String,
+    error_json: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = terminal_search_documents)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 #[allow(dead_code)]
@@ -5803,6 +6053,7 @@ fn load_feature_gate_state(
 
 fn validate_feature_gate_transition(
     connection: &mut SqliteConnection,
+    config: &TerminalPersistenceV2Config,
     name: FeatureGateName,
     state: FeatureGateState,
 ) -> Result<(), TerminalPersistenceV2Error> {
@@ -5828,7 +6079,87 @@ fn validate_feature_gate_transition(
         ));
     }
 
+    if name == FeatureGateName::EncryptedTerminalHistory
+        && state == FeatureGateState::Enabled
+        && !encryption_capability_state_for_connection(connection, config)?
+            .can_enable_encrypted_history
+    {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "encrypted_terminal_history requires an active non-test database key".to_string(),
+        ));
+    }
+
     Ok(())
+}
+
+fn enforce_encryption_startup_policy(
+    connection: &mut SqliteConnection,
+    config: &TerminalPersistenceV2Config,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let capability = encryption_capability_state_for_connection(connection, config)?;
+    if capability.feature_gate_state == FeatureGateState::Enabled.as_str()
+        && !capability.can_enable_encrypted_history
+    {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "encrypted terminal history cannot start: {}",
+            capability.action_required
+        )));
+    }
+    Ok(())
+}
+
+fn encryption_capability_state_for_connection(
+    connection: &mut SqliteConnection,
+    config: &TerminalPersistenceV2Config,
+) -> Result<EncryptionCapabilityRecord, TerminalPersistenceV2Error> {
+    let feature_gate_state =
+        load_feature_gate_state(connection, FeatureGateName::EncryptedTerminalHistory)?
+            .as_str()
+            .to_string();
+    let active_database_key_count = terminal_crypto_keys::table
+        .filter(terminal_crypto_keys::key_kind.eq("database_key"))
+        .filter(terminal_crypto_keys::state.eq("active"))
+        .count()
+        .get_result::<i64>(connection)?;
+    let active_non_test_database_key_count = terminal_crypto_keys::table
+        .filter(terminal_crypto_keys::key_kind.eq("database_key"))
+        .filter(terminal_crypto_keys::state.eq("active"))
+        .filter(terminal_crypto_keys::protection_kind.ne("test_plaintext"))
+        .count()
+        .get_result::<i64>(connection)?;
+    let test_plaintext_database_key_count = terminal_crypto_keys::table
+        .filter(terminal_crypto_keys::key_kind.eq("database_key"))
+        .filter(terminal_crypto_keys::state.eq("active"))
+        .filter(terminal_crypto_keys::protection_kind.eq("test_plaintext"))
+        .count()
+        .get_result::<i64>(connection)?;
+    let unavailable_key_count = terminal_crypto_keys::table
+        .filter(terminal_crypto_keys::state.eq("unavailable"))
+        .count()
+        .get_result::<i64>(connection)?;
+    let test_key_allowed =
+        config.allow_test_plaintext_crypto_keys && test_plaintext_database_key_count > 0;
+    let can_enable_encrypted_history = active_non_test_database_key_count > 0 || test_key_allowed;
+    let action_required = if can_enable_encrypted_history {
+        "none"
+    } else if active_database_key_count == 0 {
+        "register_active_database_key"
+    } else {
+        "replace_test_plaintext_key_with_os_protected_key"
+    }
+    .to_string();
+
+    Ok(EncryptionCapabilityRecord {
+        feature_gate_state,
+        active_database_key_count,
+        active_non_test_database_key_count,
+        test_plaintext_database_key_count,
+        unavailable_key_count,
+        can_enable_encrypted_history,
+        plaintext_fallback_allowed: false,
+        key_material_exported: false,
+        action_required,
+    })
 }
 
 fn ensure_no_open_critical_health_records(
@@ -7535,6 +7866,93 @@ fn validate_storage_pressure_domain(
     Ok(())
 }
 
+fn validate_crypto_key_domain(
+    key_kind: &str,
+    protection_kind: &str,
+    state: Option<&str>,
+) -> Result<(), TerminalPersistenceV2Error> {
+    const KEY_KINDS: &[&str] = &["database_key", "export_key", "artifact_key"];
+    const PROTECTION_KINDS: &[&str] = &[
+        "windows_credential_manager",
+        "dpapi_user",
+        "dpapi_machine",
+        "macos_keychain",
+        "linux_secret_service",
+        "test_plaintext",
+    ];
+    const STATES: &[&str] = &["active", "rotating", "disabled", "destroyed", "unavailable"];
+    if !KEY_KINDS.contains(&key_kind) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown crypto key kind: {key_kind}"
+        )));
+    }
+    if !PROTECTION_KINDS.contains(&protection_kind) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown crypto key protection kind: {protection_kind}"
+        )));
+    }
+    if let Some(state) = state
+        && !STATES.contains(&state)
+    {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown crypto key state: {state}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_crypto_key_event_domain(
+    event_kind: &str,
+    status: &str,
+) -> Result<(), TerminalPersistenceV2Error> {
+    const EVENT_KINDS: &[&str] = &[
+        "created",
+        "unlocked",
+        "lock_failed",
+        "rotated",
+        "destroy_requested",
+        "destroyed",
+        "recovery_failed",
+    ];
+    const STATUSES: &[&str] = &["succeeded", "failed", "skipped"];
+    if !EVENT_KINDS.contains(&event_kind) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown crypto key event kind: {event_kind}"
+        )));
+    }
+    if !STATUSES.contains(&status) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown crypto key event status: {status}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_crypto_key_ref(key_ref: &str) -> Result<(), TerminalPersistenceV2Error> {
+    if key_ref.trim().is_empty() {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "crypto key_ref must not be empty".to_string(),
+        ));
+    }
+    if key_ref.len() > 512 {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "crypto key_ref must stay an opaque short reference, not key material".to_string(),
+        ));
+    }
+    if key_ref.contains('\n') || key_ref.contains('\r') {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "crypto key_ref must be a single-line opaque reference".to_string(),
+        ));
+    }
+    let lower = key_ref.to_ascii_lowercase();
+    if lower.contains("begin ") || lower.contains("private key") || lower.contains("secret key") {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "crypto key_ref must not contain key material".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn is_storage_full_like_error(error: &TerminalPersistenceV2Error) -> bool {
     match error {
         TerminalPersistenceV2Error::Query(DieselError::DatabaseError(_, info)) => {
@@ -7832,6 +8250,133 @@ mod tests {
                 Some("test"),
             )
             .expect("authoritative gate should disable after reads gate");
+    }
+
+    #[test]
+    fn encrypted_history_gate_requires_active_database_key() {
+        let store = test_store("encrypted-history-gate");
+
+        let error = store
+            .set_feature_gate_state(
+                FeatureGateName::EncryptedTerminalHistory,
+                FeatureGateState::Enabled,
+                Some("test"),
+            )
+            .expect_err("encryption gate should fail without a database key");
+        let capability =
+            store.encryption_capability_state().expect("encryption capability should load");
+
+        assert!(
+            matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("active non-test database key") || message.contains("active"))
+        );
+        assert_eq!(capability.feature_gate_state, "disabled");
+        assert_eq!(capability.active_database_key_count, 0);
+        assert!(!capability.can_enable_encrypted_history);
+        assert!(!capability.plaintext_fallback_allowed);
+        assert!(!capability.key_material_exported);
+        assert_eq!(capability.action_required, "register_active_database_key");
+    }
+
+    #[test]
+    fn crypto_key_foundation_keeps_refs_opaque_and_allows_test_gate_only_in_test_config() {
+        let store = test_store("crypto-key-foundation");
+        let key = store
+            .register_crypto_key(CryptoKeyInput {
+                id: Some("test-db-key".to_string()),
+                key_kind: "database_key".to_string(),
+                key_ref: "test-provider:terminal-db-key".to_string(),
+                protection_kind: "test_plaintext".to_string(),
+                state: Some("active".to_string()),
+                capability_report: Some(serde_json::json!({
+                    "provider": "test",
+                    "stores_key_material_in_db": false
+                })),
+                error: None,
+                metadata: None,
+            })
+            .expect("test crypto key should register in test config");
+        let event = store
+            .record_crypto_key_event(CryptoKeyEventInput {
+                id: None,
+                key_id: Some(key.id.clone()),
+                event_kind: "created".to_string(),
+                actor: "test".to_string(),
+                status: "succeeded".to_string(),
+                error: None,
+                metadata: Some(serde_json::json!({"audit_only": true})),
+                occurred_at_ms: None,
+            })
+            .expect("crypto key event should persist");
+        let capability =
+            store.encryption_capability_state().expect("encryption capability should load");
+
+        assert_ne!(key.key_ref_hash, "test-provider:terminal-db-key");
+        assert_eq!(key.key_ref_hash, blake3_hash_text("test-provider:terminal-db-key"));
+        assert_eq!(event.key_id.as_deref(), Some("test-db-key"));
+        assert_eq!(capability.active_database_key_count, 1);
+        assert_eq!(capability.test_plaintext_database_key_count, 1);
+        assert!(capability.can_enable_encrypted_history);
+        assert_eq!(capability.action_required, "none");
+
+        store
+            .set_feature_gate_state(
+                FeatureGateName::EncryptedTerminalHistory,
+                FeatureGateState::Enabled,
+                Some("test key in test config"),
+            )
+            .expect("test config can enable encrypted history with a test key");
+        let reopened = TerminalPersistenceV2::open_with_config(
+            store.path(),
+            TerminalPersistenceV2Config::test(),
+        )
+        .expect("test config should reopen enabled encrypted-history gate");
+        assert_eq!(
+            reopened
+                .feature_gate_state(FeatureGateName::EncryptedTerminalHistory)
+                .expect("gate should load"),
+            FeatureGateState::Enabled
+        );
+    }
+
+    #[test]
+    fn production_config_rejects_test_plaintext_crypto_keys_and_key_material_refs() {
+        let path = std::env::temp_dir()
+            .join(format!("terminal-persistence-v2-crypto-prod-{}.sqlite3", Uuid::new_v4()));
+        let store =
+            TerminalPersistenceV2::open_with_config(path, TerminalPersistenceV2Config::default())
+                .expect("production-like store should open");
+
+        let test_key_error = store
+            .register_crypto_key(CryptoKeyInput {
+                id: None,
+                key_kind: "database_key".to_string(),
+                key_ref: "test-provider:terminal-db-key".to_string(),
+                protection_kind: "test_plaintext".to_string(),
+                state: Some("active".to_string()),
+                capability_report: None,
+                error: None,
+                metadata: None,
+            })
+            .expect_err("production config should reject test plaintext keys");
+        let material_ref_error = store
+            .register_crypto_key(CryptoKeyInput {
+                id: None,
+                key_kind: "database_key".to_string(),
+                key_ref: "-----BEGIN PRIVATE KEY-----".to_string(),
+                protection_kind: "dpapi_user".to_string(),
+                state: Some("active".to_string()),
+                capability_report: None,
+                error: None,
+                metadata: None,
+            })
+            .expect_err("key refs must not contain key material");
+
+        assert!(
+            matches!(test_key_error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("test_plaintext"))
+        );
+        assert!(
+            matches!(material_ref_error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("key material"))
+        );
     }
 
     #[test]

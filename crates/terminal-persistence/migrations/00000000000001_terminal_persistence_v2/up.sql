@@ -593,22 +593,34 @@ CREATE TABLE IF NOT EXISTS terminal_support_bundles (
 
 CREATE TABLE IF NOT EXISTS terminal_crypto_keys (
     id TEXT PRIMARY KEY,
-    key_kind TEXT NOT NULL,
+    key_kind TEXT NOT NULL CHECK(key_kind IN ('database_key', 'export_key', 'artifact_key')),
     key_ref TEXT NOT NULL,
-    protection_kind TEXT NOT NULL,
-    state TEXT NOT NULL,
+    protection_kind TEXT NOT NULL CHECK(protection_kind IN ('windows_credential_manager', 'dpapi_user', 'dpapi_machine', 'macos_keychain', 'linux_secret_service', 'test_plaintext')),
+    state TEXT NOT NULL CHECK(state IN ('active', 'rotating', 'disabled', 'destroyed', 'unavailable')),
     created_at_ms BIGINT NOT NULL,
     rotated_at_ms BIGINT,
+    destroyed_at_ms BIGINT,
+    capability_report_json TEXT,
+    error_json TEXT,
     metadata_json TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_terminal_crypto_keys_state
+ON terminal_crypto_keys(state, created_at_ms DESC);
 
 CREATE TABLE IF NOT EXISTS terminal_crypto_key_events (
     id TEXT PRIMARY KEY,
     key_id TEXT REFERENCES terminal_crypto_keys(id) ON DELETE SET NULL,
-    event_kind TEXT NOT NULL,
+    event_kind TEXT NOT NULL CHECK(event_kind IN ('created', 'unlocked', 'lock_failed', 'rotated', 'destroy_requested', 'destroyed', 'recovery_failed')),
+    actor TEXT NOT NULL,
     occurred_at_ms BIGINT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('succeeded', 'failed', 'skipped')),
+    error_json TEXT,
     metadata_json TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_terminal_crypto_key_events_key_time
+ON terminal_crypto_key_events(key_id, occurred_at_ms DESC);
 
 CREATE TABLE IF NOT EXISTS terminal_search_documents (
     rowid INTEGER PRIMARY KEY AUTOINCREMENT,

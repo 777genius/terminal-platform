@@ -589,6 +589,9 @@ diesel::table! {
         state -> Text,
         created_at_ms -> BigInt,
         rotated_at_ms -> Nullable<BigInt>,
+        destroyed_at_ms -> Nullable<BigInt>,
+        capability_report_json -> Nullable<Text>,
+        error_json -> Nullable<Text>,
         metadata_json -> Nullable<Text>,
     }
 }
@@ -598,7 +601,10 @@ diesel::table! {
         id -> Text,
         key_id -> Nullable<Text>,
         event_kind -> Text,
+        actor -> Text,
         occurred_at_ms -> BigInt,
+        status -> Text,
+        error_json -> Nullable<Text>,
         metadata_json -> Nullable<Text>,
     }
 }
@@ -642,6 +648,7 @@ diesel::joinable!(terminal_sessions -> terminal_retention_policies (retention_po
 diesel::joinable!(terminal_data_health_records -> terminal_sessions (session_id));
 diesel::joinable!(terminal_projection_versions -> terminal_payload_schemas (payload_schema_id));
 diesel::joinable!(terminal_maintenance_runs -> terminal_retention_policies (selected_policy_id));
+diesel::joinable!(terminal_crypto_key_events -> terminal_crypto_keys (key_id));
 diesel::joinable!(terminal_delivery_offsets -> terminal_clients (client_id));
 diesel::joinable!(terminal_delivery_offsets -> terminal_sessions (session_id));
 diesel::joinable!(terminal_stream_cursors -> terminal_panes (pane_id));
