@@ -590,6 +590,42 @@ impl TerminalPersistenceV2 {
         Ok(id)
     }
 
+    pub fn mark_backend_capability_reports_stale(
+        &self,
+        input: BackendCapabilityStaleInput,
+    ) -> Result<usize, TerminalPersistenceV2Error> {
+        validate_backend_capability_stale_reason(&input.stale_reason)?;
+        let mut connection = self.connection()?;
+        let mut query = terminal_backend_capability_reports::table
+            .filter(terminal_backend_capability_reports::stale_reason.is_null())
+            .into_boxed();
+        if let Some(session_id) = input.session_id.as_deref() {
+            query = query.filter(
+                terminal_backend_capability_reports::session_id.eq(Some(session_id.to_string())),
+            );
+        }
+        if let Some(backend_kind) = input.backend_kind.as_deref() {
+            query =
+                query.filter(terminal_backend_capability_reports::backend_kind.eq(backend_kind));
+        }
+        if let Some(route_kind) = input.route_kind.as_deref() {
+            query = query.filter(terminal_backend_capability_reports::route_kind.eq(route_kind));
+        }
+        let ids = query
+            .select(terminal_backend_capability_reports::id)
+            .load::<String>(&mut connection)?;
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let updated = diesel::update(
+            terminal_backend_capability_reports::table
+                .filter(terminal_backend_capability_reports::id.eq_any(&ids)),
+        )
+        .set(terminal_backend_capability_reports::stale_reason.eq(Some(input.stale_reason)))
+        .execute(&mut connection)?;
+        Ok(updated)
+    }
+
     pub fn import_saved_native_session_snapshot(
         &self,
         saved: &SavedNativeSession,
@@ -3685,6 +3721,14 @@ pub struct BackendCapabilityReportInput {
     pub command_boundary_confidence: String,
     pub evidence: Option<Value>,
     pub expires_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackendCapabilityStaleInput {
+    pub session_id: Option<String>,
+    pub backend_kind: Option<String>,
+    pub route_kind: Option<String>,
+    pub stale_reason: String,
 }
 
 impl BackendCapabilityReportInput {
@@ -8187,6 +8231,22 @@ fn validate_backend_probe_status_domain(value: &str) -> Result<(), TerminalPersi
     Ok(())
 }
 
+fn validate_backend_capability_stale_reason(value: &str) -> Result<(), TerminalPersistenceV2Error> {
+    const REASONS: &[&str] = &[
+        "backend_version_changed",
+        "backend_binary_path_changed",
+        "backend_config_changed",
+        "probe_failed",
+        "manual_invalidation",
+    ];
+    if !REASONS.contains(&value) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown backend capability stale reason: {value}"
+        )));
+    }
+    Ok(())
+}
+
 fn path_hash(path: &Path) -> String {
     blake3_hash_text(&path.to_string_lossy())
 }
@@ -10117,6 +10177,94 @@ mod tests {
         assert!(plan.evidence.iter().any(|evidence| {
             evidence.kind == "backend_capability_stale" && evidence.value == "true"
         }));
+    }
+
+    #[test]
+    fn backend_capability_drift_invalidation_marks_reports_stale() {
+        let store = test_store("backend-capability-drift");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let mut segment_input = StreamSegmentInput::terminal_output(
+            session_id.clone(),
+            pane_id.clone(),
+            writer.id.clone(),
+            b"zellij rendered history\r\n".to_vec(),
+        );
+        segment_input.capture_semantics = Some("rendered_plaintext_snapshot".to_string());
+        let segment = store.append_stream_segment(segment_input).expect("segment should persist");
+        store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id,
+                writer_generation: writer.id,
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: segment.event_seq_low,
+                high_water_event_seq: segment.event_seq_high,
+                high_water_byte_seq: Some(segment.byte_high),
+                screen: serde_json::json!({"lines":["zellij rendered history"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("screen snapshot should persist");
+        store
+            .record_backend_capability_report(BackendCapabilityReportInput {
+                id: None,
+                session_id: Some(session_id.clone()),
+                backend_kind: "zellij".to_string(),
+                backend_version: Some("0.44.1".to_string()),
+                backend_binary_path_hash: Some("old-path-hash".to_string()),
+                route_kind: "imported_foreign".to_string(),
+                probe_status: "passed".to_string(),
+                capture_strategy: "rendered_snapshot".to_string(),
+                capture_semantics: "rendered_plaintext_snapshot".to_string(),
+                can_preserve_process_when_live: true,
+                can_capture_scrollback: true,
+                command_boundary_confidence: "low".to_string(),
+                evidence: Some(serde_json::json!({"probe": "zellij"})),
+                expires_at_ms: None,
+            })
+            .expect("capability report should persist");
+
+        let updated = store
+            .mark_backend_capability_reports_stale(BackendCapabilityStaleInput {
+                session_id: Some(session_id.clone()),
+                backend_kind: Some("zellij".to_string()),
+                route_kind: Some("imported_foreign".to_string()),
+                stale_reason: "backend_version_changed".to_string(),
+            })
+            .expect("capability reports should mark stale");
+        let second_update = store
+            .mark_backend_capability_reports_stale(BackendCapabilityStaleInput {
+                session_id: Some(session_id.clone()),
+                backend_kind: Some("zellij".to_string()),
+                route_kind: Some("imported_foreign".to_string()),
+                stale_reason: "backend_version_changed".to_string(),
+            })
+            .expect("already stale reports should not update again");
+        let plan = store.restore_plan(&session_id).expect("restore plan should load");
+        let bad_reason = store
+            .mark_backend_capability_reports_stale(BackendCapabilityStaleInput {
+                session_id: Some(session_id),
+                backend_kind: Some("zellij".to_string()),
+                route_kind: Some("imported_foreign".to_string()),
+                stale_reason: "maybe".to_string(),
+            })
+            .expect_err("unknown stale reason should fail");
+
+        assert_eq!(updated, 1);
+        assert_eq!(second_update, 0);
+        assert_eq!(plan.guarantee_level, RestoreGuaranteeLevel::DegradedHistory);
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "backend_capability_stale_reason"
+                && evidence.value == "backend_version_changed"
+        }));
+        assert!(
+            matches!(bad_reason, TerminalPersistenceV2Error::InvalidData(message) if message.contains("stale reason"))
+        );
     }
 
     #[test]
