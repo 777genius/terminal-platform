@@ -2,8 +2,9 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
+    sync::OnceLock,
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use diesel::{
@@ -26,16 +27,16 @@ use crate::{
         connection::establish_initialized_connection,
         schema::{
             terminal_backend_capability_reports, terminal_backup_records,
-            terminal_capture_receipts, terminal_clients, terminal_command_blocks,
-            terminal_command_history_entries, terminal_commit_log, terminal_data_health_records,
-            terminal_db_identity, terminal_delete_requests, terminal_deletion_tombstones,
-            terminal_delivery_offsets, terminal_export_requests, terminal_feature_gates,
-            terminal_history_gaps, terminal_integrity_checks, terminal_journal_events,
-            terminal_outbox_messages, terminal_panes, terminal_payload_schemas,
-            terminal_restore_drills, terminal_screen_snapshots, terminal_search_documents,
-            terminal_session_cursors, terminal_sessions, terminal_storage_pressure_events,
-            terminal_stream_cursors, terminal_stream_segments, terminal_support_bundles,
-            terminal_topology_snapshots, terminal_writer_generations,
+            terminal_capture_receipts, terminal_clients, terminal_clock_anchors,
+            terminal_command_blocks, terminal_command_history_entries, terminal_commit_log,
+            terminal_data_health_records, terminal_db_identity, terminal_delete_requests,
+            terminal_deletion_tombstones, terminal_delivery_offsets, terminal_export_requests,
+            terminal_feature_gates, terminal_history_gaps, terminal_integrity_checks,
+            terminal_journal_events, terminal_outbox_messages, terminal_panes,
+            terminal_payload_schemas, terminal_restore_drills, terminal_screen_snapshots,
+            terminal_search_documents, terminal_session_cursors, terminal_sessions,
+            terminal_storage_pressure_events, terminal_stream_cursors, terminal_stream_segments,
+            terminal_support_bundles, terminal_topology_snapshots, terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -1385,6 +1386,7 @@ impl TerminalPersistenceV2 {
                 .values(&row)
                 .execute(connection)
                 .map_err(map_writer_generation_insert_error)?;
+            insert_clock_anchor(connection, &id, now, "writer_acquire")?;
 
             Ok(())
         })?;
@@ -1430,16 +1432,25 @@ impl TerminalPersistenceV2 {
         }
         let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
-        diesel::update(
-            terminal_writer_generations::table
-                .filter(terminal_writer_generations::id.eq(writer_generation))
-                .filter(terminal_writer_generations::state.eq("active")),
-        )
-        .set((
-            terminal_writer_generations::heartbeat_at_ms.eq(now),
-            terminal_writer_generations::lease_expires_at_ms.eq(now + lease_ms),
-        ))
-        .execute(&mut connection)?;
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let updated = diesel::update(
+                terminal_writer_generations::table
+                    .filter(terminal_writer_generations::id.eq(writer_generation))
+                    .filter(terminal_writer_generations::state.eq("active")),
+            )
+            .set((
+                terminal_writer_generations::heartbeat_at_ms.eq(now),
+                terminal_writer_generations::lease_expires_at_ms.eq(now + lease_ms),
+            ))
+            .execute(connection)?;
+            if updated == 0 {
+                return Err(TerminalPersistenceV2Error::InvalidData(
+                    "active writer generation not found for heartbeat".to_string(),
+                ));
+            }
+            insert_clock_anchor(connection, writer_generation, now, "writer_heartbeat")?;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -1449,16 +1460,25 @@ impl TerminalPersistenceV2 {
     ) -> Result<(), TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
-        diesel::update(
-            terminal_writer_generations::table
-                .filter(terminal_writer_generations::id.eq(writer_generation))
-                .filter(terminal_writer_generations::state.eq("active")),
-        )
-        .set((
-            terminal_writer_generations::state.eq("released"),
-            terminal_writer_generations::released_at_ms.eq(Some(now)),
-        ))
-        .execute(&mut connection)?;
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let updated = diesel::update(
+                terminal_writer_generations::table
+                    .filter(terminal_writer_generations::id.eq(writer_generation))
+                    .filter(terminal_writer_generations::state.eq("active")),
+            )
+            .set((
+                terminal_writer_generations::state.eq("released"),
+                terminal_writer_generations::released_at_ms.eq(Some(now)),
+            ))
+            .execute(connection)?;
+            if updated == 0 {
+                return Err(TerminalPersistenceV2Error::InvalidData(
+                    "active writer generation not found for release".to_string(),
+                ));
+            }
+            insert_clock_anchor(connection, writer_generation, now, "writer_release")?;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -4465,6 +4485,17 @@ struct NewWriterGenerationRow {
     metadata_json: Option<String>,
 }
 
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_clock_anchors)]
+struct NewClockAnchorRow {
+    id: String,
+    writer_generation: String,
+    wall_time_ms: i64,
+    monotonic_ms: i64,
+    source: String,
+    created_at_ms: i64,
+}
+
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = terminal_session_cursors)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -6229,6 +6260,30 @@ fn ensure_active_writer(
     Ok(())
 }
 
+fn insert_clock_anchor(
+    connection: &mut SqliteConnection,
+    writer_generation: &str,
+    wall_time_ms: i64,
+    source: &str,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let row = NewClockAnchorRow {
+        id: new_id(),
+        writer_generation: writer_generation.to_string(),
+        wall_time_ms,
+        monotonic_ms: process_monotonic_ms(),
+        source: source.to_string(),
+        created_at_ms: wall_time_ms,
+    };
+    insert_into(terminal_clock_anchors::table).values(&row).execute(connection)?;
+    Ok(())
+}
+
+fn process_monotonic_ms() -> i64 {
+    static PROCESS_START: OnceLock<Instant> = OnceLock::new();
+    let elapsed_ms = PROCESS_START.get_or_init(Instant::now).elapsed().as_millis();
+    elapsed_ms.min(i64::MAX as u128) as i64
+}
+
 fn map_writer_generation_insert_error(error: DieselError) -> TerminalPersistenceV2Error {
     match error {
         DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
@@ -6825,6 +6880,35 @@ mod tests {
         store
             .acquire_writer_generation("process-b", 60_000)
             .expect("new writer should acquire after release");
+    }
+
+    #[test]
+    fn writer_generation_records_clock_anchors() {
+        let store = test_store("writer-clock-anchors");
+        let writer =
+            store.acquire_writer_generation("process-a", 60_000).expect("writer should acquire");
+
+        store
+            .heartbeat_writer_generation(&writer.id, 60_000)
+            .expect("writer heartbeat should persist");
+        store.release_writer_generation(&writer.id).expect("writer should release");
+
+        let mut connection = store.connection().expect("connection should open");
+        let anchors = terminal_clock_anchors::table
+            .filter(terminal_clock_anchors::writer_generation.eq(&writer.id))
+            .order(terminal_clock_anchors::created_at_ms.asc())
+            .select((
+                terminal_clock_anchors::source,
+                terminal_clock_anchors::wall_time_ms,
+                terminal_clock_anchors::monotonic_ms,
+            ))
+            .load::<(String, i64, i64)>(&mut connection)
+            .expect("clock anchors should load");
+        let sources = anchors.iter().map(|(source, _, _)| source.as_str()).collect::<Vec<_>>();
+
+        assert_eq!(sources, vec!["writer_acquire", "writer_heartbeat", "writer_release"]);
+        assert!(anchors.iter().all(|(_, wall_time_ms, _)| *wall_time_ms > 0));
+        assert!(anchors.iter().all(|(_, _, monotonic_ms)| *monotonic_ms >= 0));
     }
 
     #[test]
