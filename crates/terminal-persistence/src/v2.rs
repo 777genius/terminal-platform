@@ -264,11 +264,7 @@ impl TerminalPersistenceV2 {
         name: FeatureGateName,
     ) -> Result<FeatureGateState, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
-        let row = terminal_feature_gates::table
-            .filter(terminal_feature_gates::feature_name.eq(name.as_str()))
-            .select(FeatureGateRow::as_select())
-            .first::<FeatureGateRow>(&mut connection)?;
-        FeatureGateState::parse(&row.state)
+        load_feature_gate_state(&mut connection, name)
     }
 
     pub fn set_feature_gate_state(
@@ -285,19 +281,22 @@ impl TerminalPersistenceV2 {
             matches!(state, FeatureGateState::Disabled | FeatureGateState::ForceDisabled)
                 .then_some(now);
 
-        diesel::update(
-            terminal_feature_gates::table
-                .filter(terminal_feature_gates::feature_name.eq(name.as_str())),
-        )
-        .set((
-            terminal_feature_gates::state.eq(state.as_str()),
-            terminal_feature_gates::reason.eq(reason.map(ToOwned::to_owned)),
-            terminal_feature_gates::enabled_at_ms.eq(enabled_at),
-            terminal_feature_gates::disabled_at_ms.eq(disabled_at),
-            terminal_feature_gates::updated_at_ms.eq(now),
-        ))
-        .execute(&mut connection)?;
-        Ok(())
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            validate_feature_gate_transition(connection, name, state)?;
+            diesel::update(
+                terminal_feature_gates::table
+                    .filter(terminal_feature_gates::feature_name.eq(name.as_str())),
+            )
+            .set((
+                terminal_feature_gates::state.eq(state.as_str()),
+                terminal_feature_gates::reason.eq(reason.map(ToOwned::to_owned)),
+                terminal_feature_gates::enabled_at_ms.eq(enabled_at),
+                terminal_feature_gates::disabled_at_ms.eq(disabled_at),
+                terminal_feature_gates::updated_at_ms.eq(now),
+            ))
+            .execute(connection)?;
+            Ok(())
+        })
     }
 
     pub fn create_session(
@@ -5283,6 +5282,47 @@ fn verify_seeded_defaults(
     Ok(())
 }
 
+fn load_feature_gate_state(
+    connection: &mut SqliteConnection,
+    name: FeatureGateName,
+) -> Result<FeatureGateState, TerminalPersistenceV2Error> {
+    let row = terminal_feature_gates::table
+        .filter(terminal_feature_gates::feature_name.eq(name.as_str()))
+        .select(FeatureGateRow::as_select())
+        .first::<FeatureGateRow>(connection)?;
+    FeatureGateState::parse(&row.state)
+}
+
+fn validate_feature_gate_transition(
+    connection: &mut SqliteConnection,
+    name: FeatureGateName,
+    state: FeatureGateState,
+) -> Result<(), TerminalPersistenceV2Error> {
+    if name == FeatureGateName::TerminalPersistenceV2AuthoritativeReads
+        && state == FeatureGateState::Enabled
+        && load_feature_gate_state(connection, FeatureGateName::TerminalPersistenceV2Authoritative)?
+            != FeatureGateState::Enabled
+    {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "terminal_persistence_v2_authoritative_reads requires terminal_persistence_v2_authoritative=enabled".to_string(),
+        ));
+    }
+
+    if name == FeatureGateName::TerminalPersistenceV2Authoritative
+        && matches!(state, FeatureGateState::Disabled | FeatureGateState::ForceDisabled)
+        && load_feature_gate_state(
+            connection,
+            FeatureGateName::TerminalPersistenceV2AuthoritativeReads,
+        )? == FeatureGateState::Enabled
+    {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "disable terminal_persistence_v2_authoritative_reads first before disabling terminal_persistence_v2_authoritative".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn seed_payload_schemas(
     connection: &mut SqliteConnection,
     now: i64,
@@ -6296,6 +6336,63 @@ mod tests {
         assert_eq!(notes["foreign_keys"], true);
         assert_eq!(notes["configured_wal_autocheckpoint_pages"], 64);
         assert!(notes["compile_options"].as_array().is_some_and(|values| !values.is_empty()));
+    }
+
+    #[test]
+    fn authoritative_reads_gate_requires_authoritative_gate() {
+        let store = test_store("feature-gate-deps");
+
+        let reads_without_authoritative = store.set_feature_gate_state(
+            FeatureGateName::TerminalPersistenceV2AuthoritativeReads,
+            FeatureGateState::Enabled,
+            Some("test"),
+        );
+        assert!(matches!(
+            reads_without_authoritative,
+            Err(TerminalPersistenceV2Error::InvalidData(message))
+                if message.contains("requires terminal_persistence_v2_authoritative=enabled")
+        ));
+
+        store
+            .set_feature_gate_state(
+                FeatureGateName::TerminalPersistenceV2Authoritative,
+                FeatureGateState::Enabled,
+                Some("test"),
+            )
+            .expect("authoritative gate should enable");
+        store
+            .set_feature_gate_state(
+                FeatureGateName::TerminalPersistenceV2AuthoritativeReads,
+                FeatureGateState::Enabled,
+                Some("test"),
+            )
+            .expect("reads gate should enable after authoritative gate");
+
+        let disable_authoritative_first = store.set_feature_gate_state(
+            FeatureGateName::TerminalPersistenceV2Authoritative,
+            FeatureGateState::Disabled,
+            Some("test"),
+        );
+        assert!(matches!(
+            disable_authoritative_first,
+            Err(TerminalPersistenceV2Error::InvalidData(message))
+                if message.contains("disable terminal_persistence_v2_authoritative_reads first")
+        ));
+
+        store
+            .set_feature_gate_state(
+                FeatureGateName::TerminalPersistenceV2AuthoritativeReads,
+                FeatureGateState::Disabled,
+                Some("test"),
+            )
+            .expect("reads gate should disable");
+        store
+            .set_feature_gate_state(
+                FeatureGateName::TerminalPersistenceV2Authoritative,
+                FeatureGateState::Disabled,
+                Some("test"),
+            )
+            .expect("authoritative gate should disable after reads gate");
     }
 
     #[test]
