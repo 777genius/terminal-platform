@@ -438,6 +438,142 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    terminal_storage_pressure_events (id) {
+        id -> Text,
+        state -> Text,
+        db_file_bytes -> Nullable<BigInt>,
+        wal_file_bytes -> Nullable<BigInt>,
+        disk_free_bytes -> Nullable<BigInt>,
+        temp_free_bytes -> Nullable<BigInt>,
+        quota_bytes -> Nullable<BigInt>,
+        action_taken -> Text,
+        reason -> Nullable<Text>,
+        created_at_ms -> BigInt,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_delete_requests (id) {
+        id -> Text,
+        session_id -> Nullable<Text>,
+        request_kind -> Text,
+        state -> Text,
+        policy_id -> Nullable<Text>,
+        requested_at_ms -> BigInt,
+        approved_at_ms -> Nullable<BigInt>,
+        completed_at_ms -> Nullable<BigInt>,
+        requester_ref_hash -> Nullable<Text>,
+        reason -> Nullable<Text>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_deletion_tombstones (id) {
+        id -> Text,
+        delete_request_id -> Nullable<Text>,
+        session_id -> Nullable<Text>,
+        deleted_scope -> Text,
+        policy_id -> Nullable<Text>,
+        deleted_at_ms -> BigInt,
+        evidence_json -> Nullable<Text>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_export_requests (id) {
+        id -> Text,
+        session_id -> Nullable<Text>,
+        export_kind -> Text,
+        state -> Text,
+        redaction_profile_id -> Nullable<Text>,
+        include_raw -> Integer,
+        approved_at_ms -> Nullable<BigInt>,
+        requested_at_ms -> BigInt,
+        completed_at_ms -> Nullable<BigInt>,
+        manifest_json -> Nullable<Text>,
+        output_ref_hash -> Nullable<Text>,
+        error -> Nullable<Text>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_support_bundles (id) {
+        id -> Text,
+        scope_json -> Text,
+        state -> Text,
+        redaction_profile_id -> Nullable<Text>,
+        include_raw -> Integer,
+        requested_at_ms -> BigInt,
+        completed_at_ms -> Nullable<BigInt>,
+        manifest_json -> Nullable<Text>,
+        output_ref_hash -> Nullable<Text>,
+        error -> Nullable<Text>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_crypto_keys (id) {
+        id -> Text,
+        key_kind -> Text,
+        key_ref -> Text,
+        protection_kind -> Text,
+        state -> Text,
+        created_at_ms -> BigInt,
+        rotated_at_ms -> Nullable<BigInt>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_crypto_key_events (id) {
+        id -> Text,
+        key_id -> Nullable<Text>,
+        event_kind -> Text,
+        occurred_at_ms -> BigInt,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_search_documents (rowid) {
+        rowid -> Integer,
+        document_id -> Text,
+        session_id -> Text,
+        pane_id -> Nullable<Text>,
+        command_block_id -> Nullable<Text>,
+        document_kind -> Text,
+        event_seq_low -> Nullable<BigInt>,
+        event_seq_high -> Nullable<BigInt>,
+        byte_low -> Nullable<BigInt>,
+        byte_high -> Nullable<BigInt>,
+        redaction_profile_id -> Nullable<Text>,
+        redaction_state -> Text,
+        source_hash_algorithm -> Text,
+        source_hash -> Text,
+        text_preview -> Text,
+        updated_at_ms -> BigInt,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_legacy_migration_records (id) {
+        id -> Text,
+        legacy_table -> Text,
+        legacy_session_id -> Text,
+        new_session_id -> Text,
+        migrated_at_ms -> BigInt,
+        migration_state -> Text,
+        notes -> Nullable<Text>,
+    }
+}
+
 diesel::joinable!(terminal_panes -> terminal_sessions (session_id));
 diesel::joinable!(terminal_sessions -> terminal_retention_policies (retention_policy_id));
 diesel::joinable!(terminal_data_health_records -> terminal_sessions (session_id));
@@ -473,4 +609,13 @@ diesel::allow_tables_to_appear_in_same_query!(
     terminal_history_gaps,
     terminal_restore_drills,
     terminal_backup_records,
+    terminal_storage_pressure_events,
+    terminal_delete_requests,
+    terminal_deletion_tombstones,
+    terminal_export_requests,
+    terminal_support_bundles,
+    terminal_crypto_keys,
+    terminal_crypto_key_events,
+    terminal_search_documents,
+    terminal_legacy_migration_records,
 );

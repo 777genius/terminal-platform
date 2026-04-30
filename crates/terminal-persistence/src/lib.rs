@@ -8,12 +8,15 @@ pub use legacy::{
 };
 pub use v2::{
     BackendCapabilityReportInput, BackupRecord, CommandBlockInput, CommandHistoryEntryInput,
-    CommandHistoryEntryRecord, DurabilityProfile, FeatureGateName, FeatureGateState,
+    CommandHistoryEntryRecord, DeleteRequestInput, DeleteRequestRecord, DeletionTombstoneRecord,
+    DurabilityProfile, ExportRequestInput, ExportRequestRecord, FeatureGateName, FeatureGateState,
     HistoryGapEventInput, HistoryGapRecord, IntegrityCheckRecord, JournalEventInput,
     JournalEventReceipt, PaneHistoryHydrationRecord, PaneHistoryReplayStrategy, PaneInput,
     RestoreDrillRecord, RestoreEvidence, RestoreGuaranteeLevel, RestorePlan,
-    ScreenSnapshotEventInput, ScreenSnapshotInput, ScreenSnapshotRecord, SessionInput,
-    StreamSegmentInput, StreamSegmentReceipt, StreamSegmentRecord, TerminalOutputEventInput,
-    TerminalPersistenceV2, TerminalPersistenceV2Config, TerminalPersistenceV2Error,
-    TopologySnapshotEventInput, TopologySnapshotInput, UiInputEventInput, WriterGenerationLease,
+    ScreenSnapshotEventInput, ScreenSnapshotInput, ScreenSnapshotRecord, SearchDocumentInput,
+    SearchDocumentRecord, SessionInput, StoragePressureEventInput, StoragePressureRecord,
+    StreamSegmentInput, StreamSegmentReceipt, StreamSegmentRecord, SupportBundleInput,
+    SupportBundleRecord, TerminalOutputEventInput, TerminalPersistenceV2,
+    TerminalPersistenceV2Config, TerminalPersistenceV2Error, TopologySnapshotEventInput,
+    TopologySnapshotInput, UiInputEventInput, WriterGenerationLease,
 };

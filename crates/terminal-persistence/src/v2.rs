@@ -28,11 +28,13 @@ use crate::{
             terminal_backend_capability_reports, terminal_backup_records,
             terminal_capture_receipts, terminal_clients, terminal_command_blocks,
             terminal_command_history_entries, terminal_commit_log, terminal_data_health_records,
-            terminal_db_identity, terminal_delivery_offsets, terminal_feature_gates,
+            terminal_db_identity, terminal_delete_requests, terminal_deletion_tombstones,
+            terminal_delivery_offsets, terminal_export_requests, terminal_feature_gates,
             terminal_history_gaps, terminal_integrity_checks, terminal_journal_events,
             terminal_outbox_messages, terminal_panes, terminal_restore_drills,
-            terminal_screen_snapshots, terminal_session_cursors, terminal_sessions,
-            terminal_stream_cursors, terminal_stream_segments, terminal_topology_snapshots,
+            terminal_screen_snapshots, terminal_search_documents, terminal_session_cursors,
+            terminal_sessions, terminal_storage_pressure_events, terminal_stream_cursors,
+            terminal_stream_segments, terminal_support_bundles, terminal_topology_snapshots,
             terminal_writer_generations,
         },
     },
@@ -2471,6 +2473,281 @@ impl TerminalPersistenceV2 {
             .collect()
     }
 
+    pub fn record_storage_pressure_event(
+        &self,
+        input: StoragePressureEventInput,
+    ) -> Result<StoragePressureRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let row = NewStoragePressureEventRow {
+            id: input.id.unwrap_or_else(new_id),
+            state: input.state.unwrap_or_else(|| "active".to_string()),
+            db_file_bytes: input.db_file_bytes,
+            wal_file_bytes: input.wal_file_bytes,
+            disk_free_bytes: input.disk_free_bytes,
+            temp_free_bytes: input.temp_free_bytes,
+            quota_bytes: input.quota_bytes,
+            action_taken: input.action_taken.unwrap_or_else(|| "warn_only".to_string()),
+            reason: input.reason,
+            created_at_ms: now,
+            metadata_json: json_metadata(&input.metadata)?,
+        };
+        insert_into(terminal_storage_pressure_events::table)
+            .values(&row)
+            .execute(&mut connection)?;
+        Ok(StoragePressureRecord::from(row))
+    }
+
+    pub fn probe_storage_health(
+        &self,
+    ) -> Result<StoragePressureRecord, TerminalPersistenceV2Error> {
+        let db_file_bytes = fs::metadata(&self.path)
+            .ok()
+            .map(|metadata| metadata.len())
+            .map(|len| u64_to_i64(len, "database file size"))
+            .transpose()?;
+        let wal_path = sqlite_sidecar_path(&self.path, "-wal");
+        let wal_file_bytes = fs::metadata(&wal_path)
+            .ok()
+            .map(|metadata| metadata.len())
+            .map(|len| u64_to_i64(len, "wal file size"))
+            .transpose()?;
+
+        self.record_storage_pressure_event(StoragePressureEventInput {
+            id: None,
+            state: Some("ok".to_string()),
+            db_file_bytes,
+            wal_file_bytes,
+            disk_free_bytes: None,
+            temp_free_bytes: None,
+            quota_bytes: None,
+            action_taken: Some("none".to_string()),
+            reason: Some("manual_probe".to_string()),
+            metadata: Some(serde_json::json!({
+                "db_path_hash": path_hash(&self.path),
+                "wal_path_hash": path_hash(&wal_path),
+            })),
+        })
+    }
+
+    pub fn create_delete_request(
+        &self,
+        input: DeleteRequestInput,
+    ) -> Result<DeleteRequestRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let row = NewDeleteRequestRow {
+            id: input.id.unwrap_or_else(new_id),
+            session_id: input.session_id,
+            request_kind: input.request_kind.unwrap_or_else(|| "user_delete".to_string()),
+            state: "pending".to_string(),
+            policy_id: input.policy_id,
+            requested_at_ms: now,
+            approved_at_ms: None,
+            completed_at_ms: None,
+            requester_ref_hash: input.requester_ref.map(|value| blake3_hash_text(&value)),
+            reason: input.reason,
+            metadata_json: json_metadata(&input.metadata)?,
+        };
+        insert_into(terminal_delete_requests::table).values(&row).execute(&mut connection)?;
+        Ok(DeleteRequestRecord::try_from(row)?)
+    }
+
+    pub fn complete_delete_request_with_tombstone(
+        &self,
+        delete_request_id: &str,
+        deleted_scope: &str,
+        evidence: Option<Value>,
+        metadata: Option<Value>,
+    ) -> Result<DeletionTombstoneRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let request = terminal_delete_requests::table
+                .filter(terminal_delete_requests::id.eq(delete_request_id))
+                .select(DeleteRequestRow::as_select())
+                .first::<DeleteRequestRow>(connection)?;
+            if request.state == "completed" {
+                return Err(TerminalPersistenceV2Error::InvalidData(
+                    "delete request is already completed".to_string(),
+                ));
+            }
+
+            diesel::update(
+                terminal_delete_requests::table
+                    .filter(terminal_delete_requests::id.eq(delete_request_id)),
+            )
+            .set((
+                terminal_delete_requests::state.eq("completed"),
+                terminal_delete_requests::completed_at_ms.eq(Some(now)),
+            ))
+            .execute(connection)?;
+
+            let row = NewDeletionTombstoneRow {
+                id: new_id(),
+                delete_request_id: Some(delete_request_id.to_string()),
+                session_id: request.session_id,
+                deleted_scope: deleted_scope.to_string(),
+                policy_id: request.policy_id,
+                deleted_at_ms: now,
+                evidence_json: evidence.as_ref().map(serde_json::to_string).transpose()?,
+                metadata_json: json_metadata(&metadata)?,
+            };
+            insert_into(terminal_deletion_tombstones::table).values(&row).execute(connection)?;
+            Ok(DeletionTombstoneRecord::try_from(row)?)
+        })
+    }
+
+    pub fn create_export_request(
+        &self,
+        input: ExportRequestInput,
+    ) -> Result<ExportRequestRecord, TerminalPersistenceV2Error> {
+        if input.include_raw {
+            self.ensure_raw_history_export_enabled()?;
+        }
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let manifest = privacy_manifest("export", input.include_raw, input.session_id.as_deref());
+        let row = NewExportRequestRow {
+            id: input.id.unwrap_or_else(new_id),
+            session_id: input.session_id,
+            export_kind: input.export_kind.unwrap_or_else(|| "redacted_logical".to_string()),
+            state: "pending".to_string(),
+            redaction_profile_id: input
+                .redaction_profile_id
+                .or_else(|| Some("default".to_string())),
+            include_raw: bool_to_int(input.include_raw),
+            approved_at_ms: None,
+            requested_at_ms: now,
+            completed_at_ms: None,
+            manifest_json: Some(serde_json::to_string(&manifest)?),
+            output_ref_hash: input.output_ref.map(|value| blake3_hash_text(&value)),
+            error: None,
+            metadata_json: json_metadata(&input.metadata)?,
+        };
+        insert_into(terminal_export_requests::table).values(&row).execute(&mut connection)?;
+        Ok(ExportRequestRecord::try_from(row)?)
+    }
+
+    pub fn create_support_bundle(
+        &self,
+        input: SupportBundleInput,
+    ) -> Result<SupportBundleRecord, TerminalPersistenceV2Error> {
+        if input.include_raw {
+            self.ensure_raw_history_export_enabled()?;
+        }
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let manifest = privacy_manifest("support_bundle", input.include_raw, None);
+        let row = NewSupportBundleRow {
+            id: input.id.unwrap_or_else(new_id),
+            scope_json: serde_json::to_string(&input.scope)?,
+            state: "pending".to_string(),
+            redaction_profile_id: input
+                .redaction_profile_id
+                .or_else(|| Some("default".to_string())),
+            include_raw: bool_to_int(input.include_raw),
+            requested_at_ms: now,
+            completed_at_ms: None,
+            manifest_json: Some(serde_json::to_string(&manifest)?),
+            output_ref_hash: input.output_ref.map(|value| blake3_hash_text(&value)),
+            error: None,
+            metadata_json: json_metadata(&input.metadata)?,
+        };
+        insert_into(terminal_support_bundles::table).values(&row).execute(&mut connection)?;
+        Ok(SupportBundleRecord::try_from(row)?)
+    }
+
+    pub fn upsert_redacted_search_document(
+        &self,
+        input: SearchDocumentInput,
+    ) -> Result<SearchDocumentRecord, TerminalPersistenceV2Error> {
+        validate_optional_range(input.event_seq_low, input.event_seq_high, "search event")?;
+        validate_optional_half_open_range(input.byte_low, input.byte_high, "search byte")?;
+
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let redacted = redact_terminal_text(&input.raw_text);
+        let redaction_state =
+            if redacted == input.raw_text { "clean".to_string() } else { "redacted".to_string() };
+        let source_hash = blake3_hash_text(&input.raw_text);
+        let document_id = input.document_id.unwrap_or_else(|| {
+            stable_search_document_id(
+                &input.session_id,
+                input.pane_id.as_deref(),
+                input.command_block_id.as_deref(),
+                &source_hash,
+            )
+        });
+        let row = NewSearchDocumentRow {
+            document_id: document_id.clone(),
+            session_id: input.session_id,
+            pane_id: input.pane_id,
+            command_block_id: input.command_block_id,
+            document_kind: input.document_kind.unwrap_or_else(|| "redacted_snippet".to_string()),
+            event_seq_low: input.event_seq_low,
+            event_seq_high: input.event_seq_high,
+            byte_low: input.byte_low,
+            byte_high: input.byte_high,
+            redaction_profile_id: input
+                .redaction_profile_id
+                .or_else(|| Some("default".to_string())),
+            redaction_state,
+            source_hash_algorithm: "blake3".to_string(),
+            source_hash,
+            text_preview: limit_text_preview(&redacted, 2_048),
+            updated_at_ms: now,
+            metadata_json: json_metadata(&input.metadata)?,
+        };
+        insert_into(terminal_search_documents::table)
+            .values(&row)
+            .on_conflict(terminal_search_documents::document_id)
+            .do_update()
+            .set((
+                terminal_search_documents::session_id.eq(row.session_id.clone()),
+                terminal_search_documents::pane_id.eq(row.pane_id.clone()),
+                terminal_search_documents::command_block_id.eq(row.command_block_id.clone()),
+                terminal_search_documents::document_kind.eq(row.document_kind.clone()),
+                terminal_search_documents::event_seq_low.eq(row.event_seq_low),
+                terminal_search_documents::event_seq_high.eq(row.event_seq_high),
+                terminal_search_documents::byte_low.eq(row.byte_low),
+                terminal_search_documents::byte_high.eq(row.byte_high),
+                terminal_search_documents::redaction_profile_id
+                    .eq(row.redaction_profile_id.clone()),
+                terminal_search_documents::redaction_state.eq(row.redaction_state.clone()),
+                terminal_search_documents::source_hash_algorithm
+                    .eq(row.source_hash_algorithm.clone()),
+                terminal_search_documents::source_hash.eq(row.source_hash.clone()),
+                terminal_search_documents::text_preview.eq(row.text_preview.clone()),
+                terminal_search_documents::updated_at_ms.eq(row.updated_at_ms),
+                terminal_search_documents::metadata_json.eq(row.metadata_json.clone()),
+            ))
+            .execute(&mut connection)?;
+
+        terminal_search_documents::table
+            .filter(terminal_search_documents::document_id.eq(document_id))
+            .select(SearchDocumentRow::as_select())
+            .first::<SearchDocumentRow>(&mut connection)?
+            .try_into()
+    }
+
+    pub fn list_search_documents(
+        &self,
+        session_id: &str,
+        limit: i64,
+    ) -> Result<Vec<SearchDocumentRecord>, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        terminal_search_documents::table
+            .filter(terminal_search_documents::session_id.eq(session_id))
+            .order(terminal_search_documents::updated_at_ms.desc())
+            .limit(limit.max(1))
+            .select(SearchDocumentRow::as_select())
+            .load::<SearchDocumentRow>(&mut connection)?
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect()
+    }
+
     pub fn vacuum_into_backup(
         &self,
         target_path: impl AsRef<Path>,
@@ -2605,6 +2882,16 @@ impl TerminalPersistenceV2 {
             ))
             .execute(&mut connection)?;
         Ok(())
+    }
+
+    fn ensure_raw_history_export_enabled(&self) -> Result<(), TerminalPersistenceV2Error> {
+        match self.feature_gate_state(FeatureGateName::RawHistoryExport)? {
+            FeatureGateState::Enabled => Ok(()),
+            other => Err(TerminalPersistenceV2Error::InvalidData(format!(
+                "raw history export is disabled by feature gate: {}",
+                other.as_str()
+            ))),
+        }
     }
 
     pub fn list_stream_segments(
@@ -2948,6 +3235,68 @@ pub struct OutboxMessageInput {
     pub dedupe_key: Option<String>,
     pub max_attempts: Option<i64>,
     pub next_run_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoragePressureEventInput {
+    pub id: Option<String>,
+    pub state: Option<String>,
+    pub db_file_bytes: Option<i64>,
+    pub wal_file_bytes: Option<i64>,
+    pub disk_free_bytes: Option<i64>,
+    pub temp_free_bytes: Option<i64>,
+    pub quota_bytes: Option<i64>,
+    pub action_taken: Option<String>,
+    pub reason: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteRequestInput {
+    pub id: Option<String>,
+    pub session_id: Option<String>,
+    pub request_kind: Option<String>,
+    pub policy_id: Option<String>,
+    pub requester_ref: Option<String>,
+    pub reason: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportRequestInput {
+    pub id: Option<String>,
+    pub session_id: Option<String>,
+    pub export_kind: Option<String>,
+    pub redaction_profile_id: Option<String>,
+    pub include_raw: bool,
+    pub output_ref: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupportBundleInput {
+    pub id: Option<String>,
+    pub scope: Value,
+    pub redaction_profile_id: Option<String>,
+    pub include_raw: bool,
+    pub output_ref: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchDocumentInput {
+    pub document_id: Option<String>,
+    pub session_id: String,
+    pub pane_id: Option<String>,
+    pub command_block_id: Option<String>,
+    pub document_kind: Option<String>,
+    pub event_seq_low: Option<i64>,
+    pub event_seq_high: Option<i64>,
+    pub byte_low: Option<i64>,
+    pub byte_high: Option<i64>,
+    pub redaction_profile_id: Option<String>,
+    pub raw_text: String,
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3356,6 +3705,292 @@ pub struct BackupRecord {
     pub finished_at_ms: Option<i64>,
     pub quick_check_result: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoragePressureRecord {
+    pub id: String,
+    pub state: String,
+    pub db_file_bytes: Option<i64>,
+    pub wal_file_bytes: Option<i64>,
+    pub disk_free_bytes: Option<i64>,
+    pub temp_free_bytes: Option<i64>,
+    pub quota_bytes: Option<i64>,
+    pub action_taken: String,
+    pub reason: Option<String>,
+    pub created_at_ms: i64,
+    pub metadata_json: Option<Value>,
+}
+
+impl TryFrom<StoragePressureEventRow> for StoragePressureRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: StoragePressureEventRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            state: row.state,
+            db_file_bytes: row.db_file_bytes,
+            wal_file_bytes: row.wal_file_bytes,
+            disk_free_bytes: row.disk_free_bytes,
+            temp_free_bytes: row.temp_free_bytes,
+            quota_bytes: row.quota_bytes,
+            action_taken: row.action_taken,
+            reason: row.reason,
+            created_at_ms: row.created_at_ms,
+            metadata_json: row
+                .metadata_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+        })
+    }
+}
+
+impl From<NewStoragePressureEventRow> for StoragePressureRecord {
+    fn from(row: NewStoragePressureEventRow) -> Self {
+        Self {
+            id: row.id,
+            state: row.state,
+            db_file_bytes: row.db_file_bytes,
+            wal_file_bytes: row.wal_file_bytes,
+            disk_free_bytes: row.disk_free_bytes,
+            temp_free_bytes: row.temp_free_bytes,
+            quota_bytes: row.quota_bytes,
+            action_taken: row.action_taken,
+            reason: row.reason,
+            created_at_ms: row.created_at_ms,
+            metadata_json: row.metadata_json.and_then(|value| serde_json::from_str(&value).ok()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteRequestRecord {
+    pub id: String,
+    pub session_id: Option<String>,
+    pub request_kind: String,
+    pub state: String,
+    pub policy_id: Option<String>,
+    pub requested_at_ms: i64,
+    pub approved_at_ms: Option<i64>,
+    pub completed_at_ms: Option<i64>,
+    pub requester_ref_hash: Option<String>,
+    pub reason: Option<String>,
+    pub metadata_json: Option<Value>,
+}
+
+impl TryFrom<DeleteRequestRow> for DeleteRequestRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: DeleteRequestRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            session_id: row.session_id,
+            request_kind: row.request_kind,
+            state: row.state,
+            policy_id: row.policy_id,
+            requested_at_ms: row.requested_at_ms,
+            approved_at_ms: row.approved_at_ms,
+            completed_at_ms: row.completed_at_ms,
+            requester_ref_hash: row.requester_ref_hash,
+            reason: row.reason,
+            metadata_json: row
+                .metadata_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+        })
+    }
+}
+
+impl TryFrom<NewDeleteRequestRow> for DeleteRequestRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: NewDeleteRequestRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            session_id: row.session_id,
+            request_kind: row.request_kind,
+            state: row.state,
+            policy_id: row.policy_id,
+            requested_at_ms: row.requested_at_ms,
+            approved_at_ms: row.approved_at_ms,
+            completed_at_ms: row.completed_at_ms,
+            requester_ref_hash: row.requester_ref_hash,
+            reason: row.reason,
+            metadata_json: row
+                .metadata_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeletionTombstoneRecord {
+    pub id: String,
+    pub delete_request_id: Option<String>,
+    pub session_id: Option<String>,
+    pub deleted_scope: String,
+    pub policy_id: Option<String>,
+    pub deleted_at_ms: i64,
+    pub evidence_json: Option<Value>,
+    pub metadata_json: Option<Value>,
+}
+
+impl TryFrom<NewDeletionTombstoneRow> for DeletionTombstoneRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: NewDeletionTombstoneRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            delete_request_id: row.delete_request_id,
+            session_id: row.session_id,
+            deleted_scope: row.deleted_scope,
+            policy_id: row.policy_id,
+            deleted_at_ms: row.deleted_at_ms,
+            evidence_json: row
+                .evidence_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            metadata_json: row
+                .metadata_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportRequestRecord {
+    pub id: String,
+    pub session_id: Option<String>,
+    pub export_kind: String,
+    pub state: String,
+    pub redaction_profile_id: Option<String>,
+    pub include_raw: bool,
+    pub approved_at_ms: Option<i64>,
+    pub requested_at_ms: i64,
+    pub completed_at_ms: Option<i64>,
+    pub manifest_json: Option<Value>,
+    pub output_ref_hash: Option<String>,
+    pub error: Option<String>,
+    pub metadata_json: Option<Value>,
+}
+
+impl TryFrom<NewExportRequestRow> for ExportRequestRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: NewExportRequestRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            session_id: row.session_id,
+            export_kind: row.export_kind,
+            state: row.state,
+            redaction_profile_id: row.redaction_profile_id,
+            include_raw: row.include_raw != 0,
+            approved_at_ms: row.approved_at_ms,
+            requested_at_ms: row.requested_at_ms,
+            completed_at_ms: row.completed_at_ms,
+            manifest_json: row
+                .manifest_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            output_ref_hash: row.output_ref_hash,
+            error: row.error,
+            metadata_json: row
+                .metadata_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupportBundleRecord {
+    pub id: String,
+    pub scope_json: Value,
+    pub state: String,
+    pub redaction_profile_id: Option<String>,
+    pub include_raw: bool,
+    pub requested_at_ms: i64,
+    pub completed_at_ms: Option<i64>,
+    pub manifest_json: Option<Value>,
+    pub output_ref_hash: Option<String>,
+    pub error: Option<String>,
+    pub metadata_json: Option<Value>,
+}
+
+impl TryFrom<NewSupportBundleRow> for SupportBundleRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: NewSupportBundleRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            scope_json: serde_json::from_str(&row.scope_json)?,
+            state: row.state,
+            redaction_profile_id: row.redaction_profile_id,
+            include_raw: row.include_raw != 0,
+            requested_at_ms: row.requested_at_ms,
+            completed_at_ms: row.completed_at_ms,
+            manifest_json: row
+                .manifest_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            output_ref_hash: row.output_ref_hash,
+            error: row.error,
+            metadata_json: row
+                .metadata_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchDocumentRecord {
+    pub document_id: String,
+    pub session_id: String,
+    pub pane_id: Option<String>,
+    pub command_block_id: Option<String>,
+    pub document_kind: String,
+    pub event_seq_low: Option<i64>,
+    pub event_seq_high: Option<i64>,
+    pub byte_low: Option<i64>,
+    pub byte_high: Option<i64>,
+    pub redaction_profile_id: Option<String>,
+    pub redaction_state: String,
+    pub source_hash_algorithm: String,
+    pub source_hash: String,
+    pub text_preview: String,
+    pub updated_at_ms: i64,
+    pub metadata_json: Option<Value>,
+}
+
+impl TryFrom<SearchDocumentRow> for SearchDocumentRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: SearchDocumentRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            document_id: row.document_id,
+            session_id: row.session_id,
+            pane_id: row.pane_id,
+            command_block_id: row.command_block_id,
+            document_kind: row.document_kind,
+            event_seq_low: row.event_seq_low,
+            event_seq_high: row.event_seq_high,
+            byte_low: row.byte_low,
+            byte_high: row.byte_high,
+            redaction_profile_id: row.redaction_profile_id,
+            redaction_state: row.redaction_state,
+            source_hash_algorithm: row.source_hash_algorithm,
+            source_hash: row.source_hash,
+            text_preview: row.text_preview,
+            updated_at_ms: row.updated_at_ms,
+            metadata_json: row
+                .metadata_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4219,6 +4854,166 @@ struct NewBackupRecordRow {
 }
 
 #[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_storage_pressure_events)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct StoragePressureEventRow {
+    id: String,
+    state: String,
+    db_file_bytes: Option<i64>,
+    wal_file_bytes: Option<i64>,
+    disk_free_bytes: Option<i64>,
+    temp_free_bytes: Option<i64>,
+    quota_bytes: Option<i64>,
+    action_taken: String,
+    reason: Option<String>,
+    created_at_ms: i64,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_storage_pressure_events)]
+struct NewStoragePressureEventRow {
+    id: String,
+    state: String,
+    db_file_bytes: Option<i64>,
+    wal_file_bytes: Option<i64>,
+    disk_free_bytes: Option<i64>,
+    temp_free_bytes: Option<i64>,
+    quota_bytes: Option<i64>,
+    action_taken: String,
+    reason: Option<String>,
+    created_at_ms: i64,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_delete_requests)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct DeleteRequestRow {
+    id: String,
+    session_id: Option<String>,
+    request_kind: String,
+    state: String,
+    policy_id: Option<String>,
+    requested_at_ms: i64,
+    approved_at_ms: Option<i64>,
+    completed_at_ms: Option<i64>,
+    requester_ref_hash: Option<String>,
+    reason: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_delete_requests)]
+struct NewDeleteRequestRow {
+    id: String,
+    session_id: Option<String>,
+    request_kind: String,
+    state: String,
+    policy_id: Option<String>,
+    requested_at_ms: i64,
+    approved_at_ms: Option<i64>,
+    completed_at_ms: Option<i64>,
+    requester_ref_hash: Option<String>,
+    reason: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_deletion_tombstones)]
+struct NewDeletionTombstoneRow {
+    id: String,
+    delete_request_id: Option<String>,
+    session_id: Option<String>,
+    deleted_scope: String,
+    policy_id: Option<String>,
+    deleted_at_ms: i64,
+    evidence_json: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_export_requests)]
+struct NewExportRequestRow {
+    id: String,
+    session_id: Option<String>,
+    export_kind: String,
+    state: String,
+    redaction_profile_id: Option<String>,
+    include_raw: i32,
+    approved_at_ms: Option<i64>,
+    requested_at_ms: i64,
+    completed_at_ms: Option<i64>,
+    manifest_json: Option<String>,
+    output_ref_hash: Option<String>,
+    error: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_support_bundles)]
+struct NewSupportBundleRow {
+    id: String,
+    scope_json: String,
+    state: String,
+    redaction_profile_id: Option<String>,
+    include_raw: i32,
+    requested_at_ms: i64,
+    completed_at_ms: Option<i64>,
+    manifest_json: Option<String>,
+    output_ref_hash: Option<String>,
+    error: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_search_documents)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct SearchDocumentRow {
+    rowid: i32,
+    document_id: String,
+    session_id: String,
+    pane_id: Option<String>,
+    command_block_id: Option<String>,
+    document_kind: String,
+    event_seq_low: Option<i64>,
+    event_seq_high: Option<i64>,
+    byte_low: Option<i64>,
+    byte_high: Option<i64>,
+    redaction_profile_id: Option<String>,
+    redaction_state: String,
+    source_hash_algorithm: String,
+    source_hash: String,
+    text_preview: String,
+    updated_at_ms: i64,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_search_documents)]
+struct NewSearchDocumentRow {
+    document_id: String,
+    session_id: String,
+    pane_id: Option<String>,
+    command_block_id: Option<String>,
+    document_kind: String,
+    event_seq_low: Option<i64>,
+    event_seq_high: Option<i64>,
+    byte_low: Option<i64>,
+    byte_high: Option<i64>,
+    redaction_profile_id: Option<String>,
+    redaction_state: String,
+    source_hash_algorithm: String,
+    source_hash: String,
+    text_preview: String,
+    updated_at_ms: i64,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = terminal_db_identity)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 #[allow(dead_code)]
@@ -4794,6 +5589,20 @@ fn validate_optional_range(
     }
 }
 
+fn validate_optional_half_open_range(
+    low: Option<i64>,
+    high: Option<i64>,
+    label: &str,
+) -> Result<(), TerminalPersistenceV2Error> {
+    match (low, high) {
+        (Some(low), Some(high)) if low < high => Ok(()),
+        (None, None) => Ok(()),
+        _ => Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "{label} range must be empty or half-open with low < high"
+        ))),
+    }
+}
+
 fn validate_non_negative_seq(
     value: Option<i64>,
     label: &str,
@@ -4901,6 +5710,22 @@ fn stable_history_id(
     format!("command-history-{}", blake3_hash_text(&material))
 }
 
+fn stable_search_document_id(
+    session_id: &str,
+    pane_id: Option<&str>,
+    command_block_id: Option<&str>,
+    source_hash: &str,
+) -> String {
+    let material = format!(
+        "{}\0{}\0{}\0{}",
+        session_id,
+        pane_id.unwrap_or_default(),
+        command_block_id.unwrap_or_default(),
+        source_hash
+    );
+    format!("search-document-{}", blake3_hash_text(&material))
+}
+
 fn command_text_from_ui_input(data: &str) -> Option<String> {
     let trimmed_end = data.trim_end_matches(['\r', '\n']);
     if trimmed_end.len() == data.len() {
@@ -4944,8 +5769,84 @@ fn blake3_hash_file(path: &Path) -> Result<String, TerminalPersistenceV2Error> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 
+fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    PathBuf::from(value)
+}
+
 fn path_hash(path: &Path) -> String {
     blake3_hash_text(&path.to_string_lossy())
+}
+
+fn privacy_manifest(kind: &str, include_raw: bool, session_id: Option<&str>) -> Value {
+    let included_classes = if include_raw {
+        vec![
+            "class_public_diagnostic",
+            "class_local_metadata",
+            "class_user_context",
+            "class_sensitive_content",
+        ]
+    } else {
+        vec!["class_public_diagnostic", "class_local_metadata", "class_user_context_redacted"]
+    };
+    let excluded_classes = if include_raw {
+        vec!["class_secret_material"]
+    } else {
+        vec!["class_sensitive_content", "class_secret_material"]
+    };
+    serde_json::json!({
+        "kind": kind,
+        "include_raw": include_raw,
+        "session_id": session_id,
+        "included_classes": included_classes,
+        "excluded_classes": excluded_classes,
+        "raw_terminal_output": include_raw,
+        "raw_command_text": include_raw,
+        "prompt_injection_text_is_data": true,
+    })
+}
+
+fn limit_text_preview(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
+}
+
+fn redact_terminal_text(value: &str) -> String {
+    let mut redacted = Vec::new();
+    for token in value.split_whitespace() {
+        redacted.push(redact_token(token));
+    }
+    redacted.join(" ")
+}
+
+fn redact_token(token: &str) -> String {
+    const KEY_PREFIXES: [&str; 8] = [
+        "password=",
+        "passwd=",
+        "pwd=",
+        "token=",
+        "access_token=",
+        "api_key=",
+        "apikey=",
+        "secret=",
+    ];
+    let lower = token.to_ascii_lowercase();
+    if lower == "bearer" {
+        return token.to_string();
+    }
+    if token.len() >= 24
+        && token.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        && token.chars().any(|ch| ch.is_ascii_digit())
+        && token.chars().any(|ch| ch.is_ascii_alphabetic())
+    {
+        return "[redacted-secret]".to_string();
+    }
+    for prefix in KEY_PREFIXES {
+        if lower.starts_with(prefix) {
+            return format!("{}[redacted]", &token[..prefix.len().min(token.len())]);
+        }
+    }
+    token.to_string()
 }
 
 fn current_time_ms() -> i64 {
@@ -5792,6 +6693,161 @@ mod tests {
         let _ = std::fs::remove_file(&target_path);
         let _ = std::fs::remove_file(target_path.with_extension("sqlite3-wal"));
         let _ = std::fs::remove_file(target_path.with_extension("sqlite3-shm"));
+    }
+
+    #[test]
+    fn storage_probe_and_search_documents_are_redacted() {
+        let store = test_store("storage-search");
+        let (session_id, pane_id, _writer) = session_and_pane(&store);
+
+        let pressure = store.probe_storage_health().expect("storage probe should persist");
+        let document = store
+            .upsert_redacted_search_document(SearchDocumentInput {
+                document_id: None,
+                session_id: session_id.clone(),
+                pane_id: Some(pane_id),
+                command_block_id: None,
+                document_kind: None,
+                event_seq_low: Some(1),
+                event_seq_high: Some(1),
+                byte_low: Some(0),
+                byte_high: Some(64),
+                redaction_profile_id: None,
+                raw_text:
+                    "curl -H Authorization: Bearer sk_live_secret_token_123456 password=hunter2"
+                        .to_string(),
+                metadata: None,
+            })
+            .expect("search document should persist");
+        let documents =
+            store.list_search_documents(&session_id, 10).expect("search documents should list");
+
+        assert_eq!(pressure.state, "ok");
+        assert_eq!(pressure.action_taken, "none");
+        assert!(pressure.db_file_bytes.is_some());
+        assert_eq!(document.redaction_state, "redacted");
+        assert!(!document.text_preview.contains("hunter2"));
+        assert!(!document.text_preview.contains("sk_live_secret"));
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].document_id, document.document_id);
+    }
+
+    #[test]
+    fn export_and_support_are_redacted_by_default_and_raw_is_gated() {
+        let store = test_store("privacy-workflows");
+        let (session_id, _pane_id, _writer) = session_and_pane(&store);
+
+        let export = store
+            .create_export_request(ExportRequestInput {
+                id: None,
+                session_id: Some(session_id.clone()),
+                export_kind: None,
+                redaction_profile_id: None,
+                include_raw: false,
+                output_ref: Some("C:\\temp\\redacted-export.json".to_string()),
+                metadata: None,
+            })
+            .expect("redacted export request should persist");
+        let support = store
+            .create_support_bundle(SupportBundleInput {
+                id: None,
+                scope: serde_json::json!({"session_id": session_id}),
+                redaction_profile_id: None,
+                include_raw: false,
+                output_ref: Some("support-bundle.zip".to_string()),
+                metadata: None,
+            })
+            .expect("redacted support bundle should persist");
+        let raw_export = store.create_export_request(ExportRequestInput {
+            id: None,
+            session_id: None,
+            export_kind: Some("raw_transcript".to_string()),
+            redaction_profile_id: None,
+            include_raw: true,
+            output_ref: None,
+            metadata: None,
+        });
+
+        assert!(!export.include_raw);
+        assert_eq!(
+            export.manifest_json.as_ref().and_then(|value| value["raw_terminal_output"].as_bool()),
+            Some(false)
+        );
+        assert!(!support.include_raw);
+        assert_eq!(
+            support
+                .manifest_json
+                .as_ref()
+                .and_then(|value| value["excluded_classes"].as_array())
+                .map(Vec::len),
+            Some(2)
+        );
+        assert!(
+            matches!(raw_export, Err(TerminalPersistenceV2Error::InvalidData(message)) if message.contains("raw history export is disabled"))
+        );
+
+        store
+            .set_feature_gate_state(
+                FeatureGateName::RawHistoryExport,
+                FeatureGateState::Enabled,
+                Some("test raw export approval"),
+            )
+            .expect("raw export gate should enable");
+        let approved_raw_export = store
+            .create_export_request(ExportRequestInput {
+                id: None,
+                session_id: None,
+                export_kind: Some("raw_transcript".to_string()),
+                redaction_profile_id: None,
+                include_raw: true,
+                output_ref: None,
+                metadata: None,
+            })
+            .expect("raw export should persist when gate is enabled");
+        assert!(approved_raw_export.include_raw);
+    }
+
+    #[test]
+    fn delete_request_writes_tombstone_without_deleting_canonical_history() {
+        let store = test_store("delete-workflow");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id,
+                b"history must not disappear silently\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+
+        let request = store
+            .create_delete_request(DeleteRequestInput {
+                id: None,
+                session_id: Some(session_id.clone()),
+                request_kind: Some("user_delete".to_string()),
+                policy_id: None,
+                requester_ref: Some("local-user".to_string()),
+                reason: Some("test delete request".to_string()),
+                metadata: None,
+            })
+            .expect("delete request should persist");
+        let tombstone = store
+            .complete_delete_request_with_tombstone(
+                &request.id,
+                "session",
+                Some(serde_json::json!({"canonical_delete_deferred": true})),
+                None,
+            )
+            .expect("tombstone should persist");
+        let segments = store
+            .list_stream_segments(&session_id, &pane_id, 1, 10)
+            .expect("canonical history should remain readable");
+
+        assert_eq!(request.state, "pending");
+        assert_eq!(tombstone.session_id.as_deref(), Some(session_id.as_str()));
+        assert_eq!(tombstone.deleted_scope, "session");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].payload, b"history must not disappear silently\r\n");
     }
 
     #[test]
