@@ -2645,7 +2645,7 @@ impl TerminalPersistenceV2 {
         let now = self.config.clock.now_ms();
         let row = NewStoragePressureEventRow {
             id: input.id.unwrap_or_else(new_id),
-            state: input.state.unwrap_or_else(|| "active".to_string()),
+            state: input.state.unwrap_or_else(|| "ok".to_string()),
             db_file_bytes: input.db_file_bytes,
             wal_file_bytes: input.wal_file_bytes,
             disk_free_bytes: input.disk_free_bytes,
@@ -2656,6 +2656,7 @@ impl TerminalPersistenceV2 {
             created_at_ms: now,
             metadata_json: json_metadata(&input.metadata)?,
         };
+        validate_storage_pressure_domain(&row.state, &row.action_taken)?;
         insert_into(terminal_storage_pressure_events::table)
             .values(&row)
             .execute(&mut connection)?;
@@ -6632,6 +6633,32 @@ fn classify_storage_pressure(
     StoragePressureClassification { state, action_taken, reason, db_over_budget, wal_over_budget }
 }
 
+fn validate_storage_pressure_domain(
+    state: &str,
+    action_taken: &str,
+) -> Result<(), TerminalPersistenceV2Error> {
+    const STATES: &[&str] = &["ok", "warning", "degraded", "full", "unknown"];
+    const ACTIONS: &[&str] = &[
+        "none",
+        "warn_only",
+        "checkpoint_recommended",
+        "checkpoint_and_warn",
+        "degrade_with_gap",
+        "fail_closed",
+    ];
+    if !STATES.contains(&state) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown storage pressure state: {state}"
+        )));
+    }
+    if !ACTIONS.contains(&action_taken) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown storage pressure action: {action_taken}"
+        )));
+    }
+    Ok(())
+}
+
 fn path_hash(path: &Path) -> String {
     blake3_hash_text(&path.to_string_lossy())
 }
@@ -8305,6 +8332,30 @@ mod tests {
                 .as_ref()
                 .and_then(|metadata| metadata["no_silent_delete"].as_bool()),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn storage_pressure_rejects_unknown_domain_values() {
+        let store = test_store("storage-pressure-domain");
+
+        let error = store
+            .record_storage_pressure_event(StoragePressureEventInput {
+                id: None,
+                state: Some("maybe_bad".to_string()),
+                db_file_bytes: None,
+                wal_file_bytes: None,
+                disk_free_bytes: None,
+                temp_free_bytes: None,
+                quota_bytes: None,
+                action_taken: Some("none".to_string()),
+                reason: Some("test".to_string()),
+                metadata: None,
+            })
+            .expect_err("unknown storage pressure state should fail");
+
+        assert!(
+            matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("unknown storage pressure state"))
         );
     }
 

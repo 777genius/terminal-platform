@@ -14,9 +14,9 @@ pub use v2::{
     JournalEventReceipt, PaneHistoryHydrationRecord, PaneHistoryReplayStrategy, PaneInput,
     RestoreDrillRecord, RestoreEvidence, RestoreGuaranteeLevel, RestorePlan,
     ScreenSnapshotEventInput, ScreenSnapshotInput, ScreenSnapshotRecord, SearchDocumentInput,
-    SearchDocumentRecord, SessionInput, StoragePressureEventInput, StoragePressureRecord,
-    StreamSegmentInput, StreamSegmentReceipt, StreamSegmentRecord, SupportBundleInput,
-    SupportBundleRecord, TerminalOutputEventInput, TerminalPersistenceV2,
+    SearchDocumentRecord, SessionInput, StoragePressureConfig, StoragePressureEventInput,
+    StoragePressureRecord, StreamSegmentInput, StreamSegmentReceipt, StreamSegmentRecord,
+    SupportBundleInput, SupportBundleRecord, TerminalOutputEventInput, TerminalPersistenceV2,
     TerminalPersistenceV2Config, TerminalPersistenceV2Error, TopologySnapshotEventInput,
     TopologySnapshotInput, UiInputEventInput, WriterGenerationLease,
 };
