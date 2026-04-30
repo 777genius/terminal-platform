@@ -665,6 +665,77 @@ CREATE TABLE IF NOT EXISTS terminal_search_documents (
 CREATE INDEX IF NOT EXISTS idx_terminal_search_documents_session
 ON terminal_search_documents(session_id, updated_at_ms DESC);
 
+CREATE TABLE IF NOT EXISTS terminal_ai_context_packages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT REFERENCES terminal_sessions(id) ON DELETE SET NULL,
+    pane_id TEXT REFERENCES terminal_panes(id) ON DELETE SET NULL,
+    state TEXT NOT NULL CHECK(state IN ('ready', 'blocked', 'expired', 'failed')),
+    redaction_profile_id TEXT,
+    include_raw INTEGER NOT NULL DEFAULT 0 CHECK(include_raw IN (0, 1)),
+    requested_at_ms BIGINT NOT NULL,
+    built_at_ms BIGINT,
+    item_count BIGINT NOT NULL DEFAULT 0,
+    manifest_json TEXT,
+    metadata_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_terminal_ai_context_packages_session
+ON terminal_ai_context_packages(session_id, requested_at_ms DESC);
+
+CREATE TABLE IF NOT EXISTS terminal_ai_context_items (
+    id TEXT PRIMARY KEY,
+    package_id TEXT NOT NULL REFERENCES terminal_ai_context_packages(id) ON DELETE CASCADE,
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('command_history', 'search_document', 'restore_evidence', 'manual_context')),
+    source_ref TEXT,
+    session_id TEXT REFERENCES terminal_sessions(id) ON DELETE SET NULL,
+    pane_id TEXT REFERENCES terminal_panes(id) ON DELETE SET NULL,
+    command_block_id TEXT REFERENCES terminal_command_blocks(id) ON DELETE SET NULL,
+    event_seq_low BIGINT,
+    event_seq_high BIGINT,
+    byte_low BIGINT,
+    byte_high BIGINT,
+    redaction_state TEXT NOT NULL,
+    data_only INTEGER NOT NULL DEFAULT 1 CHECK(data_only IN (0, 1)),
+    content_preview TEXT NOT NULL,
+    metadata_json TEXT,
+    CHECK((event_seq_low IS NULL AND event_seq_high IS NULL) OR (event_seq_low IS NOT NULL AND event_seq_high IS NOT NULL AND event_seq_low <= event_seq_high)),
+    CHECK((byte_low IS NULL AND byte_high IS NULL) OR (byte_low IS NOT NULL AND byte_high IS NOT NULL AND byte_low < byte_high))
+);
+
+CREATE INDEX IF NOT EXISTS idx_terminal_ai_context_items_package
+ON terminal_ai_context_items(package_id, source_kind);
+
+CREATE TABLE IF NOT EXISTS terminal_prompt_injection_findings (
+    id TEXT PRIMARY KEY,
+    package_id TEXT REFERENCES terminal_ai_context_packages(id) ON DELETE SET NULL,
+    item_id TEXT REFERENCES terminal_ai_context_items(id) ON DELETE SET NULL,
+    severity TEXT NOT NULL CHECK(severity IN ('info', 'warning', 'critical')),
+    pattern_kind TEXT NOT NULL,
+    action_state TEXT NOT NULL CHECK(action_state IN ('detected', 'reviewed', 'ignored')),
+    detected_at_ms BIGINT NOT NULL,
+    evidence_preview TEXT NOT NULL,
+    metadata_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_terminal_prompt_injection_findings_package
+ON terminal_prompt_injection_findings(package_id, severity);
+
+CREATE TABLE IF NOT EXISTS terminal_ai_action_approvals (
+    id TEXT PRIMARY KEY,
+    package_id TEXT REFERENCES terminal_ai_context_packages(id) ON DELETE SET NULL,
+    action_kind TEXT NOT NULL CHECK(action_kind IN ('send_input', 'rerun_command', 'export', 'share', 'delete', 'open_link')),
+    state TEXT NOT NULL CHECK(state IN ('pending', 'approved', 'denied', 'expired', 'used')),
+    requester_ref_hash TEXT,
+    approver_ref_hash TEXT,
+    requested_at_ms BIGINT NOT NULL,
+    decided_at_ms BIGINT,
+    expires_at_ms BIGINT,
+    metadata_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_terminal_ai_action_approvals_package
+ON terminal_ai_action_approvals(package_id, state, requested_at_ms DESC);
+
 CREATE TABLE IF NOT EXISTS terminal_legacy_migration_records (
     id TEXT PRIMARY KEY,
     legacy_table TEXT NOT NULL,

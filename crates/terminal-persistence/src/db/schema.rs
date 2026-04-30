@@ -649,6 +649,71 @@ diesel::table! {
 }
 
 diesel::table! {
+    terminal_ai_context_packages (id) {
+        id -> Text,
+        session_id -> Nullable<Text>,
+        pane_id -> Nullable<Text>,
+        state -> Text,
+        redaction_profile_id -> Nullable<Text>,
+        include_raw -> Integer,
+        requested_at_ms -> BigInt,
+        built_at_ms -> Nullable<BigInt>,
+        item_count -> BigInt,
+        manifest_json -> Nullable<Text>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_ai_context_items (id) {
+        id -> Text,
+        package_id -> Text,
+        source_kind -> Text,
+        source_ref -> Nullable<Text>,
+        session_id -> Nullable<Text>,
+        pane_id -> Nullable<Text>,
+        command_block_id -> Nullable<Text>,
+        event_seq_low -> Nullable<BigInt>,
+        event_seq_high -> Nullable<BigInt>,
+        byte_low -> Nullable<BigInt>,
+        byte_high -> Nullable<BigInt>,
+        redaction_state -> Text,
+        data_only -> Integer,
+        content_preview -> Text,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_prompt_injection_findings (id) {
+        id -> Text,
+        package_id -> Nullable<Text>,
+        item_id -> Nullable<Text>,
+        severity -> Text,
+        pattern_kind -> Text,
+        action_state -> Text,
+        detected_at_ms -> BigInt,
+        evidence_preview -> Text,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_ai_action_approvals (id) {
+        id -> Text,
+        package_id -> Nullable<Text>,
+        action_kind -> Text,
+        state -> Text,
+        requester_ref_hash -> Nullable<Text>,
+        approver_ref_hash -> Nullable<Text>,
+        requested_at_ms -> BigInt,
+        decided_at_ms -> Nullable<BigInt>,
+        expires_at_ms -> Nullable<BigInt>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     terminal_legacy_migration_records (id) {
         id -> Text,
         legacy_table -> Text,
@@ -671,6 +736,15 @@ diesel::joinable!(terminal_delivery_offsets -> terminal_sessions (session_id));
 diesel::joinable!(terminal_stream_cursors -> terminal_panes (pane_id));
 diesel::joinable!(terminal_stream_cursors -> terminal_sessions (session_id));
 diesel::joinable!(terminal_session_cursors -> terminal_sessions (session_id));
+diesel::joinable!(terminal_ai_context_packages -> terminal_sessions (session_id));
+diesel::joinable!(terminal_ai_context_packages -> terminal_panes (pane_id));
+diesel::joinable!(terminal_ai_context_items -> terminal_ai_context_packages (package_id));
+diesel::joinable!(terminal_ai_context_items -> terminal_sessions (session_id));
+diesel::joinable!(terminal_ai_context_items -> terminal_panes (pane_id));
+diesel::joinable!(terminal_ai_context_items -> terminal_command_blocks (command_block_id));
+diesel::joinable!(terminal_prompt_injection_findings -> terminal_ai_context_packages (package_id));
+diesel::joinable!(terminal_prompt_injection_findings -> terminal_ai_context_items (item_id));
+diesel::joinable!(terminal_ai_action_approvals -> terminal_ai_context_packages (package_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     terminal_db_identity,
@@ -712,5 +786,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     terminal_crypto_key_events,
     terminal_external_artifacts,
     terminal_search_documents,
+    terminal_ai_context_packages,
+    terminal_ai_context_items,
+    terminal_prompt_injection_findings,
+    terminal_ai_action_approvals,
     terminal_legacy_migration_records,
 );

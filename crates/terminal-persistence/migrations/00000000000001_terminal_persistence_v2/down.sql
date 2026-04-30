@@ -1,4 +1,8 @@
 DROP TABLE IF EXISTS terminal_legacy_migration_records;
+DROP TABLE IF EXISTS terminal_ai_action_approvals;
+DROP TABLE IF EXISTS terminal_prompt_injection_findings;
+DROP TABLE IF EXISTS terminal_ai_context_items;
+DROP TABLE IF EXISTS terminal_ai_context_packages;
 DROP TABLE IF EXISTS terminal_search_documents;
 DROP TABLE IF EXISTS terminal_external_artifacts;
 DROP TABLE IF EXISTS terminal_crypto_key_events;
