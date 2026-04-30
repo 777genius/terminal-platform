@@ -3407,8 +3407,12 @@ impl BackendCapabilityReportInput {
                 "raw_stream".to_string()
             } else if capabilities.rendered_viewport_stream {
                 "rendered_stream".to_string()
+            } else if capabilities.rendered_viewport_snapshot
+                || capabilities.rendered_scrollback_snapshot
+            {
+                "rendered_snapshot".to_string()
             } else {
-                "snapshot_only".to_string()
+                "unknown".to_string()
             },
             capture_semantics: if capabilities.raw_output_stream {
                 "raw_vt_stream".to_string()
@@ -7497,6 +7501,46 @@ mod tests {
             matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("unknown capture strategy"))
         );
         assert_eq!(capability_count, 0);
+    }
+
+    #[test]
+    fn backend_capability_mapper_outputs_db_valid_domains() {
+        let store = test_store("backend-capability-mapper-domains");
+
+        let unknown = BackendCapabilityReportInput::from_backend_capabilities(
+            BackendKind::Zellij,
+            "imported_foreign",
+            &BackendCapabilities::default(),
+        );
+        assert_eq!(unknown.capture_strategy, "unknown");
+        assert_eq!(unknown.capture_semantics, "rendered_plaintext_snapshot");
+        store
+            .record_backend_capability_report(unknown)
+            .expect("unknown strategy is a valid conservative capability report");
+
+        let mut snapshot_capabilities = BackendCapabilities::default();
+        snapshot_capabilities.rendered_scrollback_snapshot = true;
+        let snapshot = BackendCapabilityReportInput::from_backend_capabilities(
+            BackendKind::Tmux,
+            "imported_foreign",
+            &snapshot_capabilities,
+        );
+        assert_eq!(snapshot.capture_strategy, "rendered_snapshot");
+        assert_eq!(snapshot.capture_semantics, "rendered_plaintext_snapshot");
+        store
+            .record_backend_capability_report(snapshot)
+            .expect("rendered snapshot strategy should persist");
+
+        let mut raw_capabilities = BackendCapabilities::default();
+        raw_capabilities.raw_output_stream = true;
+        let raw = BackendCapabilityReportInput::from_backend_capabilities(
+            BackendKind::Native,
+            "local_daemon",
+            &raw_capabilities,
+        );
+        assert_eq!(raw.capture_strategy, "raw_stream");
+        assert_eq!(raw.capture_semantics, "raw_vt_stream");
+        store.record_backend_capability_report(raw).expect("raw strategy should persist");
     }
 
     #[test]
