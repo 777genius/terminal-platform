@@ -524,13 +524,13 @@ CREATE TABLE IF NOT EXISTS terminal_backup_records (
 
 CREATE TABLE IF NOT EXISTS terminal_storage_pressure_events (
     id TEXT PRIMARY KEY,
-    state TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('ok', 'warning', 'degraded', 'full', 'unknown')),
     db_file_bytes BIGINT,
     wal_file_bytes BIGINT,
     disk_free_bytes BIGINT,
     temp_free_bytes BIGINT,
     quota_bytes BIGINT,
-    action_taken TEXT NOT NULL,
+    action_taken TEXT NOT NULL CHECK(action_taken IN ('none', 'warn_only', 'checkpoint_recommended', 'checkpoint_and_warn', 'degrade_with_gap', 'fail_closed')),
     reason TEXT,
     created_at_ms BIGINT NOT NULL,
     metadata_json TEXT

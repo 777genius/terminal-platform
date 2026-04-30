@@ -8360,6 +8360,22 @@ mod tests {
     }
 
     #[test]
+    fn storage_pressure_db_constraints_reject_unknown_domain_values() {
+        let store = test_store("storage-pressure-db-domain");
+        let mut connection = store.connection().expect("connection should open");
+
+        let error = diesel::sql_query(
+            "INSERT INTO terminal_storage_pressure_events \
+             (id, state, action_taken, created_at_ms) \
+             VALUES ('invalid-storage-pressure-domain', 'maybe_bad', 'none', 1)",
+        )
+        .execute(&mut connection)
+        .expect_err("sqlite CHECK constraint should reject unknown storage pressure state");
+
+        assert!(matches!(error, DieselError::DatabaseError(_, _)));
+    }
+
+    #[test]
     fn export_and_support_are_redacted_by_default_and_raw_is_gated() {
         let store = test_store("privacy-workflows");
         let (session_id, _pane_id, _writer) = session_and_pane(&store);
