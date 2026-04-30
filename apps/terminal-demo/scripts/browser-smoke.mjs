@@ -857,6 +857,22 @@ async function main() {
     }
 
     if (
+      result.afterCommandHistoryDbReload.storageBeforeReload !== null
+      || !result.afterCommandHistoryDbReload.connectionReady
+      || !result.afterCommandHistoryDbReload.attached
+      || result.afterCommandHistoryDbReload.commandHistoryCount < 1
+      || !result.afterCommandHistoryDbReload.commandHistoryIncludesPrimary
+      || !result.afterCommandHistoryDbReload.storedCommandHistoryIncludesPrimary
+      || !isCompactCommandHistoryBadge(result.afterCommandHistoryDbReload.historyBadgeText)
+    ) {
+      throw new Error(
+        `Command history did not hydrate from DB after browser storage clear: ${
+          JSON.stringify(result.afterCommandHistoryDbReload)
+        }`,
+      );
+    }
+
+    if (
       !result.afterCommandHistoryClear.clicked
       || result.afterCommandHistoryClear.beforeCount < 1
       || !result.afterCommandHistoryClear.firstClickArmed
@@ -3116,6 +3132,56 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
 
+    const commandHistoryStorageBeforeDbReload = await evaluate(send, `(() => {
+      window.localStorage.removeItem(${JSON.stringify(commandHistoryStorageKey)});
+      return window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)});
+    })()`);
+    await send("Page.reload", { ignoreCache: true });
+    await sleep(500);
+    const afterCommandHistoryDbReload = await waitForBrowserValue(
+      send,
+      "command history hydrated from DB after browser storage clear",
+      `(() => {
+        const debug = window.terminalDemoDebug?.getState?.();
+        const entries = debug?.commandHistory?.entries ?? [];
+        const storedCommandHistory = (() => {
+          try {
+            const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })();
+        const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+        const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+        return {
+          storageBeforeReload: ${JSON.stringify(commandHistoryStorageBeforeDbReload)},
+          connectionReady: debug?.connection?.state === 'ready',
+          attached: Boolean(debug?.attachedSession?.focused_screen),
+          commandHistoryCount: entries.length,
+          commandHistoryLatest: entries.at(-1) ?? null,
+          commandHistoryIncludesPrimary: entries.some((entry) =>
+            typeof entry === 'string' && entry.includes('browser-smoke-ok')
+          ),
+          storedCommandHistoryCount: storedCommandHistory.length,
+          storedCommandHistoryIncludesPrimary: storedCommandHistory.some((entry) =>
+            typeof entry === 'string' && entry.includes('browser-smoke-ok')
+          ),
+          historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
+            ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        };
+      })()`,
+      (value) => (
+        value.storageBeforeReload === null
+        && value.connectionReady
+        && value.attached
+        && value.commandHistoryIncludesPrimary
+        && value.storedCommandHistoryIncludesPrimary
+      ),
+      35_000,
+    );
+    await installBrowserSmokeHelpers(send);
+
     const afterCommandHistoryClear = await evaluate(send, `(async () => {
       const workspaceHost = document.querySelector('tp-terminal-workspace') ?? null;
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
@@ -3405,6 +3471,7 @@ async function runSmokeScenario(browserUrl) {
           ? afterHistoryReplay.focusedSequence !== replayInitialSequence
           : false,
       },
+      afterCommandHistoryDbReload,
       afterCommandHistoryClear,
       afterDirectScreenInput,
       afterDirectScreenPaste,
