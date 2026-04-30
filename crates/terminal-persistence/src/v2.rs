@@ -113,7 +113,14 @@ mod storage_pressure;
 
 mod restore;
 
-mod capture;
+mod capture_diagnostics;
+mod command_capture;
+mod delivery_offsets;
+mod event_capture;
+mod outbox;
+mod snapshot_writer;
+mod stream_journal;
+mod writer_generations;
 
 mod models;
 pub use models::*;
