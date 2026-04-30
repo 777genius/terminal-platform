@@ -1072,6 +1072,7 @@ function createStaticSavedSessionSummary(snapshot: WorkspaceSnapshot): SavedSess
       replays_saved_screen_buffers: false,
       preserves_process_state: false,
     },
+    restore_semantics_v2: null,
   };
 }
 

@@ -122,6 +122,7 @@ async function main() {
       new URL(autoStartBrowserUrl).searchParams.get("controlPlaneUrl");
     const autoStartDefaultSessionStreamUrl =
       new URL(autoStartBrowserUrl).searchParams.get("sessionStreamUrl");
+    process.stdout.write("[browser-smoke] running auto-start scenario\n");
     const autoStartResult = await runAutoStartSmokeScenario(autoStartBrowserUrl);
     if (autoStartResult.issues.length > 0) {
       throw new Error(`Browser auto-start reported runtime issues: ${JSON.stringify(autoStartResult.issues)}`);
@@ -143,6 +144,7 @@ async function main() {
     ) {
       throw new Error(`Host auto-start did not settle into one default shell: ${JSON.stringify(autoStartResult)}`);
     }
+    process.stdout.write("[browser-smoke] running stale auto-start URL scenario\n");
     const staleAutoStartResult = await runAutoStartSmokeScenario(buildStaleBrowserUrl(autoStartBrowserUrl), {
       allowStaleBootstrapConnectionIssues: true,
     });
@@ -159,6 +161,7 @@ async function main() {
       throw new Error(`Host auto-start did not replace a stale browser URL: ${JSON.stringify(staleAutoStartResult)}`);
     }
 
+    process.stdout.write("[browser-smoke] running browser host restart recovery scenario\n");
     const restartRecoveryResult = await runAutoStartRestartRecoveryScenario(autoStartBrowserUrl, {
       initialControlPlaneUrl: autoStartDefaultControlPlaneUrl,
       initialSessionStreamUrl: autoStartDefaultSessionStreamUrl,
@@ -195,6 +198,7 @@ async function main() {
       runtimeSlug: `${runtimeSlugPrefix}-explicit`,
       sessionStorePath,
     });
+    process.stdout.write("[browser-smoke] running explicit launch scenario\n");
     const result = await runSmokeScenario(browserUrl);
 
     if (result.issues.length > 0) {
@@ -3917,6 +3921,7 @@ async function removeFileWithWindowsRetries(filePath, options = {}) {
 
 function evaluate(send, expression) {
   let timeoutId;
+  const timeoutSnippet = formatEvaluationTimeoutSnippet(expression);
   const evaluation = send("Runtime.evaluate", {
     expression,
     returnByValue: true,
@@ -3924,13 +3929,23 @@ function evaluate(send, expression) {
   }).then(resolveRuntimeEvaluationValue);
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
-      reject(new Error("Timed out waiting for browser evaluation"));
+      reject(new Error(`Timed out waiting for browser evaluation: ${timeoutSnippet}`));
     }, 60_000);
   });
 
   return Promise.race([evaluation, timeout]).finally(() => {
     clearTimeout(timeoutId);
   });
+}
+
+function formatEvaluationTimeoutSnippet(expression) {
+  return String(expression)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(" ")
+    .slice(0, 240);
 }
 
 async function waitForBrowser(send, label, expression, timeoutMs = 20_000) {
