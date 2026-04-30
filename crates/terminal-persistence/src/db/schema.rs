@@ -252,6 +252,25 @@ diesel::table! {
 }
 
 diesel::table! {
+    terminal_outbox_messages (id) {
+        id -> Text,
+        message_kind -> Text,
+        dedupe_key -> Nullable<Text>,
+        state -> Text,
+        payload_json -> Text,
+        attempts -> BigInt,
+        max_attempts -> BigInt,
+        claimed_by -> Nullable<Text>,
+        lease_token -> Nullable<Text>,
+        claimed_until_ms -> Nullable<BigInt>,
+        next_run_at_ms -> BigInt,
+        last_error -> Nullable<Text>,
+        created_at_ms -> BigInt,
+        updated_at_ms -> BigInt,
+    }
+}
+
+diesel::table! {
     terminal_command_blocks (id) {
         id -> Text,
         session_id -> Text,
@@ -427,6 +446,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     terminal_capture_receipts,
     terminal_clients,
     terminal_delivery_offsets,
+    terminal_outbox_messages,
     terminal_command_blocks,
     terminal_command_history_entries,
     terminal_topology_snapshots,

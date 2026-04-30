@@ -29,10 +29,10 @@ use crate::{
             terminal_capture_receipts, terminal_clients, terminal_command_blocks,
             terminal_command_history_entries, terminal_commit_log, terminal_db_identity,
             terminal_delivery_offsets, terminal_feature_gates, terminal_history_gaps,
-            terminal_integrity_checks, terminal_journal_events, terminal_panes,
-            terminal_restore_drills, terminal_screen_snapshots, terminal_session_cursors,
-            terminal_sessions, terminal_stream_cursors, terminal_stream_segments,
-            terminal_topology_snapshots, terminal_writer_generations,
+            terminal_integrity_checks, terminal_journal_events, terminal_outbox_messages,
+            terminal_panes, terminal_restore_drills, terminal_screen_snapshots,
+            terminal_session_cursors, terminal_sessions, terminal_stream_cursors,
+            terminal_stream_segments, terminal_topology_snapshots, terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -1524,6 +1524,36 @@ impl TerminalPersistenceV2 {
             };
             insert_into(terminal_journal_events::table).values(&event).execute(connection)?;
 
+            let outbox = NewOutboxMessageRow {
+                id: new_id(),
+                message_kind: "pane_history_projection".to_string(),
+                dedupe_key: Some(normalize_outbox_dedupe_key(&format!(
+                    "pane_history_projection:{}",
+                    commit.id
+                ))),
+                state: "pending".to_string(),
+                payload_json: serde_json::to_string(&serde_json::json!({
+                    "session_id": input.session_id.clone(),
+                    "pane_id": input.pane_id.clone(),
+                    "stream_id": stream_id.clone(),
+                    "commit_id": commit.id.clone(),
+                    "event_seq_low": event_seq_low,
+                    "event_seq_high": event_seq_high,
+                    "byte_low": byte_low,
+                    "byte_high": byte_high
+                }))?,
+                attempts: 0,
+                max_attempts: 5,
+                claimed_by: None,
+                lease_token: None,
+                claimed_until_ms: None,
+                next_run_at_ms: now,
+                last_error: None,
+                created_at_ms: now,
+                updated_at_ms: now,
+            };
+            insert_into(terminal_outbox_messages::table).values(&outbox).execute(connection)?;
+
             if let (Some(source_kind), Some(source_event_id_hash)) =
                 (capture_source_kind.as_deref(), source_event_id_hash.as_deref())
             {
@@ -1940,6 +1970,170 @@ impl TerminalPersistenceV2 {
         .to_string();
 
         Ok(DeliveryReplayWindow { from_event_seq, to_event_seq: persisted, gap_state })
+    }
+
+    pub fn enqueue_outbox_message(
+        &self,
+        input: OutboxMessageInput,
+    ) -> Result<OutboxMessageRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let max_attempts = input.max_attempts.unwrap_or(5);
+        if max_attempts <= 0 {
+            return Err(TerminalPersistenceV2Error::InvalidData(
+                "outbox max_attempts must be positive".to_string(),
+            ));
+        }
+        let dedupe_key = input.dedupe_key.as_deref().map(normalize_outbox_dedupe_key);
+        if let Some(dedupe_key) = dedupe_key.as_deref()
+            && let Some(existing) = load_outbox_message_by_dedupe(&mut connection, dedupe_key)?
+        {
+            return existing.try_into();
+        }
+
+        let row = NewOutboxMessageRow {
+            id: new_id(),
+            message_kind: input.message_kind,
+            dedupe_key,
+            state: "pending".to_string(),
+            payload_json: serde_json::to_string(&input.payload)?,
+            attempts: 0,
+            max_attempts,
+            claimed_by: None,
+            lease_token: None,
+            claimed_until_ms: None,
+            next_run_at_ms: input.next_run_at_ms.unwrap_or(now),
+            last_error: None,
+            created_at_ms: now,
+            updated_at_ms: now,
+        };
+        insert_into(terminal_outbox_messages::table).values(&row).execute(&mut connection)?;
+        load_outbox_message(&mut connection, &row.id)?.try_into()
+    }
+
+    pub fn claim_next_outbox_message(
+        &self,
+        worker_id: &str,
+        lease_ms: i64,
+    ) -> Result<Option<OutboxMessageRecord>, TerminalPersistenceV2Error> {
+        if lease_ms <= 0 {
+            return Err(TerminalPersistenceV2Error::InvalidData(
+                "outbox lease_ms must be positive".to_string(),
+            ));
+        }
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        connection.immediate_transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let candidate = terminal_outbox_messages::table
+                .filter(
+                    terminal_outbox_messages::state
+                        .eq("pending")
+                        .and(terminal_outbox_messages::next_run_at_ms.le(now))
+                        .or(terminal_outbox_messages::state
+                            .eq("claimed")
+                            .and(terminal_outbox_messages::claimed_until_ms.le(Some(now)))),
+                )
+                .filter(
+                    terminal_outbox_messages::attempts.lt(terminal_outbox_messages::max_attempts),
+                )
+                .order((
+                    terminal_outbox_messages::next_run_at_ms.asc(),
+                    terminal_outbox_messages::created_at_ms.asc(),
+                ))
+                .select(OutboxMessageRow::as_select())
+                .first::<OutboxMessageRow>(connection)
+                .optional()?;
+            let Some(candidate) = candidate else {
+                return Ok(None);
+            };
+
+            let lease_token = new_id();
+            let updated = diesel::update(
+                terminal_outbox_messages::table
+                    .filter(terminal_outbox_messages::id.eq(&candidate.id))
+                    .filter(
+                        terminal_outbox_messages::state.eq("pending").or(
+                            terminal_outbox_messages::state
+                                .eq("claimed")
+                                .and(terminal_outbox_messages::claimed_until_ms.le(Some(now))),
+                        ),
+                    ),
+            )
+            .set((
+                terminal_outbox_messages::state.eq("claimed"),
+                terminal_outbox_messages::attempts.eq(candidate.attempts + 1),
+                terminal_outbox_messages::claimed_by.eq(Some(worker_id.to_string())),
+                terminal_outbox_messages::lease_token.eq(Some(lease_token)),
+                terminal_outbox_messages::claimed_until_ms.eq(Some(now + lease_ms)),
+                terminal_outbox_messages::last_error.eq::<Option<String>>(None),
+                terminal_outbox_messages::updated_at_ms.eq(now),
+            ))
+            .execute(connection)?;
+            if updated == 0 {
+                return Ok(None);
+            }
+
+            load_outbox_message(connection, &candidate.id)?.try_into().map(Some)
+        })
+    }
+
+    pub fn mark_outbox_message_done(
+        &self,
+        message_id: &str,
+        lease_token: &str,
+    ) -> Result<bool, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let updated = diesel::update(
+            terminal_outbox_messages::table
+                .filter(terminal_outbox_messages::id.eq(message_id))
+                .filter(terminal_outbox_messages::lease_token.eq(Some(lease_token.to_string())))
+                .filter(terminal_outbox_messages::state.eq("claimed")),
+        )
+        .set((
+            terminal_outbox_messages::state.eq("done"),
+            terminal_outbox_messages::claimed_by.eq::<Option<String>>(None),
+            terminal_outbox_messages::lease_token.eq::<Option<String>>(None),
+            terminal_outbox_messages::claimed_until_ms.eq::<Option<i64>>(None),
+            terminal_outbox_messages::updated_at_ms.eq(now),
+        ))
+        .execute(&mut connection)?;
+        Ok(updated > 0)
+    }
+
+    pub fn fail_outbox_message(
+        &self,
+        message_id: &str,
+        lease_token: &str,
+        error: &str,
+    ) -> Result<OutboxMessageRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let row = terminal_outbox_messages::table
+                .filter(terminal_outbox_messages::id.eq(message_id))
+                .filter(terminal_outbox_messages::lease_token.eq(Some(lease_token.to_string())))
+                .filter(terminal_outbox_messages::state.eq("claimed"))
+                .select(OutboxMessageRow::as_select())
+                .first::<OutboxMessageRow>(connection)?;
+            let next_state =
+                if row.attempts >= row.max_attempts { "quarantined" } else { "pending" };
+            let retry_delay_ms = 1_000_i64.saturating_mul(row.attempts.max(1));
+            diesel::update(
+                terminal_outbox_messages::table.filter(terminal_outbox_messages::id.eq(message_id)),
+            )
+            .set((
+                terminal_outbox_messages::state.eq(next_state),
+                terminal_outbox_messages::claimed_by.eq::<Option<String>>(None),
+                terminal_outbox_messages::lease_token.eq::<Option<String>>(None),
+                terminal_outbox_messages::claimed_until_ms.eq::<Option<i64>>(None),
+                terminal_outbox_messages::next_run_at_ms.eq(now + retry_delay_ms),
+                terminal_outbox_messages::last_error.eq(Some(error.to_string())),
+                terminal_outbox_messages::updated_at_ms.eq(now),
+            ))
+            .execute(connection)?;
+            load_outbox_message(connection, message_id)?.try_into()
+        })
     }
 
     pub fn write_screen_snapshot(
@@ -2712,6 +2906,15 @@ pub struct DeliveryProgressInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutboxMessageInput {
+    pub message_kind: String,
+    pub payload: Value,
+    pub dedupe_key: Option<String>,
+    pub max_attempts: Option<i64>,
+    pub next_run_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiInputEventInput {
     pub session_id: String,
     pub route: SessionRoute,
@@ -3130,6 +3333,47 @@ pub struct DeliveryReplayWindow {
     pub from_event_seq: Option<i64>,
     pub to_event_seq: i64,
     pub gap_state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutboxMessageRecord {
+    pub id: String,
+    pub message_kind: String,
+    pub dedupe_key: Option<String>,
+    pub state: String,
+    pub payload_json: Value,
+    pub attempts: i64,
+    pub max_attempts: i64,
+    pub claimed_by: Option<String>,
+    pub lease_token: Option<String>,
+    pub claimed_until_ms: Option<i64>,
+    pub next_run_at_ms: i64,
+    pub last_error: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+impl TryFrom<OutboxMessageRow> for OutboxMessageRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: OutboxMessageRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            message_kind: row.message_kind,
+            dedupe_key: row.dedupe_key,
+            state: row.state,
+            payload_json: serde_json::from_str(&row.payload_json)?,
+            attempts: row.attempts,
+            max_attempts: row.max_attempts,
+            claimed_by: row.claimed_by,
+            lease_token: row.lease_token,
+            claimed_until_ms: row.claimed_until_ms,
+            next_run_at_ms: row.next_run_at_ms,
+            last_error: row.last_error,
+            created_at_ms: row.created_at_ms,
+            updated_at_ms: row.updated_at_ms,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3563,6 +3807,46 @@ struct NewDeliveryOffsetRow {
     last_persisted_event_seq: i64,
     replay_from_event_seq: Option<i64>,
     gap_state: String,
+    updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_outbox_messages)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct OutboxMessageRow {
+    id: String,
+    message_kind: String,
+    dedupe_key: Option<String>,
+    state: String,
+    payload_json: String,
+    attempts: i64,
+    max_attempts: i64,
+    claimed_by: Option<String>,
+    lease_token: Option<String>,
+    claimed_until_ms: Option<i64>,
+    next_run_at_ms: i64,
+    last_error: Option<String>,
+    created_at_ms: i64,
+    updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_outbox_messages)]
+struct NewOutboxMessageRow {
+    id: String,
+    message_kind: String,
+    dedupe_key: Option<String>,
+    state: String,
+    payload_json: String,
+    attempts: i64,
+    max_attempts: i64,
+    claimed_by: Option<String>,
+    lease_token: Option<String>,
+    claimed_until_ms: Option<i64>,
+    next_run_at_ms: i64,
+    last_error: Option<String>,
+    created_at_ms: i64,
     updated_at_ms: i64,
 }
 
@@ -4245,6 +4529,29 @@ fn has_history_gap_in_range(
     Ok(count > 0)
 }
 
+fn load_outbox_message(
+    connection: &mut SqliteConnection,
+    id: &str,
+) -> Result<OutboxMessageRow, TerminalPersistenceV2Error> {
+    terminal_outbox_messages::table
+        .filter(terminal_outbox_messages::id.eq(id))
+        .select(OutboxMessageRow::as_select())
+        .first::<OutboxMessageRow>(connection)
+        .map_err(Into::into)
+}
+
+fn load_outbox_message_by_dedupe(
+    connection: &mut SqliteConnection,
+    dedupe_key: &str,
+) -> Result<Option<OutboxMessageRow>, TerminalPersistenceV2Error> {
+    terminal_outbox_messages::table
+        .filter(terminal_outbox_messages::dedupe_key.eq(Some(dedupe_key.to_string())))
+        .select(OutboxMessageRow::as_select())
+        .first::<OutboxMessageRow>(connection)
+        .optional()
+        .map_err(Into::into)
+}
+
 fn advance_stream_cursor(
     connection: &mut SqliteConnection,
     cursor_id: &str,
@@ -4396,6 +4703,10 @@ fn delivery_offset_id(client_id: &str, session_id: &str, pane_id: &str, stream_i
         "delivery-offset-{}",
         blake3_hash_text(&format!("{client_id}\0{session_id}\0{pane_id}\0{stream_id}"))
     )
+}
+
+fn normalize_outbox_dedupe_key(value: &str) -> String {
+    format!("blake3:{}", blake3_hash_text(value))
 }
 
 fn ui_input_capture_source_kind(pane_id: &str) -> String {
@@ -4816,6 +5127,115 @@ mod tests {
         assert_eq!(window.from_event_seq, Some(1));
         assert_eq!(window.to_event_seq, 2);
         assert_eq!(window.gap_state, "gap");
+    }
+
+    #[test]
+    fn stream_segment_enqueue_projection_outbox_message() {
+        let store = test_store("outbox-stream");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let receipt = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id,
+                b"outbox\r\n".to_vec(),
+            ))
+            .expect("stream segment should persist");
+
+        let message = store
+            .claim_next_outbox_message("projection-worker", 60_000)
+            .expect("claim should load")
+            .expect("projection outbox message should exist");
+
+        assert_eq!(message.message_kind, "pane_history_projection");
+        assert_eq!(message.state, "claimed");
+        assert_eq!(message.attempts, 1);
+        assert_eq!(message.payload_json["session_id"], session_id);
+        assert_eq!(message.payload_json["pane_id"], pane_id);
+        assert_eq!(message.payload_json["commit_id"], receipt.commit_id);
+    }
+
+    #[test]
+    fn outbox_dedupes_claims_and_completes_by_lease_token() {
+        let store = test_store("outbox-dedupe");
+        let first = store
+            .enqueue_outbox_message(OutboxMessageInput {
+                message_kind: "restore_drill".to_string(),
+                payload: serde_json::json!({ "session_id": "session-a" }),
+                dedupe_key: Some("restore-drill:session-a".to_string()),
+                max_attempts: None,
+                next_run_at_ms: None,
+            })
+            .expect("first outbox message should enqueue");
+        let second = store
+            .enqueue_outbox_message(OutboxMessageInput {
+                message_kind: "restore_drill".to_string(),
+                payload: serde_json::json!({ "session_id": "session-a" }),
+                dedupe_key: Some("restore-drill:session-a".to_string()),
+                max_attempts: None,
+                next_run_at_ms: None,
+            })
+            .expect("deduped outbox message should load");
+
+        let claim = store
+            .claim_next_outbox_message("worker-a", 60_000)
+            .expect("claim should succeed")
+            .expect("message should be claimable");
+        let second_claim = store
+            .claim_next_outbox_message("worker-b", 60_000)
+            .expect("second claim should not fail");
+        let wrong_token_done = store
+            .mark_outbox_message_done(&claim.id, "wrong-token")
+            .expect("wrong token completion should be safe");
+        let done = store
+            .mark_outbox_message_done(
+                &claim.id,
+                claim.lease_token.as_deref().expect("claim should have a lease token"),
+            )
+            .expect("completion should succeed");
+        let no_more = store
+            .claim_next_outbox_message("worker-a", 60_000)
+            .expect("done message should not be claimable");
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(claim.id, first.id);
+        assert!(second_claim.is_none());
+        assert!(!wrong_token_done);
+        assert!(done);
+        assert!(no_more.is_none());
+    }
+
+    #[test]
+    fn outbox_quarantines_poison_message_after_max_attempts() {
+        let store = test_store("outbox-quarantine");
+        let message = store
+            .enqueue_outbox_message(OutboxMessageInput {
+                message_kind: "integrity_check".to_string(),
+                payload: serde_json::json!({ "scope": "test" }),
+                dedupe_key: None,
+                max_attempts: Some(1),
+                next_run_at_ms: None,
+            })
+            .expect("message should enqueue");
+        let claim = store
+            .claim_next_outbox_message("worker-a", 60_000)
+            .expect("claim should succeed")
+            .expect("message should be claimable");
+
+        let failed = store
+            .fail_outbox_message(
+                &message.id,
+                claim.lease_token.as_deref().expect("claim should have a lease token"),
+                "synthetic failure",
+            )
+            .expect("failure should persist");
+        let no_more = store
+            .claim_next_outbox_message("worker-b", 60_000)
+            .expect("quarantined message should not be claimable");
+
+        assert_eq!(failed.state, "quarantined");
+        assert_eq!(failed.last_error.as_deref(), Some("synthetic failure"));
+        assert!(no_more.is_none());
     }
 
     #[test]
