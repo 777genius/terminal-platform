@@ -800,6 +800,24 @@ async function main() {
     }
 
     if (
+      !result.afterCommandSavedRestore.saved
+      || !result.afterCommandSavedRestore.restored
+      || result.afterCommandSavedRestore.savedSessionCount < result.afterCommandSavedRestore.beforeSavedSessionCount
+      || result.afterCommandSavedRestore.historySource !== "saved_session_restore"
+      || !result.afterCommandSavedRestore.historyIncludesPrimary
+      || !result.afterCommandSavedRestore.domHistoryIncludesPrimary
+      || !result.afterCommandSavedRestore.domHasRestoreBoundary
+      || !result.afterCommandSavedRestore.viewportIncludesPrimary
+      || !result.afterCommandSavedRestore.inputReadyAfterRestore
+    ) {
+      throw new Error(
+        `Saved command-output restore did not replay visible history: ${
+          JSON.stringify(result.afterCommandSavedRestore)
+        }`,
+      );
+    }
+
+    if (
       !result.afterScreenCopy.clicked
       || result.afterScreenCopy.copiedEvents !== 1
       || result.afterScreenCopy.failedEvents !== 0
@@ -2702,6 +2720,181 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
 
+    const afterCommandSavedRestore = await evaluate(send, `(async () => {
+      const waitForValue = async (label, predicate, timeoutMs = 30_000) => {
+        const deadline = performance.now() + timeoutMs;
+        let last = null;
+        while (performance.now() < deadline) {
+          last = await predicate();
+          if (last) {
+            return { ok: true, value: last };
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        return { ok: false, label, last };
+      };
+      const stateBefore = window.terminalDemoDebug?.getState?.();
+      const beforeSavedSessionCount = stateBefore?.catalog?.savedSessions?.length ?? 0;
+      const beforeSessionId = stateBefore?.attachedSession?.session?.session_id ?? null;
+      const workspaceHost = document.querySelector('tp-terminal-workspace') ?? null;
+      const workspaceRoot = workspaceHost?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const sessionTools = commandRoot?.querySelector('[data-testid="tp-session-tools"]') ?? null;
+      const saveLayoutButton = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
+      const controllerCommands = window.terminalDemoDebug?.controller?.commands ?? null;
+      if (!workspaceHost || !saveLayoutButton || !controllerCommands?.restoreSavedSession) {
+        return {
+          saved: false,
+          restored: false,
+          reason: !workspaceHost
+            ? 'workspace host missing'
+            : !saveLayoutButton
+              ? 'save layout button missing'
+              : 'restore command missing',
+          beforeSavedSessionCount,
+          savedSessionCount: beforeSavedSessionCount,
+        };
+      }
+      if (saveLayoutButton.disabled) {
+        return {
+          saved: false,
+          restored: false,
+          reason: 'save layout button disabled',
+          beforeSavedSessionCount,
+          savedSessionCount: beforeSavedSessionCount,
+          saveLayoutTitle: saveLayoutButton.getAttribute('title'),
+        };
+      }
+
+      if (sessionTools) {
+        sessionTools.open = true;
+      }
+      let saveEventDetail = null;
+      workspaceHost.addEventListener('tp-terminal-layout-saved', (event) => {
+        saveEventDetail = event.detail ?? null;
+      }, { once: true });
+      saveLayoutButton.click();
+
+      const savedWait = await waitForValue('saved command-output layout', async () => {
+        const state = window.terminalDemoDebug?.getState?.();
+        const savedSessions = state?.catalog?.savedSessions ?? [];
+        const savedSessionId = saveEventDetail?.savedSessionId ?? savedSessions[0]?.session_id ?? null;
+        const savedSession = savedSessionId
+          ? savedSessions.find((session) => session.session_id === savedSessionId) ?? null
+          : null;
+        if (!savedSession) {
+          return null;
+        }
+        return {
+          savedSessionId,
+          savedSessionCount: savedSessions.length,
+          savedSessionTitle: savedSession.title ?? null,
+          savedAtMs: savedSession.saved_at_ms != null ? String(savedSession.saved_at_ms) : null,
+          restoreGuarantee: savedSession.restore_semantics_v2?.restore_guarantee_level ?? null,
+          replayScreenBuffers:
+            savedSession.restore_semantics_v2?.guarantees?.replays_saved_screen_buffers ?? null,
+        };
+      });
+      if (!savedWait.ok || !savedWait.value?.savedSessionId) {
+        return {
+          saved: false,
+          restored: false,
+          reason: 'saved layout did not appear in catalog',
+          beforeSavedSessionCount,
+          savedSessionCount: beforeSavedSessionCount,
+          saveEventDetail,
+          savedWait,
+        };
+      }
+
+      await controllerCommands.restoreSavedSession(savedWait.value.savedSessionId);
+      const restoredWait = await waitForValue('restored command-output visible history', async () => {
+        const state = window.terminalDemoDebug?.getState?.();
+        const activeSessionId =
+          state?.selection?.activeSessionId ?? state?.attachedSession?.session?.session_id ?? null;
+        const activePaneId =
+          state?.selection?.activePaneId ?? state?.attachedSession?.focused_screen?.pane_id ?? null;
+        const history = activePaneId ? state?.historicalPanes?.[activePaneId] ?? null : null;
+        const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
+        const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+        const historyLineTexts = [...(screenRoot?.querySelectorAll('[data-line-source="history"] .text') ?? [])]
+          .map((line) => line.textContent ?? '');
+        const boundaryTexts = [...(screenRoot?.querySelectorAll('[data-line-source="boundary"] .text') ?? [])]
+          .map((line) => line.textContent ?? '');
+        const viewportText = viewport?.textContent?.replace(/\\s+/g, ' ').trim() ?? '';
+        const historyIncludesPrimary = (history?.lines ?? []).some((line) => /browser-smoke-ok/i.test(line));
+        const domHistoryIncludesPrimary = historyLineTexts.some((line) => /browser-smoke-ok/i.test(line));
+        const domHasRestoreBoundary = boundaryTexts.some((line) => /restored history above/i.test(line));
+        const viewportIncludesPrimary = /browser-smoke-ok/i.test(viewportText);
+        const inputReadyAfterRestore = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]')
+          ?.getAttribute('tabindex') === '0'
+          && Boolean(commandRoot?.querySelector('[data-testid="tp-command-input"]:not([disabled])'));
+        if (
+          activeSessionId
+          && activePaneId
+          && history?.source === 'saved_session_restore'
+          && historyIncludesPrimary
+          && domHistoryIncludesPrimary
+          && domHasRestoreBoundary
+          && viewportIncludesPrimary
+          && inputReadyAfterRestore
+        ) {
+          return {
+            activeSessionId,
+            activePaneId,
+            historySource: history.source,
+            historyLineCount: history.lines.length,
+            historyIncludesPrimary,
+            domHistoryIncludesPrimary,
+            domHasRestoreBoundary,
+            viewportIncludesPrimary,
+            inputReadyAfterRestore,
+            viewportPreview: viewportText.slice(0, 180),
+          };
+        }
+        return null;
+      });
+
+      const stateAfter = window.terminalDemoDebug?.getState?.();
+      const activePaneId =
+        stateAfter?.selection?.activePaneId ?? stateAfter?.attachedSession?.focused_screen?.pane_id ?? null;
+      const history = activePaneId ? stateAfter?.historicalPanes?.[activePaneId] ?? null : null;
+      const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
+      const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      const historyLineTexts = [...(screenRoot?.querySelectorAll('[data-line-source="history"] .text') ?? [])]
+        .map((line) => line.textContent ?? '');
+      const boundaryTexts = [...(screenRoot?.querySelectorAll('[data-line-source="boundary"] .text') ?? [])]
+        .map((line) => line.textContent ?? '');
+      const viewportText = viewport?.textContent?.replace(/\\s+/g, ' ').trim() ?? '';
+
+      return {
+        saved: true,
+        restored: restoredWait.ok,
+        beforeSavedSessionCount,
+        savedSessionCount: savedWait.value.savedSessionCount,
+        savedSessionId: savedWait.value.savedSessionId,
+        savedSessionTitle: savedWait.value.savedSessionTitle,
+        savedRestoreGuarantee: savedWait.value.restoreGuarantee,
+        savedReplayScreenBuffers: savedWait.value.replayScreenBuffers,
+        beforeSessionId,
+        restoredSessionId:
+          stateAfter?.selection?.activeSessionId ?? stateAfter?.attachedSession?.session?.session_id ?? null,
+        activePaneId,
+        historySource: history?.source ?? null,
+        historyLineCount: history?.lines?.length ?? 0,
+        historyIncludesPrimary: (history?.lines ?? []).some((line) => /browser-smoke-ok/i.test(line)),
+        domHistoryIncludesPrimary: historyLineTexts.some((line) => /browser-smoke-ok/i.test(line)),
+        domHasRestoreBoundary: boundaryTexts.some((line) => /restored history above/i.test(line)),
+        viewportIncludesPrimary: /browser-smoke-ok/i.test(viewportText),
+        inputReadyAfterRestore:
+          viewport?.getAttribute('tabindex') === '0'
+          && Boolean(commandRoot?.querySelector('[data-testid="tp-command-input"]:not([disabled])')),
+        restoreWait: restoredWait.ok ? null : restoredWait,
+        viewportPreview: viewportText.slice(0, 180),
+        saveEventDetail,
+      };
+    })()`);
+
     afterScreenCopy = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
@@ -3461,6 +3654,7 @@ async function runSmokeScenario(browserUrl) {
       },
       afterCommandCompactHistoryLayout,
       afterCommandActionFocus,
+      afterCommandSavedRestore,
       afterScreenCopy,
       afterRecentCommandRecall,
       afterClipboardPaste,
