@@ -2409,6 +2409,17 @@ impl TerminalPersistenceV2 {
         let has_fresh_raw_capability = latest_capability_report.as_ref().is_some_and(|report| {
             capability_stale == Some(false) && report.capture_semantics == "raw_vt_stream"
         });
+        let critical_health_record_count: i64 = terminal_data_health_records::table
+            .filter(
+                terminal_data_health_records::session_id
+                    .eq(Some(session_id.to_string()))
+                    .or(terminal_data_health_records::session_id.is_null()),
+            )
+            .filter(terminal_data_health_records::severity.eq("critical"))
+            .filter(terminal_data_health_records::action_state.ne("resolved"))
+            .filter(terminal_data_health_records::action_state.ne("ignored"))
+            .count()
+            .get_result(&mut connection)?;
 
         let mut guarantee_level = match (
             segment_count > 0,
@@ -2432,6 +2443,9 @@ impl TerminalPersistenceV2 {
             guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
         }
         if authoritative_reads_gate == FeatureGateState::ForceDisabled.as_str() {
+            guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
+        }
+        if critical_health_record_count > 0 {
             guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
         }
         if let Some(report) = latest_capability_report.as_ref() {
@@ -2465,6 +2479,10 @@ impl TerminalPersistenceV2 {
             RestoreEvidence {
                 kind: "authoritative_reads_gate_state".to_string(),
                 value: authoritative_reads_gate,
+            },
+            RestoreEvidence {
+                kind: "critical_data_health_record_count".to_string(),
+                value: critical_health_record_count.to_string(),
             },
         ];
         if let (Some(event_seq_low), Some(event_seq_high)) = stream_event_range {
@@ -8558,6 +8576,59 @@ mod tests {
             store.list_open_data_health_records(None).expect("health records should list");
         assert_eq!(duplicate_integrity.result, "failed");
         assert_eq!(duplicate_health.len(), 1);
+    }
+
+    #[test]
+    fn restore_plan_downgrades_on_open_critical_health_records() {
+        let store = test_store("restore-health-downgrade");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let output = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"health downgrade target\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id,
+                writer_generation: writer.id,
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: output.event_seq_low,
+                high_water_event_seq: output.event_seq_high,
+                high_water_byte_seq: Some(output.byte_high),
+                screen: serde_json::json!({"lines":["health downgrade target"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("screen snapshot should persist");
+
+        let before_health = store.restore_plan(&session_id).expect("plan should load");
+        assert_eq!(before_health.guarantee_level, RestoreGuaranteeLevel::BasicHistory);
+
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(
+            terminal_stream_segments::table
+                .filter(terminal_stream_segments::id.eq(output.segment_id)),
+        )
+        .set(terminal_stream_segments::checksum.eq("not-the-real-checksum"))
+        .execute(&mut connection)
+        .expect("test should corrupt checksum");
+        store.run_integrity_check().expect("integrity check should persist health");
+
+        let plan = store.restore_plan(&session_id).expect("plan should reload");
+
+        assert_eq!(plan.guarantee_level, RestoreGuaranteeLevel::DegradedHistory);
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "critical_data_health_record_count" && evidence.value == "1"
+        }));
     }
 
     #[test]
