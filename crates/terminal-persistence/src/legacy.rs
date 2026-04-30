@@ -138,7 +138,9 @@ impl SqliteSessionStore {
                 &self.path,
                 TerminalPersistenceV2Config::default(),
             )?;
-            store.import_saved_native_session_snapshot(session)
+            store.import_saved_native_session_snapshot(session)?;
+            store.run_restore_drill(&session.session_id.0.to_string())?;
+            store.restore_plan(&session.session_id.0.to_string())
         })
     }
 
@@ -1044,6 +1046,7 @@ mod tests {
         assert_eq!(plan.guarantee_level, RestoreGuaranteeLevel::VisualSnapshotOnly);
         assert!(plan.latest_screen_snapshot_id.is_some());
         assert!(plan.latest_topology_snapshot_id.is_some());
+        assert_eq!(plan.latest_restore_drill_status.as_deref(), Some("passed"));
 
         let _ = std::fs::remove_file(path);
     }
