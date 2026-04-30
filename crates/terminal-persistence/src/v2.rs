@@ -760,9 +760,12 @@ impl TerminalPersistenceV2 {
         let capture_source_kind =
             source_event_id_hash.as_ref().map(|_| ui_input_capture_source_kind(&input.pane_id));
         let command_text = command_text_from_ui_input(&input.data);
+        let shell_profile =
+            shell_metadata_profile(input.launch.as_ref(), input.shell_kind.as_deref());
         let command_metadata_json = Some(serde_json::to_string(&serde_json::json!({
             "capture_source": "ui_input",
-            "rerun_policy": "confirm"
+            "rerun_policy": "confirm",
+            "shell_profile": shell_profile
         }))?);
 
         connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
@@ -890,7 +893,7 @@ impl TerminalPersistenceV2 {
                     command_hash_scope: COMMAND_HASH_SCOPE.to_string(),
                     command_hash,
                     cwd: None,
-                    shell_kind: input.shell_kind.clone(),
+                    shell_kind: shell_profile.shell_kind.clone(),
                     trust_level: "verified".to_string(),
                     source: "ui_submit".to_string(),
                     sensitivity_class: "unknown".to_string(),
@@ -3982,6 +3985,15 @@ pub struct UiInputEventInput {
     pub rows: Option<i32>,
     pub cols: Option<i32>,
     pub shell_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellMetadataProfile {
+    pub shell_kind: Option<String>,
+    pub command_boundary_confidence: String,
+    pub cwd_source: String,
+    pub input_terminator: String,
+    pub windows_profile: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -7786,6 +7798,55 @@ fn command_text_from_ui_input(data: &str) -> Option<String> {
     if command.is_empty() { None } else { Some(command.to_string()) }
 }
 
+pub fn shell_metadata_profile(
+    launch: Option<&ShellLaunchSpec>,
+    explicit_shell_kind: Option<&str>,
+) -> ShellMetadataProfile {
+    let shell_kind = explicit_shell_kind
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .or_else(|| launch.and_then(|launch| infer_shell_kind_from_program(&launch.program)));
+    let windows_profile = matches!(shell_kind.as_deref(), Some("cmd" | "powershell" | "pwsh"));
+    let command_boundary_confidence = match shell_kind.as_deref() {
+        Some("cmd" | "powershell" | "pwsh") => "high",
+        Some("bash" | "sh" | "zsh" | "fish") => "high",
+        Some(_) => "medium",
+        None => "unknown",
+    }
+    .to_string();
+    let cwd_source = if launch.and_then(|launch| launch.cwd.as_ref()).is_some() {
+        "launch_cwd"
+    } else {
+        "unknown"
+    }
+    .to_string();
+    let input_terminator = if windows_profile { "cr" } else { "lf_or_cr" }.to_string();
+
+    ShellMetadataProfile {
+        shell_kind,
+        command_boundary_confidence,
+        cwd_source,
+        input_terminator,
+        windows_profile,
+    }
+}
+
+fn infer_shell_kind_from_program(program: &str) -> Option<String> {
+    let normalized = program.replace('\\', "/");
+    let file_name = normalized.rsplit('/').next().unwrap_or(program).to_ascii_lowercase();
+    let stem = file_name.strip_suffix(".exe").unwrap_or(&file_name);
+    match stem {
+        "cmd" | "cmd32" | "cmd64" => Some("cmd".to_string()),
+        "powershell" => Some("powershell".to_string()),
+        "pwsh" => Some("pwsh".to_string()),
+        "bash" => Some("bash".to_string()),
+        "sh" => Some("sh".to_string()),
+        "zsh" => Some("zsh".to_string()),
+        "fish" => Some("fish".to_string()),
+        _ => None,
+    }
+}
+
 fn new_id() -> String {
     Uuid::now_v7().to_string()
 }
@@ -9762,6 +9823,78 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].display_text, "git status");
         assert!(segments.is_empty());
+    }
+
+    #[test]
+    fn windows_shell_metadata_profiles_cmd_and_powershell_inputs() {
+        let store = test_store("windows-shell-profiles");
+        let cmd_session_id = Uuid::new_v4().to_string();
+        let cmd_pane_id = Uuid::new_v4().to_string();
+        let powershell_session_id = Uuid::new_v4().to_string();
+        let powershell_pane_id = Uuid::new_v4().to_string();
+
+        store
+            .record_ui_input_event(UiInputEventInput {
+                session_id: cmd_session_id.clone(),
+                route: route(),
+                title: Some("cmd".to_string()),
+                launch: Some(ShellLaunchSpec::new(r"C:\Windows\System32\cmd.exe")),
+                pane_id: cmd_pane_id,
+                data: "dir\r".to_string(),
+                is_paste: false,
+                source_event_id: Some("cmd-submit".to_string()),
+                rows: None,
+                cols: None,
+                shell_kind: None,
+            })
+            .expect("cmd input should persist");
+        store
+            .record_ui_input_event(UiInputEventInput {
+                session_id: powershell_session_id.clone(),
+                route: route(),
+                title: Some("powershell".to_string()),
+                launch: Some(ShellLaunchSpec::new(
+                    r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                )),
+                pane_id: powershell_pane_id,
+                data: "Get-Location\r".to_string(),
+                is_paste: false,
+                source_event_id: Some("powershell-submit".to_string()),
+                rows: None,
+                cols: None,
+                shell_kind: None,
+            })
+            .expect("powershell input should persist");
+
+        let mut connection = store.connection().expect("connection should open");
+        let cmd_shell = terminal_command_history_entries::table
+            .filter(terminal_command_history_entries::session_id.eq(Some(cmd_session_id)))
+            .select(terminal_command_history_entries::shell_kind)
+            .first::<Option<String>>(&mut connection)
+            .expect("cmd history should load");
+        let powershell_shell = terminal_command_history_entries::table
+            .filter(
+                terminal_command_history_entries::session_id
+                    .eq(Some(powershell_session_id.clone())),
+            )
+            .select(terminal_command_history_entries::shell_kind)
+            .first::<Option<String>>(&mut connection)
+            .expect("powershell history should load");
+        let powershell_metadata = terminal_command_blocks::table
+            .filter(terminal_command_blocks::session_id.eq(powershell_session_id))
+            .select(terminal_command_blocks::metadata_json)
+            .first::<Option<String>>(&mut connection)
+            .expect("powershell command block metadata should load");
+        let metadata: Value = serde_json::from_str(
+            powershell_metadata.as_deref().expect("powershell command metadata should exist"),
+        )
+        .expect("powershell command metadata should be json");
+
+        assert_eq!(cmd_shell.as_deref(), Some("cmd"));
+        assert_eq!(powershell_shell.as_deref(), Some("powershell"));
+        assert_eq!(metadata["shell_profile"]["shell_kind"], "powershell");
+        assert_eq!(metadata["shell_profile"]["windows_profile"], true);
+        assert_eq!(metadata["shell_profile"]["command_boundary_confidence"], "high");
     }
 
     #[test]
