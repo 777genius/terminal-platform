@@ -10,7 +10,7 @@ use std::{
 use diesel::{
     Connection, ExpressionMethods, OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper,
     connection::SimpleConnection,
-    dsl::{insert_into, max},
+    dsl::{insert_into, max, min},
     prelude::*,
     result::{DatabaseErrorKind, Error as DieselError},
     sqlite::SqliteConnection,
@@ -2230,6 +2230,13 @@ impl TerminalPersistenceV2 {
         })
     }
 
+    pub fn outbox_diagnostics(
+        &self,
+    ) -> Result<OutboxDiagnosticsRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        collect_outbox_diagnostics(&mut connection, self.config.clock.now_ms())
+    }
+
     pub fn write_screen_snapshot(
         &self,
         input: ScreenSnapshotInput,
@@ -2846,6 +2853,7 @@ impl TerminalPersistenceV2 {
     ) -> Result<MaintenanceRunRecord, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
         let recovery = recover_expired_maintenance_leases(&mut connection, started_at_ms)?;
+        let outbox_diagnostics = collect_outbox_diagnostics(&mut connection, started_at_ms)?;
         let wal_checkpoint = if run_wal_checkpoint {
             Some(run_passive_wal_checkpoint(&mut connection)?)
         } else {
@@ -2871,6 +2879,7 @@ impl TerminalPersistenceV2 {
                 "stale_outbox_claims_quarantined": recovery.stale_outbox_claims_quarantined,
                 "stale_writer_generations_marked": recovery.stale_writer_generations_marked
             },
+            "outbox": outbox_diagnostics,
             "storage": {
                 "db_file_bytes": db_file_bytes,
                 "wal_file_bytes": wal_file_bytes,
@@ -4510,6 +4519,20 @@ pub struct OutboxMessageRecord {
     pub last_error: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutboxDiagnosticsRecord {
+    pub generated_at_ms: i64,
+    pub pending_count: i64,
+    pub due_pending_count: i64,
+    pub claimed_count: i64,
+    pub stale_claim_count: i64,
+    pub done_count: i64,
+    pub failed_count: i64,
+    pub quarantined_count: i64,
+    pub oldest_due_pending_age_ms: Option<i64>,
+    pub next_pending_due_in_ms: Option<i64>,
 }
 
 impl TryFrom<OutboxMessageRow> for OutboxMessageRecord {
@@ -6765,6 +6788,61 @@ struct MaintenanceRecoverySummary {
     stale_outbox_claims_requeued: usize,
     stale_outbox_claims_quarantined: usize,
     stale_writer_generations_marked: usize,
+}
+
+fn collect_outbox_diagnostics(
+    connection: &mut SqliteConnection,
+    now: i64,
+) -> Result<OutboxDiagnosticsRecord, TerminalPersistenceV2Error> {
+    let pending_count = count_outbox_state(connection, "pending")?;
+    let due_pending_count = terminal_outbox_messages::table
+        .filter(terminal_outbox_messages::state.eq("pending"))
+        .filter(terminal_outbox_messages::next_run_at_ms.le(now))
+        .count()
+        .get_result::<i64>(connection)?;
+    let claimed_count = count_outbox_state(connection, "claimed")?;
+    let stale_claim_count = terminal_outbox_messages::table
+        .filter(terminal_outbox_messages::state.eq("claimed"))
+        .filter(terminal_outbox_messages::claimed_until_ms.le(Some(now)))
+        .count()
+        .get_result::<i64>(connection)?;
+    let done_count = count_outbox_state(connection, "done")?;
+    let failed_count = count_outbox_state(connection, "failed")?;
+    let quarantined_count = count_outbox_state(connection, "quarantined")?;
+    let oldest_due_pending_created_at = terminal_outbox_messages::table
+        .filter(terminal_outbox_messages::state.eq("pending"))
+        .filter(terminal_outbox_messages::next_run_at_ms.le(now))
+        .select(min(terminal_outbox_messages::created_at_ms))
+        .first::<Option<i64>>(connection)?;
+    let next_pending_run_at = terminal_outbox_messages::table
+        .filter(terminal_outbox_messages::state.eq("pending"))
+        .filter(terminal_outbox_messages::next_run_at_ms.gt(now))
+        .select(min(terminal_outbox_messages::next_run_at_ms))
+        .first::<Option<i64>>(connection)?;
+
+    Ok(OutboxDiagnosticsRecord {
+        generated_at_ms: now,
+        pending_count,
+        due_pending_count,
+        claimed_count,
+        stale_claim_count,
+        done_count,
+        failed_count,
+        quarantined_count,
+        oldest_due_pending_age_ms: oldest_due_pending_created_at
+            .map(|created_at_ms| (now - created_at_ms).max(0)),
+        next_pending_due_in_ms: next_pending_run_at.map(|run_at_ms| (run_at_ms - now).max(0)),
+    })
+}
+
+fn count_outbox_state(
+    connection: &mut SqliteConnection,
+    state_name: &str,
+) -> Result<i64, TerminalPersistenceV2Error> {
+    Ok(terminal_outbox_messages::table
+        .filter(terminal_outbox_messages::state.eq(state_name))
+        .count()
+        .get_result::<i64>(connection)?)
 }
 
 fn recover_expired_maintenance_leases(
@@ -9470,6 +9548,8 @@ mod tests {
         assert_eq!(summary["wal_checkpoint"]["mode"], "PASSIVE");
         assert!(summary["wal_checkpoint"]["log_frames"].as_i64().is_some());
         assert_eq!(summary["optimize"]["ran"], true);
+        assert_eq!(summary["outbox"]["pending_count"], 1);
+        assert_eq!(summary["outbox"]["due_pending_count"], 1);
         assert_eq!(summary["storage"]["no_silent_delete"], true);
     }
 
@@ -9516,6 +9596,11 @@ mod tests {
             .execute(&mut connection)
             .expect("test should expire writer lease");
         }
+        let before_maintenance =
+            store.outbox_diagnostics().expect("outbox diagnostics should load");
+
+        assert_eq!(before_maintenance.claimed_count, 1);
+        assert_eq!(before_maintenance.stale_claim_count, 1);
 
         let run = store
             .run_maintenance(MaintenanceRunInput {
@@ -9540,6 +9625,9 @@ mod tests {
         assert_eq!(summary["recovery"]["stale_outbox_claims_requeued"], 1);
         assert_eq!(summary["recovery"]["stale_outbox_claims_quarantined"], 0);
         assert_eq!(summary["recovery"]["stale_writer_generations_marked"], 1);
+        assert_eq!(summary["outbox"]["pending_count"], 1);
+        assert_eq!(summary["outbox"]["due_pending_count"], 1);
+        assert_eq!(summary["outbox"]["stale_claim_count"], 0);
 
         let mut connection = store.connection().expect("connection should open");
         let stale_writer_state = terminal_writer_generations::table
