@@ -25,13 +25,13 @@ use crate::{
     db::{
         connection::establish_initialized_connection,
         schema::{
-            terminal_backend_capability_reports, terminal_backup_records, terminal_command_blocks,
-            terminal_command_history_entries, terminal_commit_log, terminal_db_identity,
-            terminal_feature_gates, terminal_history_gaps, terminal_integrity_checks,
-            terminal_journal_events, terminal_panes, terminal_restore_drills,
-            terminal_screen_snapshots, terminal_session_cursors, terminal_sessions,
-            terminal_stream_cursors, terminal_stream_segments, terminal_topology_snapshots,
-            terminal_writer_generations,
+            terminal_backend_capability_reports, terminal_backup_records,
+            terminal_capture_receipts, terminal_command_blocks, terminal_command_history_entries,
+            terminal_commit_log, terminal_db_identity, terminal_feature_gates,
+            terminal_history_gaps, terminal_integrity_checks, terminal_journal_events,
+            terminal_panes, terminal_restore_drills, terminal_screen_snapshots,
+            terminal_session_cursors, terminal_sessions, terminal_stream_cursors,
+            terminal_stream_segments, terminal_topology_snapshots, terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -1300,8 +1300,30 @@ impl TerminalPersistenceV2 {
         let payload_len = checked_len(input.payload.len(), "payload length")?;
         let payload_checksum = blake3_hash_bytes(&input.payload);
         let metadata_json = json_metadata(&input.metadata)?;
+        let source_event_id_hash = input.source_event_id_hash.clone();
+        let capture_source_kind = source_event_id_hash
+            .as_ref()
+            .map(|_| stream_capture_source_kind(&input.pane_id, &stream_id));
 
         connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            if let (Some(source_kind), Some(source_event_id_hash)) =
+                (capture_source_kind.as_deref(), source_event_id_hash.as_deref())
+            {
+                if let Some(receipt) = load_capture_receipt(
+                    connection,
+                    &input.session_id,
+                    source_kind,
+                    source_event_id_hash,
+                )? {
+                    if receipt.source_payload_hash != payload_checksum {
+                        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                            "capture receipt payload hash mismatch for source_kind={source_kind}"
+                        )));
+                    }
+                    return stream_segment_receipt_from_capture_receipt(connection, &receipt);
+                }
+            }
+
             ensure_active_writer(connection, &input.writer_generation, now)?;
             let commit = allocate_commit(
                 connection,
@@ -1363,14 +1385,33 @@ impl TerminalPersistenceV2 {
                 byte_high: Some(byte_high),
                 payload_json: input.payload_json.as_ref().map(serde_json::to_string).transpose()?,
                 payload_schema_id: None,
-                source_event_id_hash: input.source_event_id_hash,
+                source_event_id_hash: source_event_id_hash.clone(),
                 occurred_at_ms,
                 created_at_ms: now,
                 capture_semantics,
                 trust_level: input.trust_level.unwrap_or_else(|| "captured".to_string()),
-                metadata_json,
+                metadata_json: metadata_json.clone(),
             };
             insert_into(terminal_journal_events::table).values(&event).execute(connection)?;
+
+            if let (Some(source_kind), Some(source_event_id_hash)) =
+                (capture_source_kind.as_deref(), source_event_id_hash.as_deref())
+            {
+                let receipt = NewCaptureReceiptRow {
+                    id: new_id(),
+                    session_id: input.session_id.clone(),
+                    commit_id: Some(commit.id.clone()),
+                    source_kind: source_kind.to_string(),
+                    source_event_id_hash: source_event_id_hash.to_string(),
+                    source_payload_hash: payload_checksum.clone(),
+                    received_at_ms: occurred_at_ms,
+                    created_at_ms: now,
+                    metadata_json: metadata_json.clone(),
+                };
+                insert_into(terminal_capture_receipts::table)
+                    .values(&receipt)
+                    .execute(connection)?;
+            }
 
             advance_stream_cursor(connection, &cursor.id, event_seq_high + 1, byte_high, now)?;
             diesel::update(terminal_panes::table.filter(terminal_panes::id.eq(&input.pane_id)))
@@ -3028,6 +3069,36 @@ struct NewJournalEventRow {
 }
 
 #[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_capture_receipts)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct CaptureReceiptRow {
+    id: String,
+    session_id: String,
+    commit_id: Option<String>,
+    source_kind: String,
+    source_event_id_hash: String,
+    source_payload_hash: String,
+    received_at_ms: i64,
+    created_at_ms: i64,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_capture_receipts)]
+struct NewCaptureReceiptRow {
+    id: String,
+    session_id: String,
+    commit_id: Option<String>,
+    source_kind: String,
+    source_event_id_hash: String,
+    source_payload_hash: String,
+    received_at_ms: i64,
+    created_at_ms: i64,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = terminal_history_gaps)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 #[allow(dead_code)]
@@ -3565,6 +3636,65 @@ fn load_stream_cursor(
         .map_err(Into::into)
 }
 
+fn load_capture_receipt(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    source_kind: &str,
+    source_event_id_hash: &str,
+) -> Result<Option<CaptureReceiptRow>, TerminalPersistenceV2Error> {
+    terminal_capture_receipts::table
+        .filter(terminal_capture_receipts::session_id.eq(session_id))
+        .filter(terminal_capture_receipts::source_kind.eq(source_kind))
+        .filter(terminal_capture_receipts::source_event_id_hash.eq(source_event_id_hash))
+        .select(CaptureReceiptRow::as_select())
+        .first::<CaptureReceiptRow>(connection)
+        .optional()
+        .map_err(Into::into)
+}
+
+fn stream_segment_receipt_from_capture_receipt(
+    connection: &mut SqliteConnection,
+    receipt: &CaptureReceiptRow,
+) -> Result<StreamSegmentReceipt, TerminalPersistenceV2Error> {
+    let commit_id = receipt.commit_id.as_deref().ok_or_else(|| {
+        TerminalPersistenceV2Error::InvalidData(format!(
+            "stream capture receipt {} does not point to a commit",
+            receipt.id
+        ))
+    })?;
+    stream_segment_receipt_from_commit(connection, commit_id)
+}
+
+fn stream_segment_receipt_from_commit(
+    connection: &mut SqliteConnection,
+    commit_ref: &str,
+) -> Result<StreamSegmentReceipt, TerminalPersistenceV2Error> {
+    let segment = terminal_stream_segments::table
+        .filter(terminal_stream_segments::commit_id.eq(commit_ref))
+        .select(StreamSegmentRow::as_select())
+        .first::<StreamSegmentRow>(connection)?;
+    let event_id = terminal_journal_events::table
+        .filter(terminal_journal_events::commit_id.eq(commit_ref))
+        .select(terminal_journal_events::id)
+        .first::<String>(connection)?;
+    let commit_seq = terminal_commit_log::table
+        .filter(terminal_commit_log::id.eq(commit_ref))
+        .select(terminal_commit_log::commit_seq)
+        .first::<i64>(connection)?;
+
+    Ok(StreamSegmentReceipt {
+        commit_id: commit_ref.to_string(),
+        commit_seq,
+        segment_id: segment.id,
+        event_id,
+        event_seq_low: segment.event_seq_low,
+        event_seq_high: segment.event_seq_high,
+        byte_low: segment.byte_low,
+        byte_high: segment.byte_high,
+        checksum: segment.checksum,
+    })
+}
+
 fn advance_stream_cursor(
     connection: &mut SqliteConnection,
     cursor_id: &str,
@@ -3691,6 +3821,10 @@ fn collect_topology_pane_high_water(
 
 fn stream_cursor_id(pane_id: &str, stream_id: &str) -> String {
     format!("stream-cursor-{}", blake3_hash_text(&format!("{pane_id}\0{stream_id}")))
+}
+
+fn stream_capture_source_kind(pane_id: &str, stream_id: &str) -> String {
+    format!("stream-segment-{}", blake3_hash_text(&format!("{pane_id}\0{stream_id}")))
 }
 
 fn stable_history_id(
@@ -3898,6 +4032,56 @@ mod tests {
                 .collect::<Vec<_>>(),
             b"git status\r\nfatal: not a git repository\r\n"
         );
+    }
+
+    #[test]
+    fn dedupes_retried_stream_segment_capture_by_source_event_id() {
+        let store = test_store("stream-retry-dedupe");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let mut input = StreamSegmentInput::terminal_output(
+            session_id.clone(),
+            pane_id.clone(),
+            writer.id,
+            b"cargo test\r\n".to_vec(),
+        );
+        input.source_event_id_hash = Some(blake3_hash_text("runtime-output-seq:42"));
+
+        let first =
+            store.append_stream_segment(input.clone()).expect("first capture should persist");
+        let retry =
+            store.append_stream_segment(input).expect("retry should return existing receipt");
+        let segments =
+            store.list_stream_segments(&session_id, &pane_id, 1, 10).expect("segments should list");
+
+        assert_eq!(retry, first);
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].payload, b"cargo test\r\n");
+    }
+
+    #[test]
+    fn rejects_retry_with_same_source_event_id_and_different_payload() {
+        let store = test_store("stream-retry-conflict");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let mut input = StreamSegmentInput::terminal_output(
+            session_id.clone(),
+            pane_id.clone(),
+            writer.id.clone(),
+            b"first\r\n".to_vec(),
+        );
+        input.source_event_id_hash = Some(blake3_hash_text("runtime-output-seq:43"));
+        store.append_stream_segment(input.clone()).expect("first capture should persist");
+
+        input.writer_generation = writer.id;
+        input.payload = b"changed\r\n".to_vec();
+        let error = store.append_stream_segment(input).expect_err("conflicting retry should fail");
+        let segments =
+            store.list_stream_segments(&session_id, &pane_id, 1, 10).expect("segments should list");
+
+        assert!(
+            matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("payload hash mismatch"))
+        );
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].payload, b"first\r\n");
     }
 
     #[test]

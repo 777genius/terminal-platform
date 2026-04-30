@@ -209,6 +209,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    terminal_capture_receipts (id) {
+        id -> Text,
+        session_id -> Text,
+        commit_id -> Nullable<Text>,
+        source_kind -> Text,
+        source_event_id_hash -> Text,
+        source_payload_hash -> Text,
+        received_at_ms -> BigInt,
+        created_at_ms -> BigInt,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     terminal_command_blocks (id) {
         id -> Text,
         session_id -> Text,
@@ -379,6 +393,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     terminal_commit_log,
     terminal_stream_segments,
     terminal_journal_events,
+    terminal_capture_receipts,
     terminal_command_blocks,
     terminal_command_history_entries,
     terminal_topology_snapshots,
