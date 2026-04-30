@@ -223,6 +223,35 @@ diesel::table! {
 }
 
 diesel::table! {
+    terminal_clients (id) {
+        id -> Text,
+        client_kind -> Text,
+        install_ref_hash -> Nullable<Text>,
+        browser_profile_ref_hash -> Nullable<Text>,
+        user_agent_hash -> Nullable<Text>,
+        created_at_ms -> BigInt,
+        last_seen_at_ms -> BigInt,
+        trust_state -> Text,
+    }
+}
+
+diesel::table! {
+    terminal_delivery_offsets (id) {
+        id -> Text,
+        client_id -> Text,
+        session_id -> Text,
+        pane_id -> Nullable<Text>,
+        stream_id -> Text,
+        last_sent_event_seq -> BigInt,
+        last_acked_event_seq -> BigInt,
+        last_persisted_event_seq -> BigInt,
+        replay_from_event_seq -> Nullable<BigInt>,
+        gap_state -> Text,
+        updated_at_ms -> BigInt,
+    }
+}
+
+diesel::table! {
     terminal_command_blocks (id) {
         id -> Text,
         session_id -> Text,
@@ -375,6 +404,8 @@ diesel::table! {
 
 diesel::joinable!(terminal_panes -> terminal_sessions (session_id));
 diesel::joinable!(terminal_sessions -> terminal_retention_policies (retention_policy_id));
+diesel::joinable!(terminal_delivery_offsets -> terminal_clients (client_id));
+diesel::joinable!(terminal_delivery_offsets -> terminal_sessions (session_id));
 diesel::joinable!(terminal_stream_cursors -> terminal_panes (pane_id));
 diesel::joinable!(terminal_stream_cursors -> terminal_sessions (session_id));
 diesel::joinable!(terminal_session_cursors -> terminal_sessions (session_id));
@@ -394,6 +425,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     terminal_stream_segments,
     terminal_journal_events,
     terminal_capture_receipts,
+    terminal_clients,
+    terminal_delivery_offsets,
     terminal_command_blocks,
     terminal_command_history_entries,
     terminal_topology_snapshots,

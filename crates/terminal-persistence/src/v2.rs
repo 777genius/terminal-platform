@@ -8,7 +8,7 @@ use std::{
 
 use diesel::{
     Connection, ExpressionMethods, OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper,
-    dsl::insert_into,
+    dsl::{insert_into, max},
     prelude::*,
     result::{DatabaseErrorKind, Error as DieselError},
     sqlite::SqliteConnection,
@@ -26,12 +26,13 @@ use crate::{
         connection::establish_initialized_connection,
         schema::{
             terminal_backend_capability_reports, terminal_backup_records,
-            terminal_capture_receipts, terminal_command_blocks, terminal_command_history_entries,
-            terminal_commit_log, terminal_db_identity, terminal_feature_gates,
-            terminal_history_gaps, terminal_integrity_checks, terminal_journal_events,
-            terminal_panes, terminal_restore_drills, terminal_screen_snapshots,
-            terminal_session_cursors, terminal_sessions, terminal_stream_cursors,
-            terminal_stream_segments, terminal_topology_snapshots, terminal_writer_generations,
+            terminal_capture_receipts, terminal_clients, terminal_command_blocks,
+            terminal_command_history_entries, terminal_commit_log, terminal_db_identity,
+            terminal_delivery_offsets, terminal_feature_gates, terminal_history_gaps,
+            terminal_integrity_checks, terminal_journal_events, terminal_panes,
+            terminal_restore_drills, terminal_screen_snapshots, terminal_session_cursors,
+            terminal_sessions, terminal_stream_cursors, terminal_stream_segments,
+            terminal_topology_snapshots, terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -1743,6 +1744,204 @@ impl TerminalPersistenceV2 {
         Ok(id)
     }
 
+    pub fn upsert_delivery_client(
+        &self,
+        input: DeliveryClientInput,
+    ) -> Result<DeliveryClientRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        let id = input.id.unwrap_or_else(new_id);
+        let row = NewDeliveryClientRow {
+            id: id.clone(),
+            client_kind: input.client_kind,
+            install_ref_hash: input.install_ref_hash,
+            browser_profile_ref_hash: input.browser_profile_ref_hash,
+            user_agent_hash: input.user_agent_hash,
+            created_at_ms: now,
+            last_seen_at_ms: now,
+            trust_state: input.trust_state.unwrap_or_else(|| "local_unverified".to_string()),
+        };
+
+        insert_into(terminal_clients::table)
+            .values(&row)
+            .on_conflict(terminal_clients::id)
+            .do_update()
+            .set((
+                terminal_clients::client_kind.eq(row.client_kind.clone()),
+                terminal_clients::install_ref_hash.eq(row.install_ref_hash.clone()),
+                terminal_clients::browser_profile_ref_hash.eq(row.browser_profile_ref_hash.clone()),
+                terminal_clients::user_agent_hash.eq(row.user_agent_hash.clone()),
+                terminal_clients::last_seen_at_ms.eq(row.last_seen_at_ms),
+                terminal_clients::trust_state.eq(row.trust_state.clone()),
+            ))
+            .execute(&mut connection)?;
+
+        Ok(DeliveryClientRecord {
+            id,
+            client_kind: row.client_kind,
+            last_seen_at_ms: now,
+            trust_state: row.trust_state,
+        })
+    }
+
+    pub fn record_delivery_progress(
+        &self,
+        input: DeliveryProgressInput,
+    ) -> Result<DeliveryOffsetRecord, TerminalPersistenceV2Error> {
+        let stream_id = input.stream_id.unwrap_or_else(|| DEFAULT_STREAM_ID.to_string());
+        validate_non_negative_seq(input.last_sent_event_seq, "last sent event seq")?;
+        validate_non_negative_seq(input.last_acked_event_seq, "last acked event seq")?;
+
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            touch_delivery_client(connection, &input.client_id, now)?;
+            let persisted = load_persisted_event_high_water(
+                connection,
+                &input.session_id,
+                &input.pane_id,
+                &stream_id,
+            )?;
+            let existing = load_delivery_offset(
+                connection,
+                &input.client_id,
+                &input.session_id,
+                &input.pane_id,
+                &stream_id,
+            )?;
+            let existing_sent = existing.as_ref().map_or(0, |row| row.last_sent_event_seq);
+            let existing_acked = existing.as_ref().map_or(0, |row| row.last_acked_event_seq);
+            let last_sent = input.last_sent_event_seq.unwrap_or(existing_sent).max(existing_sent);
+            let last_acked =
+                input.last_acked_event_seq.unwrap_or(existing_acked).max(existing_acked);
+
+            if last_sent > persisted {
+                return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                    "last sent event seq {last_sent} is above persisted high-water {persisted}"
+                )));
+            }
+            if last_acked > last_sent {
+                return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                    "last acked event seq {last_acked} is above last sent event seq {last_sent}"
+                )));
+            }
+
+            let replay_from_event_seq =
+                (last_acked < persisted).then_some(last_acked.saturating_add(1));
+            let gap_state = match replay_from_event_seq {
+                Some(from)
+                    if has_history_gap_in_range(
+                        connection,
+                        &input.session_id,
+                        &input.pane_id,
+                        &stream_id,
+                        from,
+                        persisted,
+                    )? =>
+                {
+                    "gap"
+                }
+                _ => "none",
+            }
+            .to_string();
+            let row = NewDeliveryOffsetRow {
+                id: delivery_offset_id(
+                    &input.client_id,
+                    &input.session_id,
+                    &input.pane_id,
+                    &stream_id,
+                ),
+                client_id: input.client_id.clone(),
+                session_id: input.session_id.clone(),
+                pane_id: Some(input.pane_id.clone()),
+                stream_id: stream_id.clone(),
+                last_sent_event_seq: last_sent,
+                last_acked_event_seq: last_acked,
+                last_persisted_event_seq: persisted,
+                replay_from_event_seq,
+                gap_state,
+                updated_at_ms: now,
+            };
+
+            insert_into(terminal_delivery_offsets::table)
+                .values(&row)
+                .on_conflict(terminal_delivery_offsets::id)
+                .do_update()
+                .set((
+                    terminal_delivery_offsets::last_sent_event_seq.eq(row.last_sent_event_seq),
+                    terminal_delivery_offsets::last_acked_event_seq.eq(row.last_acked_event_seq),
+                    terminal_delivery_offsets::last_persisted_event_seq
+                        .eq(row.last_persisted_event_seq),
+                    terminal_delivery_offsets::replay_from_event_seq.eq(row.replay_from_event_seq),
+                    terminal_delivery_offsets::gap_state.eq(row.gap_state.clone()),
+                    terminal_delivery_offsets::updated_at_ms.eq(row.updated_at_ms),
+                ))
+                .execute(connection)?;
+
+            load_delivery_offset(
+                connection,
+                &input.client_id,
+                &input.session_id,
+                &input.pane_id,
+                &stream_id,
+            )?
+            .map(Into::into)
+            .ok_or_else(|| {
+                TerminalPersistenceV2Error::InvalidData(
+                    "delivery offset upsert did not return a row".to_string(),
+                )
+            })
+        })
+    }
+
+    pub fn delivery_replay_window(
+        &self,
+        input: DeliveryOffsetInput,
+    ) -> Result<DeliveryReplayWindow, TerminalPersistenceV2Error> {
+        let stream_id = input.stream_id.unwrap_or_else(|| DEFAULT_STREAM_ID.to_string());
+        let mut connection = self.connection()?;
+        let persisted = load_persisted_event_high_water(
+            &mut connection,
+            &input.session_id,
+            &input.pane_id,
+            &stream_id,
+        )?;
+        let offset = load_delivery_offset(
+            &mut connection,
+            &input.client_id,
+            &input.session_id,
+            &input.pane_id,
+            &stream_id,
+        )?;
+        let from_event_seq = offset
+            .as_ref()
+            .and_then(|row| row.replay_from_event_seq)
+            .or_else(|| {
+                let acked = offset.as_ref().map_or(0, |row| row.last_acked_event_seq);
+                (acked < persisted).then_some(acked.saturating_add(1))
+            })
+            .filter(|from| *from <= persisted);
+        let gap_state = match from_event_seq {
+            Some(from)
+                if has_history_gap_in_range(
+                    &mut connection,
+                    &input.session_id,
+                    &input.pane_id,
+                    &stream_id,
+                    from,
+                    persisted,
+                )? =>
+            {
+                "gap"
+            }
+            Some(_) => offset.as_ref().map_or("none", |row| row.gap_state.as_str()),
+            None => "none",
+        }
+        .to_string();
+
+        Ok(DeliveryReplayWindow { from_event_seq, to_event_seq: persisted, gap_state })
+    }
+
     pub fn write_screen_snapshot(
         &self,
         input: ScreenSnapshotInput,
@@ -2485,6 +2684,34 @@ pub struct JournalEventInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryClientInput {
+    pub id: Option<String>,
+    pub client_kind: String,
+    pub install_ref_hash: Option<String>,
+    pub browser_profile_ref_hash: Option<String>,
+    pub user_agent_hash: Option<String>,
+    pub trust_state: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryOffsetInput {
+    pub client_id: String,
+    pub session_id: String,
+    pub pane_id: String,
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryProgressInput {
+    pub client_id: String,
+    pub session_id: String,
+    pub pane_id: String,
+    pub stream_id: Option<String>,
+    pub last_sent_event_seq: Option<i64>,
+    pub last_acked_event_seq: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiInputEventInput {
     pub session_id: String,
     pub route: SessionRoute,
@@ -2857,6 +3084,54 @@ pub struct BackupRecord {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryClientRecord {
+    pub id: String,
+    pub client_kind: String,
+    pub last_seen_at_ms: i64,
+    pub trust_state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryOffsetRecord {
+    pub id: String,
+    pub client_id: String,
+    pub session_id: String,
+    pub pane_id: Option<String>,
+    pub stream_id: String,
+    pub last_sent_event_seq: i64,
+    pub last_acked_event_seq: i64,
+    pub last_persisted_event_seq: i64,
+    pub replay_from_event_seq: Option<i64>,
+    pub gap_state: String,
+    pub updated_at_ms: i64,
+}
+
+impl From<DeliveryOffsetRow> for DeliveryOffsetRecord {
+    fn from(row: DeliveryOffsetRow) -> Self {
+        Self {
+            id: row.id,
+            client_id: row.client_id,
+            session_id: row.session_id,
+            pane_id: row.pane_id,
+            stream_id: row.stream_id,
+            last_sent_event_seq: row.last_sent_event_seq,
+            last_acked_event_seq: row.last_acked_event_seq,
+            last_persisted_event_seq: row.last_persisted_event_seq,
+            replay_from_event_seq: row.replay_from_event_seq,
+            gap_state: row.gap_state,
+            updated_at_ms: row.updated_at_ms,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryReplayWindow {
+    pub from_event_seq: Option<i64>,
+    pub to_event_seq: i64,
+    pub gap_state: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriterGenerationLease {
     pub id: String,
@@ -3227,6 +3502,68 @@ struct NewCaptureReceiptRow {
     received_at_ms: i64,
     created_at_ms: i64,
     metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_clients)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct DeliveryClientRow {
+    id: String,
+    client_kind: String,
+    install_ref_hash: Option<String>,
+    browser_profile_ref_hash: Option<String>,
+    user_agent_hash: Option<String>,
+    created_at_ms: i64,
+    last_seen_at_ms: i64,
+    trust_state: String,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_clients)]
+struct NewDeliveryClientRow {
+    id: String,
+    client_kind: String,
+    install_ref_hash: Option<String>,
+    browser_profile_ref_hash: Option<String>,
+    user_agent_hash: Option<String>,
+    created_at_ms: i64,
+    last_seen_at_ms: i64,
+    trust_state: String,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_delivery_offsets)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct DeliveryOffsetRow {
+    id: String,
+    client_id: String,
+    session_id: String,
+    pane_id: Option<String>,
+    stream_id: String,
+    last_sent_event_seq: i64,
+    last_acked_event_seq: i64,
+    last_persisted_event_seq: i64,
+    replay_from_event_seq: Option<i64>,
+    gap_state: String,
+    updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_delivery_offsets)]
+struct NewDeliveryOffsetRow {
+    id: String,
+    client_id: String,
+    session_id: String,
+    pane_id: Option<String>,
+    stream_id: String,
+    last_sent_event_seq: i64,
+    last_acked_event_seq: i64,
+    last_persisted_event_seq: i64,
+    replay_from_event_seq: Option<i64>,
+    gap_state: String,
+    updated_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable)]
@@ -3826,6 +4163,88 @@ fn stream_segment_receipt_from_commit(
     })
 }
 
+fn touch_delivery_client(
+    connection: &mut SqliteConnection,
+    client_id: &str,
+    now: i64,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let updated =
+        diesel::update(terminal_clients::table.filter(terminal_clients::id.eq(client_id)))
+            .set(terminal_clients::last_seen_at_ms.eq(now))
+            .execute(connection)?;
+    if updated == 0 {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "delivery client not found: {client_id}"
+        )));
+    }
+    Ok(())
+}
+
+fn load_delivery_offset(
+    connection: &mut SqliteConnection,
+    client_id: &str,
+    session_id: &str,
+    pane_id: &str,
+    stream_id: &str,
+) -> Result<Option<DeliveryOffsetRow>, TerminalPersistenceV2Error> {
+    terminal_delivery_offsets::table
+        .filter(terminal_delivery_offsets::client_id.eq(client_id))
+        .filter(terminal_delivery_offsets::session_id.eq(session_id))
+        .filter(terminal_delivery_offsets::pane_id.eq(Some(pane_id.to_string())))
+        .filter(terminal_delivery_offsets::stream_id.eq(stream_id))
+        .select(DeliveryOffsetRow::as_select())
+        .first::<DeliveryOffsetRow>(connection)
+        .optional()
+        .map_err(Into::into)
+}
+
+fn load_persisted_event_high_water(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    pane_id: &str,
+    stream_id: &str,
+) -> Result<i64, TerminalPersistenceV2Error> {
+    let segment_high = terminal_stream_segments::table
+        .filter(terminal_stream_segments::session_id.eq(session_id))
+        .filter(terminal_stream_segments::pane_id.eq(pane_id))
+        .filter(terminal_stream_segments::stream_id.eq(stream_id))
+        .select(max(terminal_stream_segments::event_seq_high))
+        .first::<Option<i64>>(connection)?
+        .unwrap_or(0);
+    let gap_high = terminal_history_gaps::table
+        .filter(terminal_history_gaps::session_id.eq(session_id))
+        .filter(terminal_history_gaps::pane_id.eq(Some(pane_id.to_string())))
+        .filter(terminal_history_gaps::stream_id.eq(stream_id))
+        .filter(terminal_history_gaps::event_seq_high.is_not_null())
+        .select(max(terminal_history_gaps::event_seq_high))
+        .first::<Option<i64>>(connection)?
+        .unwrap_or(0);
+
+    Ok(segment_high.max(gap_high))
+}
+
+fn has_history_gap_in_range(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    pane_id: &str,
+    stream_id: &str,
+    from_event_seq: i64,
+    to_event_seq: i64,
+) -> Result<bool, TerminalPersistenceV2Error> {
+    if from_event_seq > to_event_seq {
+        return Ok(false);
+    }
+    let count = terminal_history_gaps::table
+        .filter(terminal_history_gaps::session_id.eq(session_id))
+        .filter(terminal_history_gaps::pane_id.eq(Some(pane_id.to_string())))
+        .filter(terminal_history_gaps::stream_id.eq(stream_id))
+        .filter(terminal_history_gaps::event_seq_low.le(Some(to_event_seq)))
+        .filter(terminal_history_gaps::event_seq_high.ge(Some(from_event_seq)))
+        .count()
+        .get_result::<i64>(connection)?;
+    Ok(count > 0)
+}
+
 fn advance_stream_cursor(
     connection: &mut SqliteConnection,
     cursor_id: &str,
@@ -3907,6 +4326,20 @@ fn validate_optional_range(
     }
 }
 
+fn validate_non_negative_seq(
+    value: Option<i64>,
+    label: &str,
+) -> Result<(), TerminalPersistenceV2Error> {
+    if let Some(value) = value
+        && value < 0
+    {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "{label} must not be negative"
+        )));
+    }
+    Ok(())
+}
+
 fn checked_len(len: usize, label: &str) -> Result<i64, TerminalPersistenceV2Error> {
     i64::try_from(len).map_err(|_| {
         TerminalPersistenceV2Error::InvalidData(format!("{label} does not fit in i64"))
@@ -3956,6 +4389,13 @@ fn stream_cursor_id(pane_id: &str, stream_id: &str) -> String {
 
 fn stream_capture_source_kind(pane_id: &str, stream_id: &str) -> String {
     format!("stream-segment-{}", blake3_hash_text(&format!("{pane_id}\0{stream_id}")))
+}
+
+fn delivery_offset_id(client_id: &str, session_id: &str, pane_id: &str, stream_id: &str) -> String {
+    format!(
+        "delivery-offset-{}",
+        blake3_hash_text(&format!("{client_id}\0{session_id}\0{pane_id}\0{stream_id}"))
+    )
 }
 
 fn ui_input_capture_source_kind(pane_id: &str) -> String {
@@ -4228,6 +4668,154 @@ mod tests {
         );
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].payload, b"first\r\n");
+    }
+
+    #[test]
+    fn records_delivery_offsets_and_builds_replay_window() {
+        let store = test_store("delivery-offset");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"first\r\n".to_vec(),
+            ))
+            .expect("first segment should persist");
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id,
+                b"second\r\n".to_vec(),
+            ))
+            .expect("second segment should persist");
+        let client = store
+            .upsert_delivery_client(DeliveryClientInput {
+                id: Some("browser-a".to_string()),
+                client_kind: "browser".to_string(),
+                install_ref_hash: None,
+                browser_profile_ref_hash: None,
+                user_agent_hash: None,
+                trust_state: None,
+            })
+            .expect("client should persist");
+
+        let sent = store
+            .record_delivery_progress(DeliveryProgressInput {
+                client_id: client.id.clone(),
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                stream_id: None,
+                last_sent_event_seq: Some(2),
+                last_acked_event_seq: None,
+            })
+            .expect("sent offset should persist");
+        let acked = store
+            .record_delivery_progress(DeliveryProgressInput {
+                client_id: client.id.clone(),
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                stream_id: None,
+                last_sent_event_seq: None,
+                last_acked_event_seq: Some(1),
+            })
+            .expect("acked offset should persist");
+        let window = store
+            .delivery_replay_window(DeliveryOffsetInput {
+                client_id: client.id.clone(),
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                stream_id: None,
+            })
+            .expect("replay window should load");
+        let replay = store
+            .hydrate_pane_history(
+                &session_id,
+                &pane_id,
+                window.from_event_seq,
+                Some(10),
+                Some(1024),
+            )
+            .expect("replay history should hydrate");
+
+        assert_eq!(sent.last_sent_event_seq, 2);
+        assert_eq!(acked.last_acked_event_seq, 1);
+        assert_eq!(acked.replay_from_event_seq, Some(2));
+        assert_eq!(window.from_event_seq, Some(2));
+        assert_eq!(window.to_event_seq, 2);
+        assert_eq!(window.gap_state, "none");
+        assert_eq!(replay.segments.len(), 1);
+        assert_eq!(replay.segments[0].payload, b"second\r\n");
+
+        let fully_acked = store
+            .record_delivery_progress(DeliveryProgressInput {
+                client_id: client.id.clone(),
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                stream_id: None,
+                last_sent_event_seq: None,
+                last_acked_event_seq: Some(2),
+            })
+            .expect("fully acked offset should persist");
+        let empty_window = store
+            .delivery_replay_window(DeliveryOffsetInput {
+                client_id: client.id,
+                session_id,
+                pane_id,
+                stream_id: None,
+            })
+            .expect("empty replay window should load");
+
+        assert_eq!(fully_acked.replay_from_event_seq, None);
+        assert_eq!(empty_window.from_event_seq, None);
+        assert_eq!(empty_window.to_event_seq, 2);
+    }
+
+    #[test]
+    fn delivery_replay_window_surfaces_gap_state() {
+        let store = test_store("delivery-gap");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store.release_writer_generation(&writer.id).expect("writer should release");
+        store
+            .record_history_gap_event(HistoryGapEventInput {
+                session_id: session_id.clone(),
+                route: route(),
+                title: Some("shell".to_string()),
+                launch: None,
+                pane_id: pane_id.clone(),
+                tab_id: None,
+                rows: Some(24),
+                cols: Some(80),
+                skipped_events: 2,
+                estimated_dropped_bytes: Some(64),
+                reason: "test_delivery_gap".to_string(),
+                occurred_at_ms: None,
+            })
+            .expect("history gap should persist");
+        let client = store
+            .upsert_delivery_client(DeliveryClientInput {
+                id: Some("browser-gap".to_string()),
+                client_kind: "browser".to_string(),
+                install_ref_hash: None,
+                browser_profile_ref_hash: None,
+                user_agent_hash: None,
+                trust_state: None,
+            })
+            .expect("client should persist");
+
+        let window = store
+            .delivery_replay_window(DeliveryOffsetInput {
+                client_id: client.id,
+                session_id,
+                pane_id,
+                stream_id: None,
+            })
+            .expect("replay window should load");
+
+        assert_eq!(window.from_event_seq, Some(1));
+        assert_eq!(window.to_event_seq, 2);
+        assert_eq!(window.gap_state, "gap");
     }
 
     #[test]
