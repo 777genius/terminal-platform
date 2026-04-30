@@ -3189,6 +3189,7 @@ impl TerminalPersistenceV2 {
         input: ExportArtifactVerificationInput,
     ) -> Result<ExportArtifactVerificationRecord, TerminalPersistenceV2Error> {
         validate_external_artifact_ref(&input.artifact_ref)?;
+        validate_external_artifact_target_ref(&input.artifact_ref, &self.path)?;
         let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
         connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
@@ -3509,6 +3510,7 @@ impl TerminalPersistenceV2 {
             input.encryption_state.as_deref(),
         )?;
         validate_external_artifact_ref(&input.artifact_ref)?;
+        validate_external_artifact_target_ref(&input.artifact_ref, &self.path)?;
         if let Some(size_bytes) = input.size_bytes
             && size_bytes < 0
         {
@@ -8632,6 +8634,75 @@ fn validate_external_artifact_ref(artifact_ref: &str) -> Result<(), TerminalPers
     Ok(())
 }
 
+fn validate_external_artifact_target_ref(
+    artifact_ref: &str,
+    source_db_path: &Path,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let Some(target_path) = path_like_artifact_ref(artifact_ref) else {
+        return Ok(());
+    };
+    let source_canonical = source_db_path.canonicalize()?;
+    let Some(target_normalized) = normalize_artifact_target_path(&target_path) else {
+        return Ok(());
+    };
+    let forbidden_targets = [
+        source_canonical.clone(),
+        sqlite_sidecar_path(&source_canonical, "-wal"),
+        sqlite_sidecar_path(&source_canonical, "-shm"),
+    ];
+    if forbidden_targets
+        .iter()
+        .any(|forbidden| paths_equal_for_platform(forbidden, &target_normalized))
+    {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "external artifact ref cannot point at the live database or SQLite sidecar: {}",
+            target_normalized.display()
+        )));
+    }
+    Ok(())
+}
+
+fn path_like_artifact_ref(artifact_ref: &str) -> Option<PathBuf> {
+    let trimmed = artifact_ref.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains("://") {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute()
+        || trimmed.starts_with('.')
+        || trimmed.contains('\\')
+        || trimmed.contains('/')
+        || looks_like_windows_drive_path(trimmed)
+    {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn looks_like_windows_drive_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 3
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+        && bytes[0].is_ascii_alphabetic()
+}
+
+fn normalize_artifact_target_path(path: &Path) -> Option<PathBuf> {
+    if let Ok(canonical) = path.canonicalize() {
+        return Some(canonical);
+    }
+    let file_name = path.file_name()?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    parent.canonicalize().ok().map(|parent| parent.join(file_name))
+}
+
 fn is_storage_full_like_error(error: &TerminalPersistenceV2Error) -> bool {
     match error {
         TerminalPersistenceV2Error::Query(DieselError::DatabaseError(_, info)) => {
@@ -9129,6 +9200,34 @@ mod tests {
         assert!(
             matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("external artifact kind"))
         );
+    }
+
+    #[test]
+    fn external_artifact_metadata_rejects_live_database_and_sidecar_refs() {
+        let store = test_store("external-artifact-live-db-refs");
+        let live_db_ref = store.path().to_string_lossy().to_string();
+        let wal_ref = sqlite_sidecar_path(store.path(), "-wal").to_string_lossy().to_string();
+
+        for artifact_ref in [live_db_ref, wal_ref] {
+            let error = store
+                .record_external_artifact(ExternalArtifactInput {
+                    id: None,
+                    artifact_kind: "backup_file".to_string(),
+                    artifact_ref,
+                    state: Some("planned".to_string()),
+                    encryption_state: Some("encrypted".to_string()),
+                    key_ref: Some("crypto-key:artifact".to_string()),
+                    checksum_algorithm: Some("blake3".to_string()),
+                    checksum: Some(blake3_hash_text("artifact-bytes")),
+                    size_bytes: Some(1),
+                    verified_at_ms: None,
+                    metadata: None,
+                })
+                .expect_err("live db and sidecar refs must be rejected");
+            assert!(
+                matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("live database or SQLite sidecar"))
+            );
+        }
     }
 
     #[test]
