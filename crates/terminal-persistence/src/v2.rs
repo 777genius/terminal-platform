@@ -5763,6 +5763,8 @@ fn persist_history_validation_health_records(
             "migration_mismatch"
         } else if failure.starts_with("stream_cursor:")
             || failure.starts_with("pane:")
+            || failure.starts_with("session_cursor:")
+            || failure.starts_with("commit_log:")
             || failure.starts_with("stream_segment:")
         {
             "missing_segment"
@@ -5978,6 +5980,140 @@ fn validate_sequence_invariants(
                     pane_id, last_event_seq, expected_last_event_seq
                 ));
             }
+        }
+    }
+
+    validate_stream_segment_ordering(connection, session_id, failures)?;
+    validate_commit_sequence_invariants(connection, session_id, failures)?;
+
+    Ok(())
+}
+
+fn validate_stream_segment_ordering(
+    connection: &mut SqliteConnection,
+    session_id: Option<&str>,
+    failures: &mut Vec<String>,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let mut query = terminal_stream_segments::table.into_boxed();
+    if let Some(session_id) = session_id {
+        query = query.filter(terminal_stream_segments::session_id.eq(session_id));
+    }
+    let rows = query
+        .order((
+            terminal_stream_segments::session_id.asc(),
+            terminal_stream_segments::pane_id.asc(),
+            terminal_stream_segments::stream_id.asc(),
+            terminal_stream_segments::event_seq_low.asc(),
+            terminal_stream_segments::byte_low.asc(),
+        ))
+        .select((
+            terminal_stream_segments::id,
+            terminal_stream_segments::session_id,
+            terminal_stream_segments::pane_id,
+            terminal_stream_segments::stream_id,
+            terminal_stream_segments::event_seq_low,
+            terminal_stream_segments::event_seq_high,
+            terminal_stream_segments::byte_low,
+            terminal_stream_segments::byte_high,
+        ))
+        .load::<(String, String, String, String, i64, i64, i64, i64)>(connection)?;
+
+    let mut previous: Option<(String, String, String, String, i64, i64)> = None;
+    for (
+        id,
+        row_session_id,
+        pane_id,
+        stream_id,
+        event_seq_low,
+        event_seq_high,
+        byte_low,
+        byte_high,
+    ) in rows
+    {
+        if let Some((
+            previous_id,
+            previous_session_id,
+            previous_pane_id,
+            previous_stream_id,
+            previous_event_high,
+            previous_byte_high,
+        )) = previous.as_ref()
+        {
+            if previous_session_id == &row_session_id
+                && previous_pane_id == &pane_id
+                && previous_stream_id == &stream_id
+            {
+                if event_seq_low <= *previous_event_high {
+                    failures.push(format!(
+                        "stream_segment:{id} overlaps stream_segment:{previous_id} event range"
+                    ));
+                }
+                if byte_low < *previous_byte_high {
+                    failures.push(format!(
+                        "stream_segment:{id} overlaps stream_segment:{previous_id} byte range"
+                    ));
+                }
+            }
+        }
+        previous = Some((id, row_session_id, pane_id, stream_id, event_seq_high, byte_high));
+    }
+
+    Ok(())
+}
+
+fn validate_commit_sequence_invariants(
+    connection: &mut SqliteConnection,
+    session_id: Option<&str>,
+    failures: &mut Vec<String>,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let mut cursor_query = terminal_session_cursors::table.into_boxed();
+    if let Some(session_id) = session_id {
+        cursor_query = cursor_query.filter(terminal_session_cursors::session_id.eq(session_id));
+    }
+    let cursors = cursor_query
+        .select((terminal_session_cursors::session_id, terminal_session_cursors::next_commit_seq))
+        .load::<(String, i64)>(connection)?;
+    for (cursor_session_id, next_commit_seq) in cursors {
+        let max_commit_seq = terminal_commit_log::table
+            .filter(terminal_commit_log::session_id.eq(&cursor_session_id))
+            .select(max(terminal_commit_log::commit_seq))
+            .first::<Option<i64>>(connection)?
+            .unwrap_or(0);
+        let expected_next_commit_seq = max_commit_seq + 1;
+        if next_commit_seq != expected_next_commit_seq {
+            failures.push(format!(
+                "session_cursor:{cursor_session_id} next_commit_seq={next_commit_seq} expected={expected_next_commit_seq}"
+            ));
+        }
+    }
+
+    let mut commit_query = terminal_commit_log::table.into_boxed();
+    if let Some(session_id) = session_id {
+        commit_query = commit_query.filter(terminal_commit_log::session_id.eq(session_id));
+    }
+    let commits = commit_query
+        .order((terminal_commit_log::session_id.asc(), terminal_commit_log::commit_seq.asc()))
+        .select((
+            terminal_commit_log::id,
+            terminal_commit_log::session_id,
+            terminal_commit_log::commit_seq,
+        ))
+        .load::<(String, String, i64)>(connection)?;
+
+    let mut previous_session: Option<String> = None;
+    let mut expected_commit_seq = 1_i64;
+    for (commit_id, commit_session_id, commit_seq) in commits {
+        if previous_session.as_deref() != Some(commit_session_id.as_str()) {
+            previous_session = Some(commit_session_id.clone());
+            expected_commit_seq = 1;
+        }
+        if commit_seq != expected_commit_seq {
+            failures.push(format!(
+                "commit_log:{commit_id} commit_seq={commit_seq} expected={expected_commit_seq}"
+            ));
+            expected_commit_seq = commit_seq + 1;
+        } else {
+            expected_commit_seq += 1;
         }
     }
 
@@ -8513,6 +8649,86 @@ mod tests {
                 .as_deref()
                 .unwrap_or_default()
                 .contains("next_event_seq=99 expected=2")
+        );
+    }
+
+    #[test]
+    fn integrity_check_flags_overlapping_stream_segment_ranges() {
+        let store = test_store("stream-overlap");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let first = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"first\r\n".to_vec(),
+            ))
+            .expect("first segment should persist");
+        let second = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id,
+                pane_id,
+                writer.id,
+                b"second\r\n".to_vec(),
+            ))
+            .expect("second segment should persist");
+
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(
+            terminal_stream_segments::table
+                .filter(terminal_stream_segments::id.eq(&first.segment_id)),
+        )
+        .set(terminal_stream_segments::event_seq_high.eq(second.event_seq_low))
+        .execute(&mut connection)
+        .expect("test should corrupt segment ordering");
+
+        let integrity = store.run_integrity_check().expect("integrity check should run");
+
+        assert_eq!(integrity.result, "failed");
+        let error = integrity.error.as_deref().unwrap_or_default();
+        assert!(error.contains("history_validation_failures=1"));
+        let health = store.list_open_data_health_records(None).expect("health records should list");
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].detection_kind, "missing_segment");
+        assert!(health[0].affected_ref.as_deref().unwrap_or_default().contains("overlaps"));
+    }
+
+    #[test]
+    fn integrity_check_flags_commit_cursor_drift() {
+        let store = test_store("commit-cursor-drift");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id,
+                writer.id,
+                b"commit target\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(
+            terminal_session_cursors::table
+                .filter(terminal_session_cursors::session_id.eq(&session_id)),
+        )
+        .set(terminal_session_cursors::next_commit_seq.eq(99))
+        .execute(&mut connection)
+        .expect("test should corrupt session cursor");
+
+        let integrity = store.run_integrity_check().expect("integrity check should run");
+
+        assert_eq!(integrity.result, "failed");
+        let error = integrity.error.as_deref().unwrap_or_default();
+        assert!(error.contains("history_validation_failures=1"));
+        let health = store.list_open_data_health_records(None).expect("health records should list");
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].detection_kind, "missing_segment");
+        assert!(
+            health[0]
+                .affected_ref
+                .as_deref()
+                .unwrap_or_default()
+                .contains("next_commit_seq=99 expected=2")
         );
     }
 
