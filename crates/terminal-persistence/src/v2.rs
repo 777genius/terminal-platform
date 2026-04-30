@@ -2845,6 +2845,7 @@ impl TerminalPersistenceV2 {
         run_optimize: bool,
     ) -> Result<MaintenanceRunRecord, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        let recovery = recover_expired_maintenance_leases(&mut connection, started_at_ms)?;
         let wal_checkpoint = if run_wal_checkpoint {
             Some(run_passive_wal_checkpoint(&mut connection)?)
         } else {
@@ -2863,6 +2864,12 @@ impl TerminalPersistenceV2 {
             "optimize": {
                 "ran": run_optimize,
                 "mode": "pragma_optimize"
+            },
+            "recovery": {
+                "checked_at_ms": started_at_ms,
+                "stale_outbox_claims_requeued": recovery.stale_outbox_claims_requeued,
+                "stale_outbox_claims_quarantined": recovery.stale_outbox_claims_quarantined,
+                "stale_writer_generations_marked": recovery.stale_writer_generations_marked
             },
             "storage": {
                 "db_file_bytes": db_file_bytes,
@@ -6753,6 +6760,86 @@ fn process_monotonic_ms() -> i64 {
     elapsed_ms.min(i64::MAX as u128) as i64
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MaintenanceRecoverySummary {
+    stale_outbox_claims_requeued: usize,
+    stale_outbox_claims_quarantined: usize,
+    stale_writer_generations_marked: usize,
+}
+
+fn recover_expired_maintenance_leases(
+    connection: &mut SqliteConnection,
+    now: i64,
+) -> Result<MaintenanceRecoverySummary, TerminalPersistenceV2Error> {
+    connection.immediate_transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+        let retryable_outbox = diesel::update(
+            terminal_outbox_messages::table
+                .filter(terminal_outbox_messages::state.eq("claimed"))
+                .filter(terminal_outbox_messages::claimed_until_ms.le(Some(now)))
+                .filter(
+                    terminal_outbox_messages::attempts.lt(terminal_outbox_messages::max_attempts),
+                ),
+        )
+        .set((
+            terminal_outbox_messages::state.eq("pending"),
+            terminal_outbox_messages::claimed_by.eq::<Option<String>>(None),
+            terminal_outbox_messages::lease_token.eq::<Option<String>>(None),
+            terminal_outbox_messages::claimed_until_ms.eq::<Option<i64>>(None),
+            terminal_outbox_messages::next_run_at_ms.eq(now),
+            terminal_outbox_messages::last_error
+                .eq(Some("outbox lease expired during maintenance recovery".to_string())),
+            terminal_outbox_messages::updated_at_ms.eq(now),
+        ))
+        .execute(connection)?;
+
+        let exhausted_outbox = diesel::update(
+            terminal_outbox_messages::table
+                .filter(terminal_outbox_messages::state.eq("claimed"))
+                .filter(terminal_outbox_messages::claimed_until_ms.le(Some(now)))
+                .filter(
+                    terminal_outbox_messages::attempts.ge(terminal_outbox_messages::max_attempts),
+                ),
+        )
+        .set((
+            terminal_outbox_messages::state.eq("quarantined"),
+            terminal_outbox_messages::claimed_by.eq::<Option<String>>(None),
+            terminal_outbox_messages::lease_token.eq::<Option<String>>(None),
+            terminal_outbox_messages::claimed_until_ms.eq::<Option<i64>>(None),
+            terminal_outbox_messages::next_run_at_ms.eq(now),
+            terminal_outbox_messages::last_error
+                .eq(Some("outbox lease expired after max attempts".to_string())),
+            terminal_outbox_messages::updated_at_ms.eq(now),
+        ))
+        .execute(connection)?;
+
+        let stale_writer_ids = terminal_writer_generations::table
+            .filter(terminal_writer_generations::state.eq("active"))
+            .filter(terminal_writer_generations::lease_expires_at_ms.le(now))
+            .select(terminal_writer_generations::id)
+            .load::<String>(connection)?;
+        let stale_writers = diesel::update(
+            terminal_writer_generations::table
+                .filter(terminal_writer_generations::state.eq("active"))
+                .filter(terminal_writer_generations::lease_expires_at_ms.le(now)),
+        )
+        .set((
+            terminal_writer_generations::state.eq("stale"),
+            terminal_writer_generations::released_at_ms.eq(Some(now)),
+        ))
+        .execute(connection)?;
+
+        for writer_generation in stale_writer_ids.iter().take(stale_writers) {
+            insert_clock_anchor(connection, writer_generation, now, "writer_stale_recovery")?;
+        }
+
+        Ok(MaintenanceRecoverySummary {
+            stale_outbox_claims_requeued: retryable_outbox,
+            stale_outbox_claims_quarantined: exhausted_outbox,
+            stale_writer_generations_marked: stale_writers,
+        })
+    })
+}
+
 fn map_writer_generation_insert_error(error: DieselError) -> TerminalPersistenceV2Error {
     match error {
         DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
@@ -9384,6 +9471,94 @@ mod tests {
         assert!(summary["wal_checkpoint"]["log_frames"].as_i64().is_some());
         assert_eq!(summary["optimize"]["ran"], true);
         assert_eq!(summary["storage"]["no_silent_delete"], true);
+    }
+
+    #[test]
+    fn maintenance_requeues_stale_outbox_claims_and_marks_stale_writers() {
+        let store = test_store("maintenance-recovery");
+        let message = store
+            .enqueue_outbox_message(OutboxMessageInput {
+                message_kind: "restore_drill".to_string(),
+                payload: serde_json::json!({ "session_id": "session-a" }),
+                dedupe_key: None,
+                max_attempts: Some(2),
+                next_run_at_ms: None,
+            })
+            .expect("message should enqueue");
+        let first_claim = store
+            .claim_next_outbox_message("worker-a", 60_000)
+            .expect("claim should succeed")
+            .expect("message should be claimable");
+        let writer =
+            store.acquire_writer_generation("process-a", 60_000).expect("writer should acquire");
+        let expired_at_ms = store.config.clock.now_ms() - 1;
+
+        {
+            let mut connection = store.connection().expect("connection should open");
+            diesel::update(
+                terminal_outbox_messages::table
+                    .filter(terminal_outbox_messages::id.eq(&message.id)),
+            )
+            .set((
+                terminal_outbox_messages::claimed_until_ms.eq(Some(expired_at_ms)),
+                terminal_outbox_messages::updated_at_ms.eq(expired_at_ms),
+            ))
+            .execute(&mut connection)
+            .expect("test should expire outbox lease");
+            diesel::update(
+                terminal_writer_generations::table
+                    .filter(terminal_writer_generations::id.eq(&writer.id)),
+            )
+            .set((
+                terminal_writer_generations::heartbeat_at_ms.eq(expired_at_ms),
+                terminal_writer_generations::lease_expires_at_ms.eq(expired_at_ms),
+            ))
+            .execute(&mut connection)
+            .expect("test should expire writer lease");
+        }
+
+        let run = store
+            .run_maintenance(MaintenanceRunInput {
+                run_wal_checkpoint: false,
+                run_optimize: false,
+                ..MaintenanceRunInput::default()
+            })
+            .expect("maintenance should recover stale leases");
+        let summary = run.summary_json.as_ref().expect("maintenance summary should exist");
+        let second_claim = store
+            .claim_next_outbox_message("worker-b", 60_000)
+            .expect("second claim should succeed")
+            .expect("stale outbox message should be requeued");
+        let replacement_writer = store
+            .acquire_writer_generation("process-b", 60_000)
+            .expect("new writer should acquire after stale recovery");
+
+        assert_ne!(first_claim.lease_token, second_claim.lease_token);
+        assert_eq!(second_claim.id, message.id);
+        assert_eq!(second_claim.state, "claimed");
+        assert_eq!(second_claim.claimed_by.as_deref(), Some("worker-b"));
+        assert_eq!(summary["recovery"]["stale_outbox_claims_requeued"], 1);
+        assert_eq!(summary["recovery"]["stale_outbox_claims_quarantined"], 0);
+        assert_eq!(summary["recovery"]["stale_writer_generations_marked"], 1);
+
+        let mut connection = store.connection().expect("connection should open");
+        let stale_writer_state = terminal_writer_generations::table
+            .filter(terminal_writer_generations::id.eq(&writer.id))
+            .select(terminal_writer_generations::state)
+            .first::<String>(&mut connection)
+            .expect("stale writer should load");
+        let recovery_anchor_count = terminal_clock_anchors::table
+            .filter(terminal_clock_anchors::writer_generation.eq(&writer.id))
+            .filter(terminal_clock_anchors::source.eq("writer_stale_recovery"))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("recovery anchor should count");
+
+        assert_eq!(stale_writer_state, "stale");
+        assert_eq!(recovery_anchor_count, 1);
+        store
+            .release_writer_generation(&replacement_writer.id)
+            .expect("replacement writer should release");
     }
 
     #[test]
