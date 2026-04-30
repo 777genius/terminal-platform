@@ -51,6 +51,8 @@ const MAX_HISTORY_BYTE_LIMIT: i64 = 16 * 1024 * 1024;
 const MAX_HISTORY_GAP_LIMIT: i64 = 256;
 const DEFAULT_COMMAND_HISTORY_LIMIT: i64 = 100;
 const MAX_COMMAND_HISTORY_LIMIT: i64 = 1_000;
+const DEFAULT_DB_PRESSURE_WARNING_BYTES: i64 = 4_i64 * 1024 * 1024 * 1024;
+const DEFAULT_WAL_PRESSURE_WARNING_BYTES: i64 = 256_i64 * 1024 * 1024;
 const PAYLOAD_SCHEMA_UI_INPUT_V1: &str = "terminal.ui_input.v1";
 const PAYLOAD_SCHEMA_HISTORY_GAP_V1: &str = "terminal.history_gap.v1";
 const PAYLOAD_SCHEMA_JOURNAL_EVENT_V1: &str = "terminal.journal_event.v1";
@@ -201,6 +203,7 @@ pub struct TerminalPersistenceV2Config {
     pub busy_timeout_ms: u32,
     pub wal_autocheckpoint_pages: u32,
     pub clock: PersistenceClock,
+    pub storage_pressure: StoragePressureConfig,
     pub failpoints: PersistenceFailpoints,
 }
 
@@ -217,6 +220,7 @@ impl TerminalPersistenceV2Config {
             busy_timeout_ms: 1_000,
             wal_autocheckpoint_pages: 64,
             clock: PersistenceClock,
+            storage_pressure: StoragePressureConfig::default(),
             failpoints: PersistenceFailpoints::default(),
         }
     }
@@ -229,7 +233,23 @@ impl Default for TerminalPersistenceV2Config {
             busy_timeout_ms: 5_000,
             wal_autocheckpoint_pages: 1_000,
             clock: PersistenceClock,
+            storage_pressure: StoragePressureConfig::default(),
             failpoints: PersistenceFailpoints::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoragePressureConfig {
+    pub db_warning_bytes: i64,
+    pub wal_warning_bytes: i64,
+}
+
+impl Default for StoragePressureConfig {
+    fn default() -> Self {
+        Self {
+            db_warning_bytes: DEFAULT_DB_PRESSURE_WARNING_BYTES,
+            wal_warning_bytes: DEFAULT_WAL_PRESSURE_WARNING_BYTES,
         }
     }
 }
@@ -2632,20 +2652,27 @@ impl TerminalPersistenceV2 {
             .map(|metadata| metadata.len())
             .map(|len| u64_to_i64(len, "wal file size"))
             .transpose()?;
+        let classification =
+            classify_storage_pressure(db_file_bytes, wal_file_bytes, self.config.storage_pressure);
 
         self.record_storage_pressure_event(StoragePressureEventInput {
             id: None,
-            state: Some("ok".to_string()),
+            state: Some(classification.state.to_string()),
             db_file_bytes,
             wal_file_bytes,
             disk_free_bytes: None,
             temp_free_bytes: None,
             quota_bytes: None,
-            action_taken: Some("none".to_string()),
-            reason: Some("manual_probe".to_string()),
+            action_taken: Some(classification.action_taken.to_string()),
+            reason: Some(classification.reason.to_string()),
             metadata: Some(serde_json::json!({
                 "db_path_hash": path_hash(&self.path),
                 "wal_path_hash": path_hash(&wal_path),
+                "db_warning_bytes": self.config.storage_pressure.db_warning_bytes,
+                "wal_warning_bytes": self.config.storage_pressure.wal_warning_bytes,
+                "db_over_budget": classification.db_over_budget,
+                "wal_over_budget": classification.wal_over_budget,
+                "no_silent_delete": true,
             })),
         })
     }
@@ -6518,6 +6545,34 @@ fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(value)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StoragePressureClassification {
+    state: &'static str,
+    action_taken: &'static str,
+    reason: &'static str,
+    db_over_budget: bool,
+    wal_over_budget: bool,
+}
+
+fn classify_storage_pressure(
+    db_file_bytes: Option<i64>,
+    wal_file_bytes: Option<i64>,
+    config: StoragePressureConfig,
+) -> StoragePressureClassification {
+    let db_over_budget = config.db_warning_bytes > 0
+        && db_file_bytes.is_some_and(|value| value >= config.db_warning_bytes);
+    let wal_over_budget = config.wal_warning_bytes > 0
+        && wal_file_bytes.is_some_and(|value| value >= config.wal_warning_bytes);
+    let (state, action_taken, reason) = match (db_over_budget, wal_over_budget) {
+        (true, true) => ("warning", "checkpoint_and_warn", "db_and_wal_file_size_over_budget"),
+        (false, true) => ("warning", "checkpoint_recommended", "wal_file_size_over_budget"),
+        (true, false) => ("warning", "warn_only", "db_file_size_over_budget"),
+        (false, false) => ("ok", "none", "manual_probe"),
+    };
+
+    StoragePressureClassification { state, action_taken, reason, db_over_budget, wal_over_budget }
+}
+
 fn path_hash(path: &Path) -> String {
     blake3_hash_text(&path.to_string_lossy())
 }
@@ -8094,6 +8149,37 @@ mod tests {
         assert!(!document.text_preview.contains("sk_live_secret"));
         assert_eq!(documents.len(), 1);
         assert_eq!(documents[0].document_id, document.document_id);
+    }
+
+    #[test]
+    fn storage_probe_records_warning_when_file_budget_is_exceeded() {
+        let mut config = TerminalPersistenceV2Config::test();
+        config.storage_pressure.db_warning_bytes = 1;
+        config.storage_pressure.wal_warning_bytes = i64::MAX;
+        let path = std::env::temp_dir()
+            .join(format!("terminal-persistence-v2-storage-pressure-{}.sqlite3", Uuid::new_v4()));
+        let store =
+            TerminalPersistenceV2::open_with_config(path, config).expect("store should open");
+
+        let pressure = store.probe_storage_health().expect("storage probe should persist");
+
+        assert_eq!(pressure.state, "warning");
+        assert_eq!(pressure.action_taken, "warn_only");
+        assert_eq!(pressure.reason.as_deref(), Some("db_file_size_over_budget"));
+        assert_eq!(
+            pressure
+                .metadata_json
+                .as_ref()
+                .and_then(|metadata| metadata["db_over_budget"].as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            pressure
+                .metadata_json
+                .as_ref()
+                .and_then(|metadata| metadata["no_silent_delete"].as_bool()),
+            Some(true)
+        );
     }
 
     #[test]
