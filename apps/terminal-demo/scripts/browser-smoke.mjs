@@ -2448,7 +2448,11 @@ async function runSmokeScenario(browserUrl) {
       const savedSessionCountAfterPrompt =
         window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
       armedButton?.click();
-      await wait(1200);
+      await waitForState((state) => {
+        const expectedAfterPrune = eventDetail?.keptCount ?? pruneKeepLatest;
+        const savedSessions = state?.catalog?.savedSessions?.length ?? Number.POSITIVE_INFINITY;
+        return savedSessions <= expectedAfterPrune;
+      }, 10000);
 
       const savedSessionCountAfter = window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
       const visibleCountAfter = savedRoot.querySelectorAll('[part="item"]')?.length ?? 0;
