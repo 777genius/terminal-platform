@@ -252,6 +252,7 @@ fn map_restore_plan(plan: RestorePlan) -> Result<PaneHistoryRestorePlan, Protoco
         latest_screen_snapshot_id: plan.latest_screen_snapshot_id,
         latest_topology_snapshot_id: plan.latest_topology_snapshot_id,
         high_water_commit_seq: plan.high_water_commit_seq,
+        latest_restore_drill_status: plan.latest_restore_drill_status,
         evidence: plan
             .evidence
             .into_iter()

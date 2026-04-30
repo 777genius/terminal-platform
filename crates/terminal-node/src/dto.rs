@@ -377,6 +377,7 @@ pub struct NodePaneHistoryRestorePlan {
     pub latest_screen_snapshot_id: Option<String>,
     pub latest_topology_snapshot_id: Option<String>,
     pub high_water_commit_seq: i64,
+    pub latest_restore_drill_status: Option<String>,
     pub evidence: Vec<NodePaneHistoryRestoreEvidence>,
 }
 
@@ -1141,6 +1142,7 @@ impl From<&PaneHistoryRestorePlan> for NodePaneHistoryRestorePlan {
             latest_screen_snapshot_id: value.latest_screen_snapshot_id.clone(),
             latest_topology_snapshot_id: value.latest_topology_snapshot_id.clone(),
             high_water_commit_seq: value.high_water_commit_seq,
+            latest_restore_drill_status: value.latest_restore_drill_status.clone(),
             evidence: value.evidence.iter().map(Into::into).collect(),
         }
     }

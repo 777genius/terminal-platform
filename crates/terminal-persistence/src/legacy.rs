@@ -146,15 +146,17 @@ impl SqliteSessionStore {
         &self,
         session_id: SessionId,
     ) -> Result<Option<RestorePlan>, TerminalPersistenceV2Error> {
-        let store = TerminalPersistenceV2::open_with_config(
-            &self.path,
-            TerminalPersistenceV2Config::default(),
-        )?;
-        match store.restore_plan(&session_id.0.to_string()) {
-            Ok(plan) => Ok(Some(plan)),
-            Err(TerminalPersistenceV2Error::Query(diesel::result::Error::NotFound)) => Ok(None),
-            Err(error) => Err(error),
-        }
+        retry_v2_write(|| {
+            let store = TerminalPersistenceV2::open_with_config(
+                &self.path,
+                TerminalPersistenceV2Config::default(),
+            )?;
+            match store.restore_plan(&session_id.0.to_string()) {
+                Ok(plan) => Ok(Some(plan)),
+                Err(TerminalPersistenceV2Error::Query(diesel::result::Error::NotFound)) => Ok(None),
+                Err(error) => Err(error),
+            }
+        })
     }
 
     pub fn record_v2_ui_input(

@@ -150,6 +150,7 @@ pub struct PaneHistoryRestorePlan {
     pub latest_screen_snapshot_id: Option<String>,
     pub latest_topology_snapshot_id: Option<String>,
     pub high_water_commit_seq: i64,
+    pub latest_restore_drill_status: Option<String>,
     pub evidence: Vec<PaneHistoryRestoreEvidence>,
 }
 
