@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -1248,7 +1249,14 @@ impl TerminalPersistenceV2 {
             metadata: Some(serde_json::json!({ "capture_source": "topology_snapshot" })),
         })?;
 
-        let pane_high_water = topology_pane_high_water(&input.topology);
+        let pane_high_water = {
+            let mut connection = self.connection()?;
+            topology_pane_high_water_from_store(
+                &mut connection,
+                &input.session_id,
+                &input.topology,
+            )?
+        };
         let lease =
             self.acquire_writer_generation_with_retry("runtime-topology-snapshot", 60_000)?;
         let write_result = self.write_topology_snapshot(TopologySnapshotInput {
@@ -2493,15 +2501,20 @@ impl TerminalPersistenceV2 {
     ) -> Result<RestorePlan, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
+        let latest_topology =
+            load_latest_valid_topology_snapshot(&mut connection, session_id, now, "restore_plan")?;
+        let topology_pane_high_water = latest_topology
+            .as_ref()
+            .map(|topology| parse_pane_high_water_json(&topology.pane_high_water_json))
+            .transpose()?;
         let latest_screen = load_latest_valid_screen_snapshot(
             &mut connection,
             session_id,
             None,
+            topology_pane_high_water.as_ref(),
             now,
             "restore_plan",
         )?;
-        let latest_topology =
-            load_latest_valid_topology_snapshot(&mut connection, session_id, now, "restore_plan")?;
         let segment_count: i64 = terminal_stream_segments::table
             .filter(terminal_stream_segments::session_id.eq(session_id))
             .count()
@@ -4225,10 +4238,21 @@ impl TerminalPersistenceV2 {
             max_bytes.unwrap_or(DEFAULT_HISTORY_BYTE_LIMIT).clamp(1, MAX_HISTORY_BYTE_LIMIT);
         let now = self.config.clock.now_ms();
 
+        let latest_topology = load_latest_valid_topology_snapshot(
+            &mut connection,
+            session_id,
+            now,
+            "hydrate_pane_history",
+        )?;
+        let topology_pane_high_water = latest_topology
+            .as_ref()
+            .map(|topology| parse_pane_high_water_json(&topology.pane_high_water_json))
+            .transpose()?;
         let latest_screen_snapshot = load_latest_valid_screen_snapshot(
             &mut connection,
             session_id,
             Some(pane_id),
+            topology_pane_high_water.as_ref(),
             now,
             "hydrate_pane_history",
         )?
@@ -7892,6 +7916,11 @@ fn persist_history_validation_health_records(
             "checksum_mismatch"
         } else if failure.contains("payload_schema_id") {
             "migration_mismatch"
+        } else if failure.contains("topology high-water")
+            || failure.contains("topology high_water_event_seq")
+            || failure.contains("pane_high_water_json")
+        {
+            "projection_drift"
         } else if failure.starts_with("stream_cursor:")
             || failure.starts_with("pane:")
             || failure.starts_with("session_cursor:")
@@ -7953,6 +7982,7 @@ fn load_latest_valid_screen_snapshot(
     connection: &mut SqliteConnection,
     session_id: &str,
     pane_id: Option<&str>,
+    topology_pane_high_water: Option<&BTreeMap<String, i64>>,
     detected_at_ms: i64,
     evidence_ref: &str,
 ) -> Result<Option<ScreenSnapshotRow>, TerminalPersistenceV2Error> {
@@ -7973,7 +8003,7 @@ fn load_latest_valid_screen_snapshot(
         .load::<ScreenSnapshotRow>(connection)?;
 
     for row in rows {
-        if let Some(failure) = screen_snapshot_hydration_failure(&row) {
+        if let Some(failure) = screen_snapshot_hydration_failure(&row, topology_pane_high_water) {
             persist_projection_snapshot_failure(
                 connection,
                 Some(session_id),
@@ -8025,7 +8055,10 @@ fn load_latest_valid_topology_snapshot(
     Ok(None)
 }
 
-fn screen_snapshot_hydration_failure(row: &ScreenSnapshotRow) -> Option<String> {
+fn screen_snapshot_hydration_failure(
+    row: &ScreenSnapshotRow,
+    topology_pane_high_water: Option<&BTreeMap<String, i64>>,
+) -> Option<String> {
     let mut failures = Vec::new();
     validate_checksum_text(
         "screen_snapshot",
@@ -8035,7 +8068,34 @@ fn screen_snapshot_hydration_failure(row: &ScreenSnapshotRow) -> Option<String> 
         &row.checksum,
         &mut failures,
     );
+    validate_screen_snapshot_topology_high_water(row, topology_pane_high_water, &mut failures);
     failures.into_iter().next()
+}
+
+fn validate_screen_snapshot_topology_high_water(
+    row: &ScreenSnapshotRow,
+    topology_pane_high_water: Option<&BTreeMap<String, i64>>,
+    failures: &mut Vec<String>,
+) {
+    let Some(topology_pane_high_water) = topology_pane_high_water else {
+        return;
+    };
+    if topology_pane_high_water.is_empty() {
+        return;
+    }
+    let Some(max_event_seq) = topology_pane_high_water.get(&row.pane_id) else {
+        failures.push(format!(
+            "screen_snapshot:{} pane_id={} is not present in topology high-water vector",
+            row.id, row.pane_id
+        ));
+        return;
+    };
+    if row.high_water_event_seq > *max_event_seq {
+        failures.push(format!(
+            "screen_snapshot:{} high_water_event_seq={} exceeds topology high_water_event_seq={} for pane_id={}",
+            row.id, row.high_water_event_seq, max_event_seq, row.pane_id
+        ));
+    }
 }
 
 fn topology_snapshot_hydration_failure(
@@ -8059,7 +8119,41 @@ fn topology_snapshot_hydration_failure(
         &row.checksum,
         &mut failures,
     );
+    validate_topology_pane_high_water_json(row, &mut failures);
     failures.into_iter().next()
+}
+
+fn validate_topology_pane_high_water_json(row: &TopologySnapshotRow, failures: &mut Vec<String>) {
+    if let Err(error) = parse_pane_high_water_json(&row.pane_high_water_json) {
+        failures
+            .push(format!("topology_snapshot:{} invalid pane_high_water_json: {}", row.id, error));
+    }
+}
+
+fn parse_pane_high_water_json(
+    pane_high_water_json: &str,
+) -> Result<BTreeMap<String, i64>, TerminalPersistenceV2Error> {
+    let value: Value = serde_json::from_str(pane_high_water_json)?;
+    let Some(object) = value.as_object() else {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "pane_high_water_json must be a JSON object".to_string(),
+        ));
+    };
+    let mut high_water = BTreeMap::new();
+    for (pane_id, raw_value) in object {
+        let Some(value) = raw_value.as_i64() else {
+            return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                "pane_high_water_json value for pane_id={pane_id} must be an integer"
+            )));
+        };
+        if value < 0 {
+            return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                "pane_high_water_json value for pane_id={pane_id} must be non-negative"
+            )));
+        }
+        high_water.insert(pane_id.clone(), value);
+    }
+    Ok(high_water)
 }
 
 fn persist_projection_snapshot_failure(
@@ -9644,21 +9738,48 @@ fn legacy_pane_high_water(saved: &SavedNativeSession) -> Value {
     Value::Object(map)
 }
 
-fn topology_pane_high_water(topology: &TopologySnapshot) -> Value {
-    let mut map = serde_json::Map::new();
+fn topology_pane_high_water_from_store(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    topology: &TopologySnapshot,
+) -> Result<Value, TerminalPersistenceV2Error> {
+    let mut map = topology_pane_high_water_map(topology);
+    if !map.is_empty() {
+        let pane_ids = map.keys().cloned().collect::<Vec<_>>();
+        let persisted_high_water = terminal_panes::table
+            .filter(terminal_panes::session_id.eq(session_id))
+            .filter(terminal_panes::id.eq_any(&pane_ids))
+            .select((terminal_panes::id, terminal_panes::last_event_seq))
+            .load::<(String, i64)>(connection)?;
+        for (pane_id, last_event_seq) in persisted_high_water {
+            if let Some(value) = map.get_mut(&pane_id) {
+                *value = last_event_seq.max(0);
+            }
+        }
+    }
+
+    let mut output = serde_json::Map::new();
+    for (pane_id, high_water_event_seq) in map {
+        output.insert(pane_id, Value::from(high_water_event_seq));
+    }
+    Ok(Value::Object(output))
+}
+
+fn topology_pane_high_water_map(topology: &TopologySnapshot) -> BTreeMap<String, i64> {
+    let mut map = BTreeMap::new();
     for tab in &topology.tabs {
         collect_topology_pane_high_water(&tab.root, &mut map);
     }
-    Value::Object(map)
+    map
 }
 
 fn collect_topology_pane_high_water(
     node: &terminal_mux_domain::PaneTreeNode,
-    map: &mut serde_json::Map<String, Value>,
+    map: &mut BTreeMap<String, i64>,
 ) {
     match node {
         terminal_mux_domain::PaneTreeNode::Leaf { pane_id } => {
-            map.entry(pane_id.0.to_string()).or_insert(Value::from(0));
+            map.entry(pane_id.0.to_string()).or_insert(0);
         }
         terminal_mux_domain::PaneTreeNode::Split(split) => {
             collect_topology_pane_high_water(&split.first, map);
@@ -12356,6 +12477,158 @@ mod tests {
             evidence.kind == "topology_snapshot" && evidence.value == topology_id
         }));
         assert!(plan.evidence.iter().any(|evidence| evidence.kind == "journal_event_range"));
+    }
+
+    #[test]
+    fn restore_plan_and_hydration_respect_topology_high_water_vector() {
+        let store = test_store("restore-topology-high-water");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let first = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"topology-consistent\r\n".to_vec(),
+            ))
+            .expect("first segment should persist");
+        let topology_consistent_screen = store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                writer_generation: writer.id.clone(),
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: first.event_seq_low,
+                high_water_event_seq: first.event_seq_high,
+                high_water_byte_seq: Some(first.byte_high),
+                screen: serde_json::json!({"lines":["topology-consistent"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("topology-consistent screen snapshot should persist");
+        let second = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"too-new-for-topology\r\n".to_vec(),
+            ))
+            .expect("second segment should persist");
+        let too_new_screen = store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                writer_generation: writer.id.clone(),
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: second.event_seq_low,
+                high_water_event_seq: second.event_seq_high,
+                high_water_byte_seq: Some(second.byte_high),
+                screen: serde_json::json!({"lines":["too-new-for-topology"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("newer screen snapshot should persist");
+        let topology = store
+            .write_topology_snapshot(TopologySnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                writer_generation: writer.id,
+                pane_high_water: serde_json::json!({ pane_id.clone(): first.event_seq_high }),
+                topology: serde_json::json!({"tabs":[{"active_pane_id": pane_id.clone()}]}),
+                source: None,
+                metadata: None,
+            })
+            .expect("topology snapshot should persist");
+
+        let plan = store.restore_plan(&session_id).expect("restore plan should load");
+        let hydrated = store
+            .hydrate_pane_history(&session_id, &pane_id, Some(1), Some(10), Some(1024))
+            .expect("pane history should hydrate");
+
+        assert_eq!(
+            plan.latest_screen_snapshot_id.as_deref(),
+            Some(topology_consistent_screen.as_str())
+        );
+        assert_eq!(plan.latest_topology_snapshot_id.as_deref(), Some(topology.as_str()));
+        assert!(!plan.evidence.iter().any(|evidence| {
+            evidence.kind == "screen_snapshot" && evidence.value == too_new_screen
+        }));
+        assert_eq!(
+            hydrated.latest_screen_snapshot.as_ref().map(|snapshot| snapshot.id.as_str()),
+            Some(topology_consistent_screen.as_str())
+        );
+        let health = store
+            .list_open_data_health_records(Some(&session_id))
+            .expect("projection health records should list");
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].detection_kind, "projection_drift");
+        assert_eq!(health[0].action_state, "rebuild_pending");
+        assert!(
+            health[0]
+                .affected_ref
+                .as_deref()
+                .unwrap_or_default()
+                .contains("topology high_water_event_seq")
+        );
+    }
+
+    #[test]
+    fn runtime_topology_snapshot_records_persisted_pane_high_water() {
+        let store = test_store("runtime-topology-high-water");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let segment = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"topology runtime high water\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        store.release_writer_generation(&writer.id).expect("writer should release");
+
+        let session_typed =
+            SessionId(Uuid::parse_str(&session_id).expect("session id should be uuid"));
+        let pane_typed = PaneId(Uuid::parse_str(&pane_id).expect("pane id should be uuid"));
+        let tab_id = TabId::new();
+        let topology_id = store
+            .record_topology_snapshot_event(TopologySnapshotEventInput {
+                session_id: session_id.clone(),
+                route: route(),
+                title: Some("runtime topology".to_string()),
+                launch: None,
+                topology: TopologySnapshot {
+                    session_id: session_typed,
+                    backend_kind: BackendKind::Native,
+                    tabs: vec![TabSnapshot {
+                        tab_id,
+                        title: Some("main".to_string()),
+                        root: PaneTreeNode::Leaf { pane_id: pane_typed },
+                        focused_pane: Some(pane_typed),
+                    }],
+                    focused_tab: Some(tab_id),
+                },
+            })
+            .expect("runtime topology snapshot should persist");
+
+        let mut connection = store.connection().expect("connection should open");
+        let pane_high_water_json = terminal_topology_snapshots::table
+            .filter(terminal_topology_snapshots::id.eq(topology_id))
+            .select(terminal_topology_snapshots::pane_high_water_json)
+            .first::<String>(&mut connection)
+            .expect("topology high-water should load");
+        let high_water =
+            parse_pane_high_water_json(&pane_high_water_json).expect("high-water should parse");
+
+        assert_eq!(high_water.get(&pane_id), Some(&segment.event_seq_high));
     }
 
     #[test]
