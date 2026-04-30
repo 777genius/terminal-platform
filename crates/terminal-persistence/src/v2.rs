@@ -551,6 +551,8 @@ impl TerminalPersistenceV2 {
         input: BackendCapabilityReportInput,
     ) -> Result<String, TerminalPersistenceV2Error> {
         validate_capture_semantics_domain(&input.capture_semantics)?;
+        validate_capture_strategy_domain(&input.capture_strategy)?;
+        validate_command_boundary_confidence_domain(&input.command_boundary_confidence)?;
         let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
         let id = input.id.unwrap_or_else(new_id);
@@ -6754,6 +6756,36 @@ fn validate_capture_semantics_domain(value: &str) -> Result<(), TerminalPersiste
     Ok(())
 }
 
+fn validate_capture_strategy_domain(value: &str) -> Result<(), TerminalPersistenceV2Error> {
+    const CAPTURE_STRATEGIES: &[&str] = &[
+        "raw_stream",
+        "rendered_stream",
+        "rendered_snapshot",
+        "mux_structured",
+        "imported_snapshot",
+        "ui_input",
+        "unknown",
+    ];
+    if !CAPTURE_STRATEGIES.contains(&value) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown capture strategy: {value}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_command_boundary_confidence_domain(
+    value: &str,
+) -> Result<(), TerminalPersistenceV2Error> {
+    const CONFIDENCE_LEVELS: &[&str] = &["verified", "high", "medium", "low", "none", "unknown"];
+    if !CONFIDENCE_LEVELS.contains(&value) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown command boundary confidence: {value}"
+        )));
+    }
+    Ok(())
+}
+
 fn path_hash(path: &Path) -> String {
     blake3_hash_text(&path.to_string_lossy())
 }
@@ -7117,6 +7149,43 @@ mod tests {
             matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("unknown capture semantics"))
         );
         assert_eq!(segment_count, 0);
+    }
+
+    #[test]
+    fn rejects_unknown_backend_capability_domains_before_insert() {
+        let store = test_store("backend-capability-api-domain");
+        let session_id = Uuid::new_v4().to_string();
+        let id = "invalid-backend-capability-api-domain".to_string();
+
+        let error = store
+            .record_backend_capability_report(BackendCapabilityReportInput {
+                id: Some(id.clone()),
+                session_id: Some(session_id),
+                backend_kind: "native".to_string(),
+                backend_version: Some("test".to_string()),
+                backend_binary_path_hash: Some("test-path-hash".to_string()),
+                route_kind: "local_daemon".to_string(),
+                probe_status: "passed".to_string(),
+                capture_strategy: "rawish_stream".to_string(),
+                capture_semantics: "raw_vt_stream".to_string(),
+                can_preserve_process_when_live: false,
+                can_capture_scrollback: true,
+                command_boundary_confidence: "high".to_string(),
+                evidence: None,
+                expires_at_ms: None,
+            })
+            .expect_err("unknown capture strategy should fail before insert");
+        let mut connection = store.connection().expect("connection should open");
+        let capability_count = terminal_backend_capability_reports::table
+            .filter(terminal_backend_capability_reports::id.eq(&id))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("capability count should load");
+
+        assert!(
+            matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("unknown capture strategy"))
+        );
+        assert_eq!(capability_count, 0);
     }
 
     #[test]
@@ -8656,6 +8725,37 @@ mod tests {
         .expect_err("sqlite CHECK constraint should reject unknown capture semantics");
 
         assert!(matches!(error, DieselError::DatabaseError(_, _)));
+    }
+
+    #[test]
+    fn backend_capability_db_constraints_reject_unknown_strategy_and_confidence() {
+        let store = test_store("backend-capability-db-domain-more");
+        let mut connection = store.connection().expect("connection should open");
+
+        let strategy_error = diesel::sql_query(
+            "INSERT INTO terminal_backend_capability_reports \
+             (id, backend_kind, route_kind, probe_status, capture_strategy, capture_semantics, \
+              can_preserve_process_when_live, can_capture_scrollback, command_boundary_confidence, \
+              created_at_ms, expires_at_ms) \
+             VALUES ('invalid-backend-strategy-domain', 'native', 'local_daemon', 'passed', \
+                     'rawish_stream', 'raw_vt_stream', 0, 1, 'high', 1, 2)",
+        )
+        .execute(&mut connection)
+        .expect_err("sqlite CHECK constraint should reject unknown capture strategy");
+
+        let confidence_error = diesel::sql_query(
+            "INSERT INTO terminal_backend_capability_reports \
+             (id, backend_kind, route_kind, probe_status, capture_strategy, capture_semantics, \
+              can_preserve_process_when_live, can_capture_scrollback, command_boundary_confidence, \
+              created_at_ms, expires_at_ms) \
+             VALUES ('invalid-backend-confidence-domain', 'native', 'local_daemon', 'passed', \
+                     'raw_stream', 'raw_vt_stream', 0, 1, 'maybe', 1, 2)",
+        )
+        .execute(&mut connection)
+        .expect_err("sqlite CHECK constraint should reject unknown command confidence");
+
+        assert!(matches!(strategy_error, DieselError::DatabaseError(_, _)));
+        assert!(matches!(confidence_error, DieselError::DatabaseError(_, _)));
     }
 
     #[test]
