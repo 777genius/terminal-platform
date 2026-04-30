@@ -13,6 +13,28 @@ diesel::table! {
 }
 
 diesel::table! {
+    terminal_payload_schemas (id) {
+        id -> Text,
+        payload_kind -> Text,
+        schema_version -> Text,
+        schema_json -> Text,
+        schema_hash -> Text,
+        created_at_ms -> BigInt,
+    }
+}
+
+diesel::table! {
+    terminal_projection_versions (id) {
+        id -> Text,
+        projection_kind -> Text,
+        version -> Text,
+        parser_version -> Nullable<Text>,
+        payload_schema_id -> Nullable<Text>,
+        created_at_ms -> BigInt,
+    }
+}
+
+diesel::table! {
     terminal_feature_gates (id) {
         id -> Text,
         feature_name -> Text,
@@ -37,6 +59,20 @@ diesel::table! {
         raw_history_prune_behavior -> Text,
         created_at_ms -> BigInt,
         updated_at_ms -> BigInt,
+    }
+}
+
+diesel::table! {
+    terminal_maintenance_runs (id) {
+        id -> Text,
+        run_kind -> Text,
+        state -> Text,
+        selected_policy_id -> Nullable<Text>,
+        started_at_ms -> BigInt,
+        finished_at_ms -> Nullable<BigInt>,
+        summary_json -> Nullable<Text>,
+        error -> Nullable<Text>,
+        metadata_json -> Nullable<Text>,
     }
 }
 
@@ -141,6 +177,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    terminal_clock_anchors (id) {
+        id -> Text,
+        writer_generation -> Text,
+        wall_time_ms -> BigInt,
+        monotonic_ms -> BigInt,
+        source -> Text,
+        created_at_ms -> BigInt,
+    }
+}
+
+diesel::table! {
     terminal_session_cursors (session_id) {
         session_id -> Text,
         next_commit_seq -> BigInt,
@@ -236,6 +283,22 @@ diesel::table! {
         received_at_ms -> BigInt,
         created_at_ms -> BigInt,
         metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    terminal_idempotency_keys (id) {
+        id -> Text,
+        scope_kind -> Text,
+        scope_ref -> Text,
+        operation_kind -> Text,
+        idempotency_key_hash -> Text,
+        request_hash -> Text,
+        result_json -> Nullable<Text>,
+        state -> Text,
+        first_seen_at_ms -> BigInt,
+        last_seen_at_ms -> BigInt,
+        expires_at_ms -> BigInt,
     }
 }
 
@@ -577,6 +640,8 @@ diesel::table! {
 diesel::joinable!(terminal_panes -> terminal_sessions (session_id));
 diesel::joinable!(terminal_sessions -> terminal_retention_policies (retention_policy_id));
 diesel::joinable!(terminal_data_health_records -> terminal_sessions (session_id));
+diesel::joinable!(terminal_projection_versions -> terminal_payload_schemas (payload_schema_id));
+diesel::joinable!(terminal_maintenance_runs -> terminal_retention_policies (selected_policy_id));
 diesel::joinable!(terminal_delivery_offsets -> terminal_clients (client_id));
 diesel::joinable!(terminal_delivery_offsets -> terminal_sessions (session_id));
 diesel::joinable!(terminal_stream_cursors -> terminal_panes (pane_id));
@@ -585,20 +650,25 @@ diesel::joinable!(terminal_session_cursors -> terminal_sessions (session_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     terminal_db_identity,
+    terminal_payload_schemas,
+    terminal_projection_versions,
     terminal_feature_gates,
     terminal_retention_policies,
+    terminal_maintenance_runs,
     terminal_integrity_checks,
     terminal_data_health_records,
     terminal_sessions,
     terminal_panes,
     terminal_backend_capability_reports,
     terminal_writer_generations,
+    terminal_clock_anchors,
     terminal_session_cursors,
     terminal_stream_cursors,
     terminal_commit_log,
     terminal_stream_segments,
     terminal_journal_events,
     terminal_capture_receipts,
+    terminal_idempotency_keys,
     terminal_clients,
     terminal_delivery_offsets,
     terminal_outbox_messages,
