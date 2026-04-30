@@ -4183,10 +4183,21 @@ impl TerminalPersistenceV2 {
             .select(StreamSegmentRow::as_select())
             .load::<StreamSegmentRow>(&mut connection)?;
 
+        let now = self.config.clock.now_ms();
         let mut segments = Vec::new();
         let mut total_payload_bytes = 0_i64;
         let mut has_more_segments = fetched_segments.len() > max_segments as usize;
         for row in fetched_segments.into_iter().take(max_segments as usize) {
+            if let Some(failure) = stream_segment_hydration_failure(&row) {
+                persist_hydration_segment_failure(
+                    &mut connection,
+                    session_id,
+                    &row,
+                    &failure,
+                    now,
+                )?;
+                continue;
+            }
             let row_payload_bytes = row.payload_len.max(0);
             if total_payload_bytes > 0 && total_payload_bytes + row_payload_bytes > max_bytes {
                 has_more_segments = true;
@@ -7876,6 +7887,90 @@ fn persist_history_validation_health_records(
         };
         insert_into(terminal_data_health_records::table).values(&row).execute(connection)?;
     }
+    Ok(())
+}
+
+fn stream_segment_hydration_failure(row: &StreamSegmentRow) -> Option<String> {
+    let mut failures = Vec::new();
+    validate_stream_segment_ranges(row, &mut failures);
+    validate_checksum_bytes(
+        "stream_segment",
+        &row.id,
+        &row.payload,
+        &row.checksum_algorithm,
+        &row.checksum,
+        &mut failures,
+    );
+    failures.into_iter().next()
+}
+
+fn persist_hydration_segment_failure(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+    row: &StreamSegmentRow,
+    failure: &str,
+    detected_at_ms: i64,
+) -> Result<(), TerminalPersistenceV2Error> {
+    let validation = HistoryValidation {
+        journal_events_checked: 0,
+        stream_segments_checked: 1,
+        screen_snapshots_checked: 0,
+        topology_snapshots_checked: 0,
+        failures: vec![failure.to_string()],
+    };
+    persist_history_validation_health_records(
+        connection,
+        Some(session_id),
+        &validation,
+        detected_at_ms,
+        Some("hydrate_pane_history"),
+    )?;
+
+    let event_range_valid = row.event_seq_low <= row.event_seq_high;
+    let byte_range_valid = row.byte_low < row.byte_high;
+    let existing_gap = if event_range_valid {
+        terminal_history_gaps::table
+            .filter(terminal_history_gaps::session_id.eq(&row.session_id))
+            .filter(terminal_history_gaps::pane_id.eq(Some(row.pane_id.clone())))
+            .filter(terminal_history_gaps::stream_id.eq(&row.stream_id))
+            .filter(terminal_history_gaps::gap_kind.eq("corrupted_segment"))
+            .filter(terminal_history_gaps::event_seq_low.eq(Some(row.event_seq_low)))
+            .filter(terminal_history_gaps::event_seq_high.eq(Some(row.event_seq_high)))
+            .select(terminal_history_gaps::id)
+            .first::<String>(connection)
+            .optional()?
+    } else {
+        None
+    };
+    if existing_gap.is_some() {
+        return Ok(());
+    }
+
+    let metadata_json = Some(serde_json::to_string(&serde_json::json!({
+        "stream_segment_id": row.id,
+        "failure": failure,
+        "detected_by": "hydrate_pane_history"
+    }))?);
+    let gap = NewHistoryGapRow {
+        id: new_id(),
+        session_id: row.session_id.clone(),
+        pane_id: Some(row.pane_id.clone()),
+        stream_id: row.stream_id.clone(),
+        gap_kind: "corrupted_segment".to_string(),
+        event_seq_low: event_range_valid.then_some(row.event_seq_low),
+        event_seq_high: event_range_valid.then_some(row.event_seq_high),
+        byte_low: byte_range_valid.then_some(row.byte_low),
+        byte_high: byte_range_valid.then_some(row.byte_high),
+        estimated_dropped_bytes: byte_range_valid.then_some(row.byte_high - row.byte_low),
+        estimated_dropped_events: event_range_valid
+            .then_some(row.event_seq_high - row.event_seq_low + 1),
+        reason: "canonical stream segment failed hydration validation".to_string(),
+        writer_generation: Some(row.writer_generation.clone()),
+        opened_at_ms: detected_at_ms,
+        closed_at_ms: Some(detected_at_ms),
+        metadata_json,
+    };
+    insert_into(terminal_history_gaps::table).values(&gap).execute(connection)?;
     Ok(())
 }
 
@@ -12435,6 +12530,57 @@ mod tests {
             store.list_open_data_health_records(None).expect("health records should list");
         assert_eq!(duplicate_integrity.result, "failed");
         assert_eq!(duplicate_health.len(), 1);
+    }
+
+    #[test]
+    fn hydrate_pane_history_quarantines_corrupt_segments_as_visible_gaps() {
+        let store = test_store("hydrate-corrupt-segment");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let corrupt = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"corrupt me\r\n".to_vec(),
+            ))
+            .expect("corrupt candidate should persist");
+        let healthy = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id,
+                b"still visible\r\n".to_vec(),
+            ))
+            .expect("healthy segment should persist");
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(
+            terminal_stream_segments::table
+                .filter(terminal_stream_segments::id.eq(&corrupt.segment_id)),
+        )
+        .set(terminal_stream_segments::checksum.eq("not-the-real-checksum"))
+        .execute(&mut connection)
+        .expect("test should corrupt checksum");
+
+        let hydrated = store
+            .hydrate_pane_history(&session_id, &pane_id, Some(1), Some(10), Some(1024))
+            .expect("hydration should degrade instead of returning corrupt bytes");
+
+        assert_eq!(hydrated.segments.len(), 1);
+        assert_eq!(hydrated.segments[0].id, healthy.segment_id);
+        assert_eq!(hydrated.segments[0].payload, b"still visible\r\n");
+        assert!(hydrated.gaps.iter().any(|gap| {
+            gap.gap_kind == "corrupted_segment"
+                && gap.event_seq_low == Some(corrupt.event_seq_low)
+                && gap.event_seq_high == Some(corrupt.event_seq_high)
+        }));
+
+        let health = store
+            .list_open_data_health_records(Some(&session_id))
+            .expect("health records should list");
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].detection_kind, "checksum_mismatch");
+        assert_eq!(health[0].action_state, "quarantined");
+        assert_eq!(hydrated.restore_plan.guarantee_level, RestoreGuaranteeLevel::DegradedHistory);
     }
 
     #[test]
