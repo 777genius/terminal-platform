@@ -3318,6 +3318,10 @@ impl TerminalPersistenceV2 {
         if input.include_raw {
             self.ensure_raw_history_export_enabled()?;
         }
+        if let Some(output_ref) = input.output_ref.as_deref() {
+            validate_external_artifact_ref(output_ref)?;
+            validate_external_artifact_target_ref(output_ref, &self.path)?;
+        }
         let mut connection = self.connection()?;
         if input.include_raw {
             ensure_no_open_critical_health_records(&mut connection, None, "raw support bundle")?;
@@ -3341,6 +3345,170 @@ impl TerminalPersistenceV2 {
         };
         insert_into(terminal_support_bundles::table).values(&row).execute(&mut connection)?;
         Ok(SupportBundleRecord::try_from(row)?)
+    }
+
+    pub fn support_bundle_diagnostics(
+        &self,
+        support_bundle_id: &str,
+    ) -> Result<SupportBundleDiagnosticsRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let bundle = load_support_bundle(&mut connection, support_bundle_id)?;
+        build_support_bundle_diagnostics(
+            &mut connection,
+            &self.path,
+            &self.config,
+            &bundle,
+            self.config.clock.now_ms(),
+        )
+    }
+
+    pub fn complete_support_bundle(
+        &self,
+        input: SupportBundleCompletionInput,
+    ) -> Result<SupportBundleRecord, TerminalPersistenceV2Error> {
+        if let Some(artifact_ref) = input.artifact_ref.as_deref() {
+            validate_external_artifact_ref(artifact_ref)?;
+            validate_external_artifact_target_ref(artifact_ref, &self.path)?;
+        }
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let bundle = load_support_bundle(connection, &input.support_bundle_id)?;
+            if bundle.state == "succeeded" || bundle.state == "failed" {
+                return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                    "support bundle cannot be completed from state {}",
+                    bundle.state
+                )));
+            }
+            if bundle.include_raw != 0 {
+                if load_feature_gate_state(connection, FeatureGateName::RawHistoryExport)?
+                    != FeatureGateState::Enabled
+                {
+                    return Err(TerminalPersistenceV2Error::InvalidData(
+                        "raw support bundle completion requires raw history export gate"
+                            .to_string(),
+                    ));
+                }
+                ensure_no_open_critical_health_records(connection, None, "raw support bundle")?;
+            }
+
+            let artifact_verification = if let Some(artifact_ref) = input.artifact_ref.as_deref() {
+                let artifact_ref_hash = blake3_hash_text(artifact_ref);
+                if bundle.output_ref_hash.as_deref() != Some(artifact_ref_hash.as_str()) {
+                    return Err(TerminalPersistenceV2Error::InvalidData(
+                        "support bundle artifact ref does not match request output_ref hash"
+                            .to_string(),
+                    ));
+                }
+                let artifact = terminal_external_artifacts::table
+                    .filter(terminal_external_artifacts::artifact_ref_hash.eq(&artifact_ref_hash))
+                    .select(ExternalArtifactRow::as_select())
+                    .first::<ExternalArtifactRow>(connection)?;
+                if artifact.artifact_kind != "support_bundle" {
+                    return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                        "support bundle completion requires support_bundle artifact, got {}",
+                        artifact.artifact_kind
+                    )));
+                }
+                if artifact.state != "available" && artifact.state != "verified" {
+                    return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                        "support bundle artifact must be available or verified, got {}",
+                        artifact.state
+                    )));
+                }
+                if bundle.include_raw != 0 && artifact.encryption_state != "encrypted" {
+                    return Err(TerminalPersistenceV2Error::InvalidData(
+                        "raw support bundle must complete into an encrypted artifact".to_string(),
+                    ));
+                }
+                if artifact.encryption_state == "encrypted"
+                    && (artifact.key_ref.is_none()
+                        || artifact.checksum_algorithm.is_none()
+                        || artifact.checksum.is_none())
+                {
+                    return Err(TerminalPersistenceV2Error::InvalidData(
+                        "encrypted support bundle artifact must include key ref and checksum"
+                            .to_string(),
+                    ));
+                }
+
+                diesel::update(
+                    terminal_external_artifacts::table
+                        .filter(terminal_external_artifacts::id.eq(&artifact.id)),
+                )
+                .set((
+                    terminal_external_artifacts::state.eq("verified"),
+                    terminal_external_artifacts::verified_at_ms.eq(Some(now)),
+                ))
+                .execute(connection)?;
+
+                Some(serde_json::json!({
+                    "artifact_id": artifact.id,
+                    "artifact_ref_hash": artifact_ref_hash,
+                    "artifact_ref_stored": false,
+                    "artifact_kind": artifact.artifact_kind,
+                    "artifact_state": "verified",
+                    "encryption_state": artifact.encryption_state,
+                    "key_ref_present": artifact.key_ref.is_some(),
+                    "checksum_algorithm": artifact.checksum_algorithm,
+                    "checksum": artifact.checksum,
+                    "size_bytes": artifact.size_bytes,
+                    "verified_at_ms": now,
+                }))
+            } else {
+                None
+            };
+
+            let diagnostics = build_support_bundle_diagnostics(
+                connection,
+                &self.path,
+                &self.config,
+                &bundle,
+                now,
+            )?;
+            let mut manifest = bundle
+                .manifest_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?
+                .unwrap_or_else(|| {
+                    privacy_manifest("support_bundle", bundle.include_raw != 0, None)
+                });
+            if !manifest.is_object() {
+                manifest = serde_json::json!({ "legacy_manifest_value": manifest });
+            }
+            let manifest_object = manifest.as_object_mut().expect("manifest is object");
+            manifest_object.insert("diagnostics".to_string(), diagnostics.manifest_json.clone());
+            if let Some(artifact_verification) = artifact_verification {
+                manifest_object.insert("artifact_verification".to_string(), artifact_verification);
+            }
+            manifest_object.insert(
+                "completion".to_string(),
+                serde_json::json!({
+                    "completed_at_ms": now,
+                    "metadata": input.metadata,
+                    "raw_content_included": bundle.include_raw != 0,
+                    "raw_content_included_by_default": false,
+                }),
+            );
+
+            diesel::update(
+                terminal_support_bundles::table
+                    .filter(terminal_support_bundles::id.eq(&input.support_bundle_id)),
+            )
+            .set((
+                terminal_support_bundles::state.eq("succeeded"),
+                terminal_support_bundles::completed_at_ms.eq(Some(now)),
+                terminal_support_bundles::manifest_json.eq(Some(serde_json::to_string(&manifest)?)),
+                terminal_support_bundles::error.eq(Option::<String>::None),
+            ))
+            .execute(connection)?;
+
+            SupportBundleRecord::try_from(load_support_bundle(
+                connection,
+                &input.support_bundle_id,
+            )?)
+        })
     }
 
     pub fn register_crypto_key(
@@ -4188,6 +4356,13 @@ pub struct SupportBundleInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupportBundleCompletionInput {
+    pub support_bundle_id: String,
+    pub artifact_ref: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CryptoKeyInput {
     pub id: Option<String>,
     pub key_kind: String,
@@ -5004,6 +5179,41 @@ impl TryFrom<NewSupportBundleRow> for SupportBundleRecord {
                 .transpose()?,
         })
     }
+}
+
+impl TryFrom<SupportBundleRow> for SupportBundleRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: SupportBundleRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            scope_json: serde_json::from_str(&row.scope_json)?,
+            state: row.state,
+            redaction_profile_id: row.redaction_profile_id,
+            include_raw: row.include_raw != 0,
+            requested_at_ms: row.requested_at_ms,
+            completed_at_ms: row.completed_at_ms,
+            manifest_json: row
+                .manifest_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            output_ref_hash: row.output_ref_hash,
+            error: row.error,
+            metadata_json: row
+                .metadata_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupportBundleDiagnosticsRecord {
+    pub support_bundle_id: String,
+    pub generated_at_ms: i64,
+    pub include_raw: bool,
+    pub raw_content_included: bool,
+    pub manifest_json: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -6312,6 +6522,23 @@ struct NewExportRequestRow {
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = terminal_support_bundles)]
 struct NewSupportBundleRow {
+    id: String,
+    scope_json: String,
+    state: String,
+    redaction_profile_id: Option<String>,
+    include_raw: i32,
+    requested_at_ms: i64,
+    completed_at_ms: Option<i64>,
+    manifest_json: Option<String>,
+    output_ref_hash: Option<String>,
+    error: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_support_bundles)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+struct SupportBundleRow {
     id: String,
     scope_json: String,
     state: String,
@@ -7713,6 +7940,17 @@ fn load_export_request(
         .map_err(Into::into)
 }
 
+fn load_support_bundle(
+    connection: &mut SqliteConnection,
+    id: &str,
+) -> Result<SupportBundleRow, TerminalPersistenceV2Error> {
+    terminal_support_bundles::table
+        .filter(terminal_support_bundles::id.eq(id))
+        .select(SupportBundleRow::as_select())
+        .first::<SupportBundleRow>(connection)
+        .map_err(Into::into)
+}
+
 fn advance_stream_cursor(
     connection: &mut SqliteConnection,
     cursor_id: &str,
@@ -7928,6 +8166,137 @@ fn collect_retention_diagnostics(
         scan_mode: "warn_only".to_string(),
         maintenance_deletes_raw_history: false,
         action_taken,
+    })
+}
+
+fn build_support_bundle_diagnostics(
+    connection: &mut SqliteConnection,
+    db_path: &Path,
+    config: &TerminalPersistenceV2Config,
+    bundle: &SupportBundleRow,
+    now: i64,
+) -> Result<SupportBundleDiagnosticsRecord, TerminalPersistenceV2Error> {
+    let scope_hash = blake3_hash_text(&bundle.scope_json);
+    let feature_gates = terminal_feature_gates::table
+        .select((
+            terminal_feature_gates::feature_name,
+            terminal_feature_gates::state,
+            terminal_feature_gates::rollout_scope,
+        ))
+        .order(terminal_feature_gates::feature_name.asc())
+        .load::<(String, String, String)>(connection)?
+        .into_iter()
+        .map(|(feature_name, state, scope)| {
+            serde_json::json!({
+                "feature_name": feature_name,
+                "state": state,
+                "scope": scope,
+            })
+        })
+        .collect::<Vec<_>>();
+    let open_health_count = terminal_data_health_records::table
+        .filter(terminal_data_health_records::action_state.ne("resolved"))
+        .filter(terminal_data_health_records::action_state.ne("ignored"))
+        .count()
+        .get_result::<i64>(connection)?;
+    let open_critical_health_count = terminal_data_health_records::table
+        .filter(terminal_data_health_records::severity.eq("critical"))
+        .filter(terminal_data_health_records::action_state.ne("resolved"))
+        .filter(terminal_data_health_records::action_state.ne("ignored"))
+        .count()
+        .get_result::<i64>(connection)?;
+    let restore_drill_passed_count = terminal_restore_drills::table
+        .filter(terminal_restore_drills::result.eq("passed"))
+        .count()
+        .get_result::<i64>(connection)?;
+    let restore_drill_failed_count = terminal_restore_drills::table
+        .filter(terminal_restore_drills::result.eq("failed"))
+        .count()
+        .get_result::<i64>(connection)?;
+    let latest_restore_drill_status = terminal_restore_drills::table
+        .order(terminal_restore_drills::checked_at_ms.desc())
+        .select(terminal_restore_drills::result)
+        .first::<String>(connection)
+        .optional()?;
+    let outbox = collect_outbox_diagnostics(connection, now)?;
+    let compression = collect_compression_diagnostics(connection, now)?;
+    let retention = collect_retention_diagnostics(connection, now, None)?;
+    let encryption = encryption_capability_state_for_connection(connection, config)?;
+    let session_count = terminal_sessions::table.count().get_result::<i64>(connection)?;
+    let pane_count = terminal_panes::table.count().get_result::<i64>(connection)?;
+    let stream_segment_count =
+        terminal_stream_segments::table.count().get_result::<i64>(connection)?;
+    let command_history_count =
+        terminal_command_history_entries::table.count().get_result::<i64>(connection)?;
+    let search_document_count =
+        terminal_search_documents::table.count().get_result::<i64>(connection)?;
+    let external_artifact_count =
+        terminal_external_artifacts::table.count().get_result::<i64>(connection)?;
+    let db_file_bytes = file_len_i64(db_path)?;
+    let wal_file_bytes = file_len_i64(&sqlite_sidecar_path(db_path, "-wal"))?;
+
+    let include_raw = bundle.include_raw != 0;
+    let manifest = serde_json::json!({
+        "support_bundle_id": bundle.id,
+        "generated_at_ms": now,
+        "scope_hash": scope_hash,
+        "scope_value_stored_in_bundle_row_only": true,
+        "redaction_profile_id": bundle.redaction_profile_id,
+        "include_raw": include_raw,
+        "raw_content_included": include_raw,
+        "raw_content_included_by_default": false,
+        "excluded_classes": if include_raw {
+            vec!["class_secret_material"]
+        } else {
+            vec!["class_sensitive_content", "class_secret_material"]
+        },
+        "included_classes": if include_raw {
+            vec!["class_public_diagnostic", "class_local_metadata", "class_user_context", "class_sensitive_content"]
+        } else {
+            vec!["class_public_diagnostic", "class_local_metadata", "class_user_context_redacted"]
+        },
+        "raw_terminal_output_rows_serialized": false,
+        "raw_command_text_rows_serialized": false,
+        "raw_paths_serialized": false,
+        "crypto_key_refs_serialized": false,
+        "db_path_hash": path_hash(db_path),
+        "wal_path_hash": path_hash(&sqlite_sidecar_path(db_path, "-wal")),
+        "storage": {
+            "db_file_bytes": db_file_bytes,
+            "wal_file_bytes": wal_file_bytes,
+        },
+        "counts": {
+            "sessions": session_count,
+            "panes": pane_count,
+            "stream_segments": stream_segment_count,
+            "command_history_entries": command_history_count,
+            "search_documents": search_document_count,
+            "external_artifacts": external_artifact_count,
+        },
+        "data_health": {
+            "open_record_count": open_health_count,
+            "open_critical_record_count": open_critical_health_count,
+        },
+        "restore_drills": {
+            "passed_count": restore_drill_passed_count,
+            "failed_count": restore_drill_failed_count,
+            "latest_status": latest_restore_drill_status,
+        },
+        "feature_gates": feature_gates,
+        "outbox": outbox,
+        "compression": compression,
+        "retention": retention,
+        "encryption": encryption,
+        "prompt_injection_text_is_data": true,
+        "historical_replay_side_effects_suppressed": true,
+    });
+
+    Ok(SupportBundleDiagnosticsRecord {
+        support_bundle_id: bundle.id.clone(),
+        generated_at_ms: now,
+        include_raw,
+        raw_content_included: include_raw,
+        manifest_json: manifest,
     })
 }
 
@@ -12021,6 +12390,173 @@ mod tests {
             .expect("verification manifest should serialize");
         assert!(manifest.contains("artifact_ref_stored"));
         assert!(!manifest.contains(encrypted_ref));
+    }
+
+    #[test]
+    fn support_bundle_completion_writes_redacted_diagnostics_manifest() {
+        let store = test_store("support-bundle-diagnostics");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id,
+                writer.id,
+                b"support diagnostics should not serialize this raw output\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+
+        let artifact_ref = "C:\\exports\\support-bundle-redacted.zip";
+        let support = store
+            .create_support_bundle(SupportBundleInput {
+                id: None,
+                scope: serde_json::json!({"session_id": session_id, "path": "C:\\secret\\project"}),
+                redaction_profile_id: None,
+                include_raw: false,
+                output_ref: Some(artifact_ref.to_string()),
+                metadata: None,
+            })
+            .expect("support bundle request should persist");
+        store
+            .record_external_artifact(ExternalArtifactInput {
+                id: None,
+                artifact_kind: "support_bundle".to_string(),
+                artifact_ref: artifact_ref.to_string(),
+                state: Some("available".to_string()),
+                encryption_state: Some("redacted".to_string()),
+                key_ref: None,
+                checksum_algorithm: Some("blake3".to_string()),
+                checksum: Some(blake3_hash_text("redacted-support-bytes")),
+                size_bytes: Some(256),
+                verified_at_ms: None,
+                metadata: None,
+            })
+            .expect("support artifact metadata should persist");
+
+        let diagnostics = store
+            .support_bundle_diagnostics(&support.id)
+            .expect("support diagnostics should build");
+        assert!(!diagnostics.include_raw);
+        assert!(!diagnostics.raw_content_included);
+        assert_eq!(
+            diagnostics.manifest_json["raw_terminal_output_rows_serialized"].as_bool(),
+            Some(false)
+        );
+        let diagnostics_json = serde_json::to_string(&diagnostics.manifest_json)
+            .expect("diagnostics should serialize");
+        assert!(!diagnostics_json.contains("C:\\secret\\project"));
+        assert!(!diagnostics_json.contains("support diagnostics should not serialize"));
+        assert!(!diagnostics_json.contains(artifact_ref));
+
+        let completed = store
+            .complete_support_bundle(SupportBundleCompletionInput {
+                support_bundle_id: support.id,
+                artifact_ref: Some(artifact_ref.to_string()),
+                metadata: Some(serde_json::json!({"worker": "test"})),
+            })
+            .expect("support bundle should complete");
+        assert_eq!(completed.state, "succeeded");
+        assert!(completed.completed_at_ms.is_some());
+        let manifest = completed.manifest_json.expect("manifest should exist");
+        assert_eq!(manifest["diagnostics"]["raw_paths_serialized"].as_bool(), Some(false));
+        assert_eq!(manifest["diagnostics"]["crypto_key_refs_serialized"].as_bool(), Some(false));
+        assert_eq!(manifest["artifact_verification"]["artifact_ref_stored"].as_bool(), Some(false));
+        let manifest_json = serde_json::to_string(&manifest).expect("manifest should serialize");
+        assert!(!manifest_json.contains("C:\\secret\\project"));
+        assert!(!manifest_json.contains("support diagnostics should not serialize"));
+        assert!(!manifest_json.contains(artifact_ref));
+    }
+
+    #[test]
+    fn raw_support_bundle_completion_requires_encrypted_artifact() {
+        let store = test_store("raw-support-bundle-artifact");
+        store
+            .set_feature_gate_state(
+                FeatureGateName::RawHistoryExport,
+                FeatureGateState::Enabled,
+                Some("test raw support approval"),
+            )
+            .expect("raw support gate should enable");
+
+        let plaintext_ref = "C:\\exports\\raw-support-plaintext.zip";
+        let support = store
+            .create_support_bundle(SupportBundleInput {
+                id: None,
+                scope: serde_json::json!({"all_sessions": true}),
+                redaction_profile_id: None,
+                include_raw: true,
+                output_ref: Some(plaintext_ref.to_string()),
+                metadata: None,
+            })
+            .expect("raw support request should persist");
+        store
+            .record_external_artifact(ExternalArtifactInput {
+                id: None,
+                artifact_kind: "support_bundle".to_string(),
+                artifact_ref: plaintext_ref.to_string(),
+                state: Some("available".to_string()),
+                encryption_state: Some("plaintext".to_string()),
+                key_ref: None,
+                checksum_algorithm: Some("blake3".to_string()),
+                checksum: Some(blake3_hash_text("raw-support-plaintext-bytes")),
+                size_bytes: Some(128),
+                verified_at_ms: None,
+                metadata: None,
+            })
+            .expect("plaintext raw support artifact metadata should persist");
+
+        let plaintext_completion = store.complete_support_bundle(SupportBundleCompletionInput {
+            support_bundle_id: support.id,
+            artifact_ref: Some(plaintext_ref.to_string()),
+            metadata: None,
+        });
+        assert!(
+            matches!(plaintext_completion, Err(TerminalPersistenceV2Error::InvalidData(message)) if message.contains("encrypted artifact"))
+        );
+
+        let encrypted_ref = "C:\\exports\\raw-support-encrypted.zip";
+        let encrypted_support = store
+            .create_support_bundle(SupportBundleInput {
+                id: None,
+                scope: serde_json::json!({"all_sessions": true}),
+                redaction_profile_id: None,
+                include_raw: true,
+                output_ref: Some(encrypted_ref.to_string()),
+                metadata: None,
+            })
+            .expect("encrypted raw support request should persist");
+        store
+            .record_external_artifact(ExternalArtifactInput {
+                id: None,
+                artifact_kind: "support_bundle".to_string(),
+                artifact_ref: encrypted_ref.to_string(),
+                state: Some("available".to_string()),
+                encryption_state: Some("encrypted".to_string()),
+                key_ref: Some("crypto-key:support-v1".to_string()),
+                checksum_algorithm: Some("blake3".to_string()),
+                checksum: Some(blake3_hash_text("raw-support-encrypted-bytes")),
+                size_bytes: Some(192),
+                verified_at_ms: None,
+                metadata: None,
+            })
+            .expect("encrypted raw support artifact metadata should persist");
+        let completed = store
+            .complete_support_bundle(SupportBundleCompletionInput {
+                support_bundle_id: encrypted_support.id,
+                artifact_ref: Some(encrypted_ref.to_string()),
+                metadata: None,
+            })
+            .expect("encrypted raw support bundle should complete");
+        assert_eq!(completed.state, "succeeded");
+        assert!(completed.include_raw);
+        let manifest = completed.manifest_json.expect("manifest should exist");
+        assert_eq!(manifest["diagnostics"]["include_raw"].as_bool(), Some(true));
+        assert_eq!(
+            manifest["artifact_verification"]["encryption_state"].as_str(),
+            Some("encrypted")
+        );
+        let manifest_json = serde_json::to_string(&manifest).expect("manifest should serialize");
+        assert!(!manifest_json.contains(encrypted_ref));
+        assert!(!manifest_json.contains("crypto-key:support-v1"));
     }
 
     #[test]
