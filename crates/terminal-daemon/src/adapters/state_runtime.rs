@@ -68,16 +68,29 @@ impl TerminalDaemonCatalogPort for TerminalRuntimeAdapter<'_> {
 
 impl TerminalDaemonSavedSessionsPort for TerminalRuntimeAdapter<'_> {
     fn list_saved_sessions(&self) -> Result<Vec<RuntimeSavedSessionSummary>, BackendError> {
-        self.runtime
-            .list_saved_sessions()
-            .map(|sessions| sessions.into_iter().map(map_saved_session_summary).collect())
+        self.runtime.list_saved_sessions().map(|sessions| {
+            sessions
+                .into_iter()
+                .map(|session| {
+                    let restore_plan = self
+                        .runtime
+                        .saved_session_v2_restore_plan(session.session_id)
+                        .ok()
+                        .flatten();
+                    map_saved_session_summary(session, restore_plan)
+                })
+                .collect()
+        })
     }
 
     fn saved_session(
         &self,
         session_id: SessionId,
     ) -> Result<RuntimeSavedSessionRecord, BackendError> {
-        self.runtime.saved_session(session_id).map(map_saved_session_record)
+        let restore_plan = self.runtime.saved_session_v2_restore_plan(session_id).ok().flatten();
+        self.runtime
+            .saved_session(session_id)
+            .map(|session| map_saved_session_record(session, restore_plan))
     }
 
     fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {
@@ -204,6 +217,7 @@ fn map_runtime_handshake(handshake: RuntimeHandshake) -> Handshake {
 
 fn map_saved_session_summary(
     session: terminal_persistence::SavedSessionSummary,
+    restore_plan: Option<terminal_persistence::RestorePlan>,
 ) -> RuntimeSavedSessionSummary {
     RuntimeSavedSessionSummary {
         session_id: session.session_id,
@@ -214,11 +228,13 @@ fn map_saved_session_summary(
         has_launch: session.has_launch,
         tab_count: session.tab_count,
         pane_count: session.pane_count,
+        restore_plan,
     }
 }
 
 fn map_saved_session_record(
     session: terminal_persistence::SavedNativeSession,
+    restore_plan: Option<terminal_persistence::RestorePlan>,
 ) -> RuntimeSavedSessionRecord {
     RuntimeSavedSessionRecord {
         session_id: session.session_id,
@@ -229,5 +245,6 @@ fn map_saved_session_record(
         topology: session.topology,
         screens: session.screens,
         saved_at_ms: session.saved_at_ms,
+        restore_plan,
     }
 }

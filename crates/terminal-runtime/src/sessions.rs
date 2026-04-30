@@ -12,8 +12,8 @@ use terminal_backend_api::{
 };
 use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
 use terminal_persistence::{
-    CommandHistoryEntryRecord, PaneHistoryHydrationRecord, PrunedSavedSessions, SavedNativeSession,
-    SavedSessionSummary as PersistedSavedSessionSummary, SqliteSessionStore,
+    CommandHistoryEntryRecord, PaneHistoryHydrationRecord, PrunedSavedSessions, RestorePlan,
+    SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary, SqliteSessionStore,
 };
 use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
 
@@ -81,6 +81,13 @@ impl SessionService {
 
     pub fn saved_session(&self, session_id: SessionId) -> Result<SavedNativeSession, BackendError> {
         self.saved_sessions_service().saved_session(session_id)
+    }
+
+    pub fn saved_session_v2_restore_plan(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Option<RestorePlan>, BackendError> {
+        self.saved_sessions_service().saved_session_v2_restore_plan(session_id)
     }
 
     pub fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {

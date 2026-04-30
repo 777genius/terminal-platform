@@ -2,9 +2,10 @@
 import type { NodeSavedSessionCompatibility } from "./NodeSavedSessionCompatibility.js";
 import type { NodeSavedSessionManifest } from "./NodeSavedSessionManifest.js";
 import type { NodeSavedSessionRestoreSemantics } from "./NodeSavedSessionRestoreSemantics.js";
+import type { NodeSavedSessionRestoreSemanticsV2 } from "./NodeSavedSessionRestoreSemanticsV2.js";
 import type { NodeScreenSnapshot } from "./NodeScreenSnapshot.js";
 import type { NodeSessionRoute } from "./NodeSessionRoute.js";
 import type { NodeShellLaunchSpec } from "./NodeShellLaunchSpec.js";
 import type { NodeTopologySnapshot } from "./NodeTopologySnapshot.js";
 
-export type NodeSavedSessionRecord = { session_id: string, route: NodeSessionRoute, title: string | null, launch: NodeShellLaunchSpec | null, manifest: NodeSavedSessionManifest, compatibility: NodeSavedSessionCompatibility, topology: NodeTopologySnapshot, screens: Array<NodeScreenSnapshot>, saved_at_ms: bigint, restore_semantics: NodeSavedSessionRestoreSemantics, };
+export type NodeSavedSessionRecord = { session_id: string, route: NodeSessionRoute, title: string | null, launch: NodeShellLaunchSpec | null, manifest: NodeSavedSessionManifest, compatibility: NodeSavedSessionCompatibility, topology: NodeTopologySnapshot, screens: Array<NodeScreenSnapshot>, saved_at_ms: bigint, restore_semantics: NodeSavedSessionRestoreSemantics, restore_semantics_v2: NodeSavedSessionRestoreSemanticsV2 | null, };

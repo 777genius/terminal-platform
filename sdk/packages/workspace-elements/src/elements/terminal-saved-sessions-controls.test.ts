@@ -146,6 +146,54 @@ describe("terminal saved sessions controls", () => {
     ]);
   });
 
+  it("surfaces v2 restore guarantees and history gaps", () => {
+    const snapshot = createWorkspaceSnapshot([
+      createSavedSession(1, {
+        restoreSemanticsV2: {
+          restore_guarantee_level: "history_degraded",
+          history_replay_state: "partially_replayed_with_gaps",
+          has_known_gaps: true,
+          evidence_refs: ["history_gap_count:2"],
+        },
+      }),
+      createSavedSession(2, {
+        title: "Rich journal",
+        restoreSemanticsV2: {
+          restore_guarantee_level: "rich_history",
+          history_replay_state: "replayed_from_journal",
+          evidence_refs: ["stream_segment_count:4"],
+        },
+      }),
+    ]);
+
+    const controls = resolveTerminalSavedSessionsControlState(snapshot, createOptions());
+    const filtered = resolveTerminalSavedSessionsControlState(snapshot, createOptions({
+      filterQuery: "rich_history journal",
+    }));
+
+    expect(controls.items[0]?.restoreSemanticsNotes.slice(0, 3)).toEqual([
+      {
+        code: "restore_guarantee_history_degraded",
+        label: "history degraded",
+        detail: "Missing evidence or known gaps downgrade this saved layout.",
+        tone: "warning",
+      },
+      {
+        code: "history_replay_partially_replayed_with_gaps",
+        label: "partial replay",
+        detail: "History can be replayed with explicit missing ranges.",
+        tone: "warning",
+      },
+      {
+        code: "history_gaps_known",
+        label: "history gaps",
+        detail: "Known missing history ranges are recorded for this saved layout.",
+        tone: "warning",
+      },
+    ]);
+    expect(filtered.items.map((item) => item.session.session_id)).toEqual(["saved-2"]);
+  });
+
   it("uses compact ids for untitled saved layout fallbacks", () => {
     const session = createSavedSession(1, {
       sessionId: "d5bcf588-f6ba-46f9-a9b2-d77e6f7258cd-saved-1",
@@ -271,6 +319,7 @@ function createSavedSession(
     status?: SavedSessionCompatibilityStatus;
     backend?: SavedSessionSummary["route"]["backend"];
     restoreSemantics?: Partial<SavedSessionSummary["restore_semantics"]>;
+    restoreSemanticsV2?: Partial<NonNullable<SavedSessionSummary["restore_semantics_v2"]>> | null;
     sessionId?: string;
     title?: string | null;
   } = {},
@@ -306,5 +355,25 @@ function createSavedSession(
       preserves_process_state: false,
       ...overrides.restoreSemantics,
     },
+    restore_semantics_v2: overrides.restoreSemanticsV2 === undefined
+      ? null
+      : overrides.restoreSemanticsV2 === null
+        ? null
+        : {
+          restores_topology: true,
+          restores_focus_state: true,
+          restores_tab_titles: true,
+          uses_saved_launch_spec: true,
+          replays_saved_screen_buffers: false,
+          preserves_process_state: false,
+          restore_guarantee_level: "basic_history",
+          history_replay_state: "replayed_from_journal",
+          source_session_id: overrides.sessionId ?? `saved-${index}`,
+          restored_session_id: null,
+          latest_restore_drill_status: null,
+          has_known_gaps: false,
+          evidence_refs: [],
+          ...overrides.restoreSemanticsV2,
+        },
   };
 }

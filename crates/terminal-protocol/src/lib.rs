@@ -20,11 +20,12 @@ pub use requests::{
 pub use responses::{
     BackendCapabilitiesResponse, CommandHistoryEntry, CommandHistoryResponse,
     CreateSessionResponse, DeleteSavedSessionResponse, DiscoverSessionsResponse,
-    ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse,
+    HistoryReplayState, ImportSessionResponse, ListSavedSessionsResponse, ListSessionsResponse,
     OpenSubscriptionResponse, PaneHistoryGap, PaneHistoryReplayStrategy, PaneHistoryResponse,
     PaneHistoryRestoreEvidence, PaneHistoryRestorePlan, PaneHistoryScreenSnapshot,
-    PaneHistorySegment, PruneSavedSessionsResponse, ResponsePayload, RestoreSavedSessionResponse,
-    SavedSessionRecord, SavedSessionResponse, SavedSessionRestoreSemantics, SavedSessionSummary,
+    PaneHistorySegment, PruneSavedSessionsResponse, ResponsePayload, RestoreGuaranteeLevel,
+    RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionResponse,
+    SavedSessionRestoreSemantics, SavedSessionRestoreSemanticsV2, SavedSessionSummary,
 };
 pub use subscriptions::{SubscriptionEvent, SubscriptionRequest, SubscriptionRequestEnvelope};
 pub use transport::{LocalSocketAddress, TransportResponse, decode_json_frame, encode_json_frame};

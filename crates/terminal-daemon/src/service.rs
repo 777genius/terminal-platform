@@ -118,7 +118,9 @@ mod tests {
     use terminal_persistence::SqliteSessionStore;
     #[cfg(feature = "native-backend")]
     use terminal_projection::TopologySnapshot;
-    use terminal_protocol::{RequestEnvelope, RequestPayload, ResponsePayload};
+    use terminal_protocol::{
+        HistoryReplayState, RequestEnvelope, RequestPayload, ResponsePayload, RestoreGuaranteeLevel,
+    };
 
     use super::TerminalDaemon;
 
@@ -368,6 +370,26 @@ mod tests {
                 assert!(listed.sessions[0].restore_semantics.uses_saved_launch_spec);
                 assert!(listed.sessions[0].restore_semantics.replays_saved_screen_buffers);
                 assert!(!listed.sessions[0].restore_semantics.preserves_process_state);
+                let v2 = listed.sessions[0]
+                    .restore_semantics_v2
+                    .as_ref()
+                    .expect("v2 restore semantics should be present");
+                assert!(matches!(
+                    v2.restore_guarantee_level,
+                    RestoreGuaranteeLevel::BasicHistory | RestoreGuaranteeLevel::VisualRestoreOnly
+                ));
+                assert!(matches!(
+                    v2.history_replay_state,
+                    HistoryReplayState::ReplayedFromJournal
+                        | HistoryReplayState::HydratedFromSnapshot
+                ));
+                assert_eq!(v2.source_session_id, session_id);
+                assert!(!v2.has_known_gaps);
+                assert!(
+                    v2.evidence_refs
+                        .iter()
+                        .any(|evidence| evidence.starts_with("stream_segment_count:"))
+                );
             }
             other => panic!("unexpected payload: {other:?}"),
         }
@@ -387,6 +409,21 @@ mod tests {
                 assert!(saved.session.restore_semantics.uses_saved_launch_spec);
                 assert!(saved.session.restore_semantics.replays_saved_screen_buffers);
                 assert!(!saved.session.restore_semantics.preserves_process_state);
+                let v2 = saved
+                    .session
+                    .restore_semantics_v2
+                    .as_ref()
+                    .expect("v2 restore semantics should be present");
+                assert!(matches!(
+                    v2.restore_guarantee_level,
+                    RestoreGuaranteeLevel::BasicHistory | RestoreGuaranteeLevel::VisualRestoreOnly
+                ));
+                assert!(matches!(
+                    v2.history_replay_state,
+                    HistoryReplayState::ReplayedFromJournal
+                        | HistoryReplayState::HydratedFromSnapshot
+                ));
+                assert_eq!(v2.source_session_id, session_id);
             }
             other => panic!("unexpected payload: {other:?}"),
         }
@@ -515,6 +552,22 @@ mod tests {
                 assert!(response.restore_semantics.uses_saved_launch_spec);
                 assert!(response.restore_semantics.replays_saved_screen_buffers);
                 assert!(!response.restore_semantics.preserves_process_state);
+                let v2 = response
+                    .restore_semantics_v2
+                    .as_ref()
+                    .expect("v2 restore semantics should be present");
+                assert!(matches!(
+                    v2.restore_guarantee_level,
+                    RestoreGuaranteeLevel::BasicHistory | RestoreGuaranteeLevel::VisualRestoreOnly
+                ));
+                assert!(matches!(
+                    v2.history_replay_state,
+                    HistoryReplayState::ReplayedFromJournal
+                        | HistoryReplayState::HydratedFromSnapshot
+                ));
+                assert_eq!(v2.source_session_id, session_id);
+                assert_eq!(v2.restored_session_id, Some(response.session.session_id));
+                assert!(!v2.preserves_process_state);
             }
             other => panic!("unexpected payload: {other:?}"),
         }

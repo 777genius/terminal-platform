@@ -127,6 +127,13 @@ impl TerminalRuntime {
         self.sessions.saved_session(session_id)
     }
 
+    pub fn saved_session_v2_restore_plan(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Option<terminal_persistence::RestorePlan>, BackendError> {
+        self.sessions.saved_session_v2_restore_plan(session_id)
+    }
+
     pub fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {
         self.sessions.delete_saved_session(session_id)
     }

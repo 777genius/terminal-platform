@@ -150,6 +150,7 @@ export function createMemoryWorkspaceTransport(
         compatibility: record.compatibility,
         session: recordToSessionSummary(record),
         restore_semantics: record.restore_semantics,
+        restore_semantics_v2: record.restore_semantics_v2,
       };
       return clone(restored);
     },
@@ -519,6 +520,7 @@ function createSavedSessionRecord(
       replays_saved_screen_buffers: true,
       preserves_process_state: false,
     },
+    restore_semantics_v2: null,
   };
 }
 
@@ -534,6 +536,7 @@ function savedSessionToSummary(record: SavedSessionRecord): SavedSessionSummary 
     tab_count: record.topology.tabs.length,
     pane_count: record.screens.length,
     restore_semantics: record.restore_semantics,
+    restore_semantics_v2: record.restore_semantics_v2,
   };
 }
 

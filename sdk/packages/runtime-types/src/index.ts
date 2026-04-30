@@ -88,6 +88,15 @@ export type { NodeSavedSessionRecord as SavedSessionRecord } from "./generated/r
 export type {
   NodeSavedSessionRestoreSemantics as SavedSessionRestoreSemantics,
 } from "./generated/raw/NodeSavedSessionRestoreSemantics.js";
+export type {
+  NodeSavedSessionRestoreSemanticsV2 as SavedSessionRestoreSemanticsV2,
+} from "./generated/raw/NodeSavedSessionRestoreSemanticsV2.js";
+export type {
+  NodeRestoreGuaranteeLevel as RestoreGuaranteeLevel,
+} from "./generated/raw/NodeRestoreGuaranteeLevel.js";
+export type {
+  NodeHistoryReplayState as HistoryReplayState,
+} from "./generated/raw/NodeHistoryReplayState.js";
 export type { NodeSavedSessionSummary as SavedSessionSummary } from "./generated/raw/NodeSavedSessionSummary.js";
 export type { NodeScreenCursor as ScreenCursor } from "./generated/raw/NodeScreenCursor.js";
 export type { NodeScreenDelta as ScreenDelta } from "./generated/raw/NodeScreenDelta.js";

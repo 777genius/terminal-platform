@@ -18,11 +18,12 @@ use terminal_projection::{
 };
 use terminal_protocol::{
     BackendCapabilitiesResponse, CommandHistoryEntry, DaemonCapabilities, DaemonPhase,
-    DeleteSavedSessionResponse, Handshake, PaneHistoryGap, PaneHistoryReplayStrategy,
-    PaneHistoryResponse, PaneHistoryRestoreEvidence, PaneHistoryRestorePlan,
-    PaneHistoryScreenSnapshot, PaneHistorySegment, ProtocolError, ProtocolVersion,
-    PruneSavedSessionsResponse, RestoreSavedSessionResponse, SavedSessionRecord,
-    SavedSessionRestoreSemantics, SavedSessionSummary, SubscriptionEvent,
+    DeleteSavedSessionResponse, Handshake, HistoryReplayState, PaneHistoryGap,
+    PaneHistoryReplayStrategy, PaneHistoryResponse, PaneHistoryRestoreEvidence,
+    PaneHistoryRestorePlan, PaneHistoryScreenSnapshot, PaneHistorySegment, ProtocolError,
+    ProtocolVersion, PruneSavedSessionsResponse, RestoreGuaranteeLevel,
+    RestoreSavedSessionResponse, SavedSessionRecord, SavedSessionRestoreSemantics,
+    SavedSessionRestoreSemanticsV2, SavedSessionSummary, SubscriptionEvent,
 };
 use ts_rs::TS;
 use uuid::Uuid;
@@ -256,6 +257,45 @@ pub struct NodeSavedSessionRestoreSemantics {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodeRestoreGuaranteeLevel {
+    RichHistory,
+    BasicHistory,
+    VisualRestoreOnly,
+    HistoryDegraded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodeHistoryReplayState {
+    NotAvailable,
+    SnapshotOnly,
+    HydratedFromSnapshot,
+    ReplayedFromJournal,
+    PartiallyReplayedWithGaps,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSavedSessionRestoreSemanticsV2 {
+    pub restores_topology: bool,
+    pub restores_focus_state: bool,
+    pub restores_tab_titles: bool,
+    pub uses_saved_launch_spec: bool,
+    pub replays_saved_screen_buffers: bool,
+    pub preserves_process_state: bool,
+    pub restore_guarantee_level: NodeRestoreGuaranteeLevel,
+    pub history_replay_state: NodeHistoryReplayState,
+    pub source_session_id: String,
+    pub restored_session_id: Option<String>,
+    pub latest_restore_drill_status: Option<String>,
+    pub has_known_gaps: bool,
+    pub evidence_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct NodeSavedSessionSummary {
     pub session_id: String,
@@ -268,6 +308,7 @@ pub struct NodeSavedSessionSummary {
     pub tab_count: usize,
     pub pane_count: usize,
     pub restore_semantics: NodeSavedSessionRestoreSemantics,
+    pub restore_semantics_v2: Option<NodeSavedSessionRestoreSemanticsV2>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -283,6 +324,7 @@ pub struct NodeSavedSessionRecord {
     pub screens: Vec<NodeScreenSnapshot>,
     pub saved_at_ms: i64,
     pub restore_semantics: NodeSavedSessionRestoreSemantics,
+    pub restore_semantics_v2: Option<NodeSavedSessionRestoreSemanticsV2>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -293,6 +335,7 @@ pub struct NodeRestoredSession {
     pub compatibility: NodeSavedSessionCompatibility,
     pub session: NodeSessionSummary,
     pub restore_semantics: NodeSavedSessionRestoreSemantics,
+    pub restore_semantics_v2: Option<NodeSavedSessionRestoreSemanticsV2>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -965,6 +1008,52 @@ impl From<&SavedSessionRestoreSemantics> for NodeSavedSessionRestoreSemantics {
     }
 }
 
+impl From<&RestoreGuaranteeLevel> for NodeRestoreGuaranteeLevel {
+    fn from(value: &RestoreGuaranteeLevel) -> Self {
+        match value {
+            RestoreGuaranteeLevel::RichHistory => Self::RichHistory,
+            RestoreGuaranteeLevel::BasicHistory => Self::BasicHistory,
+            RestoreGuaranteeLevel::VisualRestoreOnly => Self::VisualRestoreOnly,
+            RestoreGuaranteeLevel::HistoryDegraded => Self::HistoryDegraded,
+        }
+    }
+}
+
+impl From<&HistoryReplayState> for NodeHistoryReplayState {
+    fn from(value: &HistoryReplayState) -> Self {
+        match value {
+            HistoryReplayState::NotAvailable => Self::NotAvailable,
+            HistoryReplayState::SnapshotOnly => Self::SnapshotOnly,
+            HistoryReplayState::HydratedFromSnapshot => Self::HydratedFromSnapshot,
+            HistoryReplayState::ReplayedFromJournal => Self::ReplayedFromJournal,
+            HistoryReplayState::PartiallyReplayedWithGaps => Self::PartiallyReplayedWithGaps,
+        }
+    }
+}
+
+impl From<&SavedSessionRestoreSemanticsV2> for NodeSavedSessionRestoreSemanticsV2 {
+    fn from(value: &SavedSessionRestoreSemanticsV2) -> Self {
+        Self {
+            restores_topology: value.restores_topology,
+            restores_focus_state: value.restores_focus_state,
+            restores_tab_titles: value.restores_tab_titles,
+            uses_saved_launch_spec: value.uses_saved_launch_spec,
+            replays_saved_screen_buffers: value.replays_saved_screen_buffers,
+            preserves_process_state: value.preserves_process_state,
+            restore_guarantee_level: (&value.restore_guarantee_level).into(),
+            history_replay_state: (&value.history_replay_state).into(),
+            source_session_id: value.source_session_id.0.to_string(),
+            restored_session_id: value
+                .restored_session_id
+                .as_ref()
+                .map(|session_id| session_id.0.to_string()),
+            latest_restore_drill_status: value.latest_restore_drill_status.clone(),
+            has_known_gaps: value.has_known_gaps,
+            evidence_refs: value.evidence_refs.clone(),
+        }
+    }
+}
+
 impl From<&SavedSessionSummary> for NodeSavedSessionSummary {
     fn from(value: &SavedSessionSummary) -> Self {
         Self {
@@ -978,6 +1067,7 @@ impl From<&SavedSessionSummary> for NodeSavedSessionSummary {
             tab_count: value.tab_count,
             pane_count: value.pane_count,
             restore_semantics: (&value.restore_semantics).into(),
+            restore_semantics_v2: value.restore_semantics_v2.as_ref().map(Into::into),
         }
     }
 }
@@ -995,6 +1085,7 @@ impl From<&SavedSessionRecord> for NodeSavedSessionRecord {
             screens: value.screens.iter().map(Into::into).collect(),
             saved_at_ms: value.saved_at_ms,
             restore_semantics: (&value.restore_semantics).into(),
+            restore_semantics_v2: value.restore_semantics_v2.as_ref().map(Into::into),
         }
     }
 }
@@ -1007,6 +1098,7 @@ impl From<&RestoreSavedSessionResponse> for NodeRestoredSession {
             compatibility: (&value.compatibility).into(),
             session: (&value.session).into(),
             restore_semantics: (&value.restore_semantics).into(),
+            restore_semantics_v2: value.restore_semantics_v2.as_ref().map(Into::into),
         }
     }
 }

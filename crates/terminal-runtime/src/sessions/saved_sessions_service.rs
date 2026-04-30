@@ -9,8 +9,8 @@ use terminal_domain::{
 };
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
 use terminal_persistence::{
-    PrunedSavedSessions, SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary,
-    SqliteSessionStore,
+    PrunedSavedSessions, RestorePlan, SavedNativeSession,
+    SavedSessionSummary as PersistedSavedSessionSummary, SqliteSessionStore,
 };
 
 use super::{
@@ -50,6 +50,17 @@ impl<'a> SavedSessionsService<'a> {
                 BackendError::internal(format!("failed to load saved native session - {error}"))
             })?
             .ok_or_else(|| BackendError::not_found(format!("unknown saved session {session_id:?}")))
+    }
+
+    pub(super) fn saved_session_v2_restore_plan(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Option<RestorePlan>, BackendError> {
+        self.runtime.persistence().native_session_v2_restore_plan(session_id).map_err(|error| {
+            BackendError::internal(format!(
+                "failed to load saved session v2 restore plan - {error}"
+            ))
+        })
     }
 
     pub(super) fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {

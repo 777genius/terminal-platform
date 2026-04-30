@@ -153,6 +153,7 @@ function normalizeSavedSessionFilterQuery(query: string): string {
 }
 
 function savedSessionMatchesFilter(session: SavedSessionSummary, filterQuery: string): boolean {
+  const restoreSemanticsV2 = session.restore_semantics_v2;
   const searchableText = [
     session.title,
     session.session_id,
@@ -161,6 +162,10 @@ function savedSessionMatchesFilter(session: SavedSessionSummary, filterQuery: st
     session.route.authority,
     session.compatibility.status,
     savedSessionCompatibilityLabel(session),
+    restoreSemanticsV2?.restore_guarantee_level,
+    restoreSemanticsV2?.history_replay_state,
+    restoreSemanticsV2?.latest_restore_drill_status,
+    ...(restoreSemanticsV2?.evidence_refs ?? []),
     `${session.tab_count} tabs`,
     `${session.pane_count} panes`,
   ]
@@ -214,7 +219,22 @@ function savedSessionCompatibilityLabel(session: SavedSessionSummary): string {
 
 function restoreSemanticsNotes(session: SavedSessionSummary): TerminalSavedSessionRestoreSemanticsNote[] {
   const semantics = session.restore_semantics;
+  const semanticsV2 = session.restore_semantics_v2;
   const notes: TerminalSavedSessionRestoreSemanticsNote[] = [];
+
+  if (semanticsV2) {
+    notes.push(restoreGuaranteeNote(semanticsV2.restore_guarantee_level));
+    notes.push(historyReplayStateNote(semanticsV2.history_replay_state));
+
+    if (semanticsV2.has_known_gaps) {
+      notes.push({
+        code: "history_gaps_known",
+        label: "history gaps",
+        detail: "Known missing history ranges are recorded for this saved layout.",
+        tone: "warning",
+      });
+    }
+  }
 
   if (semantics.restores_topology) {
     notes.push({
@@ -285,4 +305,81 @@ function restoreSemanticsNotes(session: SavedSessionSummary): TerminalSavedSessi
   }
 
   return notes;
+}
+
+function restoreGuaranteeNote(
+  guaranteeLevel: NonNullable<SavedSessionSummary["restore_semantics_v2"]>["restore_guarantee_level"],
+): TerminalSavedSessionRestoreSemanticsNote {
+  switch (guaranteeLevel) {
+    case "rich_history":
+      return {
+        code: "restore_guarantee_rich_history",
+        label: "rich history",
+        detail: "Raw terminal stream evidence is available for historical restore.",
+        tone: "ok",
+      };
+    case "basic_history":
+      return {
+        code: "restore_guarantee_basic_history",
+        label: "basic history",
+        detail: "Persisted command or stream evidence is available for restore.",
+        tone: "ok",
+      };
+    case "visual_restore_only":
+      return {
+        code: "restore_guarantee_visual_restore_only",
+        label: "visual restore",
+        detail: "A saved visual snapshot is available without a raw replay guarantee.",
+        tone: "info",
+      };
+    case "history_degraded":
+      return {
+        code: "restore_guarantee_history_degraded",
+        label: "history degraded",
+        detail: "Missing evidence or known gaps downgrade this saved layout.",
+        tone: "warning",
+      };
+  }
+}
+
+function historyReplayStateNote(
+  replayState: NonNullable<SavedSessionSummary["restore_semantics_v2"]>["history_replay_state"],
+): TerminalSavedSessionRestoreSemanticsNote {
+  switch (replayState) {
+    case "not_available":
+      return {
+        code: "history_replay_not_available",
+        label: "history unavailable",
+        detail: "No durable history replay evidence is available.",
+        tone: "warning",
+      };
+    case "snapshot_only":
+      return {
+        code: "history_replay_snapshot_only",
+        label: "snapshot only",
+        detail: "Restore can hydrate from a saved snapshot only.",
+        tone: "info",
+      };
+    case "hydrated_from_snapshot":
+      return {
+        code: "history_replay_hydrated_from_snapshot",
+        label: "snapshot hydrate",
+        detail: "Restore uses a saved screen snapshot as historical context.",
+        tone: "info",
+      };
+    case "replayed_from_journal":
+      return {
+        code: "history_replay_replayed_from_journal",
+        label: "journal replay",
+        detail: "History can be replayed from durable journal evidence.",
+        tone: "ok",
+      };
+    case "partially_replayed_with_gaps":
+      return {
+        code: "history_replay_partially_replayed_with_gaps",
+        label: "partial replay",
+        detail: "History can be replayed with explicit missing ranges.",
+        tone: "warning",
+      };
+  }
 }

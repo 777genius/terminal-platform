@@ -2,14 +2,16 @@ use terminal_backend_api::{BackendError, BackendErrorKind, BackendSessionSummary
 use terminal_domain::{PaneId, SessionId, saved_session_compatibility};
 use terminal_persistence::{
     CommandHistoryEntryRecord, HistoryGapRecord, PaneHistoryHydrationRecord,
-    PaneHistoryReplayStrategy as PersistencePaneHistoryReplayStrategy, RestorePlan,
-    ScreenSnapshotRecord, StreamSegmentRecord,
+    PaneHistoryReplayStrategy as PersistencePaneHistoryReplayStrategy,
+    RestoreGuaranteeLevel as PersistenceRestoreGuaranteeLevel, RestorePlan, ScreenSnapshotRecord,
+    StreamSegmentRecord,
 };
 use terminal_protocol::{
-    CommandHistoryEntry, CommandHistoryResponse, PaneHistoryGap, PaneHistoryReplayStrategy,
-    PaneHistoryResponse, PaneHistoryRestoreEvidence, PaneHistoryRestorePlan,
-    PaneHistoryScreenSnapshot, PaneHistorySegment, ProtocolError, RestoreSavedSessionResponse,
-    SavedSessionRecord, SavedSessionRestoreSemantics, SavedSessionSummary,
+    CommandHistoryEntry, CommandHistoryResponse, HistoryReplayState, PaneHistoryGap,
+    PaneHistoryReplayStrategy, PaneHistoryResponse, PaneHistoryRestoreEvidence,
+    PaneHistoryRestorePlan, PaneHistoryScreenSnapshot, PaneHistorySegment, ProtocolError,
+    RestoreGuaranteeLevel, RestoreSavedSessionResponse, SavedSessionRecord,
+    SavedSessionRestoreSemantics, SavedSessionRestoreSemanticsV2, SavedSessionSummary,
 };
 use uuid::Uuid;
 
@@ -35,6 +37,14 @@ pub fn map_backend_error(error: BackendError) -> ProtocolError {
 
 pub fn map_saved_session_summary(session: RuntimeSavedSessionSummary) -> SavedSessionSummary {
     let compatibility = saved_session_compatibility(&session.manifest);
+    let restore_semantics =
+        saved_session_restore_semantics(session.has_launch, session.pane_count > 0);
+    let restore_semantics_v2 = saved_session_restore_semantics_v2(
+        session.session_id,
+        None,
+        &restore_semantics,
+        session.restore_plan.as_ref(),
+    );
 
     SavedSessionSummary {
         session_id: session.session_id,
@@ -46,10 +56,8 @@ pub fn map_saved_session_summary(session: RuntimeSavedSessionSummary) -> SavedSe
         has_launch: session.has_launch,
         tab_count: session.tab_count,
         pane_count: session.pane_count,
-        restore_semantics: saved_session_restore_semantics(
-            session.has_launch,
-            session.pane_count > 0,
-        ),
+        restore_semantics,
+        restore_semantics_v2,
     }
 }
 
@@ -57,6 +65,13 @@ pub fn map_saved_session_record(session: RuntimeSavedSessionRecord) -> SavedSess
     let has_launch = session.launch.is_some();
     let has_screen_buffers = !session.screens.is_empty();
     let compatibility = saved_session_compatibility(&session.manifest);
+    let restore_semantics = saved_session_restore_semantics(has_launch, has_screen_buffers);
+    let restore_semantics_v2 = saved_session_restore_semantics_v2(
+        session.session_id,
+        None,
+        &restore_semantics,
+        session.restore_plan.as_ref(),
+    );
 
     SavedSessionRecord {
         session_id: session.session_id,
@@ -68,7 +83,8 @@ pub fn map_saved_session_record(session: RuntimeSavedSessionRecord) -> SavedSess
         topology: session.topology,
         screens: session.screens,
         saved_at_ms: session.saved_at_ms,
-        restore_semantics: saved_session_restore_semantics(has_launch, has_screen_buffers),
+        restore_semantics,
+        restore_semantics_v2,
     }
 }
 
@@ -77,15 +93,23 @@ pub fn map_restore_saved_session_response(
     saved_session: &RuntimeSavedSessionRecord,
     restored_session: BackendSessionSummary,
 ) -> RestoreSavedSessionResponse {
+    let restore_semantics = saved_session_restore_semantics(
+        saved_session.launch.is_some(),
+        !saved_session.screens.is_empty(),
+    );
+    let restore_semantics_v2 = saved_session_restore_semantics_v2(
+        saved_session_id,
+        Some(restored_session.session_id),
+        &restore_semantics,
+        saved_session.restore_plan.as_ref(),
+    );
     RestoreSavedSessionResponse {
         saved_session_id,
         manifest: saved_session.manifest.clone(),
         compatibility: saved_session_compatibility(&saved_session.manifest),
         session: restored_session,
-        restore_semantics: saved_session_restore_semantics(
-            saved_session.launch.is_some(),
-            !saved_session.screens.is_empty(),
-        ),
+        restore_semantics,
+        restore_semantics_v2,
     }
 }
 
@@ -100,6 +124,79 @@ fn saved_session_restore_semantics(
         uses_saved_launch_spec: has_launch,
         replays_saved_screen_buffers: has_screen_buffers,
         preserves_process_state: false,
+    }
+}
+
+fn saved_session_restore_semantics_v2(
+    source_session_id: SessionId,
+    restored_session_id: Option<SessionId>,
+    legacy: &SavedSessionRestoreSemantics,
+    restore_plan: Option<&RestorePlan>,
+) -> Option<SavedSessionRestoreSemanticsV2> {
+    let restore_plan = restore_plan?;
+    let has_known_gaps = restore_plan.evidence.iter().any(|evidence| {
+        evidence.kind == "history_gap"
+            || evidence.kind == "history_gap_count"
+                && evidence.value.parse::<i64>().unwrap_or(0) > 0
+    });
+    Some(SavedSessionRestoreSemanticsV2 {
+        restores_topology: legacy.restores_topology,
+        restores_focus_state: legacy.restores_focus_state,
+        restores_tab_titles: legacy.restores_tab_titles,
+        uses_saved_launch_spec: legacy.uses_saved_launch_spec,
+        replays_saved_screen_buffers: legacy.replays_saved_screen_buffers,
+        preserves_process_state: legacy.preserves_process_state,
+        restore_guarantee_level: map_restore_guarantee_level(&restore_plan.guarantee_level),
+        history_replay_state: map_history_replay_state(restore_plan, has_known_gaps),
+        source_session_id,
+        restored_session_id,
+        latest_restore_drill_status: None,
+        has_known_gaps,
+        evidence_refs: restore_plan
+            .evidence
+            .iter()
+            .map(|evidence| format!("{}:{}", evidence.kind, evidence.value))
+            .collect(),
+    })
+}
+
+fn map_restore_guarantee_level(value: &PersistenceRestoreGuaranteeLevel) -> RestoreGuaranteeLevel {
+    match value {
+        PersistenceRestoreGuaranteeLevel::RawStreamReplay => RestoreGuaranteeLevel::RichHistory,
+        PersistenceRestoreGuaranteeLevel::BasicHistory => RestoreGuaranteeLevel::BasicHistory,
+        PersistenceRestoreGuaranteeLevel::VisualSnapshotOnly => {
+            RestoreGuaranteeLevel::VisualRestoreOnly
+        }
+        PersistenceRestoreGuaranteeLevel::LiveMuxAttach => RestoreGuaranteeLevel::BasicHistory,
+        PersistenceRestoreGuaranteeLevel::DegradedHistory
+        | PersistenceRestoreGuaranteeLevel::None => RestoreGuaranteeLevel::HistoryDegraded,
+    }
+}
+
+fn map_history_replay_state(
+    restore_plan: &RestorePlan,
+    has_known_gaps: bool,
+) -> HistoryReplayState {
+    if has_known_gaps {
+        return HistoryReplayState::PartiallyReplayedWithGaps;
+    }
+    match restore_plan.guarantee_level {
+        PersistenceRestoreGuaranteeLevel::RawStreamReplay => {
+            HistoryReplayState::ReplayedFromJournal
+        }
+        PersistenceRestoreGuaranteeLevel::BasicHistory => HistoryReplayState::ReplayedFromJournal,
+        PersistenceRestoreGuaranteeLevel::VisualSnapshotOnly => {
+            HistoryReplayState::HydratedFromSnapshot
+        }
+        PersistenceRestoreGuaranteeLevel::LiveMuxAttach => HistoryReplayState::HydratedFromSnapshot,
+        PersistenceRestoreGuaranteeLevel::None => HistoryReplayState::NotAvailable,
+        PersistenceRestoreGuaranteeLevel::DegradedHistory => {
+            if restore_plan.latest_screen_snapshot_id.is_some() {
+                HistoryReplayState::SnapshotOnly
+            } else {
+                HistoryReplayState::NotAvailable
+            }
+        }
     }
 }
 
