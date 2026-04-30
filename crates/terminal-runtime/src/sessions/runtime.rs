@@ -5,11 +5,11 @@ use terminal_backend_api::{
     BackendSessionPort, BackendSessionSummary, BackendSubscription, BackendSubscriptionEvent,
     CreateSessionSpec, MuxBackendPort, MuxCommand, SubscriptionSpec,
 };
-use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute, TabId};
+use terminal_domain::{BackendKind, PaneId, RouteAuthority, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
 use terminal_persistence::{
-    HistoryGapEventInput, ScreenSnapshotEventInput, SessionRouteRecord, SqliteSessionStore,
-    TerminalOutputEventInput, TopologySnapshotEventInput,
+    BackendCapabilityReportInput, HistoryGapEventInput, ScreenSnapshotEventInput,
+    SessionRouteRecord, SqliteSessionStore, TerminalOutputEventInput, TopologySnapshotEventInput,
 };
 use terminal_projection::{
     ScreenDelta, ScreenLine, ScreenSnapshot, ScreenSurface, SessionHealthReason,
@@ -309,18 +309,36 @@ async fn start_capture_for_topology(
         let cols = initial_screen.as_ref().map(|screen| i32::from(screen.cols));
 
         match session.subscribe_raw_output(pane_id).await {
-            Ok(subscription) => spawn_v2_raw_capture_loop(
-                persistence.clone(),
-                descriptor.clone(),
-                tab_id.clone(),
-                rows,
-                cols,
-                subscription,
-            ),
+            Ok(subscription) => {
+                persist_backend_capability_report(
+                    persistence,
+                    descriptor,
+                    "raw_stream",
+                    "raw_vt_stream",
+                    "medium",
+                    "native raw output subscription opened",
+                );
+                spawn_v2_raw_capture_loop(
+                    persistence.clone(),
+                    descriptor.clone(),
+                    tab_id.clone(),
+                    rows,
+                    cols,
+                    subscription,
+                );
+            }
             Err(_) => {
                 if let Ok(subscription) =
                     session.subscribe(SubscriptionSpec::PaneSurface { pane_id }).await
                 {
+                    persist_backend_capability_report(
+                        persistence,
+                        descriptor,
+                        "rendered_stream",
+                        "rendered_plaintext_snapshot",
+                        "low",
+                        "rendered pane surface subscription opened after raw output fallback",
+                    );
                     spawn_v2_rendered_capture_loop(
                         persistence.clone(),
                         descriptor.clone(),
@@ -467,6 +485,46 @@ async fn flush_raw_capture_batch(
     };
     let store = persistence.clone();
     let _ = tokio::task::spawn_blocking(move || store.record_v2_terminal_output(input)).await;
+}
+
+fn persist_backend_capability_report(
+    persistence: &SqliteSessionStore,
+    descriptor: &SessionDescriptor,
+    capture_strategy: &str,
+    capture_semantics: &str,
+    command_boundary_confidence: &str,
+    evidence_reason: &str,
+) {
+    let input = BackendCapabilityReportInput {
+        id: None,
+        session_id: Some(descriptor.session_id.0.to_string()),
+        backend_kind: format!("{:?}", descriptor.route.backend).to_lowercase(),
+        backend_version: None,
+        backend_binary_path_hash: None,
+        route_kind: persistence_route_kind(&descriptor.route),
+        probe_status: "passed".to_string(),
+        capture_strategy: capture_strategy.to_string(),
+        capture_semantics: capture_semantics.to_string(),
+        can_preserve_process_when_live: false,
+        can_capture_scrollback: false,
+        command_boundary_confidence: command_boundary_confidence.to_string(),
+        evidence: Some(serde_json::json!({
+            "source": "runtime_v2_history_capture",
+            "reason": evidence_reason,
+            "session_id": descriptor.session_id.0.to_string(),
+            "backend": format!("{:?}", descriptor.route.backend).to_lowercase(),
+        })),
+        expires_at_ms: None,
+    };
+    let store = persistence.clone();
+    let _ = tokio::task::spawn_blocking(move || store.record_v2_backend_capability_report(input));
+}
+
+fn persistence_route_kind(route: &SessionRoute) -> String {
+    match route.authority {
+        RouteAuthority::LocalDaemon => "local_daemon".to_string(),
+        RouteAuthority::ImportedForeign => "imported_foreign".to_string(),
+    }
 }
 
 async fn persist_history_gap(

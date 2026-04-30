@@ -644,17 +644,28 @@ mod tests {
             .dispatch(created.session_id, MuxCommand::SaveSession)
             .await
             .expect("save session should preserve a healthy v2 restore plan");
-        let v2 = terminal_persistence::TerminalPersistenceV2::open_with_config(
-            &path,
-            terminal_persistence::TerminalPersistenceV2Config::test(),
-        )
-        .expect("v2 store should open");
-        let plan = v2.restore_plan(&created.session_id.0.to_string()).expect("plan should load");
+        let plan = wait_for_v2_restore_plan(&path, created.session_id, |plan| {
+            plan.latest_restore_drill_status.as_deref() == Some("passed")
+                && plan.evidence.iter().any(|evidence| {
+                    evidence.kind == "backend_capture_semantics"
+                        && evidence.value == "raw_vt_stream"
+                })
+        })
+        .await
+        .expect("v2 restore plan should include runtime raw capture capability evidence");
         assert_eq!(
             plan.latest_restore_drill_status.as_deref(),
             Some("passed"),
             "unexpected restore plan after native save: {plan:?}"
         );
+        assert_eq!(
+            plan.guarantee_level,
+            terminal_persistence::RestoreGuaranteeLevel::RawStreamReplay,
+            "raw capture with a passed restore drill should promote restore guarantee: {plan:?}"
+        );
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "backend_capture_strategy" && evidence.value == "raw_stream"
+        }));
     }
 
     fn runtime_backends(imported_backend: Arc<FakeImportedBackend>) -> BackendCatalog {
@@ -783,6 +794,29 @@ mod tests {
                 terminal_persistence::TerminalPersistenceV2Config::test(),
             ) && let Ok(plan) = store.restore_plan(&session_id.0.to_string())
                 && plan.latest_screen_snapshot_id.is_some()
+            {
+                return Some(plan);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        None
+    }
+
+    async fn wait_for_v2_restore_plan<F>(
+        path: &Path,
+        session_id: SessionId,
+        predicate: F,
+    ) -> Option<terminal_persistence::RestorePlan>
+    where
+        F: Fn(&terminal_persistence::RestorePlan) -> bool,
+    {
+        for _ in 0..120 {
+            if let Ok(store) = terminal_persistence::TerminalPersistenceV2::open_with_config(
+                path,
+                terminal_persistence::TerminalPersistenceV2Config::test(),
+            ) && let Ok(plan) = store.restore_plan(&session_id.0.to_string())
+                && predicate(&plan)
             {
                 return Some(plan);
             }

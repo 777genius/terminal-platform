@@ -19,10 +19,10 @@ use uuid::Uuid;
 
 use crate::db::executor::PersistenceExecutor;
 use crate::v2::{
-    CommandHistoryEntryRecord, HistoryGapEventInput, PaneHistoryHydrationRecord, RestorePlan,
-    ScreenSnapshotEventInput, TerminalOutputEventInput, TerminalPersistenceV2,
-    TerminalPersistenceV2Config, TerminalPersistenceV2Error, TopologySnapshotEventInput,
-    UiInputEventInput,
+    BackendCapabilityReportInput, CommandHistoryEntryRecord, HistoryGapEventInput,
+    PaneHistoryHydrationRecord, RestorePlan, ScreenSnapshotEventInput, TerminalOutputEventInput,
+    TerminalPersistenceV2, TerminalPersistenceV2Config, TerminalPersistenceV2Error,
+    TopologySnapshotEventInput, UiInputEventInput,
 };
 
 fn migrations() -> Migrations<'static> {
@@ -165,6 +165,18 @@ impl SqliteSessionStore {
                     }
                     Err(error) => Err(error),
                 }
+            })
+        })
+    }
+
+    pub fn record_v2_backend_capability_report(
+        &self,
+        input: BackendCapabilityReportInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let input = input.clone();
+            self.with_v2_store_serialized(move |store| {
+                store.record_backend_capability_report(input)
             })
         })
     }
