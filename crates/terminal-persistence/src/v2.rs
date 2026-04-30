@@ -7868,13 +7868,16 @@ fn validate_history_checksums(
     let topology_rows = topology_query
         .select((
             terminal_topology_snapshots::id,
+            terminal_topology_snapshots::pane_high_water_json,
             terminal_topology_snapshots::topology_json,
             terminal_topology_snapshots::payload_schema_id,
             terminal_topology_snapshots::checksum_algorithm,
             terminal_topology_snapshots::checksum,
         ))
-        .load::<(String, String, Option<String>, String, String)>(connection)?;
-    for (id, payload, payload_schema_id, algorithm, checksum) in &topology_rows {
+        .load::<(String, String, String, Option<String>, String, String)>(connection)?;
+    for (id, pane_high_water_json, payload, payload_schema_id, algorithm, checksum) in
+        &topology_rows
+    {
         validate_payload_schema_ref(
             "topology_snapshot",
             id,
@@ -7891,6 +7894,7 @@ fn validate_history_checksums(
             checksum,
             &mut failures,
         );
+        validate_topology_pane_high_water_json_payload(id, pane_high_water_json, &mut failures);
     }
 
     validate_sequence_invariants(connection, session_id, &mut failures)?;
@@ -8127,9 +8131,18 @@ fn topology_snapshot_hydration_failure(
 }
 
 fn validate_topology_pane_high_water_json(row: &TopologySnapshotRow, failures: &mut Vec<String>) {
-    if let Err(error) = parse_pane_high_water_json(&row.pane_high_water_json) {
-        failures
-            .push(format!("topology_snapshot:{} invalid pane_high_water_json: {}", row.id, error));
+    validate_topology_pane_high_water_json_payload(&row.id, &row.pane_high_water_json, failures);
+}
+
+fn validate_topology_pane_high_water_json_payload(
+    topology_snapshot_id: &str,
+    pane_high_water_json: &str,
+    failures: &mut Vec<String>,
+) {
+    if let Err(error) = parse_pane_high_water_json(pane_high_water_json) {
+        failures.push(format!(
+            "topology_snapshot:{topology_snapshot_id} invalid pane_high_water_json: {error}"
+        ));
     }
 }
 
@@ -13476,6 +13489,55 @@ mod tests {
                 .as_deref()
                 .unwrap_or_default()
                 .contains("missing payload_schema_id")
+        );
+    }
+
+    #[test]
+    fn integrity_check_flags_invalid_topology_high_water_json() {
+        let store = test_store("topology-high-water-integrity");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let segment = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"topology high-water target\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        let topology_id = store
+            .write_topology_snapshot(TopologySnapshotInput {
+                id: None,
+                session_id,
+                writer_generation: writer.id,
+                pane_high_water: serde_json::json!({ pane_id.clone(): segment.event_seq_high }),
+                topology: serde_json::json!({"tabs":[{"active_pane_id": pane_id}]}),
+                source: None,
+                metadata: None,
+            })
+            .expect("topology snapshot should persist");
+
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(
+            terminal_topology_snapshots::table
+                .filter(terminal_topology_snapshots::id.eq(&topology_id)),
+        )
+        .set(terminal_topology_snapshots::pane_high_water_json.eq("[]"))
+        .execute(&mut connection)
+        .expect("test should corrupt topology high-water json");
+
+        let integrity = store.run_integrity_check().expect("integrity check should run");
+
+        assert_eq!(integrity.result, "failed");
+        let error = integrity.error.as_deref().unwrap_or_default();
+        assert!(error.contains("history_validation_failures=1"));
+        assert!(error.contains("checksum_failures=0"));
+        let health = store.list_open_data_health_records(None).expect("health records should list");
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].detection_kind, "projection_drift");
+        assert_eq!(health[0].severity, "error");
+        assert_eq!(health[0].action_state, "rebuild_pending");
+        assert!(
+            health[0].affected_ref.as_deref().unwrap_or_default().contains("pane_high_water_json")
         );
     }
 
