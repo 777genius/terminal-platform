@@ -553,6 +553,7 @@ impl TerminalPersistenceV2 {
         validate_capture_semantics_domain(&input.capture_semantics)?;
         validate_capture_strategy_domain(&input.capture_strategy)?;
         validate_command_boundary_confidence_domain(&input.command_boundary_confidence)?;
+        validate_backend_probe_status_domain(&input.probe_status)?;
         let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
         let id = input.id.unwrap_or_else(new_id);
@@ -6942,6 +6943,16 @@ fn validate_command_boundary_confidence_domain(
     Ok(())
 }
 
+fn validate_backend_probe_status_domain(value: &str) -> Result<(), TerminalPersistenceV2Error> {
+    const PROBE_STATUSES: &[&str] = &["passed", "failed", "partial", "stale"];
+    if !PROBE_STATUSES.contains(&value) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown backend probe status: {value}"
+        )));
+    }
+    Ok(())
+}
+
 fn path_hash(path: &Path) -> String {
     blake3_hash_text(&path.to_string_lossy())
 }
@@ -7501,6 +7512,36 @@ mod tests {
             matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("unknown capture strategy"))
         );
         assert_eq!(capability_count, 0);
+
+        let probe_id = "invalid-backend-probe-status-api-domain".to_string();
+        let probe_error = store
+            .record_backend_capability_report(BackendCapabilityReportInput {
+                id: Some(probe_id.clone()),
+                session_id: Some(Uuid::new_v4().to_string()),
+                backend_kind: "native".to_string(),
+                backend_version: Some("test".to_string()),
+                backend_binary_path_hash: Some("test-path-hash".to_string()),
+                route_kind: "local_daemon".to_string(),
+                probe_status: "maybe".to_string(),
+                capture_strategy: "raw_stream".to_string(),
+                capture_semantics: "raw_vt_stream".to_string(),
+                can_preserve_process_when_live: false,
+                can_capture_scrollback: true,
+                command_boundary_confidence: "high".to_string(),
+                evidence: None,
+                expires_at_ms: None,
+            })
+            .expect_err("unknown probe status should fail before insert");
+        let probe_count = terminal_backend_capability_reports::table
+            .filter(terminal_backend_capability_reports::id.eq(&probe_id))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("probe capability count should load");
+
+        assert!(
+            matches!(probe_error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("unknown backend probe status"))
+        );
+        assert_eq!(probe_count, 0);
     }
 
     #[test]
