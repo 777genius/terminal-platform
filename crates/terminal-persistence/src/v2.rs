@@ -72,6 +72,8 @@ pub enum TerminalPersistenceV2Error {
     InvalidData(String),
     #[error("an active terminal writer generation already exists")]
     WriterAlreadyActive,
+    #[error("terminal persistence executor stopped")]
+    ExecutorStopped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
