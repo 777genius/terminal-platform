@@ -330,16 +330,21 @@ test("submitInput writes command text and enter as one carriage-return terminate
   const submitted = await controller.submitInput("  git status  ");
 
   assert.equal(submitted, true);
-  assert.deepEqual(gateway.dispatchCalls, [
+  assert.equal(gateway.dispatchCalls.length, 1);
+  assert.equal(gateway.dispatchCalls[0].sessionId, "session-1");
+  assert.deepEqual(
     {
-      sessionId: "session-1",
-      command: {
-        kind: "send_input",
-        pane_id: "pane-1",
-        data: "git status\r",
-      },
+      ...gateway.dispatchCalls[0].command,
+      client_event_id: "<stable-runtime-input-id>",
     },
-  ]);
+    {
+      kind: "send_input",
+      pane_id: "pane-1",
+      data: "git status\r",
+      client_event_id: "<stable-runtime-input-id>",
+    },
+  );
+  assert.match(gateway.dispatchCalls[0].command.client_event_id, /^runtime-input:/);
 });
 
 test("restoreSavedSession blocks explicitly when saved session is incompatible", async () => {

@@ -5,6 +5,7 @@ import {
   buildBackendDegradedSemantics,
   buildCreateNativeSessionPayload,
   buildHandshakeDegradedSemantics,
+  buildSavedSessionDegradedSemantics,
   findUnsupportedActionDegradedReason,
   focusedPaneId,
   getHiddenSavedSessionsCount,
@@ -135,6 +136,7 @@ test("saved sessions collapse policy keeps recent window and reports hidden coun
       replays_saved_screen_buffers: false,
       preserves_process_state: false,
     },
+    restore_semantics_v2: null,
     degradedSemantics: [],
   }));
 
@@ -213,6 +215,62 @@ test("buildBackendDegradedSemantics exposes foreign backend limitations", () => 
     "foreign_backend_projection",
     "raw_output_unavailable",
     "scrollback_snapshot_unavailable",
+  ]);
+});
+
+test("buildSavedSessionDegradedSemantics surfaces v2 restore evidence", () => {
+  const reasons = buildSavedSessionDegradedSemantics({
+    session_id: "saved-1",
+    origin: {
+      backend: "native",
+      authority: "local_daemon",
+      foreignReferenceLabel: null,
+    },
+    title: "Saved 1",
+    saved_at_ms: 1_700_000_000_000,
+    manifest: {
+      format_version: 1,
+      binary_version: "1.0.0",
+      protocol_major: 1,
+      protocol_minor: 0,
+    },
+    compatibility: {
+      can_restore: true,
+      status: "compatible",
+    },
+    has_launch: true,
+    tab_count: 1,
+    pane_count: 1,
+    restore_semantics: {
+      restores_topology: true,
+      restores_focus_state: true,
+      restores_tab_titles: true,
+      uses_saved_launch_spec: true,
+      replays_saved_screen_buffers: true,
+      preserves_process_state: false,
+    },
+    restore_semantics_v2: {
+      restores_topology: true,
+      restores_focus_state: true,
+      restores_tab_titles: true,
+      uses_saved_launch_spec: true,
+      replays_saved_screen_buffers: true,
+      preserves_process_state: false,
+      restore_guarantee_level: "history_degraded",
+      history_replay_state: "partially_replayed_with_gaps",
+      source_session_id: "saved-1",
+      restored_session_id: null,
+      latest_restore_drill_status: "failed",
+      has_known_gaps: true,
+      evidence_refs: ["history_gap:gap-1", "restore_drill:drill-1"],
+    },
+  });
+
+  assert.deepEqual(reasons.map((reason) => reason.code), [
+    "saved_session_process_state_not_preserved",
+    "saved_session_history_degraded",
+    "saved_session_history_gaps",
+    "saved_session_restore_drill_not_passed",
   ]);
 });
 
