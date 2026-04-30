@@ -2266,7 +2266,8 @@ impl TerminalPersistenceV2 {
             .count()
             .get_result(&mut connection)?;
 
-        let guarantee_level = match (segment_count > 0, latest_screen.is_some(), gap_count > 0) {
+        let mut guarantee_level = match (segment_count > 0, latest_screen.is_some(), gap_count > 0)
+        {
             (true, true, false) => RestoreGuaranteeLevel::BasicHistory,
             (_, _, true) => RestoreGuaranteeLevel::DegradedHistory,
             (false, true, _) => RestoreGuaranteeLevel::VisualSnapshotOnly,
@@ -2277,6 +2278,45 @@ impl TerminalPersistenceV2 {
             .select(diesel::dsl::max(terminal_commit_log::commit_seq))
             .first::<Option<i64>>(&mut connection)?
             .unwrap_or(0);
+        let latest_restore_drill_status = terminal_restore_drills::table
+            .filter(terminal_restore_drills::session_id.eq(session_id))
+            .order(terminal_restore_drills::checked_at_ms.desc())
+            .select(terminal_restore_drills::result)
+            .first::<String>(&mut connection)
+            .optional()?;
+        if matches!(latest_restore_drill_status.as_deref(), Some("failed" | "degraded")) {
+            guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
+        }
+        let authoritative_reads_gate = terminal_feature_gates::table
+            .filter(
+                terminal_feature_gates::feature_name
+                    .eq(FeatureGateName::TerminalPersistenceV2AuthoritativeReads.as_str()),
+            )
+            .select(terminal_feature_gates::state)
+            .first::<String>(&mut connection)
+            .optional()?
+            .unwrap_or_else(|| FeatureGateState::Disabled.as_str().to_string());
+        if authoritative_reads_gate == FeatureGateState::ForceDisabled.as_str() {
+            guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
+        }
+
+        let mut evidence = vec![
+            RestoreEvidence {
+                kind: "stream_segment_count".to_string(),
+                value: segment_count.to_string(),
+            },
+            RestoreEvidence { kind: "history_gap_count".to_string(), value: gap_count.to_string() },
+            RestoreEvidence {
+                kind: "authoritative_reads_gate_state".to_string(),
+                value: authoritative_reads_gate,
+            },
+        ];
+        if let Some(status) = &latest_restore_drill_status {
+            evidence.push(RestoreEvidence {
+                kind: "latest_restore_drill_status".to_string(),
+                value: status.clone(),
+            });
+        }
 
         Ok(RestorePlan {
             session_id: session_id.to_string(),
@@ -2284,16 +2324,8 @@ impl TerminalPersistenceV2 {
             latest_screen_snapshot_id: latest_screen.as_ref().map(|row| row.id.clone()),
             latest_topology_snapshot_id: latest_topology.as_ref().map(|row| row.id.clone()),
             high_water_commit_seq,
-            evidence: vec![
-                RestoreEvidence {
-                    kind: "stream_segment_count".to_string(),
-                    value: segment_count.to_string(),
-                },
-                RestoreEvidence {
-                    kind: "history_gap_count".to_string(),
-                    value: gap_count.to_string(),
-                },
-            ],
+            latest_restore_drill_status,
+            evidence,
         })
     }
 
@@ -3487,6 +3519,7 @@ pub struct RestorePlan {
     pub latest_screen_snapshot_id: Option<String>,
     pub latest_topology_snapshot_id: Option<String>,
     pub high_water_commit_seq: i64,
+    pub latest_restore_drill_status: Option<String>,
     pub evidence: Vec<RestoreEvidence>,
 }
 
@@ -6581,6 +6614,10 @@ mod tests {
         assert_eq!(plan.latest_screen_snapshot_id, Some(screen_id));
         assert_eq!(plan.latest_topology_snapshot_id, Some(topology_id));
         assert!(plan.high_water_commit_seq >= 3);
+        assert_eq!(plan.latest_restore_drill_status, None);
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "authoritative_reads_gate_state" && evidence.value == "disabled"
+        }));
     }
 
     #[test]
@@ -6622,6 +6659,9 @@ mod tests {
         assert_eq!(drill.result, "passed");
         assert_eq!(drill.restore_guarantee_level, "basic_history");
         assert!(drill.error.is_none());
+
+        let plan = store.restore_plan(&session_id).expect("restore plan should reload");
+        assert_eq!(plan.latest_restore_drill_status.as_deref(), Some("passed"));
     }
 
     #[test]
@@ -6658,6 +6698,55 @@ mod tests {
             store.list_open_data_health_records(None).expect("health records should list");
         assert_eq!(duplicate_integrity.result, "failed");
         assert_eq!(duplicate_health.len(), 1);
+    }
+
+    #[test]
+    fn failed_restore_drill_downgrades_restore_plan() {
+        let store = test_store("restore-drill-downgrade");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let output = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"visible before corruption\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id,
+                writer_generation: writer.id,
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: output.event_seq_low,
+                high_water_event_seq: output.event_seq_high,
+                high_water_byte_seq: Some(output.byte_high),
+                screen: serde_json::json!({"lines":["visible before corruption"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("screen snapshot should persist");
+        let mut connection = store.connection().expect("connection should open");
+        diesel::update(terminal_stream_segments::table)
+            .filter(terminal_stream_segments::id.eq(&output.segment_id))
+            .set(terminal_stream_segments::checksum.eq("not-the-real-checksum"))
+            .execute(&mut connection)
+            .expect("test should corrupt checksum");
+
+        let drill = store.run_restore_drill(&session_id).expect("restore drill should run");
+        let plan = store.restore_plan(&session_id).expect("restore plan should reload");
+
+        assert_eq!(drill.result, "failed");
+        assert_eq!(plan.guarantee_level, RestoreGuaranteeLevel::DegradedHistory);
+        assert_eq!(plan.latest_restore_drill_status.as_deref(), Some("failed"));
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "latest_restore_drill_status" && evidence.value == "failed"
+        }));
     }
 
     #[test]

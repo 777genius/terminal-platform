@@ -150,7 +150,7 @@ fn saved_session_restore_semantics_v2(
         history_replay_state: map_history_replay_state(restore_plan, has_known_gaps),
         source_session_id,
         restored_session_id,
-        latest_restore_drill_status: None,
+        latest_restore_drill_status: restore_plan.latest_restore_drill_status.clone(),
         has_known_gaps,
         evidence_refs: restore_plan
             .evidence
