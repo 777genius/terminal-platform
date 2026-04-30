@@ -155,6 +155,50 @@ export function buildSavedSessionDegradedSemantics(
     });
   }
 
+  const restoreV2 = session.restore_semantics_v2;
+  if (restoreV2?.restore_guarantee_level === "history_degraded") {
+    reasons.push({
+      code: "saved_session_history_degraded",
+      scope: "saved_session",
+      severity: "warning",
+      summary: "Saved history is degraded",
+      detail: "Restore evidence reports degraded terminal history for this saved session.",
+    });
+  }
+
+  if (restoreV2?.restore_guarantee_level === "visual_restore_only") {
+    reasons.push({
+      code: "saved_session_visual_restore_only",
+      scope: "saved_session",
+      severity: "info",
+      summary: "Visual restore only",
+      detail: "Only a visual terminal snapshot is available, not a verified raw journal replay.",
+    });
+  }
+
+  if (restoreV2?.has_known_gaps) {
+    reasons.push({
+      code: "saved_session_history_gaps",
+      scope: "saved_session",
+      severity: "warning",
+      summary: "History has gaps",
+      detail: "Known persisted gap markers exist in this saved session history.",
+    });
+  }
+
+  if (
+    restoreV2?.latest_restore_drill_status &&
+    restoreV2.latest_restore_drill_status !== "passed"
+  ) {
+    reasons.push({
+      code: "saved_session_restore_drill_not_passed",
+      scope: "saved_session",
+      severity: "warning",
+      summary: "Restore drill did not pass",
+      detail: `Latest restore drill status is ${restoreV2.latest_restore_drill_status}.`,
+    });
+  }
+
   return reasons;
 }
 

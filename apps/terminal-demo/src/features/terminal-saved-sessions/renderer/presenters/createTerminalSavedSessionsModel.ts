@@ -1,5 +1,6 @@
 import type {
   TerminalDegradedReason,
+  TerminalRestoreGuaranteeLevel,
   TerminalRuntimeWorkspaceFacade,
   TerminalSavedSessionSummary,
 } from "@features/terminal-workspace-kernel/contracts";
@@ -34,9 +35,29 @@ function toSavedSessionItemModel(session: TerminalSavedSessionSummary): Terminal
     sessionId: session.session_id,
     title: session.title ?? "Untitled save",
     meta: `${session.origin.backend} - ${new Date(session.saved_at_ms).toLocaleString()}`,
+    restoreGuaranteeBadge: toRestoreGuaranteeBadge(
+      session.restore_semantics_v2?.restore_guarantee_level ?? null,
+    ),
     degradedReasons: toDegradedReasonModels(session.degradedSemantics),
     canRestore: session.compatibility.can_restore,
   };
+}
+
+function toRestoreGuaranteeBadge(
+  guarantee: TerminalRestoreGuaranteeLevel | null,
+): TerminalSavedSessionItemModel["restoreGuaranteeBadge"] {
+  switch (guarantee) {
+    case "rich_history":
+      return { label: "Rich history", tone: "brand" };
+    case "basic_history":
+      return { label: "Basic history", tone: "brand" };
+    case "visual_restore_only":
+      return { label: "Visual only", tone: "neutral" };
+    case "history_degraded":
+      return { label: "Degraded history", tone: "danger" };
+    default:
+      return null;
+  }
 }
 
 function toDegradedReasonModels(reasons: TerminalDegradedReason[]): TerminalSavedSessionsDegradedReasonModel[] {
