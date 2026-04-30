@@ -9,6 +9,7 @@ use diesel::{
     Connection, RunQueryDsl, SelectableHelper, connection::SimpleConnection, dsl::insert_into,
     prelude::*, sqlite::SqliteConnection,
 };
+use serde_json::Value;
 
 use crate::{
     db::{migrations::run_embedded_migrations, schema::terminal_db_identity},
@@ -127,10 +128,19 @@ fn ensure_db_identity(
             if identity.product == "terminal-platform"
                 && identity.schema_family == "terminal_persistence_v2" =>
         {
-            // Opening a hot terminal-history database must stay read-only after
-            // identity is established. Raw output capture opens short-lived
-            // Diesel connections often, and an identity heartbeat would contend
-            // with real history writes under SQLite's single-writer lock.
+            // Avoid heartbeat writes on hot opens. A legacy identity without
+            // diagnostics is upgraded once so support bundles can prove the
+            // actual SQLite/WAL startup profile later.
+            if identity.notes.is_none() {
+                let notes = connection_diagnostics_json(connection, config)?;
+                diesel::update(terminal_db_identity::table.filter(terminal_db_identity::id.eq(1)))
+                    .set((
+                        terminal_db_identity::updated_at_ms.eq(now),
+                        terminal_db_identity::sqlite_version.eq(Some(sqlite_version(connection)?)),
+                        terminal_db_identity::notes.eq(Some(serde_json::to_string(&notes)?)),
+                    ))
+                    .execute(connection)?;
+            }
         }
         Some(identity) => {
             return Err(TerminalPersistenceV2Error::IdentityMismatch {
@@ -148,7 +158,9 @@ fn ensure_db_identity(
                 app_version: Some(env!("CARGO_PKG_VERSION").to_string()),
                 diesel_version: Some("2.3.8".to_string()),
                 sqlite_version: Some(sqlite_version(connection)?),
-                notes: None,
+                notes: Some(serde_json::to_string(&connection_diagnostics_json(
+                    connection, config,
+                )?)?),
             };
             insert_into(terminal_db_identity::table).values(&row).execute(connection)?;
         }
@@ -188,8 +200,112 @@ fn path_to_database_url(path: &Path) -> Result<String, TerminalPersistenceV2Erro
         })
 }
 
+fn connection_diagnostics_json(
+    connection: &mut SqliteConnection,
+    config: &TerminalPersistenceV2Config,
+) -> Result<Value, TerminalPersistenceV2Error> {
+    Ok(serde_json::json!({
+        "diagnostic_kind": "sqlite_startup",
+        "sqlite_version": sqlite_version(connection)?,
+        "journal_mode": sqlite_journal_mode(connection)?,
+        "synchronous_code": sqlite_synchronous_code(connection)?,
+        "configured_synchronous": config.durability_profile.sqlite_synchronous(),
+        "foreign_keys": sqlite_foreign_keys_enabled(connection)?,
+        "wal_autocheckpoint_pages": sqlite_wal_autocheckpoint_pages(connection)?,
+        "configured_wal_autocheckpoint_pages": config.wal_autocheckpoint_pages,
+        "configured_busy_timeout_ms": config.busy_timeout_ms,
+        "compile_options": sqlite_compile_options(connection)?,
+    }))
+}
+
+fn sqlite_journal_mode(
+    connection: &mut SqliteConnection,
+) -> Result<String, TerminalPersistenceV2Error> {
+    diesel::sql_query("PRAGMA journal_mode")
+        .load::<JournalModePragmaRow>(connection)?
+        .into_iter()
+        .next()
+        .map(|row| row.journal_mode)
+        .ok_or_else(|| TerminalPersistenceV2Error::InvalidData("missing journal_mode".to_string()))
+}
+
+fn sqlite_synchronous_code(
+    connection: &mut SqliteConnection,
+) -> Result<i32, TerminalPersistenceV2Error> {
+    diesel::sql_query("PRAGMA synchronous")
+        .load::<SynchronousPragmaRow>(connection)?
+        .into_iter()
+        .next()
+        .map(|row| row.synchronous)
+        .ok_or_else(|| TerminalPersistenceV2Error::InvalidData("missing synchronous".to_string()))
+}
+
+fn sqlite_foreign_keys_enabled(
+    connection: &mut SqliteConnection,
+) -> Result<bool, TerminalPersistenceV2Error> {
+    diesel::sql_query("PRAGMA foreign_keys")
+        .load::<ForeignKeysPragmaRow>(connection)?
+        .into_iter()
+        .next()
+        .map(|row| row.foreign_keys != 0)
+        .ok_or_else(|| TerminalPersistenceV2Error::InvalidData("missing foreign_keys".to_string()))
+}
+
+fn sqlite_wal_autocheckpoint_pages(
+    connection: &mut SqliteConnection,
+) -> Result<i32, TerminalPersistenceV2Error> {
+    diesel::sql_query("PRAGMA wal_autocheckpoint")
+        .load::<WalAutocheckpointPragmaRow>(connection)?
+        .into_iter()
+        .next()
+        .map(|row| row.wal_autocheckpoint)
+        .ok_or_else(|| {
+            TerminalPersistenceV2Error::InvalidData("missing wal_autocheckpoint".to_string())
+        })
+}
+
+fn sqlite_compile_options(
+    connection: &mut SqliteConnection,
+) -> Result<Vec<String>, TerminalPersistenceV2Error> {
+    Ok(diesel::sql_query("PRAGMA compile_options")
+        .load::<CompileOptionPragmaRow>(connection)?
+        .into_iter()
+        .map(|row| row.compile_options)
+        .collect())
+}
+
 #[derive(Debug, QueryableByName)]
 struct ApplicationIdPragmaRow {
     #[diesel(sql_type = diesel::sql_types::Integer)]
     application_id: i32,
+}
+
+#[derive(Debug, QueryableByName)]
+struct JournalModePragmaRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    journal_mode: String,
+}
+
+#[derive(Debug, QueryableByName)]
+struct SynchronousPragmaRow {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    synchronous: i32,
+}
+
+#[derive(Debug, QueryableByName)]
+struct ForeignKeysPragmaRow {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    foreign_keys: i32,
+}
+
+#[derive(Debug, QueryableByName)]
+struct WalAutocheckpointPragmaRow {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    wal_autocheckpoint: i32,
+}
+
+#[derive(Debug, QueryableByName)]
+struct CompileOptionPragmaRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    compile_options: String,
 }

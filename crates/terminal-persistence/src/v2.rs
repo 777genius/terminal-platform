@@ -6281,6 +6281,21 @@ mod tests {
         for (_, schema_json, schema_hash) in schemas {
             assert_eq!(schema_hash, blake3_hash_text(&schema_json));
         }
+
+        let identity = terminal_db_identity::table
+            .filter(terminal_db_identity::id.eq(1))
+            .select(TerminalDbIdentityRow::as_select())
+            .first::<TerminalDbIdentityRow>(&mut connection)
+            .expect("db identity should load");
+        let notes: Value =
+            serde_json::from_str(identity.notes.as_deref().expect("identity notes should exist"))
+                .expect("identity notes should be json");
+        assert_eq!(notes["diagnostic_kind"], "sqlite_startup");
+        assert_eq!(notes["journal_mode"], "wal");
+        assert_eq!(notes["configured_synchronous"], "NORMAL");
+        assert_eq!(notes["foreign_keys"], true);
+        assert_eq!(notes["configured_wal_autocheckpoint_pages"], 64);
+        assert!(notes["compile_options"].as_array().is_some_and(|values| !values.is_empty()));
     }
 
     #[test]
