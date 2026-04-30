@@ -380,7 +380,8 @@ mod tests {
                 assert!(
                     matches!(
                         v2.restore_guarantee_level,
-                        RestoreGuaranteeLevel::BasicHistory
+                        RestoreGuaranteeLevel::RichHistory
+                            | RestoreGuaranteeLevel::BasicHistory
                             | RestoreGuaranteeLevel::VisualRestoreOnly
                     ),
                     "unexpected v2 restore semantics: {v2:?}"
@@ -428,7 +429,8 @@ mod tests {
                 assert!(
                     matches!(
                         v2.restore_guarantee_level,
-                        RestoreGuaranteeLevel::BasicHistory
+                        RestoreGuaranteeLevel::RichHistory
+                            | RestoreGuaranteeLevel::BasicHistory
                             | RestoreGuaranteeLevel::VisualRestoreOnly
                     ),
                     "unexpected v2 restore semantics: {v2:?}"
@@ -578,7 +580,8 @@ mod tests {
                 assert!(
                     matches!(
                         v2.restore_guarantee_level,
-                        RestoreGuaranteeLevel::BasicHistory
+                        RestoreGuaranteeLevel::RichHistory
+                            | RestoreGuaranteeLevel::BasicHistory
                             | RestoreGuaranteeLevel::VisualRestoreOnly
                     ),
                     "unexpected v2 restore semantics: {v2:?}"

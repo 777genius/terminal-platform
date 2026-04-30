@@ -3144,6 +3144,172 @@ impl TerminalPersistenceV2 {
         Ok(ExportRequestRecord::try_from(row)?)
     }
 
+    pub fn approve_export_request(
+        &self,
+        input: ExportApprovalInput,
+    ) -> Result<ExportRequestRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let request = load_export_request(connection, &input.export_request_id)?;
+            if request.state == "succeeded" || request.state == "failed" {
+                return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                    "export request cannot be approved from state {}",
+                    request.state
+                )));
+            }
+
+            let metadata_json = merge_json_field(
+                request.metadata_json.as_deref(),
+                "approval",
+                serde_json::json!({
+                    "approved_at_ms": now,
+                    "approver_ref_hash": input.approver_ref.as_ref().map(|value| blake3_hash_text(value)),
+                    "metadata": input.metadata,
+                }),
+            )?;
+
+            diesel::update(
+                terminal_export_requests::table
+                    .filter(terminal_export_requests::id.eq(&input.export_request_id)),
+            )
+            .set((
+                terminal_export_requests::state.eq("approved"),
+                terminal_export_requests::approved_at_ms.eq(Some(now)),
+                terminal_export_requests::metadata_json.eq(metadata_json),
+            ))
+            .execute(connection)?;
+
+            ExportRequestRecord::try_from(load_export_request(connection, &input.export_request_id)?)
+        })
+    }
+
+    pub fn verify_export_artifact(
+        &self,
+        input: ExportArtifactVerificationInput,
+    ) -> Result<ExportArtifactVerificationRecord, TerminalPersistenceV2Error> {
+        validate_external_artifact_ref(&input.artifact_ref)?;
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let request = load_export_request(connection, &input.export_request_id)?;
+            let artifact_ref_hash = blake3_hash_text(&input.artifact_ref);
+            if request.output_ref_hash.as_deref() != Some(artifact_ref_hash.as_str()) {
+                return Err(TerminalPersistenceV2Error::InvalidData(
+                    "export artifact ref does not match request output_ref hash".to_string(),
+                ));
+            }
+            if request.include_raw != 0 && request.approved_at_ms.is_none() {
+                return Err(TerminalPersistenceV2Error::InvalidData(
+                    "raw export must be explicitly approved before artifact verification"
+                        .to_string(),
+                ));
+            }
+
+            let artifact = terminal_external_artifacts::table
+                .filter(terminal_external_artifacts::artifact_ref_hash.eq(&artifact_ref_hash))
+                .select(ExternalArtifactRow::as_select())
+                .first::<ExternalArtifactRow>(connection)?;
+            if artifact.artifact_kind != "export_file" {
+                return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                    "export artifact verification requires export_file artifact, got {}",
+                    artifact.artifact_kind
+                )));
+            }
+            if artifact.state != "available" && artifact.state != "verified" {
+                return Err(TerminalPersistenceV2Error::InvalidData(format!(
+                    "export artifact must be available or verified, got {}",
+                    artifact.state
+                )));
+            }
+
+            let raw_export = request.include_raw != 0;
+            let encrypted_required = raw_export || input.require_encrypted;
+            if encrypted_required && artifact.encryption_state != "encrypted" {
+                return Err(TerminalPersistenceV2Error::InvalidData(
+                    "raw or encrypted-required export must complete into an encrypted artifact"
+                        .to_string(),
+                ));
+            }
+            if encrypted_required && artifact.key_ref.is_none() {
+                return Err(TerminalPersistenceV2Error::InvalidData(
+                    "encrypted export artifact must reference an opaque key id".to_string(),
+                ));
+            }
+            if encrypted_required
+                && (artifact.checksum_algorithm.is_none() || artifact.checksum.is_none())
+            {
+                return Err(TerminalPersistenceV2Error::InvalidData(
+                    "encrypted export artifact must include a stored-bytes checksum".to_string(),
+                ));
+            }
+
+            let artifact_id = artifact.id.clone();
+            let artifact_kind = artifact.artifact_kind.clone();
+            let encryption_state = artifact.encryption_state.clone();
+            let checksum_algorithm = artifact.checksum_algorithm.clone();
+            let checksum = artifact.checksum.clone();
+            let verification = serde_json::json!({
+                "artifact_id": artifact_id,
+                "artifact_ref_hash": artifact_ref_hash.clone(),
+                "artifact_ref_stored": false,
+                "artifact_kind": artifact_kind,
+                "artifact_state": "verified",
+                "encryption_state": encryption_state,
+                "key_ref_present": artifact.key_ref.is_some(),
+                "checksum_algorithm": checksum_algorithm,
+                "checksum": checksum,
+                "size_bytes": artifact.size_bytes,
+                "verified_at_ms": now,
+                "raw_export": raw_export,
+                "encrypted_required": encrypted_required,
+                "metadata": input.metadata,
+            });
+            let manifest_json = merge_json_field(
+                request.manifest_json.as_deref(),
+                "artifact_verification",
+                verification.clone(),
+            )?;
+
+            diesel::update(
+                terminal_external_artifacts::table
+                    .filter(terminal_external_artifacts::id.eq(&artifact.id)),
+            )
+            .set((
+                terminal_external_artifacts::state.eq("verified"),
+                terminal_external_artifacts::verified_at_ms.eq(Some(now)),
+            ))
+            .execute(connection)?;
+
+            diesel::update(
+                terminal_export_requests::table
+                    .filter(terminal_export_requests::id.eq(&input.export_request_id)),
+            )
+            .set((
+                terminal_export_requests::state.eq("succeeded"),
+                terminal_export_requests::completed_at_ms.eq(Some(now)),
+                terminal_export_requests::manifest_json.eq(manifest_json),
+                terminal_export_requests::error.eq(Option::<String>::None),
+            ))
+            .execute(connection)?;
+
+            Ok(ExportArtifactVerificationRecord {
+                export_request_id: input.export_request_id,
+                artifact_id: artifact.id,
+                artifact_ref_hash,
+                export_state: "succeeded".to_string(),
+                artifact_state: "verified".to_string(),
+                encryption_state: artifact.encryption_state,
+                raw_export,
+                encrypted_required,
+                verified_at_ms: now,
+                checksum_algorithm: artifact.checksum_algorithm,
+                checksum: artifact.checksum,
+                manifest_json: verification,
+            })
+        })
+    }
+
     pub fn create_support_bundle(
         &self,
         input: SupportBundleInput,
@@ -3995,6 +4161,21 @@ pub struct ExportRequestInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportApprovalInput {
+    pub export_request_id: String,
+    pub approver_ref: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportArtifactVerificationInput {
+    pub export_request_id: String,
+    pub artifact_ref: String,
+    pub require_encrypted: bool,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SupportBundleInput {
     pub id: Option<String>,
     pub scope: Value,
@@ -4738,6 +4919,50 @@ impl TryFrom<NewExportRequestRow> for ExportRequestRecord {
     }
 }
 
+impl TryFrom<ExportRequestRow> for ExportRequestRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: ExportRequestRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            session_id: row.session_id,
+            export_kind: row.export_kind,
+            state: row.state,
+            redaction_profile_id: row.redaction_profile_id,
+            include_raw: row.include_raw != 0,
+            approved_at_ms: row.approved_at_ms,
+            requested_at_ms: row.requested_at_ms,
+            completed_at_ms: row.completed_at_ms,
+            manifest_json: row
+                .manifest_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            output_ref_hash: row.output_ref_hash,
+            error: row.error,
+            metadata_json: row
+                .metadata_json
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportArtifactVerificationRecord {
+    pub export_request_id: String,
+    pub artifact_id: String,
+    pub artifact_ref_hash: String,
+    pub export_state: String,
+    pub artifact_state: String,
+    pub encryption_state: String,
+    pub raw_export: bool,
+    pub encrypted_required: bool,
+    pub verified_at_ms: i64,
+    pub checksum_algorithm: Option<String>,
+    pub checksum: Option<String>,
+    pub manifest_json: Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SupportBundleRecord {
     pub id: String,
@@ -4914,6 +5139,27 @@ impl TryFrom<NewExternalArtifactRow> for ExternalArtifactRecord {
     type Error = TerminalPersistenceV2Error;
 
     fn try_from(row: NewExternalArtifactRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            artifact_kind: row.artifact_kind,
+            artifact_ref_hash: row.artifact_ref_hash,
+            state: row.state,
+            encryption_state: row.encryption_state,
+            key_ref: row.key_ref,
+            checksum_algorithm: row.checksum_algorithm,
+            checksum: row.checksum,
+            size_bytes: row.size_bytes,
+            created_at_ms: row.created_at_ms,
+            verified_at_ms: row.verified_at_ms,
+            metadata_json: row.metadata_json.as_deref().map(serde_json::from_str).transpose()?,
+        })
+    }
+}
+
+impl TryFrom<ExternalArtifactRow> for ExternalArtifactRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: ExternalArtifactRow) -> Result<Self, Self::Error> {
         Ok(Self {
             id: row.id,
             artifact_kind: row.artifact_kind,
@@ -6024,6 +6270,25 @@ struct NewDeletionTombstoneRow {
     metadata_json: Option<String>,
 }
 
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_export_requests)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+struct ExportRequestRow {
+    id: String,
+    session_id: Option<String>,
+    export_kind: String,
+    state: String,
+    redaction_profile_id: Option<String>,
+    include_raw: i32,
+    approved_at_ms: Option<i64>,
+    requested_at_ms: i64,
+    completed_at_ms: Option<i64>,
+    manifest_json: Option<String>,
+    output_ref_hash: Option<String>,
+    error: Option<String>,
+    metadata_json: Option<String>,
+}
+
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = terminal_export_requests)]
 struct NewExportRequestRow {
@@ -6102,6 +6367,24 @@ struct NewCryptoKeyEventRow {
     occurred_at_ms: i64,
     status: String,
     error_json: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_external_artifacts)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+struct ExternalArtifactRow {
+    id: String,
+    artifact_kind: String,
+    artifact_ref_hash: String,
+    state: String,
+    encryption_state: String,
+    key_ref: Option<String>,
+    checksum_algorithm: Option<String>,
+    checksum: Option<String>,
+    size_bytes: Option<i64>,
+    created_at_ms: i64,
+    verified_at_ms: Option<i64>,
     metadata_json: Option<String>,
 }
 
@@ -7417,6 +7700,17 @@ fn load_maintenance_run(
         .map_err(Into::into)
 }
 
+fn load_export_request(
+    connection: &mut SqliteConnection,
+    id: &str,
+) -> Result<ExportRequestRow, TerminalPersistenceV2Error> {
+    terminal_export_requests::table
+        .filter(terminal_export_requests::id.eq(id))
+        .select(ExportRequestRow::as_select())
+        .first::<ExportRequestRow>(connection)
+        .map_err(Into::into)
+}
+
 fn advance_stream_cursor(
     connection: &mut SqliteConnection,
     cursor_id: &str,
@@ -7965,6 +8259,20 @@ fn bool_to_int(value: bool) -> i32 {
 
 fn json_metadata(value: &Option<Value>) -> Result<Option<String>, TerminalPersistenceV2Error> {
     value.as_ref().map(serde_json::to_string).transpose().map_err(Into::into)
+}
+
+fn merge_json_field(
+    existing: Option<&str>,
+    field: &str,
+    value: Value,
+) -> Result<Option<String>, TerminalPersistenceV2Error> {
+    let mut root =
+        existing.map(serde_json::from_str).transpose()?.unwrap_or_else(|| serde_json::json!({}));
+    if !root.is_object() {
+        root = serde_json::json!({ "legacy_json_value": root });
+    }
+    root.as_object_mut().expect("root is normalized to an object").insert(field.to_string(), value);
+    Ok(Some(serde_json::to_string(&root)?))
 }
 
 fn blake3_hash_bytes(value: &[u8]) -> String {
@@ -11487,6 +11795,133 @@ mod tests {
             })
             .expect("raw export should persist when gate is enabled");
         assert!(approved_raw_export.include_raw);
+    }
+
+    #[test]
+    fn raw_export_artifact_verifier_requires_approval_and_encrypted_artifact() {
+        let store = test_store("raw-export-artifact-verifier");
+        let (session_id, _pane_id, _writer) = session_and_pane(&store);
+        store
+            .set_feature_gate_state(
+                FeatureGateName::RawHistoryExport,
+                FeatureGateState::Enabled,
+                Some("test raw export approval"),
+            )
+            .expect("raw export gate should enable");
+
+        let plaintext_ref = "C:\\exports\\raw-history-plaintext.cast";
+        let plaintext_request = store
+            .create_export_request(ExportRequestInput {
+                id: None,
+                session_id: Some(session_id.clone()),
+                export_kind: Some("raw_transcript".to_string()),
+                redaction_profile_id: None,
+                include_raw: true,
+                output_ref: Some(plaintext_ref.to_string()),
+                metadata: None,
+            })
+            .expect("raw export request should persist");
+        store
+            .record_external_artifact(ExternalArtifactInput {
+                id: None,
+                artifact_kind: "export_file".to_string(),
+                artifact_ref: plaintext_ref.to_string(),
+                state: Some("available".to_string()),
+                encryption_state: Some("plaintext".to_string()),
+                key_ref: None,
+                checksum_algorithm: Some("blake3".to_string()),
+                checksum: Some(blake3_hash_text("plaintext-export-bytes")),
+                size_bytes: Some(64),
+                verified_at_ms: None,
+                metadata: None,
+            })
+            .expect("plaintext export artifact should persist as metadata only");
+
+        let unapproved = store.verify_export_artifact(ExportArtifactVerificationInput {
+            export_request_id: plaintext_request.id.clone(),
+            artifact_ref: plaintext_ref.to_string(),
+            require_encrypted: false,
+            metadata: None,
+        });
+        assert!(
+            matches!(unapproved, Err(TerminalPersistenceV2Error::InvalidData(message)) if message.contains("explicitly approved"))
+        );
+
+        let approved = store
+            .approve_export_request(ExportApprovalInput {
+                export_request_id: plaintext_request.id.clone(),
+                approver_ref: Some("local-user".to_string()),
+                metadata: Some(serde_json::json!({"reason": "test approval"})),
+            })
+            .expect("raw export request should approve");
+        assert_eq!(approved.state, "approved");
+        let approval_metadata = serde_json::to_string(&approved.metadata_json)
+            .expect("approval metadata should serialize");
+        assert!(!approval_metadata.contains("local-user"));
+
+        let plaintext_completion = store.verify_export_artifact(ExportArtifactVerificationInput {
+            export_request_id: plaintext_request.id,
+            artifact_ref: plaintext_ref.to_string(),
+            require_encrypted: false,
+            metadata: None,
+        });
+        assert!(
+            matches!(plaintext_completion, Err(TerminalPersistenceV2Error::InvalidData(message)) if message.contains("encrypted artifact"))
+        );
+
+        let encrypted_ref = "C:\\exports\\raw-history-encrypted.cast";
+        let encrypted_request = store
+            .create_export_request(ExportRequestInput {
+                id: None,
+                session_id: Some(session_id),
+                export_kind: Some("raw_transcript".to_string()),
+                redaction_profile_id: None,
+                include_raw: true,
+                output_ref: Some(encrypted_ref.to_string()),
+                metadata: None,
+            })
+            .expect("second raw export request should persist");
+        store
+            .approve_export_request(ExportApprovalInput {
+                export_request_id: encrypted_request.id.clone(),
+                approver_ref: Some("local-user".to_string()),
+                metadata: None,
+            })
+            .expect("second raw export request should approve");
+        store
+            .record_external_artifact(ExternalArtifactInput {
+                id: None,
+                artifact_kind: "export_file".to_string(),
+                artifact_ref: encrypted_ref.to_string(),
+                state: Some("available".to_string()),
+                encryption_state: Some("encrypted".to_string()),
+                key_ref: Some("crypto-key:export-v1".to_string()),
+                checksum_algorithm: Some("blake3".to_string()),
+                checksum: Some(blake3_hash_text("encrypted-export-bytes")),
+                size_bytes: Some(128),
+                verified_at_ms: None,
+                metadata: None,
+            })
+            .expect("encrypted export artifact should persist as metadata only");
+
+        let verified = store
+            .verify_export_artifact(ExportArtifactVerificationInput {
+                export_request_id: encrypted_request.id,
+                artifact_ref: encrypted_ref.to_string(),
+                require_encrypted: false,
+                metadata: Some(serde_json::json!({"worker": "test"})),
+            })
+            .expect("encrypted raw export should verify");
+        assert_eq!(verified.export_state, "succeeded");
+        assert_eq!(verified.artifact_state, "verified");
+        assert!(verified.raw_export);
+        assert!(verified.encrypted_required);
+        assert_eq!(verified.encryption_state, "encrypted");
+        assert_eq!(verified.artifact_ref_hash, blake3_hash_text(encrypted_ref));
+        let manifest = serde_json::to_string(&verified.manifest_json)
+            .expect("verification manifest should serialize");
+        assert!(manifest.contains("artifact_ref_stored"));
+        assert!(!manifest.contains(encrypted_ref));
     }
 
     #[test]
