@@ -1,7 +1,7 @@
 use std::{
-    fs,
+    fmt, fs,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -17,6 +17,7 @@ use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::db::executor::PersistenceExecutor;
 use crate::v2::{
     CommandHistoryEntryRecord, HistoryGapEventInput, PaneHistoryHydrationRecord, RestorePlan,
     ScreenSnapshotEventInput, TerminalOutputEventInput, TerminalPersistenceV2,
@@ -92,9 +93,16 @@ pub struct SessionRouteRecord {
     pub route_fingerprint: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SqliteSessionStore {
     path: PathBuf,
+    v2_executor: Arc<Mutex<Option<Arc<PersistenceExecutor>>>>,
+}
+
+impl fmt::Debug for SqliteSessionStore {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("SqliteSessionStore").field("path", &self.path).finish()
+    }
 }
 
 type SavedSessionSummaryRow = (String, String, Option<String>, String, String, String, i64);
@@ -124,7 +132,7 @@ impl SqliteSessionStore {
             fs::create_dir_all(parent)?;
         }
 
-        let store = Self { path };
+        let store = Self { path, v2_executor: Arc::new(Mutex::new(None)) };
         retry_persistence_operation(|| store.ensure_schema())?;
         Ok(store)
     }
@@ -133,14 +141,14 @@ impl SqliteSessionStore {
         &self,
         session: &SavedNativeSession,
     ) -> Result<RestorePlan, TerminalPersistenceV2Error> {
+        let session = session.clone();
         retry_v2_write(|| {
-            let store = TerminalPersistenceV2::open_with_config(
-                &self.path,
-                TerminalPersistenceV2Config::default(),
-            )?;
-            store.import_saved_native_session_snapshot(session)?;
-            store.run_restore_drill(&session.session_id.0.to_string())?;
-            store.restore_plan(&session.session_id.0.to_string())
+            let session = session.clone();
+            self.with_v2_store_serialized(move |store| {
+                store.import_saved_native_session_snapshot(&session)?;
+                store.run_restore_drill(&session.session_id.0.to_string())?;
+                store.restore_plan(&session.session_id.0.to_string())
+            })
         })
     }
 
@@ -149,15 +157,15 @@ impl SqliteSessionStore {
         session_id: SessionId,
     ) -> Result<Option<RestorePlan>, TerminalPersistenceV2Error> {
         retry_v2_write(|| {
-            let store = TerminalPersistenceV2::open_with_config(
-                &self.path,
-                TerminalPersistenceV2Config::default(),
-            )?;
-            match store.restore_plan(&session_id.0.to_string()) {
-                Ok(plan) => Ok(Some(plan)),
-                Err(TerminalPersistenceV2Error::Query(diesel::result::Error::NotFound)) => Ok(None),
-                Err(error) => Err(error),
-            }
+            self.with_v2_store_serialized(move |store| {
+                match store.restore_plan(&session_id.0.to_string()) {
+                    Ok(plan) => Ok(Some(plan)),
+                    Err(TerminalPersistenceV2Error::Query(diesel::result::Error::NotFound)) => {
+                        Ok(None)
+                    }
+                    Err(error) => Err(error),
+                }
+            })
         })
     }
 
@@ -166,11 +174,8 @@ impl SqliteSessionStore {
         input: UiInputEventInput,
     ) -> Result<(), TerminalPersistenceV2Error> {
         retry_v2_write(|| {
-            let store = TerminalPersistenceV2::open_with_config(
-                &self.path,
-                TerminalPersistenceV2Config::default(),
-            )?;
-            store.record_ui_input_event(input.clone())
+            let input = input.clone();
+            self.with_v2_store_serialized(move |store| store.record_ui_input_event(input))
         })
     }
 
@@ -179,12 +184,11 @@ impl SqliteSessionStore {
         input: TerminalOutputEventInput,
     ) -> Result<(), TerminalPersistenceV2Error> {
         retry_v2_write(|| {
-            let store = TerminalPersistenceV2::open_with_config(
-                &self.path,
-                TerminalPersistenceV2Config::default(),
-            )?;
-            store.record_terminal_output_event(input.clone())?;
-            Ok(())
+            let input = input.clone();
+            self.with_v2_store_serialized(move |store| {
+                store.record_terminal_output_event(input)?;
+                Ok(())
+            })
         })
     }
 
@@ -193,12 +197,11 @@ impl SqliteSessionStore {
         input: HistoryGapEventInput,
     ) -> Result<(), TerminalPersistenceV2Error> {
         retry_v2_write(|| {
-            let store = TerminalPersistenceV2::open_with_config(
-                &self.path,
-                TerminalPersistenceV2Config::default(),
-            )?;
-            store.record_history_gap_event(input.clone())?;
-            Ok(())
+            let input = input.clone();
+            self.with_v2_store_serialized(move |store| {
+                store.record_history_gap_event(input)?;
+                Ok(())
+            })
         })
     }
 
@@ -207,12 +210,11 @@ impl SqliteSessionStore {
         input: ScreenSnapshotEventInput,
     ) -> Result<(), TerminalPersistenceV2Error> {
         retry_v2_write(|| {
-            let store = TerminalPersistenceV2::open_with_config(
-                &self.path,
-                TerminalPersistenceV2Config::default(),
-            )?;
-            store.record_screen_snapshot_event(input.clone())?;
-            Ok(())
+            let input = input.clone();
+            self.with_v2_store_serialized(move |store| {
+                store.record_screen_snapshot_event(input)?;
+                Ok(())
+            })
         })
     }
 
@@ -221,12 +223,11 @@ impl SqliteSessionStore {
         input: TopologySnapshotEventInput,
     ) -> Result<(), TerminalPersistenceV2Error> {
         retry_v2_write(|| {
-            let store = TerminalPersistenceV2::open_with_config(
-                &self.path,
-                TerminalPersistenceV2Config::default(),
-            )?;
-            store.record_topology_snapshot_event(input.clone())?;
-            Ok(())
+            let input = input.clone();
+            self.with_v2_store_serialized(move |store| {
+                store.record_topology_snapshot_event(input)?;
+                Ok(())
+            })
         })
     }
 
@@ -238,12 +239,20 @@ impl SqliteSessionStore {
         max_segments: Option<i64>,
         max_bytes: Option<i64>,
     ) -> Result<PaneHistoryHydrationRecord, TerminalPersistenceV2Error> {
+        let session_id = session_id.to_string();
+        let pane_id = pane_id.to_string();
         retry_v2_write(|| {
-            let store = TerminalPersistenceV2::open_with_config(
-                &self.path,
-                TerminalPersistenceV2Config::default(),
-            )?;
-            store.hydrate_pane_history(session_id, pane_id, from_event_seq, max_segments, max_bytes)
+            let session_id = session_id.clone();
+            let pane_id = pane_id.clone();
+            self.with_v2_store_serialized(move |store| {
+                store.hydrate_pane_history(
+                    &session_id,
+                    &pane_id,
+                    from_event_seq,
+                    max_segments,
+                    max_bytes,
+                )
+            })
         })
     }
 
@@ -252,13 +261,61 @@ impl SqliteSessionStore {
         session_id: Option<&str>,
         limit: i64,
     ) -> Result<Vec<CommandHistoryEntryRecord>, TerminalPersistenceV2Error> {
+        let session_id = session_id.map(ToOwned::to_owned);
         retry_v2_write(|| {
+            let session_id = session_id.clone();
+            self.with_v2_store_serialized(move |store| {
+                store.list_command_history(session_id.as_deref(), limit)
+            })
+        })
+    }
+
+    fn with_v2_store_serialized<T>(
+        &self,
+        operation: impl FnOnce(TerminalPersistenceV2) -> Result<T, TerminalPersistenceV2Error>
+        + Send
+        + 'static,
+    ) -> Result<T, TerminalPersistenceV2Error>
+    where
+        T: Send + 'static,
+    {
+        let path = self.path.clone();
+        self.execute_v2_serialized(move || {
             let store = TerminalPersistenceV2::open_with_config(
-                &self.path,
+                &path,
                 TerminalPersistenceV2Config::default(),
             )?;
-            store.list_command_history(session_id, limit)
+            operation(store)
         })
+    }
+
+    fn execute_v2_serialized<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, TerminalPersistenceV2Error> + Send + 'static,
+    ) -> Result<T, TerminalPersistenceV2Error>
+    where
+        T: Send + 'static,
+    {
+        let executor = self.v2_executor()?;
+        executor.execute(move |_connection| operation())
+    }
+
+    fn v2_executor(&self) -> Result<Arc<PersistenceExecutor>, TerminalPersistenceV2Error> {
+        let mut guard = self.v2_executor.lock().map_err(|_| {
+            TerminalPersistenceV2Error::InvalidData(
+                "terminal persistence v2 executor lock poisoned".to_string(),
+            )
+        })?;
+        if let Some(executor) = guard.as_ref() {
+            return Ok(Arc::clone(executor));
+        }
+
+        let executor = Arc::new(PersistenceExecutor::start(
+            &self.path,
+            TerminalPersistenceV2Config::default(),
+        )?);
+        *guard = Some(Arc::clone(&executor));
+        Ok(executor)
     }
 
     pub fn open_default() -> Result<Self, PersistenceError> {
@@ -683,6 +740,8 @@ fn is_retryable_v2_write_error(error: &TerminalPersistenceV2Error) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::{sync::Arc, thread};
+
     use rusqlite::{Connection, params};
     use terminal_backend_api::ShellLaunchSpec;
     use terminal_domain::{
@@ -693,7 +752,7 @@ mod tests {
         ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
     };
 
-    use crate::v2::RestoreGuaranteeLevel;
+    use crate::v2::{RestoreGuaranteeLevel, TerminalOutputEventInput};
 
     use super::{PersistenceError, SavedNativeSession, SessionRouteRecord, SqliteSessionStore};
 
@@ -1048,6 +1107,76 @@ mod tests {
         assert!(plan.latest_topology_snapshot_id.is_some());
         assert_eq!(plan.latest_restore_drill_status.as_deref(), Some("passed"));
 
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn v2_facade_serializes_concurrent_output_capture() {
+        let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+        let path =
+            std::env::temp_dir().join(format!("terminal-platform-v2-serialized-{nonce}.sqlite3"));
+        let store = Arc::new(SqliteSessionStore::open(&path).expect("store should open"));
+        let session_id = SessionId::new();
+        let pane_id = PaneId::new();
+        let route = SessionRoute {
+            backend: BackendKind::Native,
+            authority: RouteAuthority::LocalDaemon,
+            external: None,
+        };
+
+        let mut handles = Vec::new();
+        for index in 0..12 {
+            let store = Arc::clone(&store);
+            let route = route.clone();
+            let input = TerminalOutputEventInput {
+                session_id: session_id.0.to_string(),
+                route,
+                title: Some("serialized shell".to_string()),
+                launch: None,
+                pane_id: pane_id.0.to_string(),
+                tab_id: None,
+                payload: format!("serialized-line-{index}\n").into_bytes(),
+                rows: Some(24),
+                cols: Some(80),
+                source_sequence: Some(index),
+                occurred_at_ms: None,
+                capture_semantics: Some("raw_vt_stream".to_string()),
+            };
+            handles.push(thread::spawn(move || {
+                store
+                    .record_v2_terminal_output(input)
+                    .expect("serialized v2 output capture should persist");
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("capture thread should finish");
+        }
+
+        let history = store
+            .hydrate_v2_pane_history(
+                &session_id.0.to_string(),
+                &pane_id.0.to_string(),
+                Some(1),
+                Some(32),
+                Some(16 * 1024),
+            )
+            .expect("history should hydrate after concurrent capture");
+
+        assert_eq!(history.segments.len(), 12);
+        let mut expected_event_seq = 1;
+        let mut payload_text = String::new();
+        for segment in &history.segments {
+            assert_eq!(segment.event_seq_low, expected_event_seq);
+            assert_eq!(segment.event_seq_high, expected_event_seq);
+            expected_event_seq += 1;
+            payload_text.push_str(&String::from_utf8_lossy(&segment.payload));
+        }
+        for index in 0..12 {
+            assert!(payload_text.contains(&format!("serialized-line-{index}")));
+        }
+
+        drop(store);
         let _ = std::fs::remove_file(path);
     }
 
