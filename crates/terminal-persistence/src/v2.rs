@@ -1796,7 +1796,11 @@ impl TerminalPersistenceV2 {
             row.output_event_seq_high,
             "command output event",
         )?;
-        validate_optional_range(row.output_byte_low, row.output_byte_high, "command output byte")?;
+        validate_optional_half_open_range(
+            row.output_byte_low,
+            row.output_byte_high,
+            "command output byte",
+        )?;
 
         insert_into(terminal_command_blocks::table).values(&row).execute(&mut connection)?;
         Ok(id)
@@ -7536,6 +7540,44 @@ mod tests {
             .expect("other history row should load");
 
         assert_ne!(row.command_hash, other_row.command_hash);
+    }
+
+    #[test]
+    fn command_output_byte_range_is_half_open() {
+        let store = test_store("command-output-byte-range");
+        let (session_id, pane_id, _) = session_and_pane(&store);
+
+        let error = store
+            .write_command_block(CommandBlockInput {
+                id: None,
+                session_id,
+                pane_id,
+                commit_id: None,
+                command_text: Some("echo bad range".to_string()),
+                display_text: Some("echo bad range".to_string()),
+                redacted_text: None,
+                command_text_source: None,
+                trust_level: None,
+                state: Some("finished".to_string()),
+                cwd: None,
+                cwd_source: None,
+                exit_code: Some(0),
+                started_event_seq: None,
+                submitted_event_seq: None,
+                finished_event_seq: None,
+                output_event_seq_low: None,
+                output_event_seq_high: None,
+                output_byte_low: Some(42),
+                output_byte_high: Some(42),
+                sensitivity_class: None,
+                created_at_ms: None,
+                metadata: None,
+            })
+            .expect_err("equal byte range should be rejected before sqlite insert");
+
+        assert!(
+            matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("command output byte range must be empty or half-open"))
+        );
     }
 
     #[test]
