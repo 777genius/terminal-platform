@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS terminal_backend_capability_reports (
     route_kind TEXT NOT NULL,
     probe_status TEXT NOT NULL CHECK(probe_status IN ('passed', 'failed', 'partial', 'stale')),
     capture_strategy TEXT NOT NULL,
-    capture_semantics TEXT NOT NULL,
+    capture_semantics TEXT NOT NULL CHECK(capture_semantics IN ('raw_vt_stream', 'rendered_ansi_stream', 'rendered_plaintext_snapshot', 'mux_structured_surface', 'imported_text', 'ui_input')),
     can_preserve_process_when_live INTEGER NOT NULL CHECK(can_preserve_process_when_live IN (0, 1)),
     can_capture_scrollback INTEGER NOT NULL CHECK(can_capture_scrollback IN (0, 1)),
     command_boundary_confidence TEXT NOT NULL,

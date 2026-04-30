@@ -550,6 +550,7 @@ impl TerminalPersistenceV2 {
         &self,
         input: BackendCapabilityReportInput,
     ) -> Result<String, TerminalPersistenceV2Error> {
+        validate_capture_semantics_domain(&input.capture_semantics)?;
         let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
         let id = input.id.unwrap_or_else(new_id);
@@ -1548,6 +1549,7 @@ impl TerminalPersistenceV2 {
             let event_id = new_id();
             let capture_semantics =
                 input.capture_semantics.unwrap_or_else(|| "raw_vt_stream".to_string());
+            validate_capture_semantics_domain(&capture_semantics)?;
             let event_type = input.event_type.unwrap_or_else(|| "terminal_output".to_string());
             let payload_json =
                 input.payload_json.as_ref().map(serde_json::to_string).transpose()?;
@@ -1693,6 +1695,9 @@ impl TerminalPersistenceV2 {
 
         connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
             ensure_active_writer(connection, &input.writer_generation, now)?;
+            let capture_semantics =
+                input.capture_semantics.unwrap_or_else(|| "raw_vt_stream".to_string());
+            validate_capture_semantics_domain(&capture_semantics)?;
             let commit = allocate_commit(
                 connection,
                 &input.session_id,
@@ -1738,9 +1743,7 @@ impl TerminalPersistenceV2 {
                 source_event_id_hash: input.source_event_id_hash,
                 occurred_at_ms,
                 created_at_ms: now,
-                capture_semantics: input
-                    .capture_semantics
-                    .unwrap_or_else(|| "raw_vt_stream".to_string()),
+                capture_semantics,
                 trust_level: input.trust_level.unwrap_or_else(|| "captured".to_string()),
                 metadata_json,
             };
@@ -6659,6 +6662,23 @@ fn validate_storage_pressure_domain(
     Ok(())
 }
 
+fn validate_capture_semantics_domain(value: &str) -> Result<(), TerminalPersistenceV2Error> {
+    const CAPTURE_SEMANTICS: &[&str] = &[
+        "raw_vt_stream",
+        "rendered_ansi_stream",
+        "rendered_plaintext_snapshot",
+        "mux_structured_surface",
+        "imported_text",
+        "ui_input",
+    ];
+    if !CAPTURE_SEMANTICS.contains(&value) {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "unknown capture semantics: {value}"
+        )));
+    }
+    Ok(())
+}
+
 fn path_hash(path: &Path) -> String {
     blake3_hash_text(&path.to_string_lossy())
 }
@@ -6994,6 +7014,34 @@ mod tests {
                 .collect::<Vec<_>>(),
             b"git status\r\nfatal: not a git repository\r\n"
         );
+    }
+
+    #[test]
+    fn rejects_unknown_capture_semantics_before_stream_insert() {
+        let store = test_store("capture-semantics-domain");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let mut input = StreamSegmentInput::terminal_output(
+            session_id.clone(),
+            pane_id.clone(),
+            writer.id,
+            b"rendered text\r\n".to_vec(),
+        );
+        input.capture_semantics = Some("probably_plain_text".to_string());
+
+        let error = store
+            .append_stream_segment(input)
+            .expect_err("unknown capture semantics should fail before insert");
+        let mut connection = store.connection().expect("connection should open");
+        let segment_count = terminal_stream_segments::table
+            .filter(terminal_stream_segments::session_id.eq(&session_id))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("segment count should load");
+
+        assert!(
+            matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("unknown capture semantics"))
+        );
+        assert_eq!(segment_count, 0);
     }
 
     #[test]
@@ -8371,6 +8419,25 @@ mod tests {
         )
         .execute(&mut connection)
         .expect_err("sqlite CHECK constraint should reject unknown storage pressure state");
+
+        assert!(matches!(error, DieselError::DatabaseError(_, _)));
+    }
+
+    #[test]
+    fn backend_capability_db_constraints_reject_unknown_capture_semantics() {
+        let store = test_store("backend-capability-db-domain");
+        let mut connection = store.connection().expect("connection should open");
+
+        let error = diesel::sql_query(
+            "INSERT INTO terminal_backend_capability_reports \
+             (id, backend_kind, route_kind, probe_status, capture_strategy, capture_semantics, \
+              can_preserve_process_when_live, can_capture_scrollback, command_boundary_confidence, \
+              created_at_ms, expires_at_ms) \
+             VALUES ('invalid-backend-capability-domain', 'native', 'local_daemon', 'passed', \
+                     'raw_stream', 'probably_plain_text', 0, 0, 'unknown', 1, 2)",
+        )
+        .execute(&mut connection)
+        .expect_err("sqlite CHECK constraint should reject unknown capture semantics");
 
         assert!(matches!(error, DieselError::DatabaseError(_, _)));
     }
