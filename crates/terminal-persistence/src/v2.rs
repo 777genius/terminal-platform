@@ -2351,33 +2351,42 @@ impl TerminalPersistenceV2 {
             .filter(terminal_stream_segments::session_id.eq(session_id))
             .count()
             .get_result(&mut connection)?;
-        let gap_count: i64 = terminal_journal_events::table
+        let raw_segment_count: i64 = terminal_stream_segments::table
+            .filter(terminal_stream_segments::session_id.eq(session_id))
+            .filter(terminal_stream_segments::capture_semantics.eq("raw_vt_stream"))
+            .count()
+            .get_result(&mut connection)?;
+        let rendered_segment_count = segment_count - raw_segment_count;
+        let stream_event_range = terminal_stream_segments::table
+            .filter(terminal_stream_segments::session_id.eq(session_id))
+            .select((
+                diesel::dsl::min(terminal_stream_segments::event_seq_low),
+                diesel::dsl::max(terminal_stream_segments::event_seq_high),
+            ))
+            .first::<(Option<i64>, Option<i64>)>(&mut connection)?;
+        let persisted_gap_count: i64 = terminal_history_gaps::table
+            .filter(terminal_history_gaps::session_id.eq(session_id))
+            .count()
+            .get_result(&mut connection)?;
+        let journal_gap_count: i64 = terminal_journal_events::table
             .filter(terminal_journal_events::session_id.eq(session_id))
             .filter(terminal_journal_events::event_type.eq("history_gap"))
             .count()
             .get_result(&mut connection)?;
-
-        let mut guarantee_level = match (segment_count > 0, latest_screen.is_some(), gap_count > 0)
-        {
-            (true, true, false) => RestoreGuaranteeLevel::BasicHistory,
-            (_, _, true) => RestoreGuaranteeLevel::DegradedHistory,
-            (false, true, _) => RestoreGuaranteeLevel::VisualSnapshotOnly,
-            _ => RestoreGuaranteeLevel::None,
-        };
+        let gap_count = persisted_gap_count.max(journal_gap_count);
         let high_water_commit_seq = terminal_commit_log::table
             .filter(terminal_commit_log::session_id.eq(session_id))
             .select(diesel::dsl::max(terminal_commit_log::commit_seq))
             .first::<Option<i64>>(&mut connection)?
             .unwrap_or(0);
-        let latest_restore_drill_status = terminal_restore_drills::table
+        let latest_restore_drill = terminal_restore_drills::table
             .filter(terminal_restore_drills::session_id.eq(session_id))
             .order(terminal_restore_drills::checked_at_ms.desc())
-            .select(terminal_restore_drills::result)
-            .first::<String>(&mut connection)
+            .select((terminal_restore_drills::id, terminal_restore_drills::result))
+            .first::<(String, String)>(&mut connection)
             .optional()?;
-        if matches!(latest_restore_drill_status.as_deref(), Some("failed" | "degraded")) {
-            guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
-        }
+        let latest_restore_drill_status =
+            latest_restore_drill.as_ref().map(|(_, result)| result.clone());
         let authoritative_reads_gate = terminal_feature_gates::table
             .filter(
                 terminal_feature_gates::feature_name
@@ -2387,12 +2396,42 @@ impl TerminalPersistenceV2 {
             .first::<String>(&mut connection)
             .optional()?
             .unwrap_or_else(|| FeatureGateState::Disabled.as_str().to_string());
-        if authoritative_reads_gate == FeatureGateState::ForceDisabled.as_str() {
-            guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
-        }
         let now = self.config.clock.now_ms();
         let latest_capability_report =
             latest_backend_capability_report(&mut connection, session_id)?;
+        let capability_stale = latest_capability_report.as_ref().map(|report| {
+            report.expires_at_ms <= now
+                || report.stale_reason.is_some()
+                || report.probe_status != "passed"
+        });
+        let has_fresh_raw_capability = latest_capability_report.as_ref().is_some_and(|report| {
+            capability_stale == Some(false) && report.capture_semantics == "raw_vt_stream"
+        });
+
+        let mut guarantee_level = match (
+            segment_count > 0,
+            raw_segment_count > 0,
+            latest_screen.is_some(),
+            latest_topology.is_some(),
+            gap_count > 0,
+        ) {
+            (_, _, _, _, true) => RestoreGuaranteeLevel::DegradedHistory,
+            (true, true, true, true, false)
+                if latest_restore_drill_status.as_deref() == Some("passed")
+                    && has_fresh_raw_capability =>
+            {
+                RestoreGuaranteeLevel::RawStreamReplay
+            }
+            (true, _, true, _, false) => RestoreGuaranteeLevel::BasicHistory,
+            (false, _, true, _, false) => RestoreGuaranteeLevel::VisualSnapshotOnly,
+            _ => RestoreGuaranteeLevel::None,
+        };
+        if matches!(latest_restore_drill_status.as_deref(), Some("failed" | "degraded")) {
+            guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
+        }
+        if authoritative_reads_gate == FeatureGateState::ForceDisabled.as_str() {
+            guarantee_level = RestoreGuaranteeLevel::DegradedHistory;
+        }
         if let Some(report) = latest_capability_report.as_ref() {
             let stale = report.expires_at_ms <= now
                 || report.stale_reason.is_some()
@@ -2412,22 +2451,58 @@ impl TerminalPersistenceV2 {
                 kind: "stream_segment_count".to_string(),
                 value: segment_count.to_string(),
             },
+            RestoreEvidence {
+                kind: "raw_stream_segment_count".to_string(),
+                value: raw_segment_count.to_string(),
+            },
+            RestoreEvidence {
+                kind: "rendered_stream_segment_count".to_string(),
+                value: rendered_segment_count.to_string(),
+            },
             RestoreEvidence { kind: "history_gap_count".to_string(), value: gap_count.to_string() },
             RestoreEvidence {
                 kind: "authoritative_reads_gate_state".to_string(),
                 value: authoritative_reads_gate,
             },
         ];
+        if let (Some(event_seq_low), Some(event_seq_high)) = stream_event_range {
+            evidence.push(RestoreEvidence {
+                kind: "journal_event_range".to_string(),
+                value: format!("{session_id}:{event_seq_low}:{event_seq_high}"),
+            });
+        }
+        if let Some(screen) = latest_screen.as_ref() {
+            evidence.push(RestoreEvidence {
+                kind: "screen_snapshot".to_string(),
+                value: screen.id.clone(),
+            });
+        }
+        if let Some(topology) = latest_topology.as_ref() {
+            evidence.push(RestoreEvidence {
+                kind: "topology_snapshot".to_string(),
+                value: topology.id.clone(),
+            });
+        }
         if let Some(status) = &latest_restore_drill_status {
             evidence.push(RestoreEvidence {
                 kind: "latest_restore_drill_status".to_string(),
                 value: status.clone(),
             });
         }
+        if let Some((drill_id, _)) = &latest_restore_drill {
+            evidence.push(RestoreEvidence {
+                kind: "restore_drill".to_string(),
+                value: drill_id.clone(),
+            });
+        }
         if let Some(report) = latest_capability_report {
             let stale = report.expires_at_ms <= now
                 || report.stale_reason.is_some()
                 || report.probe_status != "passed";
+            evidence.push(RestoreEvidence {
+                kind: "backend_capability_report".to_string(),
+                value: report.id.clone(),
+            });
             evidence.push(RestoreEvidence {
                 kind: "backend_capability_probe_status".to_string(),
                 value: report.probe_status,
@@ -7891,12 +7966,153 @@ mod tests {
         let plan = store.restore_plan(&session_id).expect("restore plan should load");
 
         assert_eq!(plan.guarantee_level, RestoreGuaranteeLevel::BasicHistory);
-        assert_eq!(plan.latest_screen_snapshot_id, Some(screen_id));
-        assert_eq!(plan.latest_topology_snapshot_id, Some(topology_id));
+        assert_eq!(plan.latest_screen_snapshot_id, Some(screen_id.clone()));
+        assert_eq!(plan.latest_topology_snapshot_id, Some(topology_id.clone()));
         assert!(plan.high_water_commit_seq >= 3);
         assert_eq!(plan.latest_restore_drill_status, None);
         assert!(plan.evidence.iter().any(|evidence| {
             evidence.kind == "authoritative_reads_gate_state" && evidence.value == "disabled"
+        }));
+        assert!(
+            plan.evidence.iter().any(|evidence| {
+                evidence.kind == "screen_snapshot" && evidence.value == screen_id
+            })
+        );
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "topology_snapshot" && evidence.value == topology_id
+        }));
+        assert!(plan.evidence.iter().any(|evidence| evidence.kind == "journal_event_range"));
+    }
+
+    #[test]
+    fn restore_plan_promotes_raw_stream_after_drill_and_fresh_capability() {
+        let store = test_store("restore-plan-raw-evidence");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let segment = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"raw durable history\r\n".to_vec(),
+            ))
+            .expect("raw segment should persist");
+        store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                writer_generation: writer.id.clone(),
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: segment.event_seq_low,
+                high_water_event_seq: segment.event_seq_high,
+                high_water_byte_seq: Some(segment.byte_high),
+                screen: serde_json::json!({"lines":["raw durable history"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("screen snapshot should persist");
+        store
+            .write_topology_snapshot(TopologySnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                writer_generation: writer.id.clone(),
+                pane_high_water: serde_json::json!({ pane_id.clone(): segment.event_seq_high }),
+                topology: serde_json::json!({"tabs":[{"active_pane_id": pane_id}]}),
+                source: None,
+                metadata: None,
+            })
+            .expect("topology snapshot should persist");
+        let capability_id = store
+            .record_backend_capability_report(BackendCapabilityReportInput {
+                id: None,
+                session_id: Some(session_id.clone()),
+                backend_kind: "native".to_string(),
+                backend_version: Some("test".to_string()),
+                backend_binary_path_hash: Some("test-path-hash".to_string()),
+                route_kind: "local_daemon".to_string(),
+                probe_status: "passed".to_string(),
+                capture_strategy: "raw_stream".to_string(),
+                capture_semantics: "raw_vt_stream".to_string(),
+                can_preserve_process_when_live: false,
+                can_capture_scrollback: true,
+                command_boundary_confidence: "high".to_string(),
+                evidence: Some(serde_json::json!({"probe": "test"})),
+                expires_at_ms: None,
+            })
+            .expect("capability report should persist");
+
+        let before_drill = store.restore_plan(&session_id).expect("plan should load");
+        assert_eq!(before_drill.guarantee_level, RestoreGuaranteeLevel::BasicHistory);
+
+        let drill = store.run_restore_drill(&session_id).expect("restore drill should pass");
+        assert_eq!(drill.result, "passed");
+
+        let plan = store.restore_plan(&session_id).expect("plan should reload");
+
+        assert_eq!(plan.guarantee_level, RestoreGuaranteeLevel::RawStreamReplay);
+        assert_eq!(plan.latest_restore_drill_status.as_deref(), Some("passed"));
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "backend_capability_report" && evidence.value == capability_id
+        }));
+        assert!(
+            plan.evidence
+                .iter()
+                .any(|evidence| evidence.kind == "restore_drill" && evidence.value == drill.id)
+        );
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "raw_stream_segment_count" && evidence.value == "1"
+        }));
+    }
+
+    #[test]
+    fn force_disabled_authoritative_reads_downgrades_restore_plan() {
+        let store = test_store("restore-plan-force-disabled");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let segment = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"raw history\r\n".to_vec(),
+            ))
+            .expect("segment should persist");
+        store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id: pane_id.clone(),
+                writer_generation: writer.id.clone(),
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: segment.event_seq_low,
+                high_water_event_seq: segment.event_seq_high,
+                high_water_byte_seq: Some(segment.byte_high),
+                screen: serde_json::json!({"lines":["raw history"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("screen snapshot should persist");
+        store
+            .set_feature_gate_state(
+                FeatureGateName::TerminalPersistenceV2AuthoritativeReads,
+                FeatureGateState::ForceDisabled,
+                Some("test rollback"),
+            )
+            .expect("force disabled gate should persist");
+
+        let plan = store.restore_plan(&session_id).expect("plan should load");
+
+        assert_eq!(plan.guarantee_level, RestoreGuaranteeLevel::DegradedHistory);
+        assert!(plan.evidence.iter().any(|evidence| {
+            evidence.kind == "authoritative_reads_gate_state"
+                && evidence.value == FeatureGateState::ForceDisabled.as_str()
         }));
     }
 
