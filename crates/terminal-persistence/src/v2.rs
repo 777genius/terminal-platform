@@ -27,12 +27,13 @@ use crate::{
         schema::{
             terminal_backend_capability_reports, terminal_backup_records,
             terminal_capture_receipts, terminal_clients, terminal_command_blocks,
-            terminal_command_history_entries, terminal_commit_log, terminal_db_identity,
-            terminal_delivery_offsets, terminal_feature_gates, terminal_history_gaps,
-            terminal_integrity_checks, terminal_journal_events, terminal_outbox_messages,
-            terminal_panes, terminal_restore_drills, terminal_screen_snapshots,
-            terminal_session_cursors, terminal_sessions, terminal_stream_cursors,
-            terminal_stream_segments, terminal_topology_snapshots, terminal_writer_generations,
+            terminal_command_history_entries, terminal_commit_log, terminal_data_health_records,
+            terminal_db_identity, terminal_delivery_offsets, terminal_feature_gates,
+            terminal_history_gaps, terminal_integrity_checks, terminal_journal_events,
+            terminal_outbox_messages, terminal_panes, terminal_restore_drills,
+            terminal_screen_snapshots, terminal_session_cursors, terminal_sessions,
+            terminal_stream_cursors, terminal_stream_segments, terminal_topology_snapshots,
+            terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -2368,6 +2369,13 @@ impl TerminalPersistenceV2 {
             metadata_json,
         };
         insert_into(terminal_restore_drills::table).values(&row).execute(&mut connection)?;
+        persist_history_validation_health_records(
+            &mut connection,
+            Some(session_id),
+            &validation,
+            finished_at_ms,
+            Some(&id),
+        )?;
 
         Ok(RestoreDrillRecord {
             id,
@@ -2422,6 +2430,13 @@ impl TerminalPersistenceV2 {
             metadata_json: None,
         };
         insert_into(terminal_integrity_checks::table).values(&row).execute(&mut connection)?;
+        persist_history_validation_health_records(
+            &mut connection,
+            None,
+            &validation,
+            checked_at_ms,
+            Some(&id),
+        )?;
 
         Ok(IntegrityCheckRecord {
             id,
@@ -2433,6 +2448,27 @@ impl TerminalPersistenceV2 {
             details_json: Some(details),
             error,
         })
+    }
+
+    pub fn list_open_data_health_records(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Vec<DataHealthRecord>, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let mut query = terminal_data_health_records::table
+            .filter(terminal_data_health_records::action_state.ne("resolved"))
+            .filter(terminal_data_health_records::action_state.ne("ignored"))
+            .into_boxed();
+        if let Some(session_id) = session_id {
+            query = query.filter(terminal_data_health_records::session_id.eq(session_id));
+        }
+        query
+            .order(terminal_data_health_records::detected_at_ms.desc())
+            .select(DataHealthRecordRow::as_select())
+            .load::<DataHealthRecordRow>(&mut connection)?
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect()
     }
 
     pub fn vacuum_into_backup(
@@ -3272,6 +3308,41 @@ pub struct IntegrityCheckRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataHealthRecord {
+    pub id: String,
+    pub session_id: Option<String>,
+    pub pane_id: Option<String>,
+    pub detection_kind: String,
+    pub severity: String,
+    pub first_bad_event_seq: Option<i64>,
+    pub affected_ref: Option<String>,
+    pub action_state: String,
+    pub detected_at_ms: i64,
+    pub resolved_at_ms: Option<i64>,
+    pub details_json: Option<Value>,
+}
+
+impl TryFrom<DataHealthRecordRow> for DataHealthRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: DataHealthRecordRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            session_id: row.session_id,
+            pane_id: row.pane_id,
+            detection_kind: row.detection_kind,
+            severity: row.severity,
+            first_bad_event_seq: row.first_bad_event_seq,
+            affected_ref: row.affected_ref,
+            action_state: row.action_state,
+            detected_at_ms: row.detected_at_ms,
+            resolved_at_ms: row.resolved_at_ms,
+            details_json: row.details_json.map(|value| serde_json::from_str(&value)).transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackupRecord {
     pub id: String,
     pub backup_kind: String,
@@ -4093,6 +4164,42 @@ struct NewIntegrityCheckRow {
     metadata_json: Option<String>,
 }
 
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_data_health_records)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct DataHealthRecordRow {
+    id: String,
+    session_id: Option<String>,
+    pane_id: Option<String>,
+    detection_kind: String,
+    severity: String,
+    first_bad_event_seq: Option<i64>,
+    affected_ref: Option<String>,
+    action_state: String,
+    detected_at_ms: i64,
+    resolved_at_ms: Option<i64>,
+    details_json: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_data_health_records)]
+struct NewDataHealthRecordRow {
+    id: String,
+    session_id: Option<String>,
+    pane_id: Option<String>,
+    detection_kind: String,
+    severity: String,
+    first_bad_event_seq: Option<i64>,
+    affected_ref: Option<String>,
+    action_state: String,
+    detected_at_ms: i64,
+    resolved_at_ms: Option<i64>,
+    details_json: Option<String>,
+    metadata_json: Option<String>,
+}
+
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = terminal_backup_records)]
 struct NewBackupRecordRow {
@@ -4303,6 +4410,60 @@ fn validate_history_checksums(
         topology_snapshots_checked: topology_rows.len(),
         failures,
     })
+}
+
+fn persist_history_validation_health_records(
+    connection: &mut SqliteConnection,
+    session_id: Option<&str>,
+    validation: &HistoryValidation,
+    detected_at_ms: i64,
+    evidence_ref: Option<&str>,
+) -> Result<(), TerminalPersistenceV2Error> {
+    for failure in &validation.failures {
+        let detection_kind =
+            if failure.contains("checksum mismatch") { "checksum_mismatch" } else { "manual" };
+        let is_canonical_stream = failure.starts_with("stream_segment:");
+        let severity = if is_canonical_stream { "critical" } else { "error" };
+        let action_state = if is_canonical_stream { "quarantined" } else { "rebuild_pending" };
+        let affected_ref = Some(failure.clone());
+        let existing = terminal_data_health_records::table
+            .filter(terminal_data_health_records::affected_ref.eq(affected_ref.clone()))
+            .filter(terminal_data_health_records::detection_kind.eq(detection_kind))
+            .filter(terminal_data_health_records::action_state.ne("resolved"))
+            .filter(terminal_data_health_records::action_state.ne("ignored"))
+            .select(DataHealthRecordRow::as_select())
+            .first::<DataHealthRecordRow>(connection)
+            .optional()?;
+        if existing.is_some() {
+            continue;
+        }
+
+        let details_json = Some(serde_json::to_string(&serde_json::json!({
+            "failure": failure,
+            "evidence_ref": evidence_ref,
+            "validation": {
+                "stream_segments_checked": validation.stream_segments_checked,
+                "screen_snapshots_checked": validation.screen_snapshots_checked,
+                "topology_snapshots_checked": validation.topology_snapshots_checked
+            }
+        }))?);
+        let row = NewDataHealthRecordRow {
+            id: new_id(),
+            session_id: session_id.map(ToOwned::to_owned),
+            pane_id: None,
+            detection_kind: detection_kind.to_string(),
+            severity: severity.to_string(),
+            first_bad_event_seq: None,
+            affected_ref,
+            action_state: action_state.to_string(),
+            detected_at_ms,
+            resolved_at_ms: None,
+            details_json,
+            metadata_json: None,
+        };
+        insert_into(terminal_data_health_records::table).values(&row).execute(connection)?;
+    }
+    Ok(())
 }
 
 fn validate_checksum_bytes(
@@ -5568,7 +5729,7 @@ mod tests {
         let (session_id, pane_id, writer) = session_and_pane(&store);
         store
             .append_stream_segment(StreamSegmentInput::terminal_output(
-                session_id,
+                session_id.clone(),
                 pane_id,
                 writer.id,
                 b"tamper target\r\n".to_vec(),
@@ -5584,6 +5745,18 @@ mod tests {
 
         assert_eq!(integrity.result, "failed");
         assert!(integrity.error.as_deref().unwrap_or_default().contains("checksum_failures=1"));
+        let health = store.list_open_data_health_records(None).expect("health records should list");
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].detection_kind, "checksum_mismatch");
+        assert_eq!(health[0].severity, "critical");
+        assert_eq!(health[0].action_state, "quarantined");
+        assert!(health[0].affected_ref.as_deref().unwrap_or_default().contains("stream_segment"));
+
+        let duplicate_integrity = store.run_integrity_check().expect("second check should run");
+        let duplicate_health =
+            store.list_open_data_health_records(None).expect("health records should list");
+        assert_eq!(duplicate_integrity.result, "failed");
+        assert_eq!(duplicate_health.len(), 1);
     }
 
     #[test]

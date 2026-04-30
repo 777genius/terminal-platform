@@ -55,6 +55,23 @@ diesel::table! {
 }
 
 diesel::table! {
+    terminal_data_health_records (id) {
+        id -> Text,
+        session_id -> Nullable<Text>,
+        pane_id -> Nullable<Text>,
+        detection_kind -> Text,
+        severity -> Text,
+        first_bad_event_seq -> Nullable<BigInt>,
+        affected_ref -> Nullable<Text>,
+        action_state -> Text,
+        detected_at_ms -> BigInt,
+        resolved_at_ms -> Nullable<BigInt>,
+        details_json -> Nullable<Text>,
+        metadata_json -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     terminal_sessions (id) {
         id -> Text,
         route_json -> Text,
@@ -423,6 +440,7 @@ diesel::table! {
 
 diesel::joinable!(terminal_panes -> terminal_sessions (session_id));
 diesel::joinable!(terminal_sessions -> terminal_retention_policies (retention_policy_id));
+diesel::joinable!(terminal_data_health_records -> terminal_sessions (session_id));
 diesel::joinable!(terminal_delivery_offsets -> terminal_clients (client_id));
 diesel::joinable!(terminal_delivery_offsets -> terminal_sessions (session_id));
 diesel::joinable!(terminal_stream_cursors -> terminal_panes (pane_id));
@@ -434,6 +452,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     terminal_feature_gates,
     terminal_retention_policies,
     terminal_integrity_checks,
+    terminal_data_health_records,
     terminal_sessions,
     terminal_panes,
     terminal_backend_capability_reports,
