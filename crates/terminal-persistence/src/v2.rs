@@ -55,6 +55,8 @@ const PAYLOAD_SCHEMA_UI_INPUT_V1: &str = "terminal.ui_input.v1";
 const PAYLOAD_SCHEMA_HISTORY_GAP_V1: &str = "terminal.history_gap.v1";
 const PAYLOAD_SCHEMA_JOURNAL_EVENT_V1: &str = "terminal.journal_event.v1";
 const PAYLOAD_SCHEMA_TOPOLOGY_SNAPSHOT_V1: &str = "terminal.topology_snapshot.v1";
+const COMMAND_HASH_ALGORITHM: &str = "blake3_keyed_v1";
+const COMMAND_HASH_SCOPE: &str = "local_keyed";
 
 #[derive(Debug, Error)]
 pub enum TerminalPersistenceV2Error {
@@ -799,7 +801,7 @@ impl TerminalPersistenceV2 {
                     .do_nothing()
                     .execute(connection)?;
 
-                let command_hash = blake3_hash_text(command_text);
+                let command_hash = local_keyed_command_hash(connection, command_text)?;
                 let history_id = stable_history_id(
                     "session",
                     Some(&input.session_id),
@@ -815,8 +817,8 @@ impl TerminalPersistenceV2 {
                     command_text: Some(command_text.clone()),
                     display_text: command_text.clone(),
                     redacted_text: None,
-                    command_hash_algorithm: "blake3".to_string(),
-                    command_hash_scope: "local_profile".to_string(),
+                    command_hash_algorithm: COMMAND_HASH_ALGORITHM.to_string(),
+                    command_hash_scope: COMMAND_HASH_SCOPE.to_string(),
                     command_hash,
                     cwd: None,
                     shell_kind: input.shell_kind.clone(),
@@ -1766,9 +1768,8 @@ impl TerminalPersistenceV2 {
     ) -> Result<String, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
-        let command_hash = input.command_hash.unwrap_or_else(|| {
-            blake3_hash_text(input.command_text.as_deref().unwrap_or(&input.display_text))
-        });
+        let command_hash_material = input.command_text.as_deref().unwrap_or(&input.display_text);
+        let command_hash = local_keyed_command_hash(&mut connection, command_hash_material)?;
         let id = input.id.unwrap_or_else(|| {
             stable_history_id(
                 &input.scope_kind,
@@ -1787,8 +1788,8 @@ impl TerminalPersistenceV2 {
             command_text: input.command_text,
             display_text: input.display_text,
             redacted_text: input.redacted_text,
-            command_hash_algorithm: "blake3".to_string(),
-            command_hash_scope: "local_profile".to_string(),
+            command_hash_algorithm: COMMAND_HASH_ALGORITHM.to_string(),
+            command_hash_scope: COMMAND_HASH_SCOPE.to_string(),
             command_hash,
             cwd: input.cwd,
             shell_kind: input.shell_kind,
@@ -6419,6 +6420,84 @@ fn blake3_hash_text(value: &str) -> String {
     blake3_hash_bytes(value.as_bytes())
 }
 
+fn local_keyed_command_hash(
+    connection: &mut SqliteConnection,
+    command_text: &str,
+) -> Result<String, TerminalPersistenceV2Error> {
+    let key_seed = load_or_create_command_hash_key_seed(connection)?;
+    let key_hash = blake3::hash(key_seed.as_bytes());
+    let key = *key_hash.as_bytes();
+    Ok(blake3::keyed_hash(&key, command_text.as_bytes()).to_hex().to_string())
+}
+
+fn load_or_create_command_hash_key_seed(
+    connection: &mut SqliteConnection,
+) -> Result<String, TerminalPersistenceV2Error> {
+    let notes = terminal_db_identity::table
+        .filter(terminal_db_identity::id.eq(1))
+        .select(terminal_db_identity::notes)
+        .first::<Option<String>>(connection)?;
+
+    let mut notes_value = parse_identity_notes(notes.as_deref());
+    if let Some(key_seed) = command_hash_key_seed_from_notes(&notes_value) {
+        return Ok(key_seed.to_string());
+    }
+
+    let key_seed = format!("command-history-hash-key-v1:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+    if !notes_value.is_object() {
+        let previous = notes_value;
+        notes_value = serde_json::json!({ "legacy_notes_value": previous });
+    }
+    let object = notes_value.as_object_mut().ok_or_else(|| {
+        TerminalPersistenceV2Error::InvalidData("db identity notes are not an object".to_string())
+    })?;
+    let privacy_value =
+        object.entry("privacy".to_string()).or_insert_with(|| serde_json::json!({}));
+    if !privacy_value.is_object() {
+        let previous = privacy_value.take();
+        *privacy_value = serde_json::json!({ "legacy_privacy_value": previous });
+    }
+    let privacy = privacy_value.as_object_mut().ok_or_else(|| {
+        TerminalPersistenceV2Error::InvalidData(
+            "db identity privacy notes are not an object".to_string(),
+        )
+    })?;
+    privacy.insert("command_history_hash_key_seed_v1".to_string(), Value::String(key_seed.clone()));
+    privacy.insert(
+        "command_history_hash_algorithm".to_string(),
+        Value::String(COMMAND_HASH_ALGORITHM.to_string()),
+    );
+    privacy.insert(
+        "command_history_hash_scope".to_string(),
+        Value::String(COMMAND_HASH_SCOPE.to_string()),
+    );
+
+    diesel::update(terminal_db_identity::table.filter(terminal_db_identity::id.eq(1)))
+        .set((
+            terminal_db_identity::updated_at_ms.eq(current_time_ms()),
+            terminal_db_identity::notes.eq(Some(serde_json::to_string(&notes_value)?)),
+        ))
+        .execute(connection)?;
+
+    Ok(key_seed)
+}
+
+fn parse_identity_notes(notes: Option<&str>) -> Value {
+    match notes {
+        Some(raw) => serde_json::from_str(raw)
+            .unwrap_or_else(|_| serde_json::json!({ "legacy_notes_raw": raw })),
+        None => serde_json::json!({}),
+    }
+}
+
+fn command_hash_key_seed_from_notes(notes: &Value) -> Option<&str> {
+    notes
+        .get("privacy")?
+        .get("command_history_hash_key_seed_v1")?
+        .as_str()
+        .filter(|value| !value.is_empty())
+}
+
 fn blake3_hash_file(path: &Path) -> Result<String, TerminalPersistenceV2Error> {
     let mut file = fs::File::open(path)?;
     let mut hasher = blake3::Hasher::new();
@@ -7192,7 +7271,7 @@ mod tests {
                 command_text: Some("echo hello".to_string()),
                 display_text: "echo hello".to_string(),
                 redacted_text: None,
-                command_hash: None,
+                command_hash: Some(blake3_hash_text("echo hello")),
                 cwd: Some("C:\\Users\\User".to_string()),
                 shell_kind: Some("cmd".to_string()),
                 trust_level: None,
@@ -7215,10 +7294,109 @@ mod tests {
         assert_eq!(listed[0].display_text, "echo hello");
         assert_eq!(listed[0].use_count, 1);
 
+        let mut connection = store.connection().expect("connection should open");
+        let row = terminal_command_history_entries::table
+            .filter(terminal_command_history_entries::id.eq(&history_id))
+            .select(CommandHistoryEntryRow::as_select())
+            .first::<CommandHistoryEntryRow>(&mut connection)
+            .expect("history row should load");
+        let notes = terminal_db_identity::table
+            .filter(terminal_db_identity::id.eq(1))
+            .select(terminal_db_identity::notes)
+            .first::<Option<String>>(&mut connection)
+            .expect("identity notes should load");
+        let notes_value = parse_identity_notes(notes.as_deref());
+
+        assert_eq!(row.command_hash_algorithm, COMMAND_HASH_ALGORITHM);
+        assert_eq!(row.command_hash_scope, COMMAND_HASH_SCOPE);
+        assert_ne!(row.command_hash, blake3_hash_text("echo hello"));
+        assert!(command_hash_key_seed_from_notes(&notes_value).is_some());
+
         let fallback_limit = store
             .list_command_history(Some(&session_id), -1)
             .expect("invalid history limit should fall back");
         assert_eq!(fallback_limit.len(), 1);
+    }
+
+    #[test]
+    fn command_history_hashes_are_local_keyed_and_stable_per_store() {
+        let store = test_store("command-history-keyed");
+        let (session_id, pane_id, _) = session_and_pane(&store);
+        let input = || CommandHistoryEntryInput {
+            id: None,
+            session_id: Some(session_id.clone()),
+            pane_id: Some(pane_id.clone()),
+            command_block_id: None,
+            scope_kind: "session".to_string(),
+            command_text: Some("git status".to_string()),
+            display_text: "git status".to_string(),
+            redacted_text: None,
+            command_hash: Some("caller-supplied-hash-must-not-win".to_string()),
+            cwd: None,
+            shell_kind: Some("cmd".to_string()),
+            trust_level: None,
+            source: None,
+            sensitivity_class: None,
+            redaction_state: None,
+            rerun_policy: None,
+            first_used_at_ms: None,
+            last_used_at_ms: None,
+            use_count: None,
+            metadata: None,
+        };
+
+        let first_id = store.upsert_command_history_entry(input()).expect("first history upsert");
+        let second_id = store
+            .upsert_command_history_entry(input())
+            .expect("second history upsert should dedupe");
+        let mut connection = store.connection().expect("connection should open");
+        let row = terminal_command_history_entries::table
+            .filter(terminal_command_history_entries::id.eq(&first_id))
+            .select(CommandHistoryEntryRow::as_select())
+            .first::<CommandHistoryEntryRow>(&mut connection)
+            .expect("history row should load");
+
+        assert_eq!(first_id, second_id);
+        assert_eq!(row.use_count, 2);
+        assert_eq!(row.command_hash_algorithm, COMMAND_HASH_ALGORITHM);
+        assert_eq!(row.command_hash_scope, COMMAND_HASH_SCOPE);
+        assert_ne!(row.command_hash, blake3_hash_text("git status"));
+        assert_ne!(row.command_hash, "caller-supplied-hash-must-not-win");
+
+        let other_store = test_store("command-history-keyed-other");
+        let (other_session_id, other_pane_id, _) = session_and_pane(&other_store);
+        let other_id = other_store
+            .upsert_command_history_entry(CommandHistoryEntryInput {
+                id: None,
+                session_id: Some(other_session_id),
+                pane_id: Some(other_pane_id),
+                command_block_id: None,
+                scope_kind: "session".to_string(),
+                command_text: Some("git status".to_string()),
+                display_text: "git status".to_string(),
+                redacted_text: None,
+                command_hash: None,
+                cwd: None,
+                shell_kind: Some("cmd".to_string()),
+                trust_level: None,
+                source: None,
+                sensitivity_class: None,
+                redaction_state: None,
+                rerun_policy: None,
+                first_used_at_ms: None,
+                last_used_at_ms: None,
+                use_count: None,
+                metadata: None,
+            })
+            .expect("other store history should persist");
+        let mut other_connection = other_store.connection().expect("other connection should open");
+        let other_row = terminal_command_history_entries::table
+            .filter(terminal_command_history_entries::id.eq(&other_id))
+            .select(CommandHistoryEntryRow::as_select())
+            .first::<CommandHistoryEntryRow>(&mut other_connection)
+            .expect("other history row should load");
+
+        assert_ne!(row.command_hash, other_row.command_hash);
     }
 
     #[test]
