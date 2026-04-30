@@ -9,6 +9,7 @@ use std::{
 
 use diesel::{
     Connection, ExpressionMethods, OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper,
+    connection::SimpleConnection,
     dsl::{insert_into, max},
     prelude::*,
     result::{DatabaseErrorKind, Error as DieselError},
@@ -32,11 +33,12 @@ use crate::{
             terminal_data_health_records, terminal_db_identity, terminal_delete_requests,
             terminal_deletion_tombstones, terminal_delivery_offsets, terminal_export_requests,
             terminal_feature_gates, terminal_history_gaps, terminal_integrity_checks,
-            terminal_journal_events, terminal_outbox_messages, terminal_panes,
-            terminal_payload_schemas, terminal_restore_drills, terminal_screen_snapshots,
-            terminal_search_documents, terminal_session_cursors, terminal_sessions,
-            terminal_storage_pressure_events, terminal_stream_cursors, terminal_stream_segments,
-            terminal_support_bundles, terminal_topology_snapshots, terminal_writer_generations,
+            terminal_journal_events, terminal_maintenance_runs, terminal_outbox_messages,
+            terminal_panes, terminal_payload_schemas, terminal_restore_drills,
+            terminal_screen_snapshots, terminal_search_documents, terminal_session_cursors,
+            terminal_sessions, terminal_storage_pressure_events, terminal_stream_cursors,
+            terminal_stream_segments, terminal_support_bundles, terminal_topology_snapshots,
+            terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -2799,6 +2801,107 @@ impl TerminalPersistenceV2 {
         })
     }
 
+    pub fn run_maintenance(
+        &self,
+        input: MaintenanceRunInput,
+    ) -> Result<MaintenanceRunRecord, TerminalPersistenceV2Error> {
+        let id = input.id.unwrap_or_else(new_id);
+        let started_at_ms = self.config.clock.now_ms();
+        let run_kind = input.run_kind.unwrap_or_else(|| "scheduled_maintenance".to_string());
+        let metadata_json = json_metadata(&input.metadata)?;
+        let mut connection = self.connection()?;
+        let row = NewMaintenanceRunRow {
+            id: id.clone(),
+            run_kind: run_kind.clone(),
+            state: "running".to_string(),
+            selected_policy_id: input.selected_policy_id,
+            started_at_ms,
+            finished_at_ms: None,
+            summary_json: None,
+            error: None,
+            metadata_json,
+        };
+        insert_into(terminal_maintenance_runs::table).values(&row).execute(&mut connection)?;
+
+        let run_result = self.finish_maintenance_run(
+            &id,
+            &run_kind,
+            started_at_ms,
+            input.run_wal_checkpoint,
+            input.run_optimize,
+        );
+        if let Err(error) = &run_result {
+            let _ = self.mark_maintenance_failed(&id, error.to_string());
+        }
+        run_result
+    }
+
+    fn finish_maintenance_run(
+        &self,
+        id: &str,
+        run_kind: &str,
+        started_at_ms: i64,
+        run_wal_checkpoint: bool,
+        run_optimize: bool,
+    ) -> Result<MaintenanceRunRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let wal_checkpoint = if run_wal_checkpoint {
+            Some(run_passive_wal_checkpoint(&mut connection)?)
+        } else {
+            None
+        };
+        if run_optimize {
+            connection.batch_execute("PRAGMA optimize;")?;
+        }
+
+        let db_file_bytes = file_len_i64(&self.path)?;
+        let wal_file_bytes = file_len_i64(&sqlite_sidecar_path(&self.path, "-wal"))?;
+        let finished_at_ms = self.config.clock.now_ms();
+        let summary = serde_json::json!({
+            "run_kind": run_kind,
+            "wal_checkpoint": wal_checkpoint,
+            "optimize": {
+                "ran": run_optimize,
+                "mode": "pragma_optimize"
+            },
+            "storage": {
+                "db_file_bytes": db_file_bytes,
+                "wal_file_bytes": wal_file_bytes,
+                "no_silent_delete": true
+            },
+            "duration_ms": (finished_at_ms - started_at_ms).max(0)
+        });
+        diesel::update(
+            terminal_maintenance_runs::table.filter(terminal_maintenance_runs::id.eq(id)),
+        )
+        .set((
+            terminal_maintenance_runs::state.eq("succeeded"),
+            terminal_maintenance_runs::finished_at_ms.eq(Some(finished_at_ms)),
+            terminal_maintenance_runs::summary_json.eq(Some(serde_json::to_string(&summary)?)),
+            terminal_maintenance_runs::error.eq::<Option<String>>(None),
+        ))
+        .execute(&mut connection)?;
+        load_maintenance_run(&mut connection, id)?.try_into()
+    }
+
+    fn mark_maintenance_failed(
+        &self,
+        id: &str,
+        error: String,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        diesel::update(
+            terminal_maintenance_runs::table.filter(terminal_maintenance_runs::id.eq(id)),
+        )
+        .set((
+            terminal_maintenance_runs::state.eq("failed"),
+            terminal_maintenance_runs::finished_at_ms.eq(Some(self.config.clock.now_ms())),
+            terminal_maintenance_runs::error.eq(Some(error)),
+        ))
+        .execute(&mut connection)?;
+        Ok(())
+    }
+
     pub fn create_delete_request(
         &self,
         input: DeleteRequestInput,
@@ -3996,6 +4099,60 @@ pub struct BackupRecord {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaintenanceRunInput {
+    pub id: Option<String>,
+    pub run_kind: Option<String>,
+    pub selected_policy_id: Option<String>,
+    pub run_wal_checkpoint: bool,
+    pub run_optimize: bool,
+    pub metadata: Option<Value>,
+}
+
+impl Default for MaintenanceRunInput {
+    fn default() -> Self {
+        Self {
+            id: None,
+            run_kind: Some("scheduled_maintenance".to_string()),
+            selected_policy_id: None,
+            run_wal_checkpoint: true,
+            run_optimize: true,
+            metadata: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaintenanceRunRecord {
+    pub id: String,
+    pub run_kind: String,
+    pub state: String,
+    pub selected_policy_id: Option<String>,
+    pub started_at_ms: i64,
+    pub finished_at_ms: Option<i64>,
+    pub summary_json: Option<Value>,
+    pub error: Option<String>,
+    pub metadata_json: Option<Value>,
+}
+
+impl TryFrom<MaintenanceRunRow> for MaintenanceRunRecord {
+    type Error = TerminalPersistenceV2Error;
+
+    fn try_from(row: MaintenanceRunRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.id,
+            run_kind: row.run_kind,
+            state: row.state,
+            selected_policy_id: row.selected_policy_id,
+            started_at_ms: row.started_at_ms,
+            finished_at_ms: row.finished_at_ms,
+            summary_json: row.summary_json.as_deref().map(serde_json::from_str).transpose()?,
+            error: row.error,
+            metadata_json: row.metadata_json.as_deref().map(serde_json::from_str).transpose()?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoragePressureRecord {
     pub id: String,
@@ -4480,6 +4637,36 @@ struct FeatureGateRow {
     enabled_at_ms: Option<i64>,
     disabled_at_ms: Option<i64>,
     updated_at_ms: i64,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = terminal_maintenance_runs)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(dead_code)]
+struct MaintenanceRunRow {
+    id: String,
+    run_kind: String,
+    state: String,
+    selected_policy_id: Option<String>,
+    started_at_ms: i64,
+    finished_at_ms: Option<i64>,
+    summary_json: Option<String>,
+    error: Option<String>,
+    metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = terminal_maintenance_runs)]
+struct NewMaintenanceRunRow {
+    id: String,
+    run_kind: String,
+    state: String,
+    selected_policy_id: Option<String>,
+    started_at_ms: i64,
+    finished_at_ms: Option<i64>,
+    summary_json: Option<String>,
+    error: Option<String>,
     metadata_json: Option<String>,
 }
 
@@ -5362,6 +5549,16 @@ struct QuickCheckRow {
 }
 
 #[derive(Debug, QueryableByName, Serialize)]
+struct WalCheckpointRow {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    busy: i32,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    log: i32,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    checkpointed: i32,
+}
+
+#[derive(Debug, QueryableByName, Serialize)]
 struct ForeignKeyCheckRow {
     #[diesel(sql_type = diesel::sql_types::Text)]
     table_name: String,
@@ -5649,6 +5846,25 @@ fn run_quick_check(
         .load::<QuickCheckRow>(connection)
         .map(|rows| rows.into_iter().map(|row| row.quick_check).collect())
         .map_err(Into::into)
+}
+
+fn run_passive_wal_checkpoint(
+    connection: &mut SqliteConnection,
+) -> Result<Value, TerminalPersistenceV2Error> {
+    let rows =
+        diesel::sql_query("PRAGMA wal_checkpoint(PASSIVE)").load::<WalCheckpointRow>(connection)?;
+    let Some(row) = rows.into_iter().next() else {
+        return Err(TerminalPersistenceV2Error::InvalidData(
+            "wal_checkpoint returned no rows".to_string(),
+        ));
+    };
+
+    Ok(serde_json::json!({
+        "mode": "PASSIVE",
+        "busy": row.busy,
+        "log_frames": row.log,
+        "checkpointed_frames": row.checkpointed,
+    }))
 }
 
 fn run_foreign_key_check(
@@ -6465,6 +6681,17 @@ fn load_outbox_message_by_dedupe(
         .map_err(Into::into)
 }
 
+fn load_maintenance_run(
+    connection: &mut SqliteConnection,
+    id: &str,
+) -> Result<MaintenanceRunRow, TerminalPersistenceV2Error> {
+    terminal_maintenance_runs::table
+        .filter(terminal_maintenance_runs::id.eq(id))
+        .select(MaintenanceRunRow::as_select())
+        .first::<MaintenanceRunRow>(connection)
+        .map_err(Into::into)
+}
+
 fn advance_stream_cursor(
     connection: &mut SqliteConnection,
     cursor_id: &str,
@@ -6834,6 +7061,10 @@ fn blake3_hash_file(path: &Path) -> Result<String, TerminalPersistenceV2Error> {
         hasher.update(&buffer[..read]);
     }
     Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn file_len_i64(path: &Path) -> Result<Option<i64>, TerminalPersistenceV2Error> {
+    fs::metadata(path).ok().map(|metadata| u64_to_i64(metadata.len(), "file size")).transpose()
 }
 
 fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
@@ -9127,6 +9358,32 @@ mod tests {
         let _ = std::fs::remove_file(&target_path);
         let _ = std::fs::remove_file(target_path.with_extension("sqlite3-wal"));
         let _ = std::fs::remove_file(target_path.with_extension("sqlite3-shm"));
+    }
+
+    #[test]
+    fn maintenance_run_records_checkpoint_and_optimize_audit() {
+        let store = test_store("maintenance-run");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id,
+                pane_id,
+                writer.id,
+                b"maintenance history\r\n".to_vec(),
+            ))
+            .expect("segment should persist before maintenance");
+
+        let run =
+            store.run_maintenance(MaintenanceRunInput::default()).expect("maintenance should run");
+        let summary = run.summary_json.as_ref().expect("maintenance summary should exist");
+
+        assert_eq!(run.state, "succeeded");
+        assert_eq!(run.run_kind, "scheduled_maintenance");
+        assert!(run.finished_at_ms.unwrap_or_default() >= run.started_at_ms);
+        assert_eq!(summary["wal_checkpoint"]["mode"], "PASSIVE");
+        assert!(summary["wal_checkpoint"]["log_frames"].as_i64().is_some());
+        assert_eq!(summary["optimize"]["ran"], true);
+        assert_eq!(summary["storage"]["no_silent_delete"], true);
     }
 
     #[test]
