@@ -114,13 +114,7 @@ function selectPreferredBootstrapConfig(input: {
   browserConfig: TerminalRuntimeBootstrapConfig | null;
   queryConfig: TerminalRuntimeBootstrapConfig | null;
 }): TerminalRuntimeBootstrapConfig | null {
-  if (input.browserConfig) {
-    if (!input.queryConfig || input.queryConfig.runtimeSlug === input.browserConfig.runtimeSlug) {
-      return input.browserConfig;
-    }
-  }
-
-  return input.queryConfig;
+  return input.browserConfig ?? input.queryConfig;
 }
 
 function normalizeBootstrapConfig(
