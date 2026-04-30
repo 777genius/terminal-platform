@@ -30,6 +30,7 @@ const runtimeSlugPrefix = process.env.TERMINAL_DEMO_SMOKE_RUNTIME_SLUG
   ?? `terminal-demo-browser-smoke-${process.pid}-${Date.now().toString(16)}`;
 const screenshotPath = path.join(os.tmpdir(), `terminal-demo-browser-smoke-${Date.now()}.png`);
 const sessionStorePath = path.join(os.tmpdir(), `terminal-demo-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`);
+const keepArtifacts = process.env.TERMINAL_DEMO_SMOKE_KEEP_ARTIFACTS === "1";
 const autoStartSessionStorePath = path.join(
   os.tmpdir(),
   `terminal-demo-browser-smoke-auto-store-${process.pid}-${Date.now()}.sqlite3`,
@@ -2203,6 +2204,7 @@ async function runSmokeScenario(browserUrl) {
       const restoreButton = savedRoot?.querySelector('[data-testid="tp-restore-saved-session"]') ?? null;
       const restoreSemantics = [...(savedRoot?.querySelectorAll('[data-testid="tp-saved-session-restore-semantics"]') ?? [])];
       const savedSessionCount = state?.catalog?.savedSessions?.length ?? 0;
+      const firstSavedSession = state?.catalog?.savedSessions?.[0] ?? null;
       const deletePromptResult = {
         deletePrompted: false,
         deleteButtonText: deleteButton?.textContent?.trim() ?? null,
@@ -2229,11 +2231,12 @@ async function runSmokeScenario(browserUrl) {
         savedFiltered: savedPanel?.getAttribute('data-filtered') ?? null,
         savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
         hasSavedFilter: Boolean(savedRoot?.querySelector('[data-testid="tp-saved-session-filter"]')),
-        firstSavedTitle: state?.catalog?.savedSessions?.[0]?.title ?? null,
+        firstSavedTitle: firstSavedSession?.title ?? null,
         firstSavedCanRestore: restoreButton?.getAttribute('data-can-restore') ?? null,
         firstSavedRestoreStatus: restoreButton?.getAttribute('data-restore-status') ?? null,
         firstSavedRestoreDisabled: restoreButton?.disabled ?? null,
         firstSavedRestoreTitle: restoreButton?.getAttribute('title') ?? null,
+        firstSavedRestoreSemanticsV2: firstSavedSession?.restore_semantics_v2 ?? null,
         firstSavedSemanticsCodes: restoreSemantics.map((note) => note.getAttribute('data-semantics-code')),
         firstSavedSemanticsLabels: restoreSemantics.map((note) => note.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
         saveEventDetail,
@@ -3884,6 +3887,10 @@ async function shutdown() {
   await stopProcess(previewProcess);
   await stopProcess(chromeProcess);
   await removeChromeUserDataDir(chromeUserDataDir);
+  if (keepArtifacts) {
+    process.stderr.write(`[browser-smoke] keeping session stores: ${sessionStorePath}, ${autoStartSessionStorePath}, ${autoStartRestartSessionStorePath}\n`);
+    return;
+  }
   await removeSessionStore(autoStartSessionStorePath);
   await removeSessionStore(autoStartRestartSessionStorePath);
   await removeSessionStore(sessionStorePath);

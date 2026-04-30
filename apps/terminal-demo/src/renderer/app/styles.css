@@ -921,7 +921,20 @@ textarea:focus-visible {
 
   .shell[data-has-active-session="true"][data-shell-canvas="terminal"] {
     gap: 0;
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
     padding: 0;
+  }
+
+  .shell[data-has-active-session="true"][data-shell-canvas="terminal"] .shell__main,
+  .shell[data-has-active-session="true"][data-shell-canvas="terminal"] .panel--workspace,
+  .shell[data-has-active-session="true"][data-shell-canvas="terminal"] .workspace-stack,
+  .shell[data-has-active-session="true"][data-shell-canvas="terminal"] .terminal-workspace-host,
+  .shell[data-has-active-session="true"][data-shell-canvas="terminal"] tp-terminal-workspace {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .shell[data-has-active-session="true"] tp-terminal-workspace {
