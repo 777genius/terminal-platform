@@ -304,15 +304,15 @@ mod tests {
     use terminal_backend_api::{
         BackendCapabilities, BackendError, BackendSessionBinding, BackendSessionPort,
         BackendSessionSummary, BackendSubscription, BoxFuture, CreateSessionSpec,
-        DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult, SendInputSpec,
-        SubscriptionSpec,
+        DiscoveredSession, MuxBackendPort, MuxCommand, MuxCommandResult, NewTabSpec, SendInputSpec,
+        SplitPaneSpec, SubscriptionSpec,
     };
     use terminal_backend_native::NativeBackend;
     use terminal_domain::{
         BackendKind, ExternalSessionRef, PaneId, RouteAuthority, SessionId, SessionRoute,
         SubscriptionId, TabId, local_native_route,
     };
-    use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
+    use terminal_mux_domain::{PaneTreeNode, SplitDirection, TabSnapshot};
     use terminal_persistence::SqliteSessionStore;
     use terminal_projection::{
         ProjectionSource, ScreenDelta, ScreenSnapshot, ScreenSurface, TopologySnapshot,
@@ -550,6 +550,111 @@ mod tests {
             .expect("v2 raw output capture should persist marker");
 
         assert!(payload.windows(marker.len()).any(|window| window == marker.as_bytes()));
+
+        runtime
+            .dispatch(
+                created.session_id,
+                MuxCommand::SplitPane(SplitPaneSpec {
+                    pane_id,
+                    direction: SplitDirection::Vertical,
+                }),
+            )
+            .await
+            .expect("split pane should dispatch through runtime");
+        let after_split = wait_for_runtime_topology(&runtime, created.session_id, |topology| {
+            topology.tabs.first().map_or(false, |tab| collect_test_pane_ids(&tab.root).len() >= 2)
+        })
+        .await
+        .expect("split topology should be observed");
+        let split_pane = collect_test_pane_ids(&after_split.tabs[0].root)
+            .into_iter()
+            .find(|candidate| *candidate != pane_id)
+            .expect("split should create a second pane");
+        runtime
+            .dispatch(created.session_id, MuxCommand::ClosePane { pane_id: split_pane })
+            .await
+            .expect("close pane should dispatch through runtime");
+        let after_close_pane =
+            wait_for_runtime_topology(&runtime, created.session_id, |topology| {
+                topology
+                    .tabs
+                    .first()
+                    .map_or(false, |tab| collect_test_pane_ids(&tab.root) == vec![pane_id])
+            })
+            .await
+            .expect("closed pane topology should be observed");
+        let original_tab_id = after_close_pane.tabs[0].tab_id;
+
+        runtime
+            .dispatch(
+                created.session_id,
+                MuxCommand::NewTab(NewTabSpec { title: Some("Logs".to_string()) }),
+            )
+            .await
+            .expect("new tab should dispatch through runtime");
+        let after_new_tab = wait_for_runtime_topology(&runtime, created.session_id, |topology| {
+            topology.tabs.len() >= 2
+        })
+        .await
+        .expect("new tab topology should be observed");
+        let new_tab_id = after_new_tab
+            .tabs
+            .iter()
+            .map(|tab| tab.tab_id)
+            .find(|tab_id| *tab_id != original_tab_id)
+            .expect("new tab id should be present");
+        runtime
+            .dispatch(created.session_id, MuxCommand::FocusTab { tab_id: original_tab_id })
+            .await
+            .expect("focus original tab should dispatch through runtime");
+        runtime
+            .dispatch(created.session_id, MuxCommand::CloseTab { tab_id: new_tab_id })
+            .await
+            .expect("close tab should dispatch through runtime");
+        wait_for_runtime_topology(&runtime, created.session_id, |topology| {
+            topology.tabs.len() == 1 && topology.focused_tab == Some(original_tab_id)
+        })
+        .await
+        .expect("closed tab topology should be observed");
+        runtime
+            .dispatch(
+                created.session_id,
+                MuxCommand::RenameTab { tab_id: original_tab_id, title: "Smoke Workspace".into() },
+            )
+            .await
+            .expect("rename tab should dispatch through runtime");
+
+        let save_marker = format!("TERMINAL_PERSISTENCE_V2_SAVE_{}", created.session_id.0.simple());
+        runtime
+            .dispatch(
+                created.session_id,
+                MuxCommand::SendInput(SendInputSpec {
+                    pane_id,
+                    data: capture_shell_echo_input(&save_marker),
+                    client_event_id: None,
+                }),
+            )
+            .await
+            .expect("save marker command should dispatch");
+        wait_for_runtime_screen_line(&runtime, created.session_id, pane_id, &save_marker)
+            .await
+            .expect("native shell should render save marker output");
+
+        runtime
+            .dispatch(created.session_id, MuxCommand::SaveSession)
+            .await
+            .expect("save session should preserve a healthy v2 restore plan");
+        let v2 = terminal_persistence::TerminalPersistenceV2::open_with_config(
+            &path,
+            terminal_persistence::TerminalPersistenceV2Config::test(),
+        )
+        .expect("v2 store should open");
+        let plan = v2.restore_plan(&created.session_id.0.to_string()).expect("plan should load");
+        assert_eq!(
+            plan.latest_restore_drill_status.as_deref(),
+            Some("passed"),
+            "unexpected restore plan after native save: {plan:?}"
+        );
     }
 
     fn runtime_backends(imported_backend: Arc<FakeImportedBackend>) -> BackendCatalog {
@@ -630,6 +735,42 @@ mod tests {
         }
 
         None
+    }
+
+    async fn wait_for_runtime_topology<F>(
+        runtime: &TerminalRuntime,
+        session_id: SessionId,
+        predicate: F,
+    ) -> Option<TopologySnapshot>
+    where
+        F: Fn(&TopologySnapshot) -> bool,
+    {
+        for _ in 0..120 {
+            if let Ok(topology) = runtime.topology_snapshot(session_id).await
+                && predicate(&topology)
+            {
+                return Some(topology);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        None
+    }
+
+    fn collect_test_pane_ids(root: &PaneTreeNode) -> Vec<PaneId> {
+        let mut pane_ids = Vec::new();
+        collect_test_pane_ids_inner(root, &mut pane_ids);
+        pane_ids
+    }
+
+    fn collect_test_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<PaneId>) {
+        match root {
+            PaneTreeNode::Leaf { pane_id } => pane_ids.push(*pane_id),
+            PaneTreeNode::Split(split) => {
+                collect_test_pane_ids_inner(&split.first, pane_ids);
+                collect_test_pane_ids_inner(&split.second, pane_ids);
+            }
+        }
     }
 
     async fn wait_for_v2_snapshot(

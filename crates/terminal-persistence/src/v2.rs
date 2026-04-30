@@ -1292,7 +1292,7 @@ impl TerminalPersistenceV2 {
             title: screen.surface.title.clone(),
             rows: i32::from(screen.rows),
             cols: i32::from(screen.cols),
-            last_event_seq: u64_to_i64(screen.sequence, "screen sequence")?,
+            last_event_seq: 0,
             created_at_ms: saved.saved_at_ms,
             closed_at_ms: None,
             metadata_json: Some(serde_json::to_string(&serde_json::json!({
@@ -1307,7 +1307,6 @@ impl TerminalPersistenceV2 {
                 terminal_panes::title.eq(row.title.clone()),
                 terminal_panes::rows.eq(row.rows),
                 terminal_panes::cols.eq(row.cols),
-                terminal_panes::last_event_seq.eq(row.last_event_seq),
                 terminal_panes::metadata_json.eq(row.metadata_json.clone()),
             ))
             .execute(&mut connection)?;
@@ -1317,18 +1316,14 @@ impl TerminalPersistenceV2 {
             session_id: saved.session_id.0.to_string(),
             pane_id,
             stream_id,
-            next_event_seq: row.last_event_seq + 1,
+            next_event_seq: 1,
             next_byte_seq: 0,
             updated_at_ms: now,
         };
         insert_into(terminal_stream_cursors::table)
             .values(&cursor)
             .on_conflict(terminal_stream_cursors::id)
-            .do_update()
-            .set((
-                terminal_stream_cursors::next_event_seq.eq(cursor.next_event_seq),
-                terminal_stream_cursors::updated_at_ms.eq(cursor.updated_at_ms),
-            ))
+            .do_nothing()
             .execute(&mut connection)?;
 
         Ok(())
@@ -2594,10 +2589,10 @@ impl TerminalPersistenceV2 {
         let started_at_ms = self.config.clock.now_ms();
         let plan = self.restore_plan(session_id)?;
         let mut connection = self.connection()?;
-        let validation = validate_history_checksums(&mut connection, Some(session_id))?;
-        let finished_at_ms = self.config.clock.now_ms();
-        let result =
-            if validation.has_failures() {
+        connection.immediate_transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let validation = validate_history_checksums(connection, Some(session_id))?;
+            let finished_at_ms = self.config.clock.now_ms();
+            let result = if validation.has_failures() {
                 "failed"
             } else {
                 match &plan.guarantee_level {
@@ -2609,108 +2604,111 @@ impl TerminalPersistenceV2 {
                     RestoreGuaranteeLevel::None => "skipped",
                 }
             };
-        let error = validation.has_failures().then(|| validation.summary());
-        let mut evidence = plan.evidence.clone();
-        evidence.extend(validation.to_restore_evidence());
-        let evidence_json = Some(serde_json::to_string(&evidence)?);
-        let metadata_json = Some(serde_json::to_string(&serde_json::json!({
-            "started_at_ms": started_at_ms,
-            "validation": validation.to_json(),
-        }))?);
-        let id = new_id();
-        let row = NewRestoreDrillRow {
-            id: id.clone(),
-            session_id: session_id.to_string(),
-            drill_kind: "restore_drill".to_string(),
-            result: result.to_string(),
-            restore_guarantee_level: plan.guarantee_level.as_str().to_string(),
-            checked_at_ms: finished_at_ms,
-            duration_ms: Some((finished_at_ms - started_at_ms).max(0)),
-            source_snapshot_id: plan.latest_screen_snapshot_id.clone(),
-            evidence_json,
-            error: error.clone(),
-            metadata_json,
-        };
-        insert_into(terminal_restore_drills::table).values(&row).execute(&mut connection)?;
-        persist_history_validation_health_records(
-            &mut connection,
-            Some(session_id),
-            &validation,
-            finished_at_ms,
-            Some(&id),
-        )?;
+            let error = validation.has_failures().then(|| validation.summary());
+            let mut evidence = plan.evidence.clone();
+            evidence.extend(validation.to_restore_evidence());
+            let evidence_json = Some(serde_json::to_string(&evidence)?);
+            let metadata_json = Some(serde_json::to_string(&serde_json::json!({
+                "started_at_ms": started_at_ms,
+                "validation": validation.to_json(),
+            }))?);
+            let id = new_id();
+            let row = NewRestoreDrillRow {
+                id: id.clone(),
+                session_id: session_id.to_string(),
+                drill_kind: "restore_drill".to_string(),
+                result: result.to_string(),
+                restore_guarantee_level: plan.guarantee_level.as_str().to_string(),
+                checked_at_ms: finished_at_ms,
+                duration_ms: Some((finished_at_ms - started_at_ms).max(0)),
+                source_snapshot_id: plan.latest_screen_snapshot_id.clone(),
+                evidence_json,
+                error: error.clone(),
+                metadata_json,
+            };
+            insert_into(terminal_restore_drills::table).values(&row).execute(connection)?;
+            persist_history_validation_health_records(
+                connection,
+                Some(session_id),
+                &validation,
+                finished_at_ms,
+                Some(&id),
+            )?;
 
-        Ok(RestoreDrillRecord {
-            id,
-            session_id: session_id.to_string(),
-            drill_kind: "restore_drill".to_string(),
-            result: result.to_string(),
-            restore_guarantee_level: plan.guarantee_level.as_str().to_string(),
-            checked_at_ms: finished_at_ms,
-            duration_ms: Some((finished_at_ms - started_at_ms).max(0)),
-            source_snapshot_id: plan.latest_screen_snapshot_id,
-            error,
+            Ok(RestoreDrillRecord {
+                id,
+                session_id: session_id.to_string(),
+                drill_kind: "restore_drill".to_string(),
+                result: result.to_string(),
+                restore_guarantee_level: plan.guarantee_level.as_str().to_string(),
+                checked_at_ms: finished_at_ms,
+                duration_ms: Some((finished_at_ms - started_at_ms).max(0)),
+                source_snapshot_id: plan.latest_screen_snapshot_id.clone(),
+                error,
+            })
         })
     }
 
     pub fn run_integrity_check(&self) -> Result<IntegrityCheckRecord, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
         let checked_at_ms = self.config.clock.now_ms();
-        let quick_check = run_quick_check(&mut connection)?;
-        let foreign_key_violations = run_foreign_key_check(&mut connection)?;
-        let validation = validate_history_checksums(&mut connection, None)?;
-        let result = if quick_check.iter().all(|value| value == "ok")
-            && foreign_key_violations.is_empty()
-            && !validation.has_failures()
-        {
-            "passed"
-        } else {
-            "failed"
-        };
-        let details = serde_json::json!({
-            "quick_check": quick_check,
-            "foreign_key_violations": foreign_key_violations,
-            "history_validation": validation.to_json(),
-        });
-        let error = (result != "passed").then(|| {
-            format!(
-                "quick_check={}, foreign_key_violations={}, history_validation_failures={}, checksum_failures={}",
-                details["quick_check"],
-                details["foreign_key_violations"].as_array().map_or(0, Vec::len),
-                validation.failure_count(),
-                validation.checksum_failure_count()
-            )
-        });
-        let id = new_id();
-        let row = NewIntegrityCheckRow {
-            id: id.clone(),
-            check_kind: "sqlite_and_history_invariants".to_string(),
-            scope_kind: "database".to_string(),
-            scope_ref: None,
-            result: result.to_string(),
-            checked_at_ms,
-            details_json: Some(serde_json::to_string(&details)?),
-            error: error.clone(),
-            metadata_json: None,
-        };
-        insert_into(terminal_integrity_checks::table).values(&row).execute(&mut connection)?;
-        persist_history_validation_health_records(
-            &mut connection,
-            None,
-            &validation,
-            checked_at_ms,
-            Some(&id),
-        )?;
+        connection.immediate_transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let quick_check = run_quick_check(connection)?;
+            let foreign_key_violations = run_foreign_key_check(connection)?;
+            let validation = validate_history_checksums(connection, None)?;
+            let result = if quick_check.iter().all(|value| value == "ok")
+                && foreign_key_violations.is_empty()
+                && !validation.has_failures()
+            {
+                "passed"
+            } else {
+                "failed"
+            };
+            let details = serde_json::json!({
+                "quick_check": quick_check,
+                "foreign_key_violations": foreign_key_violations,
+                "history_validation": validation.to_json(),
+            });
+            let error = (result != "passed").then(|| {
+                format!(
+                    "quick_check={}, foreign_key_violations={}, history_validation_failures={}, checksum_failures={}",
+                    details["quick_check"],
+                    details["foreign_key_violations"].as_array().map_or(0, Vec::len),
+                    validation.failure_count(),
+                    validation.checksum_failure_count()
+                )
+            });
+            let id = new_id();
+            let row = NewIntegrityCheckRow {
+                id: id.clone(),
+                check_kind: "sqlite_and_history_invariants".to_string(),
+                scope_kind: "database".to_string(),
+                scope_ref: None,
+                result: result.to_string(),
+                checked_at_ms,
+                details_json: Some(serde_json::to_string(&details)?),
+                error: error.clone(),
+                metadata_json: None,
+            };
+            insert_into(terminal_integrity_checks::table).values(&row).execute(connection)?;
+            persist_history_validation_health_records(
+                connection,
+                None,
+                &validation,
+                checked_at_ms,
+                Some(&id),
+            )?;
 
-        Ok(IntegrityCheckRecord {
-            id,
-            check_kind: "sqlite_and_history_invariants".to_string(),
-            scope_kind: "database".to_string(),
-            scope_ref: None,
-            result: result.to_string(),
-            checked_at_ms,
-            details_json: Some(details),
-            error,
+            Ok(IntegrityCheckRecord {
+                id,
+                check_kind: "sqlite_and_history_invariants".to_string(),
+                scope_kind: "database".to_string(),
+                scope_ref: None,
+                result: result.to_string(),
+                checked_at_ms,
+                details_json: Some(details),
+                error,
+            })
         })
     }
 
@@ -7027,7 +7025,13 @@ fn current_time_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use terminal_domain::{BackendKind, RouteAuthority, SessionRoute};
+    use terminal_domain::{
+        BackendKind, PaneId, RouteAuthority, SavedSessionManifest, SessionId, SessionRoute, TabId,
+    };
+    use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
+    use terminal_projection::{
+        ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
+    };
 
     fn test_store(label: &str) -> TerminalPersistenceV2 {
         let path = std::env::temp_dir()
@@ -7275,6 +7279,100 @@ mod tests {
                 .collect::<Vec<_>>(),
             b"git status\r\nfatal: not a git repository\r\n"
         );
+    }
+
+    #[test]
+    fn legacy_visual_snapshot_import_preserves_raw_stream_cursor() {
+        let store = test_store("visual-import-preserves-cursor");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let first = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"cmd one\r\n".to_vec(),
+            ))
+            .expect("first segment should persist");
+        let second = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"cmd two\r\n".to_vec(),
+            ))
+            .expect("second segment should persist");
+        let third = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                b"cmd three\r\n".to_vec(),
+            ))
+            .expect("third segment should persist");
+        store.release_writer_generation(&writer.id).expect("writer should release");
+
+        assert_eq!(first.event_seq_low, 1);
+        assert_eq!(second.event_seq_low, 2);
+        assert_eq!(third.event_seq_low, 3);
+
+        let session_uuid = Uuid::parse_str(&session_id).expect("session id should be uuid");
+        let pane_uuid = Uuid::parse_str(&pane_id).expect("pane id should be uuid");
+        let session_typed = SessionId(session_uuid);
+        let pane_typed = PaneId(pane_uuid);
+        let tab_id = TabId::new();
+        let saved = SavedNativeSession {
+            session_id: session_typed,
+            route: route(),
+            title: Some("visual import should not rewrite raw cursor".to_string()),
+            launch: None,
+            manifest: SavedSessionManifest::current(),
+            topology: TopologySnapshot {
+                session_id: session_typed,
+                backend_kind: BackendKind::Native,
+                tabs: vec![TabSnapshot {
+                    tab_id,
+                    title: Some("main".to_string()),
+                    root: PaneTreeNode::Leaf { pane_id: pane_typed },
+                    focused_pane: Some(pane_typed),
+                }],
+                focused_tab: Some(tab_id),
+            },
+            screens: vec![ScreenSnapshot {
+                pane_id: pane_typed,
+                sequence: 6,
+                rows: 24,
+                cols: 80,
+                source: ProjectionSource::NativeEmulator,
+                surface: ScreenSurface {
+                    title: Some("visual import should not rewrite raw cursor".to_string()),
+                    cursor: None,
+                    lines: vec![ScreenLine {
+                        text: "visual snapshot sequence is not event sequence".to_string(),
+                    }],
+                },
+            }],
+            saved_at_ms: 1_700_000_000_000,
+        };
+
+        store
+            .import_saved_native_session_snapshot(&saved)
+            .expect("legacy visual snapshot should import");
+
+        let mut connection = store.connection().expect("connection should open");
+        let cursor = load_stream_cursor(&mut connection, &session_id, &pane_id, DEFAULT_STREAM_ID)
+            .expect("stream cursor should load");
+        let pane_last_event_seq = terminal_panes::table
+            .filter(terminal_panes::id.eq(&pane_id))
+            .select(terminal_panes::last_event_seq)
+            .first::<i64>(&mut connection)
+            .expect("pane cursor should load");
+
+        assert_eq!(cursor.next_event_seq, 4);
+        assert_eq!(cursor.next_byte_seq, third.byte_high);
+        assert_eq!(pane_last_event_seq, 3);
+
+        let drill = store.run_restore_drill(&session_id).expect("restore drill should run");
+        assert_eq!(drill.result, "passed");
     }
 
     #[test]
