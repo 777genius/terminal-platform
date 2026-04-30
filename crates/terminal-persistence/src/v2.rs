@@ -3178,16 +3178,7 @@ impl TerminalPersistenceV2 {
         &self,
         target_path: impl AsRef<Path>,
     ) -> Result<BackupRecord, TerminalPersistenceV2Error> {
-        let target_path = target_path.as_ref().to_path_buf();
-        if target_path.exists() {
-            return Err(TerminalPersistenceV2Error::InvalidData(format!(
-                "backup target already exists: {}",
-                target_path.display()
-            )));
-        }
-        if let Some(parent) = target_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        let target_path = prepare_vacuum_backup_target(&self.path, target_path.as_ref())?;
 
         let id = new_id();
         let started_at_ms = self.config.clock.now_ms();
@@ -7381,6 +7372,61 @@ fn file_len_i64(path: &Path) -> Result<Option<i64>, TerminalPersistenceV2Error> 
     fs::metadata(path).ok().map(|metadata| u64_to_i64(metadata.len(), "file size")).transpose()
 }
 
+fn prepare_vacuum_backup_target(
+    source_path: &Path,
+    target_path: &Path,
+) -> Result<PathBuf, TerminalPersistenceV2Error> {
+    let file_name = target_path.file_name().ok_or_else(|| {
+        TerminalPersistenceV2Error::InvalidData(format!(
+            "backup target must include a file name: {}",
+            target_path.display()
+        ))
+    })?;
+    let parent = target_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+
+    let source_canonical = source_path.canonicalize()?;
+    let target_absolute = parent.canonicalize()?.join(file_name);
+    let forbidden_targets = [
+        source_canonical.clone(),
+        sqlite_sidecar_path(&source_canonical, "-wal"),
+        sqlite_sidecar_path(&source_canonical, "-shm"),
+    ];
+    if forbidden_targets
+        .iter()
+        .any(|forbidden| paths_equal_for_platform(forbidden, &target_absolute))
+    {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "backup target cannot point at the live database or SQLite sidecar: {}",
+            target_absolute.display()
+        )));
+    }
+    if target_absolute.exists() {
+        return Err(TerminalPersistenceV2Error::InvalidData(format!(
+            "backup target already exists: {}",
+            target_absolute.display()
+        )));
+    }
+
+    Ok(target_absolute)
+}
+
+fn paths_equal_for_platform(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        left.as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&right.as_os_str().to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
+}
+
 fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     let mut value = path.as_os_str().to_os_string();
     value.push(suffix);
@@ -9672,6 +9718,25 @@ mod tests {
         let _ = std::fs::remove_file(&target_path);
         let _ = std::fs::remove_file(target_path.with_extension("sqlite3-wal"));
         let _ = std::fs::remove_file(target_path.with_extension("sqlite3-shm"));
+    }
+
+    #[test]
+    fn vacuum_backup_rejects_live_database_and_sidecar_targets() {
+        let store = test_store("vacuum-backup-target-guard");
+        let live_db = store.path().to_path_buf();
+        let wal_sidecar = sqlite_sidecar_path(store.path(), "-wal");
+        let shm_sidecar = sqlite_sidecar_path(store.path(), "-shm");
+
+        for target in [live_db, wal_sidecar, shm_sidecar] {
+            let error = store
+                .vacuum_into_backup(&target)
+                .expect_err("live database and sidecar targets should be rejected");
+            assert!(matches!(
+                error,
+                TerminalPersistenceV2Error::InvalidData(message)
+                    if message.contains("live database or SQLite sidecar")
+            ));
+        }
     }
 
     #[test]
