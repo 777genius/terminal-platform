@@ -35,10 +35,10 @@ use crate::{
             terminal_feature_gates, terminal_history_gaps, terminal_integrity_checks,
             terminal_journal_events, terminal_maintenance_runs, terminal_outbox_messages,
             terminal_panes, terminal_payload_schemas, terminal_restore_drills,
-            terminal_screen_snapshots, terminal_search_documents, terminal_session_cursors,
-            terminal_sessions, terminal_storage_pressure_events, terminal_stream_cursors,
-            terminal_stream_segments, terminal_support_bundles, terminal_topology_snapshots,
-            terminal_writer_generations,
+            terminal_retention_policies, terminal_screen_snapshots, terminal_search_documents,
+            terminal_session_cursors, terminal_sessions, terminal_storage_pressure_events,
+            terminal_stream_cursors, terminal_stream_segments, terminal_support_bundles,
+            terminal_topology_snapshots, terminal_writer_generations,
         },
     },
     legacy::SavedNativeSession,
@@ -2244,6 +2244,18 @@ impl TerminalPersistenceV2 {
         collect_compression_diagnostics(&mut connection, self.config.clock.now_ms())
     }
 
+    pub fn retention_diagnostics(
+        &self,
+        selected_policy_id: Option<&str>,
+    ) -> Result<RetentionDiagnosticsRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        collect_retention_diagnostics(
+            &mut connection,
+            self.config.clock.now_ms(),
+            selected_policy_id,
+        )
+    }
+
     pub fn write_screen_snapshot(
         &self,
         input: ScreenSnapshotInput,
@@ -2823,12 +2835,13 @@ impl TerminalPersistenceV2 {
         let started_at_ms = self.config.clock.now_ms();
         let run_kind = input.run_kind.unwrap_or_else(|| "scheduled_maintenance".to_string());
         let metadata_json = json_metadata(&input.metadata)?;
+        let selected_policy_id = input.selected_policy_id.clone();
         let mut connection = self.connection()?;
         let row = NewMaintenanceRunRow {
             id: id.clone(),
             run_kind: run_kind.clone(),
             state: "running".to_string(),
-            selected_policy_id: input.selected_policy_id,
+            selected_policy_id: selected_policy_id.clone(),
             started_at_ms,
             finished_at_ms: None,
             summary_json: None,
@@ -2843,6 +2856,7 @@ impl TerminalPersistenceV2 {
             started_at_ms,
             input.run_wal_checkpoint,
             input.run_optimize,
+            selected_policy_id.as_deref(),
         );
         if let Err(error) = &run_result {
             let _ = self.mark_maintenance_failed(&id, error.to_string());
@@ -2857,12 +2871,15 @@ impl TerminalPersistenceV2 {
         started_at_ms: i64,
         run_wal_checkpoint: bool,
         run_optimize: bool,
+        selected_policy_id: Option<&str>,
     ) -> Result<MaintenanceRunRecord, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
         let recovery = recover_expired_maintenance_leases(&mut connection, started_at_ms)?;
         let outbox_diagnostics = collect_outbox_diagnostics(&mut connection, started_at_ms)?;
         let compression_diagnostics =
             collect_compression_diagnostics(&mut connection, started_at_ms)?;
+        let retention_diagnostics =
+            collect_retention_diagnostics(&mut connection, started_at_ms, selected_policy_id)?;
         let wal_checkpoint = if run_wal_checkpoint {
             Some(run_passive_wal_checkpoint(&mut connection)?)
         } else {
@@ -2890,6 +2907,7 @@ impl TerminalPersistenceV2 {
             },
             "outbox": outbox_diagnostics,
             "compression": compression_diagnostics,
+            "retention": retention_diagnostics,
             "storage": {
                 "db_file_bytes": db_file_bytes,
                 "wal_file_bytes": wal_file_bytes,
@@ -4555,6 +4573,19 @@ pub struct CompressionDiagnosticsRecord {
     pub rewrite_candidate_count: i64,
     pub segments_rewritten: i64,
     pub restore_drill_required: bool,
+    pub action_taken: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetentionDiagnosticsRecord {
+    pub generated_at_ms: i64,
+    pub policy_id: String,
+    pub policy_kind: String,
+    pub pressure_behavior: String,
+    pub raw_history_prune_behavior: String,
+    pub sessions_scanned: i64,
+    pub scan_mode: String,
+    pub maintenance_deletes_raw_history: bool,
     pub action_taken: String,
 }
 
@@ -6921,6 +6952,46 @@ fn count_stream_segments_by_compression(
         .filter(terminal_stream_segments::compression.eq(compression))
         .count()
         .get_result::<i64>(connection)?)
+}
+
+fn collect_retention_diagnostics(
+    connection: &mut SqliteConnection,
+    now: i64,
+    selected_policy_id: Option<&str>,
+) -> Result<RetentionDiagnosticsRecord, TerminalPersistenceV2Error> {
+    let policy_id = selected_policy_id.unwrap_or(DEFAULT_RETENTION_POLICY_ID);
+    let (policy_id, policy_kind, pressure_behavior, raw_history_prune_behavior) =
+        terminal_retention_policies::table
+            .filter(terminal_retention_policies::id.eq(policy_id))
+            .select((
+                terminal_retention_policies::id,
+                terminal_retention_policies::policy_kind,
+                terminal_retention_policies::pressure_behavior,
+                terminal_retention_policies::raw_history_prune_behavior,
+            ))
+            .first::<(String, String, String, String)>(connection)?;
+    let sessions_scanned = terminal_sessions::table
+        .filter(terminal_sessions::retention_policy_id.eq(&policy_id))
+        .count()
+        .get_result::<i64>(connection)?;
+    let action_taken = match (pressure_behavior.as_str(), raw_history_prune_behavior.as_str()) {
+        ("warn_only", "never_silent") => "warn_only_no_delete",
+        (_, "request_only") => "warn_only_delete_request_required",
+        _ => "warn_only_no_silent_delete",
+    }
+    .to_string();
+
+    Ok(RetentionDiagnosticsRecord {
+        generated_at_ms: now,
+        policy_id,
+        policy_kind,
+        pressure_behavior,
+        raw_history_prune_behavior,
+        sessions_scanned,
+        scan_mode: "warn_only".to_string(),
+        maintenance_deletes_raw_history: false,
+        action_taken,
+    })
 }
 
 fn recover_expired_maintenance_leases(
@@ -9632,6 +9703,11 @@ mod tests {
         assert_eq!(summary["compression"]["raw_segment_count"], 1);
         assert_eq!(summary["compression"]["segments_rewritten"], 0);
         assert_eq!(summary["compression"]["action_taken"], "skipped_feature_disabled");
+        assert_eq!(summary["retention"]["policy_id"], DEFAULT_RETENTION_POLICY_ID);
+        assert_eq!(summary["retention"]["scan_mode"], "warn_only");
+        assert_eq!(summary["retention"]["maintenance_deletes_raw_history"], false);
+        assert_eq!(summary["retention"]["sessions_scanned"], 1);
+        assert_eq!(summary["retention"]["action_taken"], "warn_only_no_delete");
         assert_eq!(summary["storage"]["no_silent_delete"], true);
     }
 
