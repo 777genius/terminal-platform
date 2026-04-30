@@ -251,6 +251,7 @@ async fn run_v2_history_capture(
         return;
     };
 
+    persist_topology_snapshot(&persistence, &descriptor, initial_topology.clone()).await;
     start_capture_for_topology(
         &persistence,
         &descriptor,
@@ -262,7 +263,6 @@ async fn run_v2_history_capture(
     if let Some(ready_tx) = ready_tx.take() {
         let _ = ready_tx.send(());
     }
-    persist_topology_snapshot(&persistence, &descriptor, initial_topology.clone()).await;
 
     let Ok(mut topology_subscription) = session.subscribe(SubscriptionSpec::SessionTopology).await
     else {
@@ -332,20 +332,9 @@ async fn start_capture_for_topology(
         }
 
         if let Some(screen) = initial_screen {
-            spawn_v2_screen_snapshot_write(persistence.clone(), descriptor.clone(), tab_id, screen);
+            persist_screen_snapshot(persistence, descriptor, tab_id, screen).await;
         }
     }
-}
-
-fn spawn_v2_screen_snapshot_write(
-    persistence: SqliteSessionStore,
-    descriptor: SessionDescriptor,
-    tab_id: Option<String>,
-    screen: ScreenSnapshot,
-) {
-    tokio::spawn(async move {
-        persist_screen_snapshot(&persistence, &descriptor, tab_id, screen).await;
-    });
 }
 
 fn spawn_v2_raw_capture_loop(

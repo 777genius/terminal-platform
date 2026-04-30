@@ -377,10 +377,14 @@ mod tests {
                     listed.sessions[0].restore_semantics.replays_saved_screen_buffers,
                     v2.replays_saved_screen_buffers
                 );
-                assert!(matches!(
-                    v2.restore_guarantee_level,
-                    RestoreGuaranteeLevel::BasicHistory | RestoreGuaranteeLevel::VisualRestoreOnly
-                ));
+                assert!(
+                    matches!(
+                        v2.restore_guarantee_level,
+                        RestoreGuaranteeLevel::BasicHistory
+                            | RestoreGuaranteeLevel::VisualRestoreOnly
+                    ),
+                    "unexpected v2 restore semantics: {v2:?}"
+                );
                 assert!(matches!(
                     v2.history_replay_state,
                     HistoryReplayState::ReplayedFromJournal
@@ -421,10 +425,14 @@ mod tests {
                     saved.session.restore_semantics.replays_saved_screen_buffers,
                     v2.replays_saved_screen_buffers
                 );
-                assert!(matches!(
-                    v2.restore_guarantee_level,
-                    RestoreGuaranteeLevel::BasicHistory | RestoreGuaranteeLevel::VisualRestoreOnly
-                ));
+                assert!(
+                    matches!(
+                        v2.restore_guarantee_level,
+                        RestoreGuaranteeLevel::BasicHistory
+                            | RestoreGuaranteeLevel::VisualRestoreOnly
+                    ),
+                    "unexpected v2 restore semantics: {v2:?}"
+                );
                 assert!(matches!(
                     v2.history_replay_state,
                     HistoryReplayState::ReplayedFromJournal
@@ -567,10 +575,14 @@ mod tests {
                     response.restore_semantics.replays_saved_screen_buffers,
                     v2.replays_saved_screen_buffers
                 );
-                assert!(matches!(
-                    v2.restore_guarantee_level,
-                    RestoreGuaranteeLevel::BasicHistory | RestoreGuaranteeLevel::VisualRestoreOnly
-                ));
+                assert!(
+                    matches!(
+                        v2.restore_guarantee_level,
+                        RestoreGuaranteeLevel::BasicHistory
+                            | RestoreGuaranteeLevel::VisualRestoreOnly
+                    ),
+                    "unexpected v2 restore semantics: {v2:?}"
+                );
                 assert!(matches!(
                     v2.history_replay_state,
                     HistoryReplayState::ReplayedFromJournal
