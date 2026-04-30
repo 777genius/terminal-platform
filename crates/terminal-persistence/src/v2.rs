@@ -2686,6 +2686,7 @@ impl TerminalPersistenceV2 {
         let mut connection = self.connection()?;
         connection.immediate_transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
             let validation = validate_history_checksums(connection, Some(session_id))?;
+            let replay_safety = collect_restore_replay_safety(connection, session_id)?;
             let finished_at_ms = self.config.clock.now_ms();
             let result = if validation.has_failures() {
                 "failed"
@@ -2702,10 +2703,12 @@ impl TerminalPersistenceV2 {
             let error = validation.has_failures().then(|| validation.summary());
             let mut evidence = plan.evidence.clone();
             evidence.extend(validation.to_restore_evidence());
+            evidence.extend(replay_safety.to_restore_evidence());
             let evidence_json = Some(serde_json::to_string(&evidence)?);
             let metadata_json = Some(serde_json::to_string(&serde_json::json!({
                 "started_at_ms": started_at_ms,
                 "validation": validation.to_json(),
+                "replay_safety": replay_safety,
             }))?);
             let id = new_id();
             let row = NewRestoreDrillRow {
@@ -2742,6 +2745,14 @@ impl TerminalPersistenceV2 {
                 error,
             })
         })
+    }
+
+    pub fn restore_replay_safety_diagnostics(
+        &self,
+        session_id: &str,
+    ) -> Result<RestoreReplaySafetyRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        collect_restore_replay_safety(&mut connection, session_id)
     }
 
     pub fn run_integrity_check(&self) -> Result<IntegrityCheckRecord, TerminalPersistenceV2Error> {
@@ -4990,6 +5001,59 @@ pub struct RestoreDrillRecord {
     pub duration_ms: Option<i64>,
     pub source_snapshot_id: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoreReplaySafetyRecord {
+    pub session_id: String,
+    pub scanned_segment_count: i64,
+    pub osc52_clipboard_count: i64,
+    pub title_sequence_count: i64,
+    pub hyperlink_sequence_count: i64,
+    pub cwd_sequence_count: i64,
+    pub shell_marker_sequence_count: i64,
+    pub bel_byte_count: i64,
+    pub side_effects_suppressed: bool,
+    pub prompt_injection_text_is_data: bool,
+}
+
+impl RestoreReplaySafetyRecord {
+    fn to_restore_evidence(&self) -> Vec<RestoreEvidence> {
+        vec![
+            RestoreEvidence {
+                kind: "historical_replay_side_effects_suppressed".to_string(),
+                value: self.side_effects_suppressed.to_string(),
+            },
+            RestoreEvidence {
+                kind: "historical_replay_prompt_injection_text_is_data".to_string(),
+                value: self.prompt_injection_text_is_data.to_string(),
+            },
+            RestoreEvidence {
+                kind: "historical_replay_osc52_clipboard_count".to_string(),
+                value: self.osc52_clipboard_count.to_string(),
+            },
+            RestoreEvidence {
+                kind: "historical_replay_title_sequence_count".to_string(),
+                value: self.title_sequence_count.to_string(),
+            },
+            RestoreEvidence {
+                kind: "historical_replay_hyperlink_sequence_count".to_string(),
+                value: self.hyperlink_sequence_count.to_string(),
+            },
+            RestoreEvidence {
+                kind: "historical_replay_cwd_sequence_count".to_string(),
+                value: self.cwd_sequence_count.to_string(),
+            },
+            RestoreEvidence {
+                kind: "historical_replay_shell_marker_sequence_count".to_string(),
+                value: self.shell_marker_sequence_count.to_string(),
+            },
+            RestoreEvidence {
+                kind: "historical_replay_bel_byte_count".to_string(),
+                value: self.bel_byte_count.to_string(),
+            },
+        ]
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -8855,6 +8919,46 @@ fn insert_prompt_injection_findings_for_items(
     Ok(count)
 }
 
+fn collect_restore_replay_safety(
+    connection: &mut SqliteConnection,
+    session_id: &str,
+) -> Result<RestoreReplaySafetyRecord, TerminalPersistenceV2Error> {
+    let segments = terminal_stream_segments::table
+        .filter(terminal_stream_segments::session_id.eq(session_id))
+        .select(terminal_stream_segments::payload)
+        .load::<Vec<u8>>(connection)?;
+    let mut record = RestoreReplaySafetyRecord {
+        session_id: session_id.to_string(),
+        scanned_segment_count: i64::try_from(segments.len()).unwrap_or(i64::MAX),
+        osc52_clipboard_count: 0,
+        title_sequence_count: 0,
+        hyperlink_sequence_count: 0,
+        cwd_sequence_count: 0,
+        shell_marker_sequence_count: 0,
+        bel_byte_count: 0,
+        side_effects_suppressed: true,
+        prompt_injection_text_is_data: true,
+    };
+    for payload in segments {
+        record.osc52_clipboard_count += count_byte_pattern(&payload, b"\x1b]52;");
+        record.title_sequence_count +=
+            count_byte_pattern(&payload, b"\x1b]0;") + count_byte_pattern(&payload, b"\x1b]2;");
+        record.hyperlink_sequence_count += count_byte_pattern(&payload, b"\x1b]8;");
+        record.cwd_sequence_count += count_byte_pattern(&payload, b"\x1b]7;");
+        record.shell_marker_sequence_count +=
+            count_byte_pattern(&payload, b"\x1b]133;") + count_byte_pattern(&payload, b"\x1b]633;");
+        record.bel_byte_count += payload.iter().filter(|byte| **byte == 0x07).count() as i64;
+    }
+    Ok(record)
+}
+
+fn count_byte_pattern(haystack: &[u8], needle: &[u8]) -> i64 {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return 0;
+    }
+    haystack.windows(needle.len()).filter(|window| *window == needle).count() as i64
+}
+
 fn collect_retention_diagnostics(
     connection: &mut SqliteConnection,
     now: i64,
@@ -12138,6 +12242,66 @@ mod tests {
 
         let plan = store.restore_plan(&session_id).expect("restore plan should reload");
         assert_eq!(plan.latest_restore_drill_status.as_deref(), Some("passed"));
+    }
+
+    #[test]
+    fn restore_drill_records_replay_sandbox_side_effect_evidence() {
+        let store = test_store("restore-replay-sandbox");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let payload = b"\x1b]52;c;Zm9v\x07\x1b]0;owned-title\x07\x1b]8;;https://example.test\x07link\x1b]8;;\x07\x1b]7;file://C:/repo\x07\x1b]133;A\x07bell\x07"
+            .to_vec();
+        let output = store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                payload,
+            ))
+            .expect("control-sequence segment should persist");
+        store
+            .write_screen_snapshot(ScreenSnapshotInput {
+                id: None,
+                session_id: session_id.clone(),
+                pane_id,
+                writer_generation: writer.id,
+                projection_source: None,
+                buffer_kind: None,
+                rows: 24,
+                cols: 80,
+                base_event_seq: output.event_seq_low,
+                high_water_event_seq: output.event_seq_high,
+                high_water_byte_seq: Some(output.byte_high),
+                screen: serde_json::json!({"lines":["link"]}),
+                parser_version: None,
+                projection_version: None,
+                metadata: None,
+            })
+            .expect("screen snapshot should persist");
+
+        let safety = store
+            .restore_replay_safety_diagnostics(&session_id)
+            .expect("replay safety diagnostics should load");
+        let drill = store.run_restore_drill(&session_id).expect("restore drill should run");
+
+        assert_eq!(drill.result, "passed");
+        assert!(safety.side_effects_suppressed);
+        assert!(safety.prompt_injection_text_is_data);
+        assert_eq!(safety.osc52_clipboard_count, 1);
+        assert_eq!(safety.title_sequence_count, 1);
+        assert_eq!(safety.hyperlink_sequence_count, 2);
+        assert_eq!(safety.cwd_sequence_count, 1);
+        assert_eq!(safety.shell_marker_sequence_count, 1);
+
+        let mut connection = store.connection().expect("connection should open");
+        let evidence_json = terminal_restore_drills::table
+            .filter(terminal_restore_drills::id.eq(&drill.id))
+            .select(terminal_restore_drills::evidence_json)
+            .first::<Option<String>>(&mut connection)
+            .expect("restore drill evidence should load")
+            .expect("restore drill evidence should exist");
+        assert!(evidence_json.contains("historical_replay_side_effects_suppressed"));
+        assert!(evidence_json.contains("historical_replay_osc52_clipboard_count"));
+        assert!(evidence_json.contains("historical_replay_prompt_injection_text_is_data"));
     }
 
     #[test]
