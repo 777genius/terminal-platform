@@ -3238,6 +3238,94 @@ impl TerminalPersistenceV2 {
         Ok(CryptoKeyEventRecord::try_from(row)?)
     }
 
+    pub fn complete_crypto_erase(
+        &self,
+        input: CryptoEraseInput,
+    ) -> Result<CryptoEraseRecord, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        let now = self.config.clock.now_ms();
+        connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
+            let key = terminal_crypto_keys::table
+                .filter(terminal_crypto_keys::id.eq(&input.key_id))
+                .select(CryptoKeyRow::as_select())
+                .first::<CryptoKeyRow>(connection)?;
+            let key_ref_hash = blake3_hash_text(&key.key_ref);
+            diesel::update(terminal_crypto_keys::table.filter(terminal_crypto_keys::id.eq(&key.id)))
+                .set((
+                    terminal_crypto_keys::state.eq("destroyed"),
+                    terminal_crypto_keys::destroyed_at_ms.eq(Some(now)),
+                ))
+                .execute(connection)?;
+
+            let delete_request = NewDeleteRequestRow {
+                id: input.id.unwrap_or_else(new_id),
+                session_id: input.session_id.clone(),
+                request_kind: "crypto_erase".to_string(),
+                state: "completed".to_string(),
+                policy_id: None,
+                requested_at_ms: now,
+                approved_at_ms: Some(now),
+                completed_at_ms: Some(now),
+                requester_ref_hash: input.requester_ref.map(|value| blake3_hash_text(&value)),
+                reason: input.reason,
+                metadata_json: json_metadata(&input.metadata)?,
+            };
+            insert_into(terminal_delete_requests::table)
+                .values(&delete_request)
+                .execute(connection)?;
+
+            let event = NewCryptoKeyEventRow {
+                id: new_id(),
+                key_id: Some(key.id.clone()),
+                event_kind: "destroyed".to_string(),
+                actor: "crypto_erase".to_string(),
+                occurred_at_ms: now,
+                status: "succeeded".to_string(),
+                error_json: None,
+                metadata_json: Some(serde_json::to_string(&serde_json::json!({
+                    "delete_request_id": delete_request.id,
+                    "key_ref_hash": key_ref_hash,
+                    "key_material_exported": false
+                }))?),
+            };
+            insert_into(terminal_crypto_key_events::table).values(&event).execute(connection)?;
+
+            let evidence = serde_json::json!({
+                "key_id": key.id,
+                "key_kind": key.key_kind,
+                "key_ref_hash": key_ref_hash,
+                "secure_deletion_limitation": "sqlite_pages_may_retain_old_plaintext_until_vacuum_or_storage_reuse",
+                "canonical_history_deleted": false,
+                "key_material_exported": false
+            });
+            let tombstone = NewDeletionTombstoneRow {
+                id: new_id(),
+                delete_request_id: Some(delete_request.id.clone()),
+                session_id: input.session_id,
+                deleted_scope: "crypto_key".to_string(),
+                policy_id: None,
+                deleted_at_ms: now,
+                evidence_json: Some(serde_json::to_string(&evidence)?),
+                metadata_json: None,
+            };
+            insert_into(terminal_deletion_tombstones::table)
+                .values(&tombstone)
+                .execute(connection)?;
+
+            Ok(CryptoEraseRecord {
+                key_id: key.id,
+                key_ref_hash,
+                delete_request_id: delete_request.id,
+                tombstone_id: tombstone.id,
+                state: "completed".to_string(),
+                secure_deletion_limitation: evidence["secure_deletion_limitation"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            })
+        })
+    }
+
     pub fn encryption_capability_state(
         &self,
     ) -> Result<EncryptionCapabilityRecord, TerminalPersistenceV2Error> {
@@ -3938,6 +4026,16 @@ pub struct CryptoKeyEventInput {
     pub error: Option<Value>,
     pub metadata: Option<Value>,
     pub occurred_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CryptoEraseInput {
+    pub id: Option<String>,
+    pub key_id: String,
+    pub session_id: Option<String>,
+    pub requester_ref: Option<String>,
+    pub reason: Option<String>,
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4771,6 +4869,16 @@ impl TryFrom<NewCryptoKeyEventRow> for CryptoKeyEventRecord {
             metadata_json: row.metadata_json.as_deref().map(serde_json::from_str).transpose()?,
         })
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CryptoEraseRecord {
+    pub key_id: String,
+    pub key_ref_hash: String,
+    pub delete_request_id: String,
+    pub tombstone_id: String,
+    pub state: String,
+    pub secure_deletion_limitation: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -8713,6 +8821,67 @@ mod tests {
         assert!(
             matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("external artifact kind"))
         );
+    }
+
+    #[test]
+    fn crypto_erase_records_destroyed_key_event_and_tombstone_limitations() {
+        let store = test_store("crypto-erase");
+        let key = store
+            .register_crypto_key(CryptoKeyInput {
+                id: Some("erase-key".to_string()),
+                key_kind: "database_key".to_string(),
+                key_ref: "dpapi:user:erase-key".to_string(),
+                protection_kind: "test_plaintext".to_string(),
+                state: Some("active".to_string()),
+                capability_report: None,
+                error: None,
+                metadata: None,
+            })
+            .expect("crypto key should register");
+
+        let erased = store
+            .complete_crypto_erase(CryptoEraseInput {
+                id: Some("erase-request".to_string()),
+                key_id: key.id.clone(),
+                session_id: None,
+                requester_ref: Some("user-a".to_string()),
+                reason: Some("test erase".to_string()),
+                metadata: Some(serde_json::json!({"requested_by": "test"})),
+            })
+            .expect("crypto erase should complete");
+
+        let mut connection = store.connection().expect("connection should open");
+        let (state, destroyed_at_ms) = terminal_crypto_keys::table
+            .filter(terminal_crypto_keys::id.eq(&key.id))
+            .select((terminal_crypto_keys::state, terminal_crypto_keys::destroyed_at_ms))
+            .first::<(String, Option<i64>)>(&mut connection)
+            .expect("destroyed key should load");
+        let event_count = terminal_crypto_key_events::table
+            .filter(terminal_crypto_key_events::key_id.eq(Some(key.id.clone())))
+            .filter(terminal_crypto_key_events::event_kind.eq("destroyed"))
+            .count()
+            .get_result::<i64>(&mut connection)
+            .expect("destroy event should count");
+        let evidence_json = terminal_deletion_tombstones::table
+            .filter(terminal_deletion_tombstones::id.eq(&erased.tombstone_id))
+            .select(terminal_deletion_tombstones::evidence_json)
+            .first::<Option<String>>(&mut connection)
+            .expect("crypto erase tombstone should load");
+        let evidence: Value = serde_json::from_str(
+            evidence_json.as_deref().expect("crypto erase evidence should exist"),
+        )
+        .expect("crypto erase evidence should be json");
+
+        assert_eq!(erased.delete_request_id, "erase-request");
+        assert_eq!(erased.key_ref_hash, blake3_hash_text("dpapi:user:erase-key"));
+        assert_eq!(state, "destroyed");
+        assert!(destroyed_at_ms.is_some());
+        assert_eq!(event_count, 1);
+        assert_eq!(evidence["canonical_history_deleted"], false);
+        assert_eq!(evidence["key_material_exported"], false);
+        assert_eq!(evidence["key_ref_hash"], erased.key_ref_hash);
+        assert_ne!(evidence["key_ref_hash"], "dpapi:user:erase-key");
+        assert!(erased.secure_deletion_limitation.contains("sqlite_pages"));
     }
 
     #[test]
