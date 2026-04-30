@@ -104,7 +104,12 @@ mod feature_gates;
 
 mod history_read;
 
-mod operations;
+mod backup_ops;
+mod crypto_ops;
+mod maintenance_ops;
+mod privacy_export;
+mod search_ai_ops;
+mod storage_pressure;
 
 mod restore;
 
