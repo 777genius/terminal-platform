@@ -368,12 +368,15 @@ mod tests {
                 assert!(listed.sessions[0].restore_semantics.restores_focus_state);
                 assert!(listed.sessions[0].restore_semantics.restores_tab_titles);
                 assert!(listed.sessions[0].restore_semantics.uses_saved_launch_spec);
-                assert!(listed.sessions[0].restore_semantics.replays_saved_screen_buffers);
                 assert!(!listed.sessions[0].restore_semantics.preserves_process_state);
                 let v2 = listed.sessions[0]
                     .restore_semantics_v2
                     .as_ref()
                     .expect("v2 restore semantics should be present");
+                assert_eq!(
+                    listed.sessions[0].restore_semantics.replays_saved_screen_buffers,
+                    v2.replays_saved_screen_buffers
+                );
                 assert!(matches!(
                     v2.restore_guarantee_level,
                     RestoreGuaranteeLevel::BasicHistory | RestoreGuaranteeLevel::VisualRestoreOnly
@@ -408,13 +411,16 @@ mod tests {
                 assert!(saved.session.restore_semantics.restores_focus_state);
                 assert!(saved.session.restore_semantics.restores_tab_titles);
                 assert!(saved.session.restore_semantics.uses_saved_launch_spec);
-                assert!(saved.session.restore_semantics.replays_saved_screen_buffers);
                 assert!(!saved.session.restore_semantics.preserves_process_state);
                 let v2 = saved
                     .session
                     .restore_semantics_v2
                     .as_ref()
                     .expect("v2 restore semantics should be present");
+                assert_eq!(
+                    saved.session.restore_semantics.replays_saved_screen_buffers,
+                    v2.replays_saved_screen_buffers
+                );
                 assert!(matches!(
                     v2.restore_guarantee_level,
                     RestoreGuaranteeLevel::BasicHistory | RestoreGuaranteeLevel::VisualRestoreOnly
@@ -552,12 +558,15 @@ mod tests {
                 assert!(response.restore_semantics.restores_focus_state);
                 assert!(response.restore_semantics.restores_tab_titles);
                 assert!(response.restore_semantics.uses_saved_launch_spec);
-                assert!(response.restore_semantics.replays_saved_screen_buffers);
                 assert!(!response.restore_semantics.preserves_process_state);
                 let v2 = response
                     .restore_semantics_v2
                     .as_ref()
                     .expect("v2 restore semantics should be present");
+                assert_eq!(
+                    response.restore_semantics.replays_saved_screen_buffers,
+                    v2.replays_saved_screen_buffers
+                );
                 assert!(matches!(
                     v2.restore_guarantee_level,
                     RestoreGuaranteeLevel::BasicHistory | RestoreGuaranteeLevel::VisualRestoreOnly
