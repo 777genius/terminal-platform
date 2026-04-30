@@ -7282,6 +7282,65 @@ mod tests {
     }
 
     #[test]
+    fn hydrate_pane_history_respects_byte_budget_for_long_output() {
+        let store = test_store("long-output-budget");
+        let (session_id, pane_id, writer) = session_and_pane(&store);
+        let first_payload = vec![b'a'; 400];
+        let second_payload = vec![b'b'; 400];
+        let third_payload = vec![b'c'; 120];
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                first_payload.clone(),
+            ))
+            .expect("first segment should persist");
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                second_payload.clone(),
+            ))
+            .expect("second segment should persist");
+        store
+            .append_stream_segment(StreamSegmentInput::terminal_output(
+                session_id.clone(),
+                pane_id.clone(),
+                writer.id.clone(),
+                third_payload.clone(),
+            ))
+            .expect("third segment should persist");
+        store.release_writer_generation(&writer.id).expect("writer should release");
+
+        let first_page = store
+            .hydrate_pane_history(&session_id, &pane_id, Some(1), Some(10), Some(700))
+            .expect("first history page should hydrate");
+        assert_eq!(first_page.segments.len(), 1);
+        assert_eq!(first_page.segments[0].payload, first_payload);
+        assert_eq!(first_page.total_payload_bytes, 400);
+        assert_eq!(first_page.next_event_seq, Some(2));
+        assert!(first_page.has_more_segments);
+
+        let second_page = store
+            .hydrate_pane_history(
+                &session_id,
+                &pane_id,
+                first_page.next_event_seq,
+                Some(10),
+                Some(1_000),
+            )
+            .expect("second history page should hydrate");
+        assert_eq!(second_page.segments.len(), 2);
+        assert_eq!(second_page.segments[0].payload, second_payload);
+        assert_eq!(second_page.segments[1].payload, third_payload);
+        assert_eq!(second_page.total_payload_bytes, 520);
+        assert_eq!(second_page.next_event_seq, Some(4));
+        assert!(!second_page.has_more_segments);
+    }
+
+    #[test]
     fn legacy_visual_snapshot_import_preserves_raw_stream_cursor() {
         let store = test_store("visual-import-preserves-cursor");
         let (session_id, pane_id, writer) = session_and_pane(&store);

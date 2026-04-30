@@ -52,15 +52,17 @@ import {
 } from "./terminal-screen-events.js";
 
 type TerminalScreenPlacement = "panel" | "terminal";
-type VisibleOutputLineSource = "history" | "boundary" | "live";
+export type VisibleOutputLineSource = "history" | "boundary" | "live";
 
-interface VisibleOutputLine {
+export interface VisibleOutputLine {
   text: string;
   source: VisibleOutputLineSource;
 }
 
 const TERMINAL_SCREEN_SEARCH_COUNT_ID = "tp-screen-search-count";
 const RESTORED_HISTORY_BOUNDARY_TEXT = "--- restored history above; live process below ---";
+const RESTORED_HISTORY_PARTIAL_TEXT =
+  "--- restored history is partial; more persisted output is available ---";
 
 export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -1315,7 +1317,7 @@ function renderLine(
   `;
 }
 
-function createVisibleOutputLines(
+export function createVisibleOutputLines(
   history: ReturnType<typeof resolveTerminalScreenControlState>["history"],
   screen: ReturnType<typeof resolveTerminalScreenControlState>["screen"],
 ): VisibleOutputLine[] {
@@ -1329,17 +1331,21 @@ function createVisibleOutputLines(
       text: line,
       source: "history" as const,
     })) ?? [];
+  const historyBoundaryLines: VisibleOutputLine[] = history?.hasMoreSegments
+    ? [{ text: RESTORED_HISTORY_PARTIAL_TEXT, source: "boundary" }]
+    : [];
 
   if (historyLines.length === 0) {
     return liveLines;
   }
 
   if (liveLines.length === 0) {
-    return historyLines;
+    return [...historyLines, ...historyBoundaryLines];
   }
 
   return [
     ...historyLines,
+    ...historyBoundaryLines,
     { text: RESTORED_HISTORY_BOUNDARY_TEXT, source: "boundary" },
     ...liveLines,
   ];
