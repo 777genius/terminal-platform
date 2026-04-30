@@ -411,7 +411,11 @@ describe("createWorkspaceKernel live session subscriptions", () => {
         openSubscription: async () => subscription,
         getPaneHistory: async () => {
           historyCalls += 1;
-          return createPaneHistory(sessionId, paneId, "\x1B[31mgit status\x1B[0m\r\nfatal\r\n");
+          return createPaneHistory(
+            sessionId,
+            paneId,
+            "\x1B]52;c;ZmFrZS1jbGlwYm9hcmQ=\x07\x1B]0;fake-title\x07\x1B[31mgit status\x1B[0m\r\nfatal\r\n",
+          );
         },
       } as WorkspaceTransportClient,
       now: () => 7000,
@@ -430,6 +434,9 @@ describe("createWorkspaceKernel live session subscriptions", () => {
       hasGaps: false,
       hasMoreSegments: false,
     });
+    const restoredHistoryText = kernel.getSnapshot().historicalPanes?.[paneId]?.lines.join("\n") ?? "";
+    expect(restoredHistoryText).not.toContain("fake-title");
+    expect(restoredHistoryText).not.toContain("fake-clipboard");
     expect(historyCalls).toBeGreaterThan(0);
 
     await kernel.dispose();
