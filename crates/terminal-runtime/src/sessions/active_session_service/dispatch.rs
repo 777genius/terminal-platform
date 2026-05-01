@@ -23,9 +23,8 @@ impl ActiveSessionService<'_> {
 
         if let Some(input_capture) = input_capture {
             let store = self.runtime.persistence().clone();
-            let _ = tokio::task::spawn_blocking(move || {
-                let _ = store.record_v2_ui_input(input_capture);
-            });
+            let _ =
+                tokio::task::spawn_blocking(move || store.record_v2_ui_input(input_capture)).await;
         }
 
         if result.changed && refresh_summary_title {
