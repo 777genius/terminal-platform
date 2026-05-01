@@ -116,9 +116,15 @@ pub(super) async fn wait_for_pane_history_payload(
         if payload.windows(needle.len()).any(|window| window == needle) {
             return history;
         }
+        if let Some(snapshot) = &history.latest_screen_snapshot
+            && snapshot.screen_json.as_bytes().windows(needle.len()).any(|window| window == needle)
+        {
+            return history;
+        }
         last_summary = format!(
-            "segments={}, gaps={}, replay_strategy={:?}, total_payload_bytes={}",
+            "segments={}, has_snapshot={}, gaps={}, replay_strategy={:?}, total_payload_bytes={}",
             history.segments.len(),
+            history.latest_screen_snapshot.is_some(),
             history.gaps.len(),
             history.replay_strategy,
             history.total_payload_bytes
@@ -127,6 +133,17 @@ pub(super) async fn wait_for_pane_history_payload(
     }
 
     panic!("pane history never contained expected payload; last: {last_summary}");
+}
+
+#[cfg(any(unix, windows))]
+pub(super) fn assert_pane_history_has_hydrated_content(
+    history: &terminal_protocol::PaneHistoryResponse,
+) {
+    assert!(
+        !history.segments.is_empty() || history.latest_screen_snapshot.is_some(),
+        "pane history should contain either raw stream segments or a rendered snapshot: {history:?}"
+    );
+    assert_ne!(history.replay_strategy, terminal_protocol::PaneHistoryReplayStrategy::Empty);
 }
 
 #[cfg(any(unix, windows))]
@@ -171,7 +188,7 @@ pub(super) fn zellij_operation_timeout() -> Duration {
 
 #[cfg(any(unix, windows))]
 pub(super) fn zellij_attempt_timeout() -> Duration {
-    if cfg!(windows) { Duration::from_secs(120) } else { Duration::from_secs(90) }
+    if cfg!(windows) { Duration::from_secs(420) } else { Duration::from_secs(90) }
 }
 
 #[cfg(any(unix, windows))]

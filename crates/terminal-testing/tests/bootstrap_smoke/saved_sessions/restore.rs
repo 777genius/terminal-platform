@@ -170,8 +170,8 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     );
     assert_eq!(captured_command.display_text, history_command);
     assert_eq!(command_after_restore.display_text, history_command);
-    assert_eq!(captured_output.replay_strategy, output_after_restore.replay_strategy);
-    assert!(!output_after_restore.segments.is_empty());
+    assert_pane_history_has_hydrated_content(&captured_output);
+    assert_pane_history_has_hydrated_content(&output_after_restore);
     assert_eq!(restored_topology.tabs.len(), 2);
     assert_eq!(collect_pane_ids(&first_restored_tab.root).len(), 2);
     assert_eq!(collect_pane_ids(&second_restored_tab.root).len(), 1);

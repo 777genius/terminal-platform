@@ -149,6 +149,68 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                     let initial_focused_tab =
                         topology.focused_tab.expect("focused zellij tab should exist");
 
+                    if capabilities.capabilities.pane_input_write {
+                        let input_marker = format!(
+                            "TERMINAL_ZELLIJ_INPUT_{}",
+                            imported.session.session_id.0.simple()
+                        );
+                        let input_command = format!("echo {input_marker}");
+                        let input = tokio::time::timeout(
+                            zellij_operation_timeout(),
+                            fixture.client.dispatch(
+                                imported.session.session_id,
+                                MuxCommand::SendInput(SendInputSpec {
+                                    pane_id: focused_pane,
+                                    data: submitted_input(&input_command),
+                                    client_event_id: Some(format!(
+                                        "zellij-input-{}",
+                                        imported.session.session_id.0.simple()
+                                    )),
+                                }),
+                            ),
+                        )
+                        .await
+                        .expect("zellij send_input should not hang")
+                        .expect("zellij send_input should succeed");
+                        wait_for_screen_line(
+                            &fixture,
+                            imported.session.session_id,
+                            focused_pane,
+                            &input_marker,
+                        )
+                        .await;
+                        let input_history = wait_for_command_history_entry(
+                            &fixture,
+                            Some(imported.session.session_id),
+                            20,
+                            "zellij imported command history",
+                            |entry| {
+                                entry.session_id == Some(imported.session.session_id)
+                                    && entry.pane_id == Some(focused_pane)
+                                    && entry.display_text == input_command
+                            },
+                        )
+                        .await;
+
+                        assert!(input.changed);
+                        assert_eq!(input_history.display_text, input_command);
+                    }
+
+                    let save_error = tokio::time::timeout(
+                        host_timeout(),
+                        fixture
+                            .client
+                            .dispatch(imported.session.session_id, MuxCommand::SaveSession),
+                    )
+                    .await
+                    .expect("zellij save_session should not hang")
+                    .expect_err("zellij imported save_session should be unsupported");
+                    assert_eq!(save_error.code, "backend_unsupported");
+                    assert_eq!(
+                        save_error.degraded_reason,
+                        Some(DegradedModeReason::UnsupportedByBackend)
+                    );
+
                     let created = tokio::time::timeout(
                         zellij_operation_timeout(),
                         fixture.client.dispatch(

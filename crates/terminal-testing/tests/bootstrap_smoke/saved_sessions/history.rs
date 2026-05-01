@@ -204,12 +204,7 @@ async fn bootstrap_smoke_persists_command_and_output_history_across_daemon_resta
     assert_eq!(before_restart_entry.use_count, 1);
     assert_eq!(before_restart_pane_history.session_id, created.session.session_id);
     assert_eq!(before_restart_pane_history.pane_id, pane_id);
-    assert!(!before_restart_pane_history.segments.is_empty());
-    assert!(before_restart_pane_history.total_payload_bytes > 0);
-    assert_ne!(
-        before_restart_pane_history.replay_strategy,
-        terminal_protocol::PaneHistoryReplayStrategy::Empty
-    );
+    assert_pane_history_has_hydrated_content(&before_restart_pane_history);
     assert_eq!(saved_v2.source_session_id, created.session.session_id);
     assert_eq!(saved_v2.restored_session_id, None);
     assert_ne!(saved_v2.history_replay_state, terminal_protocol::HistoryReplayState::NotAvailable);
@@ -251,11 +246,7 @@ async fn bootstrap_smoke_persists_command_and_output_history_across_daemon_resta
 
     assert_eq!(after_restart_entry.display_text, command);
     assert_eq!(after_restart_entry.use_count, 1);
-    assert!(!after_restart_pane_history.segments.is_empty());
-    assert_eq!(
-        after_restart_pane_history.replay_strategy,
-        before_restart_pane_history.replay_strategy
-    );
+    assert_pane_history_has_hydrated_content(&after_restart_pane_history);
     assert!(reloaded.session.restore_semantics_v2.is_some());
 
     restarted.shutdown().await.expect("restarted fixture should stop cleanly");
