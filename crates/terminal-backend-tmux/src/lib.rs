@@ -12,8 +12,11 @@ mod util;
 
 pub use backend::TmuxBackend;
 
+#[cfg(test)]
 pub(crate) use layout::{fallback_tree, parse_tmux_layout};
+#[cfg(test)]
 pub(crate) use target::TmuxTarget;
+#[cfg(test)]
 pub(crate) use util::tmux_split_flag;
 
 pub(crate) const TMUX_ROUTE_NAMESPACE: &str = "tmux_target";
