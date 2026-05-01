@@ -1,4 +1,20 @@
+mod rows;
+mod side_effects;
+mod transitions;
+
 use super::super::*;
+
+use self::{
+    rows::{
+        PrimaryEventRowInput, StreamSegmentRowInput, new_primary_journal_event_row,
+        new_stream_segment_row,
+    },
+    side_effects::{
+        CaptureReceiptInput, ProjectionOutboxInput, enqueue_pane_history_projection,
+        insert_capture_receipt,
+    },
+    transitions::{BufferModeTransitionInput, insert_buffer_mode_transition_events},
+};
 
 impl TerminalPersistenceV2 {
     pub fn append_stream_segment(
@@ -94,30 +110,24 @@ impl TerminalPersistenceV2 {
                     )
                 })?;
 
-                let segment = NewStreamSegmentRow {
-                    id: segment_id.clone(),
-                    session_id: input.session_id.clone(),
-                    pane_id: input.pane_id.clone(),
-                    commit_id: commit.id.clone(),
-                    stream_id: stream_id.clone(),
+                let segment = new_stream_segment_row(StreamSegmentRowInput {
+                    segment_id: &segment_id,
+                    session_id: &input.session_id,
+                    pane_id: &input.pane_id,
+                    commit_id: &commit.id,
+                    stream_id: &stream_id,
                     event_seq_low,
                     event_seq_high,
                     byte_low,
                     byte_high,
-                    payload: input.payload.clone(),
+                    payload: &input.payload,
                     payload_len,
-                    stored_byte_len: payload_len,
-                    uncompressed_byte_len: Some(payload_len),
-                    checksum_algorithm: "blake3".to_string(),
-                    checksum: payload_checksum.clone(),
-                    compression: "none".to_string(),
-                    capture_semantics: capture_semantics.clone(),
-                    encryption_state: "plaintext".to_string(),
-                    key_ref: None,
-                    created_at_ms: now,
-                    writer_generation: input.writer_generation.clone(),
+                    payload_checksum: &payload_checksum,
+                    capture_semantics: &capture_semantics,
+                    writer_generation: &input.writer_generation,
                     metadata_json: metadata_json.clone(),
-                };
+                    now,
+                });
                 insert_into(terminal_stream_segments::table).values(&segment).execute(connection)?;
                 if self.config.failpoints.stream_segment_after_segment_insert {
                     return Err(TerminalPersistenceV2Error::InvalidData(
@@ -125,132 +135,76 @@ impl TerminalPersistenceV2 {
                     ));
                 }
 
-                let event = NewJournalEventRow {
-                    id: event_id.clone(),
-                    session_id: input.session_id.clone(),
-                    pane_id: Some(input.pane_id.clone()),
-                    commit_id: commit.id.clone(),
-                    stream_id: stream_id.clone(),
-                    event_scope_kind: "pane".to_string(),
-                    event_scope_id: input.pane_id.clone(),
+                let event = new_primary_journal_event_row(PrimaryEventRowInput {
+                    event_id: &event_id,
+                    session_id: &input.session_id,
+                    pane_id: &input.pane_id,
+                    commit_id: &commit.id,
+                    stream_id: &stream_id,
                     event_seq: event_seq_low,
                     event_type,
-                    byte_low: Some(byte_low),
-                    byte_high: Some(byte_high),
+                    byte_low,
+                    byte_high,
                     payload_json,
                     payload_schema_id,
                     source_event_id_hash: source_event_id_hash.clone(),
                     occurred_at_ms,
-                    created_at_ms: now,
-                    capture_semantics: capture_semantics.clone(),
+                    now,
+                    capture_semantics: &capture_semantics,
                     trust_level: input.trust_level.unwrap_or_else(|| "captured".to_string()),
                     metadata_json: metadata_json.clone(),
-                };
+                });
                 insert_into(terminal_journal_events::table).values(&event).execute(connection)?;
 
-                for (transition_index, transition) in buffer_mode_transitions.iter().enumerate() {
-                    let transition_offset =
-                        checked_len(transition_index + 1, "buffer mode transition offset")?;
-                    let transition_event_seq =
-                        event_seq_low.checked_add(transition_offset).ok_or_else(|| {
-                            TerminalPersistenceV2Error::InvalidData(
-                                "buffer mode transition event sequence overflow".to_string(),
-                            )
-                        })?;
-                    let transition_byte_low =
-                        byte_low.checked_add(transition.byte_offset).ok_or_else(|| {
-                            TerminalPersistenceV2Error::InvalidData(
-                                "buffer mode transition byte range overflow".to_string(),
-                            )
-                        })?;
-                    let transition_byte_high =
-                        transition_byte_low.checked_add(transition.byte_len).ok_or_else(|| {
-                            TerminalPersistenceV2Error::InvalidData(
-                                "buffer mode transition byte range overflow".to_string(),
-                            )
-                        })?;
-                    let payload_json = serde_json::to_string(&serde_json::json!({
-                        "action": transition.action,
-                        "mode": transition.mode,
-                        "target_buffer_kind": transition.target_buffer_kind,
-                        "derived_from_event_seq": event_seq_low
-                    }))?;
-                    let transition_event = NewJournalEventRow {
-                        id: new_id(),
-                        session_id: input.session_id.clone(),
-                        pane_id: Some(input.pane_id.clone()),
-                        commit_id: commit.id.clone(),
-                        stream_id: stream_id.clone(),
-                        event_scope_kind: "pane".to_string(),
-                        event_scope_id: input.pane_id.clone(),
-                        event_seq: transition_event_seq,
-                        event_type: "terminal_buffer_mode".to_string(),
-                        byte_low: Some(transition_byte_low),
-                        byte_high: Some(transition_byte_high.min(byte_high)),
-                        payload_json: Some(payload_json),
-                        payload_schema_id: Some(PAYLOAD_SCHEMA_JOURNAL_EVENT_V1.to_string()),
-                        source_event_id_hash: None,
+                insert_buffer_mode_transition_events(
+                    connection,
+                    BufferModeTransitionInput {
+                        transitions: &buffer_mode_transitions,
+                        session_id: &input.session_id,
+                        pane_id: &input.pane_id,
+                        commit_id: &commit.id,
+                        stream_id: &stream_id,
+                        segment_id: &segment_id,
+                        event_seq_low,
+                        byte_low,
+                        byte_high,
                         occurred_at_ms,
-                        created_at_ms: now,
-                        capture_semantics: capture_semantics.clone(),
-                        trust_level: "parser_derived".to_string(),
-                        metadata_json: Some(serde_json::to_string(&serde_json::json!({
-                            "parser": "terminal_buffer_mode_detector_v1",
-                            "source_segment_id": segment_id.clone()
-                        }))?),
-                    };
-                    insert_into(terminal_journal_events::table)
-                        .values(&transition_event)
-                        .execute(connection)?;
-                }
+                        now,
+                        capture_semantics: &capture_semantics,
+                    },
+                )?;
 
-                let outbox = NewOutboxMessageRow {
-                    id: new_id(),
-                    message_kind: "pane_history_projection".to_string(),
-                    dedupe_key: Some(normalize_outbox_dedupe_key(&format!(
-                        "pane_history_projection:{}",
-                        commit.id
-                    ))),
-                    state: "pending".to_string(),
-                    payload_json: serde_json::to_string(&serde_json::json!({
-                        "session_id": input.session_id.clone(),
-                        "pane_id": input.pane_id.clone(),
-                        "stream_id": stream_id.clone(),
-                        "commit_id": commit.id.clone(),
-                        "event_seq_low": event_seq_low,
-                        "event_seq_high": final_event_seq,
-                        "byte_low": byte_low,
-                        "byte_high": byte_high
-                    }))?,
-                    attempts: 0,
-                    max_attempts: 5,
-                    claimed_by: None,
-                    lease_token: None,
-                    claimed_until_ms: None,
-                    next_run_at_ms: now,
-                    last_error: None,
-                    created_at_ms: now,
-                    updated_at_ms: now,
-                };
-                insert_into(terminal_outbox_messages::table).values(&outbox).execute(connection)?;
+                enqueue_pane_history_projection(
+                    connection,
+                    ProjectionOutboxInput {
+                        session_id: &input.session_id,
+                        pane_id: &input.pane_id,
+                        stream_id: &stream_id,
+                        commit_id: &commit.id,
+                        event_seq_low,
+                        event_seq_high: final_event_seq,
+                        byte_low,
+                        byte_high,
+                        now,
+                    },
+                )?;
 
                 if let (Some(source_kind), Some(source_event_id_hash)) =
                     (capture_source_kind.as_deref(), source_event_id_hash.as_deref())
                 {
-                    let receipt = NewCaptureReceiptRow {
-                        id: new_id(),
-                        session_id: input.session_id.clone(),
-                        commit_id: Some(commit.id.clone()),
-                        source_kind: source_kind.to_string(),
-                        source_event_id_hash: source_event_id_hash.to_string(),
-                        source_payload_hash: payload_checksum.clone(),
-                        received_at_ms: occurred_at_ms,
-                        created_at_ms: now,
-                        metadata_json: metadata_json.clone(),
-                    };
-                    insert_into(terminal_capture_receipts::table)
-                        .values(&receipt)
-                        .execute(connection)?;
+                    insert_capture_receipt(
+                        connection,
+                        CaptureReceiptInput {
+                            session_id: &input.session_id,
+                            commit_id: &commit.id,
+                            source_kind,
+                            source_event_id_hash,
+                            source_payload_hash: &payload_checksum,
+                            received_at_ms: occurred_at_ms,
+                            created_at_ms: now,
+                            metadata_json: metadata_json.clone(),
+                        },
+                    )?;
                 }
 
                 advance_stream_cursor(connection, &cursor.id, final_event_seq + 1, byte_high, now)?;
