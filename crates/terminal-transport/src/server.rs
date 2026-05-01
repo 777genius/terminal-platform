@@ -1,27 +1,23 @@
-use std::{io, sync::Arc, time::Duration};
+mod connection;
+mod listener;
+mod shutdown;
 
-use futures_util::{SinkExt as _, StreamExt as _};
-use interprocess::local_socket::{
-    ListenerOptions,
-    tokio::{Listener, Stream},
-    traits::tokio::Listener as _,
-};
+use std::{io, sync::Arc};
+
+use interprocess::local_socket::traits::tokio::Listener as _;
+use terminal_protocol::LocalSocketAddress;
 use tokio::{
     sync::{oneshot, watch},
-    task::{JoinError, JoinHandle, JoinSet},
-    time::timeout,
-};
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
-
-use terminal_protocol::{
-    LocalSocketAddress, RequestEnvelope, ResponseEnvelope, ResponsePayload, SubscriptionEnvelope,
-    SubscriptionRequest, SubscriptionRequestEnvelope, TransportResponse, decode_json_frame,
-    encode_json_frame,
+    task::{JoinHandle, JoinSet},
 };
 
 use crate::{TransportRequestHandler, TransportSubscriptionHandler};
 
-const CONNECTION_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+use self::{
+    connection::handle_connection,
+    listener::create_listener,
+    shutdown::{drain_or_abort_connection_tasks, join_error_to_io},
+};
 
 pub struct LocalSocketServerHandle {
     address: LocalSocketAddress,
@@ -88,178 +84,4 @@ where
     });
 
     Ok(LocalSocketServerHandle { address, shutdown_tx: Some(shutdown_tx), task })
-}
-
-fn create_listener(address: &LocalSocketAddress) -> io::Result<Listener> {
-    #[cfg(windows)]
-    {
-        let mut last_error = None;
-        for attempt in 0..20 {
-            match bind_listener(address) {
-                Ok(listener) => return Ok(listener),
-                Err(error) if attempt < 19 && is_retryable_windows_bind_error(&error) => {
-                    last_error = Some(error);
-                    std::thread::sleep(std::time::Duration::from_millis(25));
-                }
-                Err(error) => return Err(error),
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| io::Error::other("listener bind retry failed")))
-    }
-
-    #[cfg(not(windows))]
-    {
-        bind_listener(address)
-    }
-}
-
-fn bind_listener(address: &LocalSocketAddress) -> io::Result<Listener> {
-    ListenerOptions::new().name(address.to_name()?).try_overwrite(true).create_tokio()
-}
-
-#[cfg(windows)]
-fn is_retryable_windows_bind_error(error: &io::Error) -> bool {
-    matches!(
-        error.kind(),
-        io::ErrorKind::PermissionDenied | io::ErrorKind::AddrInUse | io::ErrorKind::AlreadyExists
-    ) || matches!(error.raw_os_error(), Some(5 | 32 | 183))
-}
-
-async fn handle_connection<Handler>(
-    handler: Arc<Handler>,
-    stream: Stream,
-    mut shutdown_rx: watch::Receiver<bool>,
-) -> io::Result<()>
-where
-    Handler: TransportRequestHandler + TransportSubscriptionHandler + Send + Sync + 'static,
-{
-    let mut framed = Framed::new(stream, LengthDelimitedCodec::new());
-
-    loop {
-        tokio::select! {
-            _ = shutdown_rx.changed() => break Ok(()),
-            frame_result = framed.next() => {
-                let Some(frame_result) = frame_result else {
-                    break Ok(());
-                };
-                let frame = frame_result?;
-                let reply = match decode_json_frame::<RequestEnvelope>(&frame) {
-                    Ok(request) => {
-                        if matches!(&request.payload, terminal_protocol::RequestPayload::OpenSubscription(_)) {
-                            return handle_subscription_connection(handler, request, framed, shutdown_rx).await;
-                        }
-                        TransportResponse::from_result(handler.handle_request(request).await)
-                    }
-                    Err(error) => TransportResponse::Error(error),
-                };
-                let encoded_reply =
-                    encode_json_frame(&reply).map_err(|error| io::Error::other(error.to_string()))?;
-
-                framed.send(encoded_reply).await?;
-            }
-        }
-    }
-}
-
-async fn handle_subscription_connection<Handler>(
-    handler: Arc<Handler>,
-    request: RequestEnvelope,
-    mut framed: Framed<Stream, LengthDelimitedCodec>,
-    mut shutdown_rx: watch::Receiver<bool>,
-) -> io::Result<()>
-where
-    Handler: TransportRequestHandler + TransportSubscriptionHandler + Send + Sync + 'static,
-{
-    let terminal_protocol::RequestPayload::OpenSubscription(open_request) = request.payload else {
-        return Err(io::Error::other("subscription connection requires open_subscription request"));
-    };
-    let mut subscription = handler
-        .open_subscription(open_request)
-        .await
-        .map_err(|error| io::Error::other(error.to_string()))?;
-    let subscription_id = subscription.subscription_id;
-    let opened = ResponseEnvelope {
-        operation_id: request.operation_id,
-        payload: ResponsePayload::SubscriptionOpened(terminal_protocol::OpenSubscriptionResponse {
-            subscription_id,
-        }),
-    };
-    let encoded_opened = encode_json_frame(&TransportResponse::Response(Box::new(opened)))
-        .map_err(|error| io::Error::other(error.to_string()))?;
-    framed.send(encoded_opened).await?;
-
-    let result = loop {
-        tokio::select! {
-            biased;
-            _ = shutdown_rx.changed() => break Ok(()),
-            inbound = framed.next() => {
-                match inbound {
-                    Some(Ok(frame)) => {
-                        let envelope = decode_json_frame::<SubscriptionRequestEnvelope>(&frame)
-                            .map_err(|error| io::Error::other(error.to_string()));
-                        let envelope = match envelope {
-                            Ok(envelope) => envelope,
-                            Err(error) => break Err(error),
-                        };
-                        if envelope.subscription_id != subscription_id {
-                            break Err(io::Error::other("subscription control targeted wrong subscription"));
-                        }
-                        match envelope.request {
-                            SubscriptionRequest::Close => break Ok(()),
-                        }
-                    }
-                    Some(Err(error)) => break Err(error),
-                    None => break Ok(()),
-                }
-            }
-            event = subscription.events.recv() => {
-                let Some(event) = event else {
-                    break Ok(());
-                };
-                let envelope = SubscriptionEnvelope { subscription_id, event };
-                let encoded_event = match encode_json_frame(&envelope) {
-                    Ok(encoded_event) => encoded_event,
-                    Err(error) => break Err(io::Error::other(error.to_string())),
-                };
-                if let Err(error) = framed.send(encoded_event).await {
-                    break Err(error);
-                }
-            }
-        }
-    };
-
-    subscription.cancel();
-
-    result
-}
-
-async fn drain_connection_tasks(connection_tasks: &mut JoinSet<()>) -> io::Result<()> {
-    while let Some(join_result) = connection_tasks.join_next().await {
-        if let Err(error) = join_result
-            && !error.is_cancelled()
-        {
-            return Err(join_error_to_io(error));
-        }
-    }
-
-    Ok(())
-}
-
-async fn drain_or_abort_connection_tasks(connection_tasks: &mut JoinSet<()>) -> io::Result<()> {
-    if connection_tasks.is_empty() {
-        return Ok(());
-    }
-
-    match timeout(CONNECTION_DRAIN_TIMEOUT, drain_connection_tasks(connection_tasks)).await {
-        Ok(result) => result,
-        Err(_) => {
-            connection_tasks.abort_all();
-            drain_connection_tasks(connection_tasks).await
-        }
-    }
-}
-
-fn join_error_to_io(error: JoinError) -> io::Error {
-    io::Error::other(error.to_string())
 }
