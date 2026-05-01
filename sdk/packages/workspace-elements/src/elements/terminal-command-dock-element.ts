@@ -894,14 +894,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
+    this.recordCommandHistory(controls.draft);
+    this.clearHistoryClearConfirmation();
+    this.resetHistoryNavigation();
     await this.dispatchInput(
       controls.activeSessionId,
       controls.activePaneId,
       formatTerminalCommandSubmitInput(controls.draft),
     );
-    this.recordCommandHistory(controls.draft);
-    this.clearHistoryClearConfirmation();
-    this.resetHistoryNavigation();
     this.kernel?.commands.clearDraft(controls.activePaneId);
     if (options.focusInput) {
       this.refocusCommandInputAfterUpdate();

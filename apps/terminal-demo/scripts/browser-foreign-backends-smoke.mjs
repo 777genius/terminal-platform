@@ -35,6 +35,7 @@ const sessionStorePath = path.join(
 );
 const browserBootstrapPath = path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json");
 const commandHistoryStorageKey = "terminal-platform-demo.command-history";
+const browserEvaluationTimeoutMs = process.platform === "win32" ? 120_000 : 60_000;
 const zellijMinimum = [0, 44, 0];
 const foreignBackends = process.platform === "win32" ? ["zellij"] : ["tmux", "zellij"];
 
@@ -923,8 +924,8 @@ function evaluate(send, expression) {
   }).then(resolveRuntimeEvaluationValue);
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
-      reject(new Error("Timed out waiting for browser evaluation"));
-    }, 60_000);
+      reject(new Error(`Timed out waiting for browser evaluation after ${browserEvaluationTimeoutMs}ms`));
+    }, browserEvaluationTimeoutMs);
   });
 
   return Promise.race([evaluation, timeout]).finally(() => {
