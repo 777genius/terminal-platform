@@ -1,6 +1,6 @@
 use super::super::{prelude::*, support::*};
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_overrides_native_layout_via_dispatch() {
     let fixture = daemon_fixture("bootstrap-native-layout-override").expect("fixture should start");

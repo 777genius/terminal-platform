@@ -1,6 +1,6 @@
 use super::super::{prelude::*, support::*};
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_streams_live_pane_surface_updates() {
     let fixture = daemon_fixture("bootstrap-pane-sub").expect("fixture should start");
@@ -60,7 +60,7 @@ async fn bootstrap_smoke_streams_live_pane_surface_updates() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_roundtrips_live_pty_io() {
     let fixture = daemon_fixture("bootstrap-pty-smoke").expect("fixture should start");
@@ -116,7 +116,90 @@ async fn bootstrap_smoke_roundtrips_live_pty_io() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
+#[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_flushes_each_native_input_without_followup_command() {
+    let fixture = daemon_fixture("bootstrap-pty-input-flush").expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec { title: Some("shell".to_string()), launch: Some(cat_launch_spec()) },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    let before_first = fixture
+        .client
+        .screen_snapshot(created.session.session_id, pane_id)
+        .await
+        .expect("screen_snapshot should succeed");
+    let first_marker =
+        format!("TERMINAL_INPUT_FLUSH_FIRST_{}", created.session.session_id.0.simple());
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id,
+                data: submitted_input(&format!("echo {first_marker}")),
+                client_event_id: None,
+            }),
+        )
+        .await
+        .expect("first input should dispatch");
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, &first_marker).await;
+    let first_delta = fixture
+        .client
+        .screen_delta(created.session.session_id, pane_id, before_first.sequence)
+        .await
+        .expect("first screen_delta should succeed");
+    let first_patch = first_delta.patch.expect("first delta patch should exist");
+
+    assert!(first_delta.to_sequence > before_first.sequence);
+    assert!(first_patch.line_updates.iter().any(|line| line.line.text.contains(&first_marker)));
+
+    let before_second = fixture
+        .client
+        .screen_snapshot(created.session.session_id, pane_id)
+        .await
+        .expect("screen_snapshot should succeed");
+    let second_marker =
+        format!("TERMINAL_INPUT_FLUSH_SECOND_{}", created.session.session_id.0.simple());
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id,
+                data: submitted_input(&format!("echo {second_marker}")),
+                client_event_id: None,
+            }),
+        )
+        .await
+        .expect("second input should dispatch");
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, &second_marker).await;
+    let second_delta = fixture
+        .client
+        .screen_delta(created.session.session_id, pane_id, before_second.sequence)
+        .await
+        .expect("second screen_delta should succeed");
+    let second_patch = second_delta.patch.expect("second delta patch should exist");
+
+    assert!(second_delta.to_sequence > before_second.sequence);
+    assert!(second_patch.line_updates.iter().any(|line| line.line.text.contains(&second_marker)));
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_streams_surface_updates_for_all_native_panes_after_resize() {
     let fixture = daemon_fixture("bootstrap-native-pane-resize-sub").expect("fixture should start");

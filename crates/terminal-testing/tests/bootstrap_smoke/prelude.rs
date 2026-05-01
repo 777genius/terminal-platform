@@ -9,12 +9,12 @@ pub(super) use std::{
 #[cfg(unix)]
 pub(super) use std::{process::Command, sync::Arc};
 
-pub(super) use terminal_backend_api::{
-    CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SplitPaneSpec,
-    SubscriptionSpec,
-};
 #[cfg(unix)]
-pub(super) use terminal_backend_api::{MuxBackendPort, OverrideLayoutSpec, ResizePaneSpec};
+pub(super) use terminal_backend_api::MuxBackendPort;
+pub(super) use terminal_backend_api::{
+    CreateSessionSpec, MuxCommand, NewTabSpec, OverrideLayoutSpec, ResizePaneSpec, SendInputSpec,
+    ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
+};
 #[cfg(unix)]
 pub(super) use terminal_backend_native::NativeBackend;
 #[cfg(unix)]
@@ -32,7 +32,7 @@ pub(super) use terminal_domain::{
 };
 #[cfg(any(unix, windows))]
 pub(super) use terminal_domain::{DegradedModeReason, PaneId, TabId};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(super) use terminal_mux_domain::PaneSplit;
 #[cfg(any(unix, windows))]
 pub(super) use terminal_mux_domain::PaneTreeNode;

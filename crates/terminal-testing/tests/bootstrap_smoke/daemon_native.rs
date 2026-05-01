@@ -1,4 +1,4 @@
 mod basics;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod pty;
 mod subscriptions;

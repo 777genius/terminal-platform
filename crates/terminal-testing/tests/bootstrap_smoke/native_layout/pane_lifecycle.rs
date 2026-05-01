@@ -1,6 +1,6 @@
 use super::super::{prelude::*, support::*};
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_controls_native_pane_lifecycle_via_dispatch() {
     let fixture = daemon_fixture("bootstrap-native-pane-control").expect("fixture should start");
@@ -109,7 +109,7 @@ async fn bootstrap_smoke_controls_native_pane_lifecycle_via_dispatch() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_resizes_native_split_panes_through_layout_ratios() {
     let fixture = daemon_fixture("bootstrap-native-pane-resize").expect("fixture should start");

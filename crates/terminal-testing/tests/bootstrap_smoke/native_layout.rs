@@ -1,5 +1,5 @@
 mod focus;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod override_layout;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod pane_lifecycle;
