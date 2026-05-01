@@ -2,20 +2,12 @@ mod active_session_service;
 mod catalog_service;
 mod runtime;
 mod saved_sessions_service;
+mod service_api;
 mod subscription_service;
 
 use std::sync::Arc;
 
-use terminal_backend_api::{
-    BackendCapabilities, BackendError, BackendSessionSummary, BackendSubscription,
-    CreateSessionSpec, DiscoveredSession, MuxCommand, MuxCommandResult, SubscriptionSpec,
-};
-use terminal_domain::{BackendKind, PaneId, SessionId, SessionRoute};
-use terminal_persistence::{
-    CommandHistoryEntryRecord, PaneHistoryHydrationRecord, PrunedSavedSessions, RestorePlan,
-    SavedNativeSession, SavedSessionSummary as PersistedSavedSessionSummary, SqliteSessionStore,
-};
-use terminal_projection::{ScreenDelta, ScreenSnapshot, SessionHealthSnapshot, TopologySnapshot};
+use terminal_persistence::SqliteSessionStore;
 
 use crate::{
     backend_catalog::BackendCatalog,
@@ -38,152 +30,6 @@ impl SessionService {
     #[must_use]
     pub fn with_persistence(backends: BackendCatalog, persistence: SqliteSessionStore) -> Self {
         Self { backends, registry: Arc::new(InMemorySessionRegistry::default()), persistence }
-    }
-
-    pub async fn discover_sessions(
-        &self,
-        backend: BackendKind,
-    ) -> Result<Vec<DiscoveredSession>, BackendError> {
-        self.catalog_service().discover_sessions(backend).await
-    }
-
-    pub async fn backend_capabilities(
-        &self,
-        backend: BackendKind,
-    ) -> Result<BackendCapabilities, BackendError> {
-        self.catalog_service().backend_capabilities(backend).await
-    }
-
-    pub async fn create_session(
-        &self,
-        backend: BackendKind,
-        spec: CreateSessionSpec,
-    ) -> Result<BackendSessionSummary, BackendError> {
-        self.catalog_service().create_session(backend, spec).await
-    }
-
-    pub async fn import_session(
-        &self,
-        route: SessionRoute,
-        title: Option<String>,
-    ) -> Result<BackendSessionSummary, BackendError> {
-        self.catalog_service().import_session(route, title).await
-    }
-
-    pub fn list_saved_sessions(&self) -> Result<Vec<PersistedSavedSessionSummary>, BackendError> {
-        self.saved_sessions_service().list_saved_sessions()
-    }
-
-    #[must_use]
-    pub fn available_backends(&self) -> Vec<BackendKind> {
-        self.catalog_service().available_backends()
-    }
-
-    pub fn saved_session(&self, session_id: SessionId) -> Result<SavedNativeSession, BackendError> {
-        self.saved_sessions_service().saved_session(session_id)
-    }
-
-    pub fn saved_session_v2_restore_plan(
-        &self,
-        session_id: SessionId,
-    ) -> Result<Option<RestorePlan>, BackendError> {
-        self.saved_sessions_service().saved_session_v2_restore_plan(session_id)
-    }
-
-    pub fn delete_saved_session(&self, session_id: SessionId) -> Result<(), BackendError> {
-        self.saved_sessions_service().delete_saved_session(session_id)
-    }
-
-    pub fn prune_saved_sessions(
-        &self,
-        keep_latest: usize,
-    ) -> Result<PrunedSavedSessions, BackendError> {
-        self.saved_sessions_service().prune_saved_sessions(keep_latest)
-    }
-
-    pub async fn restore_saved_session(
-        &self,
-        session_id: SessionId,
-    ) -> Result<BackendSessionSummary, BackendError> {
-        self.saved_sessions_service().restore_saved_session(session_id).await
-    }
-
-    #[must_use]
-    pub fn list_sessions(&self) -> Vec<BackendSessionSummary> {
-        self.catalog_service().list_sessions()
-    }
-
-    #[must_use]
-    pub fn session_count(&self) -> usize {
-        self.catalog_service().session_count()
-    }
-
-    pub async fn topology_snapshot(
-        &self,
-        session_id: SessionId,
-    ) -> Result<TopologySnapshot, BackendError> {
-        self.active_session_service().topology_snapshot(session_id).await
-    }
-
-    pub async fn screen_snapshot(
-        &self,
-        session_id: SessionId,
-        pane_id: PaneId,
-    ) -> Result<ScreenSnapshot, BackendError> {
-        self.active_session_service().screen_snapshot(session_id, pane_id).await
-    }
-
-    pub async fn screen_delta(
-        &self,
-        session_id: SessionId,
-        pane_id: PaneId,
-        from_sequence: u64,
-    ) -> Result<ScreenDelta, BackendError> {
-        self.active_session_service().screen_delta(session_id, pane_id, from_sequence).await
-    }
-
-    pub async fn pane_history(
-        &self,
-        session_id: SessionId,
-        pane_id: PaneId,
-        from_event_seq: Option<i64>,
-        max_segments: Option<i64>,
-        max_bytes: Option<i64>,
-    ) -> Result<PaneHistoryHydrationRecord, BackendError> {
-        self.active_session_service()
-            .pane_history(session_id, pane_id, from_event_seq, max_segments, max_bytes)
-            .await
-    }
-
-    pub async fn command_history(
-        &self,
-        session_id: Option<SessionId>,
-        limit: Option<i64>,
-    ) -> Result<Vec<CommandHistoryEntryRecord>, BackendError> {
-        self.active_session_service().command_history(session_id, limit).await
-    }
-
-    pub async fn dispatch(
-        &self,
-        session_id: SessionId,
-        command: MuxCommand,
-    ) -> Result<MuxCommandResult, BackendError> {
-        self.active_session_service().dispatch(session_id, command).await
-    }
-
-    pub fn session_health_snapshot(
-        &self,
-        session_id: SessionId,
-    ) -> Result<SessionHealthSnapshot, BackendError> {
-        self.active_session_service().session_health_snapshot(session_id)
-    }
-
-    pub async fn open_subscription(
-        &self,
-        session_id: SessionId,
-        spec: SubscriptionSpec,
-    ) -> Result<BackendSubscription, BackendError> {
-        self.subscription_service().open_subscription(session_id, spec).await
     }
 
     fn runtime(&self) -> SessionRuntime<'_> {
