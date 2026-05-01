@@ -161,13 +161,33 @@ fn maps_paste_to_target_terminal_pane() {
         )
         .expect("send-paste should map");
 
-    assert_eq!(
-        actions,
-        vec![ZellijAction::Paste {
-            pane_ref: "terminal_1".to_string(),
-            text: "hello\nworld".to_string(),
-        }]
-    );
+    if cfg!(windows) {
+        assert_eq!(
+            actions,
+            vec![
+                ZellijAction::WriteChars {
+                    pane_ref: "terminal_1".to_string(),
+                    chars: "hello".to_string(),
+                },
+                ZellijAction::SendKeys {
+                    pane_ref: "terminal_1".to_string(),
+                    keys: vec!["Enter".to_string()],
+                },
+                ZellijAction::WriteChars {
+                    pane_ref: "terminal_1".to_string(),
+                    chars: "world".to_string(),
+                },
+            ]
+        );
+    } else {
+        assert_eq!(
+            actions,
+            vec![ZellijAction::Paste {
+                pane_ref: "terminal_1".to_string(),
+                text: "hello\nworld".to_string(),
+            }]
+        );
+    }
 }
 
 #[test]

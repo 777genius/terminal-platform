@@ -92,6 +92,17 @@ impl ZellijAttachedSession {
         snapshot: &ZellijSessionSnapshot,
         spec: SendPasteSpec,
     ) -> Result<Vec<ZellijAction>, BackendError> {
+        if cfg!(windows) {
+            return self.send_input_actions(
+                snapshot,
+                SendInputSpec {
+                    pane_id: spec.pane_id,
+                    data: spec.data,
+                    client_event_id: spec.client_event_id,
+                },
+            );
+        }
+
         if spec.data.is_empty() {
             return Ok(Vec::new());
         }

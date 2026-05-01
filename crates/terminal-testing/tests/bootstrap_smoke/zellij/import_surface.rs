@@ -196,6 +196,58 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                         assert_eq!(input_history.display_text, input_command);
                     }
 
+                    if capabilities.capabilities.pane_paste_write {
+                        let paste_marker = format!(
+                            "TERMINAL_ZELLIJ_PASTE_{}",
+                            imported.session.session_id.0.simple()
+                        );
+                        let paste_command = format!("echo {paste_marker}");
+                        let paste = tokio::time::timeout(
+                            zellij_operation_timeout(),
+                            fixture.client.dispatch(
+                                imported.session.session_id,
+                                MuxCommand::SendPaste(SendPasteSpec {
+                                    pane_id: focused_pane,
+                                    data: paste_command,
+                                    client_event_id: Some(format!(
+                                        "zellij-paste-{}",
+                                        imported.session.session_id.0.simple()
+                                    )),
+                                }),
+                            ),
+                        )
+                        .await
+                        .expect("zellij send_paste should not hang")
+                        .expect("zellij send_paste should succeed");
+                        let paste_enter = tokio::time::timeout(
+                            zellij_operation_timeout(),
+                            fixture.client.dispatch(
+                                imported.session.session_id,
+                                MuxCommand::SendInput(SendInputSpec {
+                                    pane_id: focused_pane,
+                                    data: submitted_input(""),
+                                    client_event_id: Some(format!(
+                                        "zellij-paste-enter-{}",
+                                        imported.session.session_id.0.simple()
+                                    )),
+                                }),
+                            ),
+                        )
+                        .await
+                        .expect("zellij paste enter should not hang")
+                        .expect("zellij paste enter should succeed");
+                        wait_for_screen_line(
+                            &fixture,
+                            imported.session.session_id,
+                            focused_pane,
+                            &paste_marker,
+                        )
+                        .await;
+
+                        assert!(paste.changed);
+                        assert!(paste_enter.changed);
+                    }
+
                     let save_error = tokio::time::timeout(
                         host_timeout(),
                         fixture

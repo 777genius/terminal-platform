@@ -13,7 +13,7 @@ pub(super) use std::{process::Command, sync::Arc};
 pub(super) use terminal_backend_api::MuxBackendPort;
 pub(super) use terminal_backend_api::{
     CreateSessionSpec, MuxCommand, NewTabSpec, OverrideLayoutSpec, ResizePaneSpec, SendInputSpec,
-    ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
+    SendPasteSpec, ShellLaunchSpec, SplitPaneSpec, SubscriptionSpec,
 };
 #[cfg(unix)]
 pub(super) use terminal_backend_native::NativeBackend;
