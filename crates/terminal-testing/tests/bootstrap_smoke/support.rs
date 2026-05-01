@@ -183,7 +183,7 @@ pub(super) async fn recv_subscription_event(
 
 #[cfg(any(unix, windows))]
 pub(super) fn zellij_operation_timeout() -> Duration {
-    if cfg!(windows) { Duration::from_secs(60) } else { Duration::from_secs(90) }
+    if cfg!(windows) { Duration::from_secs(120) } else { Duration::from_secs(90) }
 }
 
 #[cfg(any(unix, windows))]

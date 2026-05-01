@@ -2564,9 +2564,7 @@ async function runSmokeScenario(browserUrl) {
       throw new Error(`Unable to send command through command dock: ${JSON.stringify(sendCommandResult)}`);
     }
 
-    await sleep(2000);
-
-    const afterCommand = await evaluate(send, `(() => {
+    const afterCommand = await waitForBrowserValue(send, "command lane to advance focused screen", `(() => {
       const debug = window.terminalDemoDebug?.getState?.();
       const workspaceHost = document.querySelector('tp-terminal-workspace');
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
@@ -2624,7 +2622,16 @@ async function runSmokeScenario(browserUrl) {
         terminalScreenText,
         containsCommandOutput: /browser-smoke-ok/i.test(terminalScreenText),
       };
-    })()`);
+    })()`, (state) => {
+      if (!state?.connectionReady) {
+        return false;
+      }
+
+      return Boolean(
+        state.containsCommandOutput
+        || (initialSequence !== null && state.focusedSequence !== initialSequence),
+      );
+    });
     afterCommand.storedCommandHistoryIncludesPrimary = afterCommand.storedCommandHistory
       .some((entry) => typeof entry === "string" && entry.includes("browser-smoke-ok"));
     const replayInitialSequence = afterCommand.focusedSequence;

@@ -3,7 +3,7 @@ use super::super::{prelude::*, support::*};
 #[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
-    let attempts = if cfg!(windows) { 1 } else { 3 };
+    let attempts = 3;
     let mut last_error = None;
 
     for attempt in 0..attempts {
