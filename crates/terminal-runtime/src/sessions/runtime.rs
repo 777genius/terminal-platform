@@ -15,9 +15,10 @@ use crate::{backend_catalog::BackendCatalog, registry::SessionRegistry};
 
 pub(super) use helpers::{
     collect_pane_ids_from_node, collect_pane_ids_from_topology, command_updates_summary_title,
-    saved_session_title, session_health_from_attach_error, session_route_fingerprint,
-    tab_snapshot_by_id,
+    saved_session_title, tab_snapshot_by_id,
 };
+#[cfg(test)]
+pub(super) use helpers::{session_health_from_attach_error, session_route_fingerprint};
 
 const V2_RAW_CAPTURE_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 const V2_RAW_CAPTURE_MAX_BATCH_BYTES: usize = 64 * 1024;
