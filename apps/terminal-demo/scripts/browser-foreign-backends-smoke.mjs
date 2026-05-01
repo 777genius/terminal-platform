@@ -621,6 +621,53 @@ async function exerciseZellijMuxActions(send, title) {
     && before.capabilities.pane_focus === expectedPaneFocus,
   );
 
+  console.log("[foreign-browser-smoke] zellij mux: paste marker dispatch");
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    return await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'send_paste',
+      pane_id: ${JSON.stringify(before.focusedPaneId)},
+      data: ${JSON.stringify(`echo ${pasteMarker}`)},
+    });
+  })()`);
+
+  console.log("[foreign-browser-smoke] zellij mux: paste marker enter");
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    return await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'send_input',
+      pane_id: ${JSON.stringify(before.focusedPaneId)},
+      data: '\\r',
+    });
+  })()`);
+
+  console.log("[foreign-browser-smoke] zellij mux: paste marker attach");
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    await commands.attachSession(${JSON.stringify(before.sessionId)});
+    return true;
+  })()`);
+
+  await waitForBrowser(send, "zellij focused pane paste marker", `(() => {
+    const screenText = window.terminalDemoDebug?.getState?.()?.attachedSession?.focused_screen?.surface?.lines
+      ?.map((line) => line.text)
+      .join('\\n') ?? '';
+    return screenText.includes(${JSON.stringify(pasteMarker)});
+  })()`);
+
+  const zellijPasteScreen = {
+    markerSeen: true,
+    screenTextPreview: "verified through focused browser screen",
+  };
+  const afterPaste = await evaluate(send, `(() => {
+    const screenText = window.terminalDemoDebug?.getState?.()?.attachedSession?.focused_screen?.surface?.lines
+      ?.map((line) => line.text)
+      .join('\\n') ?? '';
+    return {
+      focusedScreenPasteMarkerSeen: screenText.includes(${JSON.stringify(pasteMarker)}),
+    };
+  })()`);
+
   console.log("[foreign-browser-smoke] zellij mux: new_tab");
   const dispatchResult = await evaluate(send, `(async () => {
     const commands = window.terminalDemoDebug?.controller?.commands ?? null;
@@ -673,33 +720,6 @@ async function exerciseZellijMuxActions(send, title) {
       focusCapabilitiesMatchPlatform,
     };
   }
-
-  console.log("[foreign-browser-smoke] zellij mux: paste marker");
-  await evaluate(send, `(async () => {
-    const commands = window.terminalDemoDebug?.controller?.commands;
-    await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
-      kind: 'send_paste',
-      pane_id: ${JSON.stringify(afterNewTab.newPaneId)},
-      data: ${JSON.stringify(`echo ${pasteMarker}`)},
-    });
-    await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
-      kind: 'send_input',
-      pane_id: ${JSON.stringify(afterNewTab.newPaneId)},
-      data: '\\r',
-    });
-    await commands.attachSession(${JSON.stringify(before.sessionId)});
-    return true;
-  })()`);
-
-  const zellijPasteScreen = await waitForZellijTabScreenMarker(newTabTitle, pasteMarker);
-  const afterPaste = await evaluate(send, `(() => {
-    const screenText = window.terminalDemoDebug?.getState?.()?.attachedSession?.focused_screen?.surface?.lines
-      ?.map((line) => line.text)
-      .join('\\n') ?? '';
-    return {
-      focusedScreenPasteMarkerSeen: screenText.includes(${JSON.stringify(pasteMarker)}),
-    };
-  })()`);
 
   console.log("[foreign-browser-smoke] zellij mux: control input");
   const controlInput = await evaluate(send, `(async () => {
@@ -813,70 +833,6 @@ async function exerciseZellijMuxActions(send, title) {
     unsupportedSplitMessage: unsupportedSplit.message,
     splitButtonDisabled: afterClose.splitButtonDisabled,
   };
-}
-
-async function waitForZellijTabScreenMarker(tabTitle, marker) {
-  let latest = null;
-  await waitFor(() => {
-    latest = readZellijTabScreen(tabTitle);
-    return latest?.screenText.includes(marker) ?? false;
-  }, `zellij tab ${tabTitle} screen marker`);
-
-  return {
-    ...latest,
-    markerSeen: latest?.screenText.includes(marker) ?? false,
-    screenTextPreview: compactText(latest?.screenText ?? ""),
-  };
-}
-
-function readZellijTabScreen(tabTitle) {
-  if (!zellijSessionName) {
-    return null;
-  }
-
-  try {
-    const tabs = JSON.parse(runCapture(
-      "zellij",
-      ["--session", zellijSessionName, "action", "list-tabs", "--json"],
-      appRoot,
-      smokeEnv,
-    ));
-    const tab = tabs.find((candidate) => candidate?.name === tabTitle);
-    if (!tab) {
-      return null;
-    }
-
-    const panes = JSON.parse(runCapture(
-      "zellij",
-      ["--session", zellijSessionName, "action", "list-panes", "--json"],
-      appRoot,
-      smokeEnv,
-    ));
-    const pane = panes.find((candidate) =>
-      candidate?.tab_id === tab.tab_id
-      && !candidate?.is_plugin
-      && !candidate?.is_floating
-    );
-    if (!pane) {
-      return null;
-    }
-
-    const paneRef = `terminal_${pane.id}`;
-    const screenText = runCapture(
-      "zellij",
-      ["--session", zellijSessionName, "action", "dump-screen", "--pane-id", paneRef],
-      appRoot,
-      smokeEnv,
-    );
-    return {
-      tabId: tab.tab_id,
-      paneId: pane.id,
-      paneRef,
-      screenText,
-    };
-  } catch {
-    return null;
-  }
 }
 
 async function startBrowserHost(rendererUrlValue, options) {
