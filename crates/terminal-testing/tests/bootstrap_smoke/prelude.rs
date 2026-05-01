@@ -7,25 +7,24 @@ pub(super) use std::{
 };
 
 #[cfg(unix)]
-pub(super) use std::{process::Command, sync::Arc, thread};
+pub(super) use std::{process::Command, sync::Arc};
 
 pub(super) use terminal_backend_api::{
-    CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SubscriptionSpec,
+    CreateSessionSpec, MuxCommand, NewTabSpec, SendInputSpec, ShellLaunchSpec, SplitPaneSpec,
+    SubscriptionSpec,
 };
 #[cfg(unix)]
-pub(super) use terminal_backend_api::{
-    MuxBackendPort, OverrideLayoutSpec, ResizePaneSpec, SplitPaneSpec,
-};
+pub(super) use terminal_backend_api::{MuxBackendPort, OverrideLayoutSpec, ResizePaneSpec};
 #[cfg(unix)]
 pub(super) use terminal_backend_native::NativeBackend;
 #[cfg(unix)]
 pub(super) use terminal_backend_tmux::TmuxBackend;
 #[cfg(unix)]
 pub(super) use terminal_backend_zellij::ZellijBackend;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(super) use terminal_daemon::TerminalDaemon;
 pub(super) use terminal_domain::BackendKind;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(super) use terminal_domain::{
     CURRENT_BINARY_VERSION, CURRENT_PROTOCOL_MAJOR, CURRENT_PROTOCOL_MINOR,
     CURRENT_SAVED_SESSION_FORMAT_VERSION, SavedSessionCompatibilityStatus, SavedSessionManifest,
@@ -33,11 +32,13 @@ pub(super) use terminal_domain::{
 };
 #[cfg(any(unix, windows))]
 pub(super) use terminal_domain::{DegradedModeReason, PaneId, TabId};
+#[cfg(unix)]
+pub(super) use terminal_mux_domain::PaneSplit;
 #[cfg(any(unix, windows))]
 pub(super) use terminal_mux_domain::PaneTreeNode;
-#[cfg(unix)]
-pub(super) use terminal_mux_domain::{PaneSplit, SplitDirection, TabSnapshot};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
+pub(super) use terminal_mux_domain::{SplitDirection, TabSnapshot};
+#[cfg(any(unix, windows))]
 pub(super) use terminal_persistence::SqliteSessionStore;
 #[cfg(any(unix, windows))]
 pub(super) use terminal_projection::{
@@ -49,7 +50,7 @@ pub(super) use terminal_runtime::{BackendCatalog, TerminalRuntime};
 pub(super) use terminal_testing::{
     ZellijSessionGuard, daemon, daemon_fixture, echo_shell_launch_spec, unique_zellij_session_name,
 };
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(super) use terminal_testing::{
     daemon_fixture_with_daemon, isolated_daemon, unique_sqlite_path,
 };

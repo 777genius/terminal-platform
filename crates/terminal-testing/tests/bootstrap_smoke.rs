@@ -5,7 +5,7 @@ mod bootstrap_smoke {
     mod daemon_native;
     mod fullscreen;
     mod native_layout;
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     mod saved_sessions;
     #[cfg(unix)]
     mod tmux;

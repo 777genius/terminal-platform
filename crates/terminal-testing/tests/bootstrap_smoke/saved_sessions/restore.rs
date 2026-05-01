@@ -1,6 +1,6 @@
 use super::super::{prelude::*, support::*};
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     let fixture = daemon_fixture("bootstrap-native-restore-api").expect("fixture should start");
@@ -90,8 +90,26 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     assert_eq!(restored.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
     assert!(restored.restore_semantics.restores_topology);
     assert!(restored.restore_semantics.uses_saved_launch_spec);
-    assert!(!restored.restore_semantics.replays_saved_screen_buffers);
     assert!(!restored.restore_semantics.preserves_process_state);
+    let restored_v2 = restored
+        .restore_semantics_v2
+        .as_ref()
+        .expect("restore response should expose v2 restore semantics");
+    assert_eq!(
+        restored.restore_semantics.replays_saved_screen_buffers,
+        restored_v2.replays_saved_screen_buffers
+    );
+    assert_eq!(restored_v2.source_session_id, created.session.session_id);
+    assert_eq!(restored_v2.restored_session_id, Some(restored.session.session_id));
+    assert!(restored_v2.restores_topology);
+    assert!(restored_v2.restores_focus_state);
+    assert!(restored_v2.restores_tab_titles);
+    assert!(restored_v2.uses_saved_launch_spec);
+    assert!(!restored_v2.preserves_process_state);
+    assert_ne!(
+        restored_v2.history_replay_state,
+        terminal_protocol::HistoryReplayState::NotAvailable
+    );
     assert_eq!(restored_topology.tabs.len(), 2);
     assert_eq!(collect_pane_ids(&first_restored_tab.root).len(), 2);
     assert_eq!(collect_pane_ids(&second_restored_tab.root).len(), 1);
@@ -106,7 +124,7 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_reports_incompatible_saved_session_manifest_via_daemon_api() {
     let (state, session_id) = daemon_with_incompatible_saved_session(

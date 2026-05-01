@@ -1,6 +1,6 @@
 use super::super::{prelude::*, support::*};
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_prunes_saved_native_sessions_via_daemon_api() {
     let fixture = daemon_fixture_with_daemon(
@@ -35,7 +35,7 @@ async fn bootstrap_smoke_prunes_saved_native_sessions_via_daemon_api() {
             .await
             .expect("save session should succeed");
         last_saved_session = Some(created.session.session_id);
-        thread::sleep(Duration::from_millis(5));
+        sleep(Duration::from_millis(5)).await;
     }
 
     let pruned =
@@ -54,7 +54,7 @@ async fn bootstrap_smoke_prunes_saved_native_sessions_via_daemon_api() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_overwrites_native_session_snapshot_on_resave() {
     let fixture = daemon_fixture("bootstrap-native-save-overwrite").expect("fixture should start");

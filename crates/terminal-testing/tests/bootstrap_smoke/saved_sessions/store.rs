@@ -1,6 +1,6 @@
 use super::super::{prelude::*, support::*};
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_saves_native_session_snapshot_to_store() {
     let fixture = daemon_fixture("bootstrap-native-save").expect("fixture should start");
@@ -64,7 +64,7 @@ async fn bootstrap_smoke_saves_native_session_snapshot_to_store() {
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_lists_and_loads_saved_native_sessions_via_daemon_api() {
     let fixture = daemon_fixture("bootstrap-native-saved-api").expect("fixture should start");
@@ -115,8 +115,27 @@ async fn bootstrap_smoke_lists_and_loads_saved_native_sessions_via_daemon_api() 
     assert_eq!(saved_summary.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
     assert!(saved_summary.restore_semantics.restores_topology);
     assert!(saved_summary.restore_semantics.uses_saved_launch_spec);
-    assert!(!saved_summary.restore_semantics.replays_saved_screen_buffers);
     assert!(!saved_summary.restore_semantics.preserves_process_state);
+    let saved_summary_v2 = saved_summary
+        .restore_semantics_v2
+        .as_ref()
+        .expect("saved session summary should expose v2 restore semantics");
+    assert_eq!(
+        saved_summary.restore_semantics.replays_saved_screen_buffers,
+        saved_summary_v2.replays_saved_screen_buffers
+    );
+    assert_eq!(saved_summary_v2.source_session_id, created.session.session_id);
+    assert_eq!(saved_summary_v2.restored_session_id, None);
+    assert!(saved_summary_v2.restores_topology);
+    assert!(saved_summary_v2.restores_focus_state);
+    assert!(saved_summary_v2.restores_tab_titles);
+    assert!(saved_summary_v2.uses_saved_launch_spec);
+    assert!(!saved_summary_v2.preserves_process_state);
+    assert_ne!(
+        saved_summary_v2.history_replay_state,
+        terminal_protocol::HistoryReplayState::NotAvailable
+    );
+    assert!(!saved_summary_v2.evidence_refs.is_empty());
     assert_eq!(loaded.session.session_id, created.session.session_id);
     assert_eq!(loaded.session.topology.backend_kind, BackendKind::Native);
     assert_eq!(loaded.session.topology.tabs.len(), 1);
@@ -127,13 +146,28 @@ async fn bootstrap_smoke_lists_and_loads_saved_native_sessions_via_daemon_api() 
     assert_eq!(loaded.session.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
     assert!(loaded.session.restore_semantics.restores_focus_state);
     assert!(loaded.session.restore_semantics.restores_tab_titles);
-    assert!(!loaded.session.restore_semantics.replays_saved_screen_buffers);
     assert!(!loaded.session.restore_semantics.preserves_process_state);
+    let loaded_v2 = loaded
+        .session
+        .restore_semantics_v2
+        .as_ref()
+        .expect("loaded saved session should expose v2 restore semantics");
+    assert_eq!(
+        loaded.session.restore_semantics.replays_saved_screen_buffers,
+        loaded_v2.replays_saved_screen_buffers
+    );
+    assert_eq!(loaded_v2.source_session_id, created.session.session_id);
+    assert_eq!(loaded_v2.restored_session_id, None);
+    assert!(loaded_v2.restores_topology);
+    assert!(loaded_v2.restores_focus_state);
+    assert!(loaded_v2.restores_tab_titles);
+    assert!(loaded_v2.uses_saved_launch_spec);
+    assert_ne!(loaded_v2.history_replay_state, terminal_protocol::HistoryReplayState::NotAvailable);
 
     fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_deletes_saved_native_sessions_via_daemon_api() {
     let fixture = daemon_fixture("bootstrap-native-delete-saved").expect("fixture should start");

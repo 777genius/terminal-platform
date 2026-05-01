@@ -5,7 +5,7 @@ pub(super) fn cat_launch_spec() -> ShellLaunchSpec {
     echo_shell_launch_spec()
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(super) fn daemon_with_incompatible_saved_session(
     label: &str,
     manifest: SavedSessionManifest,
@@ -64,6 +64,69 @@ pub(super) async fn wait_for_screen_line(
     }
 
     panic!("screen never contained expected text: {needle}; last lines: {last_lines:?}");
+}
+
+#[cfg(any(unix, windows))]
+pub(super) async fn wait_for_command_history_entry(
+    fixture: &terminal_testing::DaemonFixture,
+    session_id: Option<terminal_domain::SessionId>,
+    limit: i64,
+    label: &str,
+    predicate: impl Fn(&terminal_protocol::CommandHistoryEntry) -> bool,
+) -> terminal_protocol::CommandHistoryEntry {
+    let mut last_entries = Vec::new();
+    for _ in 0..120 {
+        let history = fixture
+            .client
+            .command_history(session_id, Some(limit))
+            .await
+            .expect("command_history should succeed");
+        if let Some(entry) = history.entries.iter().find(|entry| predicate(entry)) {
+            return entry.clone();
+        }
+        last_entries =
+            history.entries.iter().map(|entry| entry.display_text.clone()).take(8).collect();
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!(
+        "command history never contained expected entry: {label}; last entries: {last_entries:?}"
+    );
+}
+
+#[cfg(any(unix, windows))]
+pub(super) async fn wait_for_pane_history_payload(
+    fixture: &terminal_testing::DaemonFixture,
+    session_id: terminal_domain::SessionId,
+    pane_id: terminal_domain::PaneId,
+    needle: &[u8],
+) -> terminal_protocol::PaneHistoryResponse {
+    let mut last_summary = String::new();
+    for _ in 0..160 {
+        let history = fixture
+            .client
+            .pane_history(session_id, pane_id, None, Some(32), Some(128 * 1024))
+            .await
+            .expect("pane_history should succeed");
+        let payload = history
+            .segments
+            .iter()
+            .flat_map(|segment| segment.payload.iter().copied())
+            .collect::<Vec<_>>();
+        if payload.windows(needle.len()).any(|window| window == needle) {
+            return history;
+        }
+        last_summary = format!(
+            "segments={}, gaps={}, replay_strategy={:?}, total_payload_bytes={}",
+            history.segments.len(),
+            history.gaps.len(),
+            history.replay_strategy,
+            history.total_payload_bytes
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!("pane history never contained expected payload; last: {last_summary}");
 }
 
 #[cfg(any(unix, windows))]
