@@ -1,0 +1,61 @@
+use super::{prelude::*, *};
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeCreateSessionRequest {
+    pub title: Option<String>,
+    pub launch: Option<NodeShellLaunchSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeSessionSummary {
+    pub session_id: String,
+    pub route: NodeSessionRoute,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeDiscoveredSession {
+    pub route: NodeSessionRoute,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeBackendCapabilities {
+    pub tiled_panes: bool,
+    pub floating_panes: bool,
+    pub split_resize: bool,
+    pub tab_create: bool,
+    pub tab_close: bool,
+    pub tab_focus: bool,
+    pub tab_rename: bool,
+    pub session_scoped_tab_refs: bool,
+    pub session_scoped_pane_refs: bool,
+    pub pane_split: bool,
+    pub pane_close: bool,
+    pub pane_focus: bool,
+    pub pane_input_write: bool,
+    pub pane_paste_write: bool,
+    pub raw_output_stream: bool,
+    pub rendered_viewport_stream: bool,
+    pub rendered_viewport_snapshot: bool,
+    pub rendered_scrollback_snapshot: bool,
+    pub layout_dump: bool,
+    pub layout_override: bool,
+    pub read_only_client_mode: bool,
+    pub explicit_session_save: bool,
+    pub explicit_session_restore: bool,
+    pub plugin_panes: bool,
+    pub advisory_metadata_subscriptions: bool,
+    pub independent_resize_authority: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeBackendCapabilitiesInfo {
+    pub backend: NodeBackendKind,
+    pub capabilities: NodeBackendCapabilities,
+}
