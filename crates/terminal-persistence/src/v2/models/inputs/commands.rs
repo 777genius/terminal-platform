@@ -1,0 +1,52 @@
+use super::super::super::*;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandBlockInput {
+    pub id: Option<String>,
+    pub session_id: String,
+    pub pane_id: String,
+    pub commit_id: Option<String>,
+    pub command_text: Option<String>,
+    pub display_text: Option<String>,
+    pub redacted_text: Option<String>,
+    pub command_text_source: Option<String>,
+    pub trust_level: Option<String>,
+    pub state: Option<String>,
+    pub cwd: Option<String>,
+    pub cwd_source: Option<String>,
+    pub exit_code: Option<i32>,
+    pub started_event_seq: Option<i64>,
+    pub submitted_event_seq: Option<i64>,
+    pub finished_event_seq: Option<i64>,
+    pub output_event_seq_low: Option<i64>,
+    pub output_event_seq_high: Option<i64>,
+    pub output_byte_low: Option<i64>,
+    pub output_byte_high: Option<i64>,
+    pub sensitivity_class: Option<String>,
+    pub created_at_ms: Option<i64>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandHistoryEntryInput {
+    pub id: Option<String>,
+    pub session_id: Option<String>,
+    pub pane_id: Option<String>,
+    pub command_block_id: Option<String>,
+    pub scope_kind: String,
+    pub command_text: Option<String>,
+    pub display_text: String,
+    pub redacted_text: Option<String>,
+    pub command_hash: Option<String>,
+    pub cwd: Option<String>,
+    pub shell_kind: Option<String>,
+    pub trust_level: Option<String>,
+    pub source: Option<String>,
+    pub sensitivity_class: Option<String>,
+    pub redaction_state: Option<String>,
+    pub rerun_policy: Option<String>,
+    pub first_used_at_ms: Option<i64>,
+    pub last_used_at_ms: Option<i64>,
+    pub use_count: Option<i64>,
+    pub metadata: Option<Value>,
+}
