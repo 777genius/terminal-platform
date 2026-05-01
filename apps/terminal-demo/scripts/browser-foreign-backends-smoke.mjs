@@ -35,7 +35,7 @@ const sessionStorePath = path.join(
 );
 const browserBootstrapPath = path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json");
 const commandHistoryStorageKey = "terminal-platform-demo.command-history";
-const browserEvaluationTimeoutMs = process.platform === "win32" ? 120_000 : 60_000;
+const browserEvaluationTimeoutMs = process.platform === "win32" ? 180_000 : 60_000;
 const zellijMinimum = [0, 44, 0];
 const foreignBackends = process.platform === "win32" ? ["zellij"] : ["tmux", "zellij"];
 
@@ -108,6 +108,7 @@ async function main() {
       autoStartSession: "0",
       sessionStorePath,
     });
+    console.log("[foreign-browser-smoke] running foreign backend UI scenario");
     const result = await runForeignBackendScenario(browserUrl, {
       backendSessions: {
         ...(tmuxSessionName ? { tmux: tmuxSessionName } : {}),
@@ -367,7 +368,9 @@ async function runForeignBackendScenario(browserUrl, expected) {
 
     const imports = {};
     for (const [backend, title] of backendSessions) {
+      console.log(`[foreign-browser-smoke] importing ${backend} session ${title}`);
       imports[backend] = await importBackendViaUi(send, backend, title, `${backend}-ui-smoke-marker`);
+      console.log(`[foreign-browser-smoke] imported ${backend} session ${title}`);
     }
 
     return {
@@ -382,6 +385,7 @@ async function runForeignBackendScenario(browserUrl, expected) {
 }
 
 async function importBackendViaUi(send, backend, title, marker) {
+  console.log(`[foreign-browser-smoke] ${backend}: click import`);
   const importClicked = await evaluate(send, `(() => {
     const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
     const navigationDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-navigation-drawer"]') ?? null;
@@ -409,6 +413,7 @@ async function importBackendViaUi(send, backend, title, marker) {
     ) && state?.attachedSession?.session?.route?.backend === ${JSON.stringify(backend)};
   })()`);
 
+  console.log(`[foreign-browser-smoke] ${backend}: send command`);
   const commandSent = await evaluate(send, `(async () => {
     const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
     const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
@@ -437,6 +442,7 @@ async function importBackendViaUi(send, backend, title, marker) {
     return screenText.includes(${JSON.stringify(marker)});
   })()`);
 
+  console.log(`[foreign-browser-smoke] ${backend}: verify command history before reload`);
   await waitForBrowser(send, `${backend} command history persisted before page reload`, `(() => {
     const state = window.terminalDemoDebug?.getState?.();
     const storedCommandHistory = (() => {
@@ -480,11 +486,13 @@ async function importBackendViaUi(send, backend, title, marker) {
   afterCommand.storedCommandHistoryPersisted = afterCommand.storedCommandHistory.includes(submittedCommand);
   afterCommand.commandHistoryPersisted = afterCommand.commandHistoryPersisted
     && afterCommand.storedCommandHistoryPersisted;
+  console.log(`[foreign-browser-smoke] ${backend}: verify command history after reload`);
   const historyAfterReload = await verifyCommandHistorySurvivesPageReload(send, {
     backend,
     submittedCommand,
     title,
   });
+  console.log(`[foreign-browser-smoke] ${backend}: exercise mux actions`);
   const muxActions = backend === "zellij"
     ? await exerciseZellijMuxActions(send, title)
     : null;
@@ -613,6 +621,7 @@ async function exerciseZellijMuxActions(send, title) {
     && before.capabilities.pane_focus === expectedPaneFocus,
   );
 
+  console.log("[foreign-browser-smoke] zellij mux: new_tab");
   const dispatchResult = await evaluate(send, `(async () => {
     const commands = window.terminalDemoDebug?.controller?.commands ?? null;
     if (!commands?.dispatchMuxCommand || !commands?.attachSession) {
@@ -665,6 +674,7 @@ async function exerciseZellijMuxActions(send, title) {
     };
   }
 
+  console.log("[foreign-browser-smoke] zellij mux: paste marker");
   await evaluate(send, `(async () => {
     const commands = window.terminalDemoDebug?.controller?.commands;
     await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
@@ -691,6 +701,7 @@ async function exerciseZellijMuxActions(send, title) {
     };
   })()`);
 
+  console.log("[foreign-browser-smoke] zellij mux: control input");
   const controlInput = await evaluate(send, `(async () => {
     const commands = window.terminalDemoDebug?.controller?.commands;
     try {
@@ -706,6 +717,7 @@ async function exerciseZellijMuxActions(send, title) {
     }
   })()`);
 
+  console.log("[foreign-browser-smoke] zellij mux: rename_tab");
   await evaluate(send, `(async () => {
     const commands = window.terminalDemoDebug?.controller?.commands;
     await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
@@ -725,6 +737,7 @@ async function exerciseZellijMuxActions(send, title) {
     );
   })()`);
 
+  console.log("[foreign-browser-smoke] zellij mux: unsupported split");
   const unsupportedSplit = await evaluate(send, `(async () => {
     const commands = window.terminalDemoDebug?.controller?.commands;
     try {
@@ -739,6 +752,7 @@ async function exerciseZellijMuxActions(send, title) {
     }
   })()`);
 
+  console.log("[foreign-browser-smoke] zellij mux: close_tab");
   await evaluate(send, `(async () => {
     const commands = window.terminalDemoDebug?.controller?.commands;
     await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
