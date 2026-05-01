@@ -2,6 +2,125 @@ use super::super::{prelude::*, support::*};
 
 #[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_dedupes_retried_command_history_submits_by_client_event_id() {
+    let fixture = daemon_fixture_with_daemon(
+        "bootstrap-v2-command-history-retry",
+        isolated_daemon("bootstrap-v2-command-history-retry"),
+    )
+    .expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec {
+                title: Some("history-retry-shell".to_string()),
+                launch: Some(cat_launch_spec()),
+            },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    let marker = format!("TERMINAL_HISTORY_RETRY_{}", created.session.session_id.0.simple());
+    let command = format!("echo {marker}");
+    let client_event_id = format!("history-retry-{}", created.session.session_id.0.simple());
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id,
+                data: submitted_input(&command),
+                client_event_id: Some(client_event_id.clone()),
+            }),
+        )
+        .await
+        .expect("first submit should dispatch");
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, &marker).await;
+    let first_entry = wait_for_command_history_entry(
+        &fixture,
+        Some(created.session.session_id),
+        20,
+        "first command history submit",
+        |entry| {
+            entry.session_id == Some(created.session.session_id)
+                && entry.pane_id == Some(pane_id)
+                && entry.display_text == command
+                && entry.use_count == 1
+        },
+    )
+    .await;
+
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id,
+                data: submitted_input(&command),
+                client_event_id: Some(client_event_id),
+            }),
+        )
+        .await
+        .expect("retried submit should dispatch");
+    sleep(Duration::from_millis(300)).await;
+    let after_retry = fixture
+        .client
+        .command_history(Some(created.session.session_id), Some(20))
+        .await
+        .expect("command history should load after retry");
+    let retried_entries = after_retry
+        .entries
+        .iter()
+        .filter(|entry| entry.display_text == command)
+        .collect::<Vec<_>>();
+
+    assert_eq!(first_entry.use_count, 1);
+    assert_eq!(retried_entries.len(), 1);
+    assert_eq!(retried_entries[0].use_count, 1);
+
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id,
+                data: submitted_input(&command),
+                client_event_id: Some(format!(
+                    "history-repeat-{}",
+                    created.session.session_id.0.simple()
+                )),
+            }),
+        )
+        .await
+        .expect("new submit should dispatch");
+    let repeated_entry = wait_for_command_history_entry(
+        &fixture,
+        Some(created.session.session_id),
+        20,
+        "repeated command history submit",
+        |entry| {
+            entry.session_id == Some(created.session.session_id)
+                && entry.pane_id == Some(pane_id)
+                && entry.display_text == command
+                && entry.use_count == 2
+        },
+    )
+    .await;
+
+    assert_eq!(repeated_entry.use_count, 2);
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(any(unix, windows))]
+#[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_persists_command_and_output_history_across_daemon_restart() {
     let store_path = unique_sqlite_path("bootstrap-v2-history-restart");
     let fixture = daemon_fixture_with_daemon(

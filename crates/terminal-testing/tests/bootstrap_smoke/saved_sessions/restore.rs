@@ -20,6 +20,44 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     let first_pane = initial.tabs[0].focused_pane.expect("focused pane should exist");
 
     wait_for_screen_line(&fixture, created.session.session_id, first_pane, "ready").await;
+    let history_marker =
+        format!("TERMINAL_RESTORE_HISTORY_{}", created.session.session_id.0.simple());
+    let history_command = format!("echo {history_marker}");
+    fixture
+        .client
+        .dispatch(
+            created.session.session_id,
+            MuxCommand::SendInput(SendInputSpec {
+                pane_id: first_pane,
+                data: submitted_input(&history_command),
+                client_event_id: Some(format!(
+                    "restore-history-{}",
+                    created.session.session_id.0.simple()
+                )),
+            }),
+        )
+        .await
+        .expect("history marker input should dispatch");
+    wait_for_screen_line(&fixture, created.session.session_id, first_pane, &history_marker).await;
+    let captured_command = wait_for_command_history_entry(
+        &fixture,
+        Some(created.session.session_id),
+        20,
+        "source command history before restore",
+        |entry| {
+            entry.session_id == Some(created.session.session_id)
+                && entry.pane_id == Some(first_pane)
+                && entry.display_text == history_command
+        },
+    )
+    .await;
+    let captured_output = wait_for_pane_history_payload(
+        &fixture,
+        created.session.session_id,
+        first_pane,
+        history_marker.as_bytes(),
+    )
+    .await;
     fixture
         .client
         .dispatch(
@@ -80,6 +118,25 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     wait_for_screen_line(&fixture, restored.session.session_id, restored_first_pane, "ready").await;
     wait_for_screen_line(&fixture, restored.session.session_id, restored_second_pane, "ready")
         .await;
+    let command_after_restore = wait_for_command_history_entry(
+        &fixture,
+        Some(created.session.session_id),
+        20,
+        "source command history after restore",
+        |entry| {
+            entry.session_id == Some(created.session.session_id)
+                && entry.pane_id == Some(first_pane)
+                && entry.display_text == history_command
+        },
+    )
+    .await;
+    let output_after_restore = wait_for_pane_history_payload(
+        &fixture,
+        created.session.session_id,
+        first_pane,
+        history_marker.as_bytes(),
+    )
+    .await;
 
     assert_eq!(restored.saved_session_id, created.session.session_id);
     assert_ne!(restored.session.session_id, created.session.session_id);
@@ -106,10 +163,15 @@ async fn bootstrap_smoke_restores_saved_native_session_via_daemon_api() {
     assert!(restored_v2.restores_tab_titles);
     assert!(restored_v2.uses_saved_launch_spec);
     assert!(!restored_v2.preserves_process_state);
+    assert!(!restored_v2.evidence_refs.is_empty());
     assert_ne!(
         restored_v2.history_replay_state,
         terminal_protocol::HistoryReplayState::NotAvailable
     );
+    assert_eq!(captured_command.display_text, history_command);
+    assert_eq!(command_after_restore.display_text, history_command);
+    assert_eq!(captured_output.replay_strategy, output_after_restore.replay_strategy);
+    assert!(!output_after_restore.segments.is_empty());
     assert_eq!(restored_topology.tabs.len(), 2);
     assert_eq!(collect_pane_ids(&first_restored_tab.root).len(), 2);
     assert_eq!(collect_pane_ids(&second_restored_tab.root).len(), 1);
