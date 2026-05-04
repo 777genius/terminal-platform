@@ -14,7 +14,7 @@ zellij-backend = ["terminal-node/zellij-backend", "terminal-daemon/zellij-backen
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-napi = { version = "3.8.5", features = ["async", "serde-json"] }
+napi = { version = "3.8.6", features = ["async", "serde-json"] }
 napi-derive = "3.5.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
