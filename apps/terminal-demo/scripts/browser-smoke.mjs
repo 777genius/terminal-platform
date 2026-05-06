@@ -787,7 +787,7 @@ async function main() {
       || Math.max(0, ...result.afterCommand.historyChipHeights) > 38
       || !result.afterCommand.historyChipIds.every((id) => /^history-\d+$/.test(id))
       || !result.afterCommand.historyChipAriaLabels.every((label) => label.startsWith("Use recent command "))
-      || (!result.afterCommand.sequenceAdvanced && !result.afterCommand.containsCommandOutput)
+      || !result.afterCommand.containsCommandOutput
     ) {
       throw new Error(`Command lane did not advance the focused screen: ${JSON.stringify(result.afterCommand)}`);
     }
@@ -2629,7 +2629,10 @@ async function runSmokeScenario(browserUrl) {
 
       return Boolean(
         state.containsCommandOutput
-        || (initialSequence !== null && state.focusedSequence !== initialSequence),
+        && state.commandInputFocused
+        && state.commandInputEmpty
+        && state.commandCursorAtEnd
+        && state.commandHistoryLatest?.includes("browser-smoke-ok")
       );
     });
     afterCommand.storedCommandHistoryIncludesPrimary = afterCommand.storedCommandHistory

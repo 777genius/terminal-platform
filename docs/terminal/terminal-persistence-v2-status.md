@@ -1,0 +1,375 @@
+# Terminal Persistence v2 - Status and Handoff
+
+**Last updated**: 2026-05-06  
+**Branch**: `codex/terminal-persistence-v2-20260430`  
+**Pull request**: <https://github.com/777genius/terminal-platform/pull/5>  
+**Verified implementation commit before closeout docs/fix**: `c1a1940410fa8672ff6ec3d558395812f5096fb4`  
+**Primary plan**: [terminal-persistence-v2-implementation-plan.md](./terminal-persistence-v2-implementation-plan.md)
+
+## Executive status
+
+Terminal Persistence v2 is implemented on the PR branch and has been repeatedly verified on Windows with real local launches.
+
+The most important verified behavior:
+
+- Native terminal sessions persist saved session metadata and command/output history.
+- Command/output history survives daemon restart.
+- Retried command history submissions are deduped by `client_event_id`.
+- Command history is scoped by session.
+- Native pane/tab lifecycle works through dispatch.
+- zellij sessions can be imported and controlled through the foreign backend surface.
+- The browser demo works with real Chrome/CDP, real browser host, real terminal daemon, Windows `cmd.exe`, and zellij.
+- The browser UI command history is checked before and after reload.
+- The browser smoke command-lane assertion now waits for real visible command output, not only for an intermediate screen sequence bump.
+
+Overall local confidence after repeated Windows runs: 🎯 9/10, 🛡️ 9/10.
+
+## What was implemented
+
+### Persistence and history
+
+- Added Terminal Persistence v2 storage flow around saved sessions and command/output history.
+- Added durable command/output history behavior across daemon restart.
+- Added history dedupe behavior for retried submits using `client_event_id`.
+- Added session scoping so commands from one session do not leak into another session history.
+- Added explicit saved-session restore compatibility/degraded semantics in API-facing behavior.
+- Preserved existing restore boundary: full process state is not resurrected. The current implementation restores persisted session/history data and reports compatibility/degraded semantics explicitly.
+
+### Runtime and Windows reliability
+
+- Fixed input submit timing so command history capture is awaited after UI input instead of only becoming visible after a later command.
+- Hardened Windows browser bootstrap and smoke coverage.
+- Improved Windows working directory launch behavior for `cmd.exe`.
+- Stabilized Windows process cleanup behavior around browser host and runtime temp artifacts.
+- Verified Node is on the updated runtime used for the current test runs: `v24.15.0`, npm `11.12.1`.
+
+### zellij support
+
+- Added/verified zellij import surface coverage.
+- Added zellij command history smoke coverage through the browser foreign-backend flow.
+- Mapped Windows zellij paste dispatch to reliable targeted input actions instead of the flaky CLI paste path.
+- Added browser foreign smoke diagnostics and longer operation budgets for slow Windows zellij actions.
+- Stabilized zellij browser paste coverage by targeting the already focused imported pane. Creating, renaming and closing zellij tabs are tested separately.
+- Hardened native browser smoke so `echo browser-smoke-ok` must appear on the focused screen and the command dock must settle before the test continues.
+
+Important zellij nuance:
+
+- On Windows, sending paste into a newly-created zellij tab/pane through the zellij CLI can hang. The stable user-facing path currently verified is paste/input into the focused imported pane, with tab lifecycle actions covered independently.
+
+### E2E and smoke coverage
+
+- Added and hardened browser smoke coverage for:
+  - Auto-start session.
+  - Stale auto-start URL recovery.
+  - Browser host restart recovery.
+  - Explicit launch.
+- Added and hardened browser foreign-backend smoke coverage for:
+  - zellij session import.
+  - Sending command input.
+  - Command history before reload.
+  - Command history after reload.
+  - zellij paste into focused pane.
+  - zellij `new_tab`.
+  - zellij control input.
+  - zellij `rename_tab`.
+  - unsupported split behavior.
+  - zellij `close_tab`.
+
+## Verified local test matrix
+
+These commands have passed on Windows during the closeout verification cycle.
+
+### Rust real bootstrap and persistence
+
+```powershell
+cargo test -p terminal-testing --test bootstrap_smoke daemon_native -- --nocapture
+```
+
+Result: `9 passed`.
+
+Verified:
+
+- Empty daemon exposure.
+- Dynamic backend capability reporting.
+- Request/reply roundtrip.
+- Live PTY input/output.
+- Surface updates.
+- Surface updates for all panes after resize.
+- Topology subscriptions.
+- Explicit subscription lane close.
+- Native input flush without requiring a follow-up command.
+
+```powershell
+cargo test -p terminal-testing --test bootstrap_smoke saved_sessions -- --nocapture
+```
+
+Result: `10 passed`.
+
+Verified:
+
+- Save native session snapshot.
+- List/load saved sessions.
+- Delete saved sessions.
+- Restore saved native session.
+- Report incompatible saved session manifest.
+- Prune saved sessions.
+- Overwrite saved session snapshot on resave.
+- Persist command/output history across daemon restart.
+- Dedupe retried command history submits by `client_event_id`.
+- Scope command history by session.
+
+```powershell
+cargo test -p terminal-testing --test bootstrap_smoke native_layout -- --nocapture
+```
+
+Result: `4 passed`.
+
+Verified:
+
+- Override native layout through dispatch.
+- Native pane lifecycle through dispatch.
+- Resize split panes through layout ratios.
+- Rapid native tab focus churn.
+
+```powershell
+cargo test -p terminal-testing --test bootstrap_smoke zellij::import_surface -- --nocapture
+```
+
+Result: `1 passed`.
+
+Verified:
+
+- Real zellij session discovery.
+- zellij import surface.
+- zellij mux surface behavior covered by the Rust bootstrap harness.
+
+```powershell
+cargo test -p terminal-backend-zellij --lib
+```
+
+Result: `16 passed`.
+
+Verified:
+
+- zellij probe parsing.
+- rich/legacy surface parsing.
+- route row parsing.
+- snapshot construction.
+- targeted dispatch mapping.
+- paste mapping to target terminal pane.
+- explicit rejects for unsupported/unsafe actions.
+
+### Browser real smoke
+
+```powershell
+npm run smoke:browser
+```
+
+Result: passed.
+
+Verified with real Chrome/CDP, browser host and terminal daemon:
+
+- Auto-start scenario.
+- Stale auto-start URL scenario.
+- Browser host restart recovery.
+- Explicit launch scenario.
+
+```powershell
+npm run smoke:browser:foreign
+```
+
+Result: passed.
+
+Verified with real Chrome/CDP and zellij `0.44.2`:
+
+- Import zellij session.
+- Send command.
+- Command history before reload.
+- Command history after reload.
+- zellij paste marker through focused browser screen.
+- zellij new tab.
+- zellij control input.
+- zellij rename tab.
+- unsupported split rejection.
+- zellij close tab.
+
+### JS, renderer and static gates
+
+```powershell
+npm test
+```
+
+Result: `60 passed`.
+
+```powershell
+npm run test:offline
+```
+
+Result: `12 passed`; renderer static preview bundle and layout contracts verified.
+
+```powershell
+cargo fmt --check
+git diff --check
+```
+
+Result: passed.
+
+## GitHub PR/CD status
+
+Current PR check status observed through `gh`:
+
+```powershell
+gh pr checks 5
+```
+
+Observed result:
+
+- `CodeRabbit` - `pass`
+
+GitHub Actions workflow status observed through:
+
+```powershell
+gh run list --branch codex/terminal-persistence-v2-20260430 --limit 10
+gh run view 25236982891 --json status,conclusion,event,headBranch,headSha,displayTitle,url,jobs
+```
+
+Observed result for current HEAD `c1a1940410fa8672ff6ec3d558395812f5096fb4`:
+
+- workflow: `ci`
+- status: `completed`
+- conclusion: `action_required`
+- jobs: empty
+- failed logs: unavailable because no jobs started
+
+Attempted action:
+
+```powershell
+gh run rerun 25236982891
+```
+
+GitHub response:
+
+```text
+run 25236982891 cannot be rerun; Must have admin rights to Repository.
+```
+
+Interpretation:
+
+- There is no failing CI/CD job output for the current HEAD.
+- The workflow is blocked by repository-level GitHub Actions approval/admin permission.
+- A maintainer/admin must approve or rerun the workflow from GitHub Actions for it to become fully green.
+- Until that external approval happens, local verification is green and PR checks visible through `gh pr checks` are green, but GitHub Actions cannot be honestly called green.
+
+## Known limitations and follow-ups
+
+### 0. Long zellij checks are slow on Windows
+
+Status: expected test cost.
+
+`cargo test -p terminal-testing --test bootstrap_smoke zellij::import_surface -- --nocapture` is a real zellij scenario and can take about five minutes on this Windows machine. Run it separately from browser/zellij smoke to avoid false timeouts from process and file-lock contention.
+
+### 1. GitHub Actions needs maintainer approval
+
+Status: external blocker.
+
+The branch is pushed and PR check `CodeRabbit` passes. GitHub Actions `ci` does not start jobs and returns `action_required`. This requires repository admin/maintainer action.
+
+Recommended maintainer action:
+
+1. Open <https://github.com/777genius/terminal-platform/actions/runs/25236982891>.
+2. Approve/run the workflow if GitHub shows an approval prompt.
+3. If needed, rerun the workflow after approval.
+4. Re-check:
+
+```powershell
+gh pr checks 5
+gh run list --branch codex/terminal-persistence-v2-20260430 --limit 5
+```
+
+### 2. zellij paste into newly-created tab pane is not treated as stable on Windows
+
+Status: intentionally not promised.
+
+The tested stable path is paste/input into the focused imported pane. zellij tab lifecycle is covered separately. Do not reintroduce a browser smoke assertion that pastes into a freshly-created zellij tab pane through the CLI on Windows unless the underlying zellij behavior is proven stable or the adapter gains a stronger targeting mechanism.
+
+### 3. Full process resurrection is not implemented
+
+Status: out of current PR scope.
+
+The implementation persists session/history data and restore semantics. It does not resurrect the exact old process tree after restart. This is consistent with the current explicit degraded/compatibility semantics.
+
+### 4. Fullscreen/TUI local smoke depends on tools
+
+Status: environment-dependent.
+
+The fullscreen smoke tests are present, but local execution can skip deeper TUI behavior when `vim`, `less` and `fzf` are missing. A machine with those tools should run:
+
+```powershell
+cargo test -p terminal-testing --test bootstrap_smoke fullscreen -- --nocapture
+```
+
+## Recommended final verification before merge
+
+Run these in order on Windows:
+
+```powershell
+cargo test -p terminal-testing --test bootstrap_smoke daemon_native -- --nocapture
+cargo test -p terminal-testing --test bootstrap_smoke saved_sessions -- --nocapture
+cargo test -p terminal-testing --test bootstrap_smoke native_layout -- --nocapture
+cargo test -p terminal-testing --test bootstrap_smoke zellij::import_surface -- --nocapture
+cargo test -p terminal-backend-zellij --lib
+```
+
+Then:
+
+```powershell
+cd apps\terminal-demo
+npm test
+npm run test:offline
+npm run smoke:browser
+npm run smoke:browser:foreign
+```
+
+Finally:
+
+```powershell
+cd ..\..
+cargo fmt --check
+git diff --check
+gh pr checks 5
+gh run list --branch codex/terminal-persistence-v2-20260430 --limit 5
+```
+
+Acceptance rule:
+
+- Local gates above must pass.
+- `gh pr checks 5` must show no failing required checks.
+- GitHub Actions `ci` must be either green or explicitly documented as blocked by maintainer approval with no jobs started.
+
+## Next agent checklist
+
+1. Confirm branch:
+
+```powershell
+git status --short --branch
+git rev-parse HEAD
+```
+
+2. Confirm PR head matches local HEAD:
+
+```powershell
+gh pr view 5 --json headRefOid,headRefName,url,statusCheckRollup
+```
+
+3. If GitHub Actions still says `action_required`, do not spend time debugging nonexistent failed jobs. It is an approval/admin gate unless jobs exist with logs.
+
+4. If adding code changes, rerun at least:
+
+```powershell
+cargo test -p terminal-testing --test bootstrap_smoke saved_sessions -- --nocapture
+cargo test -p terminal-testing --test bootstrap_smoke zellij::import_surface -- --nocapture
+npm run smoke:browser:foreign
+npm test
+```
+
+5. Keep zellij smoke paste targeted at the focused imported pane unless Windows zellij targeting behavior is proven more reliable.
