@@ -74,6 +74,8 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
     assert!(tmux.capabilities.rendered_viewport_stream);
     assert_eq!(zellij.backend, BackendKind::Zellij);
     assert!(zellij.capabilities.read_only_client_mode);
+    assert!(!zellij.capabilities.explicit_session_save);
+    assert!(!zellij.capabilities.explicit_session_restore);
     assert!(!zellij.capabilities.split_resize);
     assert!(!zellij.capabilities.pane_split);
     if zellij.capabilities.rendered_viewport_snapshot {

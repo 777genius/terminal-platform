@@ -60,6 +60,8 @@ async fn fetches_backend_capabilities() {
     assert!(native.capabilities.rendered_viewport_stream);
     assert_eq!(zellij.backend, BackendKind::Zellij);
     assert!(zellij.capabilities.read_only_client_mode);
+    assert!(!zellij.capabilities.explicit_session_save);
+    assert!(!zellij.capabilities.explicit_session_restore);
 
     server.shutdown().await.expect("server shutdown should succeed");
 }

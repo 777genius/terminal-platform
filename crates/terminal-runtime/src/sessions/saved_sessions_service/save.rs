@@ -18,7 +18,7 @@ impl SavedSessionsService<'_> {
             })?;
         if descriptor.route.backend != BackendKind::Native {
             return Err(BackendError::unsupported(
-                "save session is only implemented for native sessions in v1",
+                "saved-session persistence currently supports native runtime sessions only; imported multiplexor sessions expose live control history but not saved-session restore guarantees",
                 DegradedModeReason::UnsupportedByBackend,
             ));
         }

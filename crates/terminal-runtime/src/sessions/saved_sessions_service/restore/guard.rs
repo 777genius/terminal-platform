@@ -16,7 +16,7 @@ pub(super) fn validate_native_restore(saved: &SavedNativeSession) -> Result<(), 
 
     if saved.route.backend != BackendKind::Native {
         return Err(BackendError::unsupported(
-            "restore saved session is only implemented for native sessions in v1",
+            "saved-session restore currently supports native runtime sessions only; imported multiplexor sessions do not claim saved-session replay guarantees",
             DegradedModeReason::UnsupportedByBackend,
         ));
     }

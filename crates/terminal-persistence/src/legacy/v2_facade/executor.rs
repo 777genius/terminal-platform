@@ -35,7 +35,7 @@ impl SqliteSessionStore {
         T: Send + 'static,
     {
         let executor = self.v2_executor()?;
-        executor.execute(move |_connection| operation())
+        executor.execute(operation)
     }
 
     pub(in crate::legacy) fn v2_executor(
