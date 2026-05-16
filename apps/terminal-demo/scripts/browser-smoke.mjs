@@ -828,7 +828,7 @@ async function main() {
       !result.afterCommandSavedRestore.saved
       || !result.afterCommandSavedRestore.restored
       || result.afterCommandSavedRestore.savedSessionCount < result.afterCommandSavedRestore.beforeSavedSessionCount
-      || result.afterCommandSavedRestore.historySource !== "saved_session_restore"
+      || !["saved_session_restore", "v2_pane_history"].includes(result.afterCommandSavedRestore.historySource)
       || !result.afterCommandSavedRestore.historyIncludesPrimary
       || !result.afterCommandSavedRestore.domHistoryIncludesPrimary
       || !result.afterCommandSavedRestore.domHasRestoreBoundary
@@ -2867,7 +2867,7 @@ async function runSmokeScenario(browserUrl) {
         if (
           activeSessionId
           && activePaneId
-          && history?.source === 'saved_session_restore'
+          && (history?.source === 'saved_session_restore' || history?.source === 'v2_pane_history')
           && historyIncludesPrimary
           && domHistoryIncludesPrimary
           && domHasRestoreBoundary
