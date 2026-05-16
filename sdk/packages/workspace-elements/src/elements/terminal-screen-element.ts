@@ -64,6 +64,7 @@ const TERMINAL_SCREEN_SEARCH_COUNT_ID = "tp-screen-search-count";
 const RESTORED_HISTORY_BOUNDARY_TEXT = "--- restored history above; live process below ---";
 const RESTORED_HISTORY_PARTIAL_TEXT =
   "--- restored history is partial; more persisted output is available ---";
+const HISTORY_AUTO_LOAD_TOP_THRESHOLD_PX = 24;
 
 export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -862,7 +863,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         this.toggleFollowOutput();
         return;
       case TERMINAL_SCREEN_ACTION_IDS.loadMoreHistory:
-        void this.loadMoreHistory();
+        void this.loadMoreHistory({ preserveScrollAnchor: true });
         return;
       case TERMINAL_SCREEN_ACTION_IDS.scrollLatest:
         this.scrollLatest();
@@ -873,7 +874,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     }
   }
 
-  private async loadMoreHistory(): Promise<void> {
+  private async loadMoreHistory(
+    options: { preserveScrollAnchor?: boolean; viewport?: HTMLElement } = {},
+  ): Promise<void> {
     if (this.historyLoadState === "loading") {
       return;
     }
@@ -885,8 +888,19 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
     this.followOutput = false;
     this.setHistoryLoadState("loading");
+    const anchor = options.preserveScrollAnchor
+      ? captureHistoryScrollAnchor(
+          options.viewport
+            ?? this.shadowRoot?.querySelector<HTMLElement>('[data-testid="tp-screen-viewport"]')
+            ?? null,
+        )
+      : null;
     try {
       const loaded = await this.kernel.commands.loadMorePaneHistory(controls.activePaneId);
+      if (loaded && anchor) {
+        await this.updateComplete;
+        restoreHistoryScrollAnchor(anchor);
+      }
       this.setHistoryLoadState(loaded ? "idle" : "failed");
     } catch {
       this.setHistoryLoadState("failed");
@@ -1174,6 +1188,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     if (!isViewportAtBottom(viewport)) {
       this.followOutput = false;
     }
+
+    if (shouldAutoLoadMoreHistoryFromViewport(
+      viewport,
+      resolveTerminalScreenControlState(this.snapshot).canLoadMoreHistory,
+      this.historyLoadState,
+    )) {
+      void this.loadMoreHistory({ preserveScrollAnchor: true, viewport });
+    }
   }
 
   private handleViewportKeydown(event: KeyboardEvent): void {
@@ -1420,6 +1442,50 @@ function renderHighlightedSegments(
 
 function isViewportAtBottom(viewport: HTMLElement): boolean {
   return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2;
+}
+
+export function shouldAutoLoadMoreHistoryFromViewport(
+  viewport: Pick<HTMLElement, "scrollTop">,
+  canLoadMoreHistory: boolean,
+  historyLoadState: TerminalScreenHistoryLoadState,
+): boolean {
+  return canLoadMoreHistory
+    && historyLoadState === "idle"
+    && viewport.scrollTop <= HISTORY_AUTO_LOAD_TOP_THRESHOLD_PX;
+}
+
+interface HistoryScrollAnchor {
+  readonly viewport: HTMLElement;
+  readonly scrollHeight: number;
+  readonly scrollTop: number;
+}
+
+function captureHistoryScrollAnchor(viewport: HTMLElement | null): HistoryScrollAnchor | null {
+  if (!viewport) {
+    return null;
+  }
+
+  return {
+    viewport,
+    scrollHeight: viewport.scrollHeight,
+    scrollTop: viewport.scrollTop,
+  };
+}
+
+function restoreHistoryScrollAnchor(anchor: HistoryScrollAnchor): void {
+  anchor.viewport.scrollTop = resolveScrollTopAfterHistoryPrepend(
+    anchor.scrollHeight,
+    anchor.scrollTop,
+    anchor.viewport.scrollHeight,
+  );
+}
+
+export function resolveScrollTopAfterHistoryPrepend(
+  previousScrollHeight: number,
+  previousScrollTop: number,
+  nextScrollHeight: number,
+): number {
+  return Math.max(0, previousScrollTop + Math.max(0, nextScrollHeight - previousScrollHeight));
 }
 
 function createTerminalClientEventId(prefix: string): string {

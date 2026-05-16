@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
-import { createVisibleOutputLines } from "./terminal-screen-element.js";
+import {
+  createVisibleOutputLines,
+  resolveScrollTopAfterHistoryPrepend,
+  shouldAutoLoadMoreHistoryFromViewport,
+} from "./terminal-screen-element.js";
 
 type FocusedScreen = NonNullable<WorkspaceSnapshot["attachedSession"]>["focused_screen"];
 type HistoricalPane = NonNullable<WorkspaceSnapshot["historicalPanes"]>[string];
@@ -36,6 +40,40 @@ describe("terminal screen visible output", () => {
       text: "--- restored history is partial; more persisted output is available ---",
       source: "boundary",
     });
+  });
+
+  it("auto-loads older history only near the top while idle", () => {
+    expect(shouldAutoLoadMoreHistoryFromViewport(
+      { scrollTop: 0 } as HTMLElement,
+      true,
+      "idle",
+    )).toBe(true);
+    expect(shouldAutoLoadMoreHistoryFromViewport(
+      { scrollTop: 24 } as HTMLElement,
+      true,
+      "idle",
+    )).toBe(true);
+    expect(shouldAutoLoadMoreHistoryFromViewport(
+      { scrollTop: 25 } as HTMLElement,
+      true,
+      "idle",
+    )).toBe(false);
+    expect(shouldAutoLoadMoreHistoryFromViewport(
+      { scrollTop: 0 } as HTMLElement,
+      false,
+      "idle",
+    )).toBe(false);
+    expect(shouldAutoLoadMoreHistoryFromViewport(
+      { scrollTop: 0 } as HTMLElement,
+      true,
+      "loading",
+    )).toBe(false);
+  });
+
+  it("preserves the viewport anchor after prepending older history", () => {
+    expect(resolveScrollTopAfterHistoryPrepend(400, 12, 900)).toBe(512);
+    expect(resolveScrollTopAfterHistoryPrepend(400, 0, 900)).toBe(500);
+    expect(resolveScrollTopAfterHistoryPrepend(400, 12, 350)).toBe(12);
   });
 });
 
