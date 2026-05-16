@@ -85,6 +85,10 @@ export interface WorkspaceHistoricalPaneSnapshot {
   capturedAtMs: bigint;
   hasGaps: boolean;
   hasMoreSegments: boolean;
+  fromEventSeq: bigint;
+  nextEventSeq: bigint | null;
+  segmentCount: number;
+  loadedPayloadBytes: bigint;
 }
 
 export interface WorkspaceSnapshot {

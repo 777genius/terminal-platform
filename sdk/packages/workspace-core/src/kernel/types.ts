@@ -47,6 +47,7 @@ export interface WorkspaceCommands {
   deleteSavedSession(sessionId: SessionId): Promise<void>;
   pruneSavedSessions(keepLatest: number): Promise<PruneSavedSessionsResult>;
   dispatchMuxCommand(sessionId: SessionId, command: MuxCommand): Promise<MuxCommandResult>;
+  loadMorePaneHistory(paneId?: PaneId | null): Promise<boolean>;
   openSubscription(
     sessionId: SessionId,
     spec: SubscriptionSpec,

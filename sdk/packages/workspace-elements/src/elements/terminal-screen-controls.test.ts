@@ -88,6 +88,10 @@ describe("terminal screen controls", () => {
           capturedAtMs: 1000n,
           hasGaps: false,
           hasMoreSegments: false,
+          fromEventSeq: 1n,
+          nextEventSeq: null,
+          segmentCount: 0,
+          loadedPayloadBytes: 0n,
         },
         "pane-2": {
           sessionId: "other-session",
@@ -101,6 +105,10 @@ describe("terminal screen controls", () => {
           capturedAtMs: 1000n,
           hasGaps: false,
           hasMoreSegments: false,
+          fromEventSeq: 1n,
+          nextEventSeq: null,
+          segmentCount: 0,
+          loadedPayloadBytes: 0n,
         },
       },
     }));

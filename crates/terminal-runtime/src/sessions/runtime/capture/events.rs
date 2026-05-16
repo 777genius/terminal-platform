@@ -37,7 +37,11 @@ pub(super) fn persist_backend_capability_report(
         expires_at_ms: None,
     };
     let store = persistence.clone();
-    let _ = tokio::task::spawn_blocking(move || store.record_v2_backend_capability_report(input));
+    let _ = tokio::task::spawn_blocking(move || {
+        if let Err(error) = store.record_v2_backend_capability_report(input) {
+            eprintln!("terminal-runtime: failed to persist v2 backend capability report - {error}");
+        }
+    });
 }
 
 pub(super) async fn persist_history_gap(
@@ -64,7 +68,15 @@ pub(super) async fn persist_history_gap(
         occurred_at_ms: None,
     };
     let store = persistence.clone();
-    let _ = tokio::task::spawn_blocking(move || store.record_v2_history_gap(input)).await;
+    match tokio::task::spawn_blocking(move || store.record_v2_history_gap(input)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            eprintln!("terminal-runtime: failed to persist v2 history gap - {error}");
+        }
+        Err(error) => {
+            eprintln!("terminal-runtime: v2 history gap persistence task failed - {error}");
+        }
+    }
 }
 
 pub(super) async fn persist_topology_snapshot(
@@ -80,7 +92,15 @@ pub(super) async fn persist_topology_snapshot(
         topology,
     };
     let store = persistence.clone();
-    let _ = tokio::task::spawn_blocking(move || store.record_v2_topology_snapshot(input)).await;
+    match tokio::task::spawn_blocking(move || store.record_v2_topology_snapshot(input)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            eprintln!("terminal-runtime: failed to persist v2 topology snapshot - {error}");
+        }
+        Err(error) => {
+            eprintln!("terminal-runtime: v2 topology snapshot persistence task failed - {error}");
+        }
+    }
 }
 
 pub(super) async fn persist_screen_snapshot(
@@ -100,7 +120,15 @@ pub(super) async fn persist_screen_snapshot(
         capture_semantics: Some("rendered_plaintext_snapshot".to_string()),
     };
     let store = persistence.clone();
-    let _ = tokio::task::spawn_blocking(move || store.record_v2_screen_snapshot(input)).await;
+    match tokio::task::spawn_blocking(move || store.record_v2_screen_snapshot(input)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            eprintln!("terminal-runtime: failed to persist v2 screen snapshot - {error}");
+        }
+        Err(error) => {
+            eprintln!("terminal-runtime: v2 screen snapshot persistence task failed - {error}");
+        }
+    }
 }
 
 fn persistence_route_kind(route: &SessionRoute) -> String {

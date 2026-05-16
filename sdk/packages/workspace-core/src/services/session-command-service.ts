@@ -27,6 +27,10 @@ import type { WorkspaceHistoricalPaneSnapshot } from "../read-models/workspace-s
 import type { CatalogService } from "./catalog-service.js";
 import type { ServiceContext } from "./service-context.js";
 
+const PANE_HISTORY_INITIAL_EVENT_SEQ = 1n;
+const PANE_HISTORY_PAGE_MAX_SEGMENTS = 256;
+const PANE_HISTORY_PAGE_MAX_BYTES = 1024 * 1024;
+
 export class SessionCommandService {
   readonly #context: ServiceContext;
   readonly #catalogService: CatalogService;
@@ -129,7 +133,7 @@ export class SessionCommandService {
           restored.session.session_id,
         );
         const historicalPanes = savedSession && attachedSession
-          ? buildRestoredHistoricalPanes(savedSession, attachedSession, this.#context.now())
+          ? await this.#buildRestoredHistoricalPanes(transport, savedSession, attachedSession)
           : {};
 
         this.#context.updateSnapshot((snapshot) => ({
@@ -192,6 +196,78 @@ export class SessionCommandService {
         return await transport.dispatchMuxCommand(sessionId, command);
       } catch (error) {
         throw this.#handleTransportError(error, "failed to dispatch mux command");
+      }
+    });
+  }
+
+  loadMorePaneHistory(paneId?: PaneId | null): Promise<boolean> {
+    return this.#lane.enqueue(async () => {
+      const snapshot = this.#context.getSnapshot();
+      const targetPaneId = paneId ?? snapshot.selection.activePaneId;
+      if (!targetPaneId) {
+        return false;
+      }
+
+      const existingHistory = snapshot.historicalPanes?.[targetPaneId];
+      if (!existingHistory?.hasMoreSegments || !existingHistory.nextEventSeq) {
+        return false;
+      }
+
+      try {
+        const transport = await this.#context.ensureTransport();
+        if (!transport.getPaneHistory) {
+          return false;
+        }
+
+        const history = await transport.getPaneHistory(
+          existingHistory.sourceSessionId,
+          existingHistory.sourcePaneId,
+          paneHistoryPageRequest(existingHistory.nextEventSeq),
+        );
+        const nextPage = buildHydratedHistoricalPane(history, this.#context.now(), {
+          identity: {
+            sessionId: existingHistory.sessionId,
+            paneId: existingHistory.paneId,
+            sourceSessionId: existingHistory.sourceSessionId,
+            sourcePaneId: existingHistory.sourcePaneId,
+          },
+          includeSnapshotFallback: false,
+        });
+
+        if (!nextPage) {
+          return false;
+        }
+
+        this.#context.updateSnapshot((current) => {
+          const currentHistory = current.historicalPanes?.[targetPaneId];
+          if (
+            !currentHistory
+            || currentHistory.sourceSessionId !== existingHistory.sourceSessionId
+            || currentHistory.sourcePaneId !== existingHistory.sourcePaneId
+            || currentHistory.nextEventSeq !== existingHistory.nextEventSeq
+          ) {
+            return current;
+          }
+
+          return {
+            ...current,
+            historicalPanes: {
+              ...(current.historicalPanes ?? {}),
+              [targetPaneId]: mergeHistoricalPanePage(currentHistory, nextPage),
+            },
+          };
+        });
+
+        return true;
+      } catch (error) {
+        this.#context.recordDiagnostic({
+          code: "pane_history_page_load_failed",
+          message: `failed to load more pane history for ${targetPaneId}`,
+          severity: "warn",
+          recoverable: true,
+          cause: error,
+        });
+        return false;
       }
     });
   }
@@ -466,11 +542,11 @@ export class SessionCommandService {
     }
 
     try {
-      const history = await transport.getPaneHistory(sessionId, paneId, {
-        fromEventSeq: 1n,
-        maxSegments: 256,
-        maxBytes: 1024 * 1024,
-      });
+      const history = await transport.getPaneHistory(
+        sessionId,
+        paneId,
+        paneHistoryPageRequest(PANE_HISTORY_INITIAL_EVENT_SEQ),
+      );
       const historicalPane = buildHydratedHistoricalPane(history, this.#context.now());
       if (!historicalPane) {
         return;
@@ -489,7 +565,7 @@ export class SessionCommandService {
         const existingHistory = snapshot.historicalPanes?.[paneId];
         if (
           existingHistory?.sessionId === sessionId
-          && existingHistory.source === "saved_session_restore"
+          && existingHistory.sourceSessionId !== sessionId
         ) {
           return snapshot;
         }
@@ -511,6 +587,51 @@ export class SessionCommandService {
         cause: error,
       });
     }
+  }
+
+  async #buildRestoredHistoricalPanes(
+    transport: Awaited<ReturnType<ServiceContext["ensureTransport"]>>,
+    saved: SavedSessionRecord,
+    attachedSession: NonNullable<WorkspaceSnapshot["attachedSession"]>,
+  ): Promise<Record<string, WorkspaceHistoricalPaneSnapshot>> {
+    const historicalPanes = buildRestoredHistoricalPanes(saved, attachedSession, this.#context.now());
+    const getPaneHistory = transport.getPaneHistory;
+    if (!getPaneHistory) {
+      return historicalPanes;
+    }
+
+    const paneMap = mapSavedPaneIdsToLivePaneIds(saved.topology, attachedSession.topology);
+    await Promise.all([...paneMap.entries()].map(async ([sourcePaneId, livePaneId]) => {
+      try {
+        const history = await getPaneHistory(
+          saved.session_id,
+          sourcePaneId,
+          paneHistoryPageRequest(PANE_HISTORY_INITIAL_EVENT_SEQ),
+        );
+        const hydratedPane = buildHydratedHistoricalPane(history, this.#context.now(), {
+          identity: {
+            sessionId: attachedSession.session.session_id,
+            paneId: livePaneId,
+            sourceSessionId: saved.session_id,
+            sourcePaneId,
+          },
+          includeSnapshotFallback: true,
+        });
+        if (hydratedPane) {
+          historicalPanes[livePaneId] = hydratedPane;
+        }
+      } catch (error) {
+        this.#context.recordDiagnostic({
+          code: "saved_pane_history_hydration_failed",
+          message: `failed to hydrate saved pane history for ${sourcePaneId}`,
+          severity: "warn",
+          recoverable: true,
+          cause: error,
+        });
+      }
+    }));
+
+    return historicalPanes;
   }
 
   async #closeTopologySubscription(): Promise<void> {
@@ -729,6 +850,26 @@ function mergeSession<TSession extends { session_id: string }>(
   return [...remaining, nextSession];
 }
 
+interface HydratedHistoricalPaneIdentity {
+  readonly sessionId: SessionId;
+  readonly paneId: PaneId;
+  readonly sourceSessionId: SessionId;
+  readonly sourcePaneId: PaneId;
+}
+
+interface BuildHydratedHistoricalPaneOptions {
+  readonly identity?: HydratedHistoricalPaneIdentity;
+  readonly includeSnapshotFallback?: boolean;
+}
+
+function paneHistoryPageRequest(fromEventSeq: bigint) {
+  return {
+    fromEventSeq,
+    maxSegments: PANE_HISTORY_PAGE_MAX_SEGMENTS,
+    maxBytes: PANE_HISTORY_PAGE_MAX_BYTES,
+  };
+}
+
 function buildRestoredHistoricalPanes(
   saved: SavedSessionRecord,
   attachedSession: NonNullable<WorkspaceSnapshot["attachedSession"]>,
@@ -763,6 +904,10 @@ function buildRestoredHistoricalPanes(
       capturedAtMs: saved.saved_at_ms || BigInt(Math.trunc(loadedAtMs)),
       hasGaps: false,
       hasMoreSegments: false,
+      fromEventSeq: PANE_HISTORY_INITIAL_EVENT_SEQ,
+      nextEventSeq: null,
+      segmentCount: 0,
+      loadedPayloadBytes: 0n,
     };
   }
 
@@ -772,9 +917,11 @@ function buildRestoredHistoricalPanes(
 function buildHydratedHistoricalPane(
   history: PaneHistory,
   loadedAtMs: number,
+  options: BuildHydratedHistoricalPaneOptions = {},
 ): WorkspaceHistoricalPaneSnapshot | null {
   const segmentLines = linesFromHistorySegments(history.segments);
-  const snapshotLines = history.latest_screen_snapshot
+  const includeSnapshotFallback = options.includeSnapshotFallback ?? true;
+  const snapshotLines = includeSnapshotFallback && history.latest_screen_snapshot
     ? linesFromScreenSnapshotJson(history.latest_screen_snapshot.screen_json)
     : [];
   const gapLines = history.gaps.map((gap) => {
@@ -797,12 +944,18 @@ function buildHydratedHistoricalPane(
     latestSegment?.created_at_ms
     ?? history.latest_screen_snapshot?.created_at_ms
     ?? BigInt(Math.trunc(loadedAtMs));
-
-  return {
+  const identity = options.identity ?? {
     sessionId: history.session_id,
     paneId: history.pane_id,
     sourceSessionId: history.session_id,
     sourcePaneId: history.pane_id,
+  };
+
+  return {
+    sessionId: identity.sessionId,
+    paneId: identity.paneId,
+    sourceSessionId: identity.sourceSessionId,
+    sourcePaneId: identity.sourcePaneId,
     source: "v2_pane_history",
     replayStrategy: history.replay_strategy,
     restoreGuaranteeLevel: history.restore_plan.restore_guarantee_level,
@@ -810,6 +963,31 @@ function buildHydratedHistoricalPane(
     capturedAtMs,
     hasGaps: history.gaps.length > 0,
     hasMoreSegments: history.has_more_segments,
+    fromEventSeq: history.from_event_seq,
+    nextEventSeq: history.next_event_seq,
+    segmentCount: history.segments.length,
+    loadedPayloadBytes: history.total_payload_bytes,
+  };
+}
+
+function mergeHistoricalPanePage(
+  existing: WorkspaceHistoricalPaneSnapshot,
+  nextPage: WorkspaceHistoricalPaneSnapshot,
+): WorkspaceHistoricalPaneSnapshot {
+  return {
+    ...existing,
+    source: nextPage.source,
+    replayStrategy: nextPage.replayStrategy,
+    restoreGuaranteeLevel: nextPage.restoreGuaranteeLevel,
+    lines: normalizeHistoryLines([...existing.lines, ...nextPage.lines]),
+    capturedAtMs: nextPage.capturedAtMs > existing.capturedAtMs
+      ? nextPage.capturedAtMs
+      : existing.capturedAtMs,
+    hasGaps: existing.hasGaps || nextPage.hasGaps,
+    hasMoreSegments: nextPage.hasMoreSegments,
+    nextEventSeq: nextPage.nextEventSeq,
+    segmentCount: existing.segmentCount + nextPage.segmentCount,
+    loadedPayloadBytes: existing.loadedPayloadBytes + nextPage.loadedPayloadBytes,
   };
 }
 

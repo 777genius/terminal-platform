@@ -176,6 +176,7 @@ export function createWorkspaceKernel(options: CreateWorkspaceKernelOptions): Wo
       pruneSavedSessions: (keepLatest) => sessionCommandService.pruneSavedSessions(keepLatest),
       dispatchMuxCommand: (sessionId, command) =>
         sessionCommandService.dispatchMuxCommand(sessionId, command),
+      loadMorePaneHistory: (paneId) => sessionCommandService.loadMorePaneHistory(paneId),
       openSubscription: (sessionId, spec) =>
         sessionCommandService.openSubscription(sessionId, spec),
       setActiveSession: (sessionId) => sessionCommandService.setActiveSession(sessionId),

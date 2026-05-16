@@ -42,13 +42,13 @@ impl SavedSessionsService<'_> {
                 BackendError::internal(format!("failed to prepare save timestamp - {error}"))
             })?,
         };
-        self.runtime.persistence().save_native_session(&snapshot).map_err(|error| {
-            BackendError::internal(format!("failed to save native session - {error}"))
-        })?;
         self.runtime.persistence().save_native_session_v2_snapshot(&snapshot).map_err(|error| {
             BackendError::internal(format!(
                 "failed to persist native session v2 snapshot - {error}"
             ))
+        })?;
+        self.runtime.persistence().save_native_session(&snapshot).map_err(|error| {
+            BackendError::internal(format!("failed to publish saved native session - {error}"))
         })?;
 
         Ok(MuxCommandResult { changed: false })

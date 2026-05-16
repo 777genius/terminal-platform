@@ -52,6 +52,10 @@ function createHistory(options: { hasMoreSegments: boolean }): HistoricalPane {
     capturedAtMs: 1000n,
     hasGaps: false,
     hasMoreSegments: options.hasMoreSegments,
+    fromEventSeq: 1n,
+    nextEventSeq: options.hasMoreSegments ? 2n : null,
+    segmentCount: 1,
+    loadedPayloadBytes: 32n,
   };
 }
 

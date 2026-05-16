@@ -46,7 +46,11 @@ impl<'a> UiInputTransaction<'a> {
             payload_hash,
             source_event_id_hash,
             capture_source_kind,
-            command_text: command_text_from_ui_input(&input.data),
+            command_text: if input.is_paste {
+                None
+            } else {
+                command_text_from_ui_input(&input.data)
+            },
             shell_profile,
             command_metadata_json,
         })

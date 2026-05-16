@@ -137,5 +137,13 @@ async fn flush_raw_capture_batch(
         capture_semantics: Some("raw_vt_stream".to_string()),
     };
     let store = persistence.clone();
-    let _ = tokio::task::spawn_blocking(move || store.record_v2_terminal_output(input)).await;
+    match tokio::task::spawn_blocking(move || store.record_v2_terminal_output(input)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            eprintln!("terminal-runtime: failed to persist v2 terminal output - {error}");
+        }
+        Err(error) => {
+            eprintln!("terminal-runtime: v2 terminal output persistence task failed - {error}");
+        }
+    }
 }

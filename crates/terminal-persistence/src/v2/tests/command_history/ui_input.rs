@@ -35,6 +35,48 @@ fn records_ui_input_as_verified_command_history() {
 }
 
 #[test]
+fn records_paste_as_journal_event_without_verified_command_history() {
+    let store = test_store("ui-paste-not-command-history");
+    let session_id = Uuid::new_v4().to_string();
+    let pane_id = Uuid::new_v4().to_string();
+
+    store
+        .record_ui_input_event(UiInputEventInput {
+            session_id: session_id.clone(),
+            route: route(),
+            title: Some("shell".to_string()),
+            launch: None,
+            pane_id: pane_id.clone(),
+            data: "echo pasted secret\r\nwhoami\r\n".to_string(),
+            is_paste: true,
+            source_event_id: Some("paste-submit-1".to_string()),
+            rows: None,
+            cols: None,
+            shell_kind: Some("cmd".to_string()),
+        })
+        .expect("paste input should persist as journal event");
+
+    let history =
+        store.list_command_history(Some(&session_id), 10).expect("command history should load");
+    let mut connection = store.connection().expect("connection should open");
+    let event_type = terminal_journal_events::table
+        .filter(terminal_journal_events::session_id.eq(&session_id))
+        .filter(terminal_journal_events::pane_id.eq(Some(pane_id)))
+        .select(terminal_journal_events::event_type)
+        .first::<String>(&mut connection)
+        .expect("journal event should load");
+    let command_block_count = terminal_command_blocks::table
+        .filter(terminal_command_blocks::session_id.eq(&session_id))
+        .count()
+        .get_result::<i64>(&mut connection)
+        .expect("command block count should load");
+
+    assert!(history.is_empty());
+    assert_eq!(event_type, "terminal_paste_input");
+    assert_eq!(command_block_count, 0);
+}
+
+#[test]
 fn windows_shell_metadata_profiles_cmd_and_powershell_inputs() {
     let store = test_store("windows-shell-profiles");
     let cmd_session_id = Uuid::new_v4().to_string();
