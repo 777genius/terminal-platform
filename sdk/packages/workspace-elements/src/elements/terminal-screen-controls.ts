@@ -11,6 +11,7 @@ export interface TerminalScreenControlState {
   screen: FocusedScreen | null;
   history: HistoricalPane | null;
   canCopyVisibleOutput: boolean;
+  canLoadMoreHistory: boolean;
   canUseDirectInput: boolean;
   canUseDirectPaste: boolean;
   inputCapabilityStatus: TerminalWorkspaceCapabilityStatus;
@@ -41,6 +42,7 @@ export function resolveTerminalScreenControlState(snapshot: WorkspaceSnapshot): 
     screen,
     history: currentHistory,
     canCopyVisibleOutput: Boolean(screen || currentHistory),
+    canLoadMoreHistory: Boolean(currentHistory?.hasMoreSegments && currentHistory.nextEventSeq),
     canUseDirectInput: Boolean(hasInputTarget && inputCapability.enabled),
     canUseDirectPaste: Boolean(hasInputTarget && pasteCapability.enabled),
     inputCapabilityStatus: inputCapability.status,

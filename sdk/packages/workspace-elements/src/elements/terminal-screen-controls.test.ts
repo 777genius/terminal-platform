@@ -115,6 +115,33 @@ describe("terminal screen controls", () => {
 
     expect(controls.history?.lines).toEqual(["saved output"]);
     expect(controls.canCopyVisibleOutput).toBe(true);
+    expect(controls.canLoadMoreHistory).toBe(false);
+  });
+
+  it("exposes load-more history only for active partial v2 history with a cursor", () => {
+    const controls = resolveTerminalScreenControlState(createWorkspaceSnapshot({
+      historicalPanes: {
+        "pane-1": {
+          sessionId: "session-1",
+          paneId: "pane-1",
+          sourceSessionId: "session-1",
+          sourcePaneId: "pane-1",
+          source: "v2_pane_history",
+          replayStrategy: "raw_vt_stream",
+          restoreGuaranteeLevel: "basic_history",
+          lines: ["old output"],
+          capturedAtMs: 1000n,
+          hasGaps: false,
+          hasMoreSegments: true,
+          fromEventSeq: 1n,
+          nextEventSeq: 2n,
+          segmentCount: 1,
+          loadedPayloadBytes: 128n,
+        },
+      },
+    }));
+
+    expect(controls.canLoadMoreHistory).toBe(true);
   });
 });
 

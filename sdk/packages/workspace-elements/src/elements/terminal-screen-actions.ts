@@ -1,6 +1,7 @@
 export const TERMINAL_SCREEN_ACTION_IDS = {
   copyVisible: "copy-visible",
   followOutput: "follow-output",
+  loadMoreHistory: "load-more-history",
   scrollLatest: "scroll-latest",
 } as const;
 
@@ -9,13 +10,16 @@ export type TerminalScreenActionId =
 
 export type TerminalScreenActionPlacement = "panel" | "terminal";
 export type TerminalScreenCopyState = "idle" | "copied" | "failed";
+export type TerminalScreenHistoryLoadState = "idle" | "loading" | "failed";
 export type TerminalScreenActionTone = "danger" | "primary" | "secondary" | "success";
 export type TerminalScreenActionLabelMode = "glyph" | "label";
 
 export interface TerminalScreenActionOptions {
   canCopyVisibleOutput?: boolean;
+  canLoadMoreHistory?: boolean;
   copyState?: TerminalScreenCopyState;
   followOutput?: boolean;
+  historyLoadState?: TerminalScreenHistoryLoadState;
   placement?: string | null | undefined;
 }
 
@@ -39,9 +43,11 @@ export function resolveTerminalScreenActions(
   const compact = placement === "terminal";
   const followOutput = options.followOutput !== false;
   const copyState = normalizeTerminalScreenCopyState(options.copyState);
+  const historyLoadState = normalizeTerminalScreenHistoryLoadState(options.historyLoadState);
   const canCopyVisibleOutput = options.canCopyVisibleOutput === true;
+  const canLoadMoreHistory = options.canLoadMoreHistory === true;
 
-  return [
+  const actions: TerminalScreenActionPresentation[] = [
     {
       id: TERMINAL_SCREEN_ACTION_IDS.followOutput,
       testId: "tp-screen-follow",
@@ -54,6 +60,23 @@ export function resolveTerminalScreenActions(
       disabled: false,
       tone: followOutput ? "primary" : "secondary",
     },
+  ];
+
+  if (canLoadMoreHistory) {
+    actions.push({
+      id: TERMINAL_SCREEN_ACTION_IDS.loadMoreHistory,
+      testId: "tp-screen-load-more-history",
+      label: resolveLoadMoreHistoryLabel(historyLoadState, compact),
+      labelMode: resolveTerminalScreenActionLabelMode(compact),
+      placement,
+      title: resolveLoadMoreHistoryTitle(historyLoadState),
+      ariaLabel: resolveLoadMoreHistoryAriaLabel(historyLoadState),
+      disabled: historyLoadState === "loading",
+      tone: historyLoadState === "failed" ? "danger" : "secondary",
+    });
+  }
+
+  actions.push(
     {
       id: TERMINAL_SCREEN_ACTION_IDS.scrollLatest,
       testId: "tp-screen-scroll-latest",
@@ -76,7 +99,9 @@ export function resolveTerminalScreenActions(
       disabled: !canCopyVisibleOutput,
       tone: resolveCopyVisibleTone(copyState),
     },
-  ];
+  );
+
+  return actions;
 }
 
 function normalizeTerminalScreenActionPlacement(
@@ -91,12 +116,61 @@ function normalizeTerminalScreenCopyState(
   return copyState === "copied" || copyState === "failed" ? copyState : "idle";
 }
 
+function normalizeTerminalScreenHistoryLoadState(
+  historyLoadState: TerminalScreenHistoryLoadState | undefined,
+): TerminalScreenHistoryLoadState {
+  return historyLoadState === "loading" || historyLoadState === "failed" ? historyLoadState : "idle";
+}
+
 function resolveFollowOutputLabel(followOutput: boolean, compact: boolean): string {
   if (!followOutput) {
     return compact ? "\u25b6" : "Paused";
   }
 
   return compact ? "\u23f8" : "Following";
+}
+
+function resolveLoadMoreHistoryLabel(
+  historyLoadState: TerminalScreenHistoryLoadState,
+  compact: boolean,
+): string {
+  if (historyLoadState === "loading") {
+    return compact ? "*" : "Loading";
+  }
+
+  if (historyLoadState === "failed") {
+    return compact ? "!" : "Load failed";
+  }
+
+  return compact ? "\u2191" : "Load history";
+}
+
+function resolveLoadMoreHistoryTitle(
+  historyLoadState: TerminalScreenHistoryLoadState,
+): string {
+  if (historyLoadState === "loading") {
+    return "Loading more restored terminal history";
+  }
+
+  if (historyLoadState === "failed") {
+    return "More restored terminal history could not be loaded";
+  }
+
+  return "Load more restored terminal history";
+}
+
+function resolveLoadMoreHistoryAriaLabel(
+  historyLoadState: TerminalScreenHistoryLoadState,
+): string {
+  if (historyLoadState === "loading") {
+    return "Loading more restored terminal history";
+  }
+
+  if (historyLoadState === "failed") {
+    return "Load more restored terminal history failed";
+  }
+
+  return "Load more restored terminal history";
 }
 
 function resolveCopyVisibleLabel(copyState: TerminalScreenCopyState, compact: boolean): string {
