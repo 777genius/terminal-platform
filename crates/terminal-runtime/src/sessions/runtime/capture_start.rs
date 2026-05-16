@@ -11,9 +11,10 @@ impl SessionRuntime<'_> {
         session: Box<dyn BackendSessionPort>,
     ) {
         let persistence = self.persistence.clone();
+        let registry = self.registry.clone();
         let (ready_tx, ready_rx) = oneshot::channel();
         tokio::spawn(async move {
-            run_v2_history_capture(persistence, descriptor, session, ready_tx).await;
+            run_v2_history_capture(persistence, registry, descriptor, session, ready_tx).await;
         });
         let _ = tokio::time::timeout(V2_CAPTURE_READY_TIMEOUT, ready_rx).await;
     }

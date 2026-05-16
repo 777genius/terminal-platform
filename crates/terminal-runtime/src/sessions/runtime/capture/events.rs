@@ -1,14 +1,58 @@
-use terminal_domain::{PaneId, RouteAuthority, SessionRoute};
+use std::sync::Arc;
+
+use terminal_domain::{PaneId, RouteAuthority, SessionId, SessionRoute};
 use terminal_persistence::{
     BackendCapabilityReportInput, HistoryGapEventInput, ScreenSnapshotEventInput,
-    SqliteSessionStore, TopologySnapshotEventInput,
+    SqliteSessionStore, TerminalPersistenceV2Error, TopologySnapshotEventInput,
 };
-use terminal_projection::{ScreenSnapshot, TopologySnapshot};
+use terminal_projection::{
+    ScreenSnapshot, SessionHealthReason, SessionHealthSnapshot, TopologySnapshot,
+};
 
-use crate::registry::SessionDescriptor;
+use crate::registry::{SessionDescriptor, SessionRegistry};
+
+#[derive(Clone)]
+pub(super) struct CapturePersistenceDiagnostics {
+    registry: Arc<dyn SessionRegistry>,
+    session_id: SessionId,
+}
+
+impl CapturePersistenceDiagnostics {
+    pub(super) fn new(registry: Arc<dyn SessionRegistry>, session_id: SessionId) -> Self {
+        Self { registry, session_id }
+    }
+
+    pub(super) fn record_failure(&self, operation: &str, error: &TerminalPersistenceV2Error) {
+        let detail = format!("terminal history persistence failed during {operation} - {error}");
+        eprintln!("terminal-runtime: {detail}");
+        self.registry.update_health(
+            self.session_id,
+            SessionHealthSnapshot::degraded(
+                self.session_id,
+                SessionHealthReason::HistoryPersistenceFault,
+                detail,
+            ),
+        );
+    }
+
+    pub(super) fn record_task_failure(&self, operation: &str, error: &tokio::task::JoinError) {
+        let detail =
+            format!("terminal history persistence task failed during {operation} - {error}");
+        eprintln!("terminal-runtime: {detail}");
+        self.registry.update_health(
+            self.session_id,
+            SessionHealthSnapshot::degraded(
+                self.session_id,
+                SessionHealthReason::HistoryPersistenceFault,
+                detail,
+            ),
+        );
+    }
+}
 
 pub(super) fn persist_backend_capability_report(
     persistence: &SqliteSessionStore,
+    diagnostics: &CapturePersistenceDiagnostics,
     descriptor: &SessionDescriptor,
     capture_strategy: &str,
     capture_semantics: &str,
@@ -37,15 +81,25 @@ pub(super) fn persist_backend_capability_report(
         expires_at_ms: None,
     };
     let store = persistence.clone();
-    let _ = tokio::task::spawn_blocking(move || {
-        if let Err(error) = store.record_v2_backend_capability_report(input) {
-            eprintln!("terminal-runtime: failed to persist v2 backend capability report - {error}");
+    let diagnostics = diagnostics.clone();
+    tokio::spawn(async move {
+        match tokio::task::spawn_blocking(move || store.record_v2_backend_capability_report(input))
+            .await
+        {
+            Ok(Ok(_report_id)) => {}
+            Ok(Err(error)) => {
+                diagnostics.record_failure("backend capability report", &error);
+            }
+            Err(error) => {
+                diagnostics.record_task_failure("backend capability report", &error);
+            }
         }
     });
 }
 
 pub(super) async fn persist_history_gap(
     persistence: &SqliteSessionStore,
+    diagnostics: &CapturePersistenceDiagnostics,
     descriptor: &SessionDescriptor,
     tab_id: Option<String>,
     rows: Option<i32>,
@@ -71,16 +125,17 @@ pub(super) async fn persist_history_gap(
     match tokio::task::spawn_blocking(move || store.record_v2_history_gap(input)).await {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
-            eprintln!("terminal-runtime: failed to persist v2 history gap - {error}");
+            diagnostics.record_failure("history gap", &error);
         }
         Err(error) => {
-            eprintln!("terminal-runtime: v2 history gap persistence task failed - {error}");
+            diagnostics.record_task_failure("history gap", &error);
         }
     }
 }
 
 pub(super) async fn persist_topology_snapshot(
     persistence: &SqliteSessionStore,
+    diagnostics: &CapturePersistenceDiagnostics,
     descriptor: &SessionDescriptor,
     topology: TopologySnapshot,
 ) {
@@ -95,16 +150,17 @@ pub(super) async fn persist_topology_snapshot(
     match tokio::task::spawn_blocking(move || store.record_v2_topology_snapshot(input)).await {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
-            eprintln!("terminal-runtime: failed to persist v2 topology snapshot - {error}");
+            diagnostics.record_failure("topology snapshot", &error);
         }
         Err(error) => {
-            eprintln!("terminal-runtime: v2 topology snapshot persistence task failed - {error}");
+            diagnostics.record_task_failure("topology snapshot", &error);
         }
     }
 }
 
 pub(super) async fn persist_screen_snapshot(
     persistence: &SqliteSessionStore,
+    diagnostics: &CapturePersistenceDiagnostics,
     descriptor: &SessionDescriptor,
     tab_id: Option<String>,
     screen: ScreenSnapshot,
@@ -123,10 +179,10 @@ pub(super) async fn persist_screen_snapshot(
     match tokio::task::spawn_blocking(move || store.record_v2_screen_snapshot(input)).await {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
-            eprintln!("terminal-runtime: failed to persist v2 screen snapshot - {error}");
+            diagnostics.record_failure("screen snapshot", &error);
         }
         Err(error) => {
-            eprintln!("terminal-runtime: v2 screen snapshot persistence task failed - {error}");
+            diagnostics.record_task_failure("screen snapshot", &error);
         }
     }
 }
@@ -135,5 +191,44 @@ fn persistence_route_kind(route: &SessionRoute) -> String {
     match route.authority {
         RouteAuthority::LocalDaemon => "local_daemon".to_string(),
         RouteAuthority::ImportedForeign => "imported_foreign".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use terminal_domain::{BackendKind, RouteAuthority};
+    use terminal_projection::{SessionHealthPhase, SessionHealthReason};
+
+    use super::*;
+    use crate::registry::{InMemorySessionRegistry, SessionRegistry};
+
+    #[test]
+    fn capture_persistence_failure_marks_session_health_degraded() {
+        let registry = Arc::new(InMemorySessionRegistry::default());
+        let session_id = SessionId::new();
+        registry.insert(SessionDescriptor {
+            session_id,
+            route: SessionRoute {
+                backend: BackendKind::Native,
+                authority: RouteAuthority::LocalDaemon,
+                external: None,
+            },
+            title: Some("shell".to_string()),
+            launch: None,
+            health: SessionHealthSnapshot::ready(session_id),
+        });
+        let diagnostics = CapturePersistenceDiagnostics::new(registry.clone(), session_id);
+
+        diagnostics.record_failure(
+            "screen snapshot",
+            &TerminalPersistenceV2Error::InvalidData("sqlite full".to_string()),
+        );
+
+        let health = registry.get(session_id).expect("session should exist").health;
+        assert_eq!(health.phase, SessionHealthPhase::Degraded);
+        assert_eq!(health.reason, Some(SessionHealthReason::HistoryPersistenceFault));
+        assert!(health.detail.as_deref().is_some_and(
+            |detail| detail.contains("screen snapshot") && detail.contains("sqlite full")
+        ));
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use terminal_backend_api::{BackendSessionPort, BackendSubscriptionEvent, SubscriptionSpec};
 use terminal_domain::PaneId;
@@ -6,7 +6,7 @@ use terminal_persistence::SqliteSessionStore;
 use terminal_projection::TopologySnapshot;
 use tokio::sync::oneshot;
 
-use crate::registry::SessionDescriptor;
+use crate::registry::{SessionDescriptor, SessionRegistry};
 
 use super::helpers::{collect_pane_ids_from_topology, tab_id_for_pane};
 
@@ -15,17 +15,20 @@ mod raw;
 mod rendered;
 
 use events::{
-    persist_backend_capability_report, persist_screen_snapshot, persist_topology_snapshot,
+    CapturePersistenceDiagnostics, persist_backend_capability_report, persist_screen_snapshot,
+    persist_topology_snapshot,
 };
 use raw::spawn_v2_raw_capture_loop;
 use rendered::spawn_v2_rendered_capture_loop;
 
 pub(super) async fn run_v2_history_capture(
     persistence: SqliteSessionStore,
+    registry: Arc<dyn SessionRegistry>,
     descriptor: SessionDescriptor,
     session: Box<dyn BackendSessionPort>,
     ready_tx: oneshot::Sender<()>,
 ) {
+    let diagnostics = CapturePersistenceDiagnostics::new(registry, descriptor.session_id);
     let mut ready_tx = Some(ready_tx);
     let mut captured_panes = HashSet::new();
     let Ok(initial_topology) = session.topology_snapshot().await else {
@@ -35,9 +38,11 @@ pub(super) async fn run_v2_history_capture(
         return;
     };
 
-    persist_topology_snapshot(&persistence, &descriptor, initial_topology.clone()).await;
+    persist_topology_snapshot(&persistence, &diagnostics, &descriptor, initial_topology.clone())
+        .await;
     start_capture_for_topology(
         &persistence,
+        &diagnostics,
         &descriptor,
         &*session,
         &initial_topology,
@@ -56,9 +61,16 @@ pub(super) async fn run_v2_history_capture(
     while let Some(event) = topology_subscription.events.recv().await {
         match event {
             BackendSubscriptionEvent::TopologySnapshot(topology) => {
-                persist_topology_snapshot(&persistence, &descriptor, topology.clone()).await;
+                persist_topology_snapshot(
+                    &persistence,
+                    &diagnostics,
+                    &descriptor,
+                    topology.clone(),
+                )
+                .await;
                 start_capture_for_topology(
                     &persistence,
+                    &diagnostics,
                     &descriptor,
                     &*session,
                     &topology,
@@ -77,6 +89,7 @@ pub(super) async fn run_v2_history_capture(
 
 async fn start_capture_for_topology(
     persistence: &SqliteSessionStore,
+    diagnostics: &CapturePersistenceDiagnostics,
     descriptor: &SessionDescriptor,
     session: &dyn BackendSessionPort,
     topology: &TopologySnapshot,
@@ -96,6 +109,7 @@ async fn start_capture_for_topology(
             Ok(subscription) => {
                 persist_backend_capability_report(
                     persistence,
+                    diagnostics,
                     descriptor,
                     "raw_stream",
                     "raw_vt_stream",
@@ -104,6 +118,7 @@ async fn start_capture_for_topology(
                 );
                 spawn_v2_raw_capture_loop(
                     persistence.clone(),
+                    diagnostics.clone(),
                     descriptor.clone(),
                     tab_id.clone(),
                     rows,
@@ -117,6 +132,7 @@ async fn start_capture_for_topology(
                 {
                     persist_backend_capability_report(
                         persistence,
+                        diagnostics,
                         descriptor,
                         "rendered_stream",
                         "rendered_plaintext_snapshot",
@@ -125,6 +141,7 @@ async fn start_capture_for_topology(
                     );
                     spawn_v2_rendered_capture_loop(
                         persistence.clone(),
+                        diagnostics.clone(),
                         descriptor.clone(),
                         tab_id.clone(),
                         subscription,
@@ -134,7 +151,7 @@ async fn start_capture_for_topology(
         }
 
         if let Some(screen) = initial_screen {
-            persist_screen_snapshot(persistence, descriptor, tab_id, screen).await;
+            persist_screen_snapshot(persistence, diagnostics, descriptor, tab_id, screen).await;
         }
     }
 }

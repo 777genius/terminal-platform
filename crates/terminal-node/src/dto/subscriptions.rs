@@ -27,6 +27,7 @@ pub enum NodeSessionHealthReason {
     SessionNotFound,
     BackendTransportLost,
     BackendInternalFault,
+    HistoryPersistenceFault,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

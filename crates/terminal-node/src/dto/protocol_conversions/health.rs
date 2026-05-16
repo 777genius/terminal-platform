@@ -19,6 +19,7 @@ impl From<&SessionHealthReason> for NodeSessionHealthReason {
             SessionHealthReason::SessionNotFound => Self::SessionNotFound,
             SessionHealthReason::BackendTransportLost => Self::BackendTransportLost,
             SessionHealthReason::BackendInternalFault => Self::BackendInternalFault,
+            SessionHealthReason::HistoryPersistenceFault => Self::HistoryPersistenceFault,
         }
     }
 }

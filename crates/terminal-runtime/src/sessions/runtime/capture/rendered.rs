@@ -6,10 +6,11 @@ use tokio::time::MissedTickBehavior;
 use crate::registry::SessionDescriptor;
 
 use super::super::V2_RENDERED_CAPTURE_FLUSH_INTERVAL;
-use super::events::persist_screen_snapshot;
+use super::events::{CapturePersistenceDiagnostics, persist_screen_snapshot};
 
 pub(super) fn spawn_v2_rendered_capture_loop(
     persistence: SqliteSessionStore,
+    diagnostics: CapturePersistenceDiagnostics,
     descriptor: SessionDescriptor,
     tab_id: Option<String>,
     mut subscription: BackendSubscription,
@@ -43,6 +44,7 @@ pub(super) fn spawn_v2_rendered_capture_loop(
                     if let Some(snapshot) = pending_snapshot.take() {
                         persist_screen_snapshot(
                             &persistence,
+                            &diagnostics,
                             &descriptor,
                             tab_id.clone(),
                             snapshot,
@@ -54,7 +56,8 @@ pub(super) fn spawn_v2_rendered_capture_loop(
         }
 
         if let Some(snapshot) = pending_snapshot {
-            persist_screen_snapshot(&persistence, &descriptor, tab_id, snapshot).await;
+            persist_screen_snapshot(&persistence, &diagnostics, &descriptor, tab_id, snapshot)
+                .await;
         }
         subscription.cancel();
     });

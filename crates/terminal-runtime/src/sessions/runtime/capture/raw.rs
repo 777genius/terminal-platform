@@ -6,10 +6,11 @@ use tokio::time::MissedTickBehavior;
 use crate::registry::SessionDescriptor;
 
 use super::super::{V2_RAW_CAPTURE_FLUSH_INTERVAL, V2_RAW_CAPTURE_MAX_BATCH_BYTES};
-use super::events::persist_history_gap;
+use super::events::{CapturePersistenceDiagnostics, persist_history_gap};
 
 pub(super) fn spawn_v2_raw_capture_loop(
     persistence: SqliteSessionStore,
+    diagnostics: CapturePersistenceDiagnostics,
     descriptor: SessionDescriptor,
     tab_id: Option<String>,
     rows: Option<i32>,
@@ -34,6 +35,7 @@ pub(super) fn spawn_v2_raw_capture_loop(
                             if pending_payload.len() >= V2_RAW_CAPTURE_MAX_BATCH_BYTES {
                                 flush_raw_capture_batch(
                                     &persistence,
+                                    &diagnostics,
                                     &descriptor,
                                     tab_id.clone(),
                                     pending_pane_id,
@@ -48,6 +50,7 @@ pub(super) fn spawn_v2_raw_capture_loop(
                         Some(BackendRawOutputEvent::Gap(gap)) => {
                             flush_raw_capture_batch(
                                 &persistence,
+                                &diagnostics,
                                 &descriptor,
                                 tab_id.clone(),
                                 pending_pane_id,
@@ -61,6 +64,7 @@ pub(super) fn spawn_v2_raw_capture_loop(
                             pending_sequence = None;
                             persist_history_gap(
                                 &persistence,
+                                &diagnostics,
                                 &descriptor,
                                 tab_id.clone(),
                                 rows,
@@ -76,6 +80,7 @@ pub(super) fn spawn_v2_raw_capture_loop(
                 _ = flush_interval.tick() => {
                     flush_raw_capture_batch(
                         &persistence,
+                        &diagnostics,
                         &descriptor,
                         tab_id.clone(),
                         pending_pane_id,
@@ -91,6 +96,7 @@ pub(super) fn spawn_v2_raw_capture_loop(
 
         flush_raw_capture_batch(
             &persistence,
+            &diagnostics,
             &descriptor,
             tab_id,
             pending_pane_id,
@@ -106,6 +112,7 @@ pub(super) fn spawn_v2_raw_capture_loop(
 
 async fn flush_raw_capture_batch(
     persistence: &SqliteSessionStore,
+    diagnostics: &CapturePersistenceDiagnostics,
     descriptor: &SessionDescriptor,
     tab_id: Option<String>,
     pane_id: Option<PaneId>,
@@ -140,10 +147,10 @@ async fn flush_raw_capture_batch(
     match tokio::task::spawn_blocking(move || store.record_v2_terminal_output(input)).await {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
-            eprintln!("terminal-runtime: failed to persist v2 terminal output - {error}");
+            diagnostics.record_failure("terminal output", &error);
         }
         Err(error) => {
-            eprintln!("terminal-runtime: v2 terminal output persistence task failed - {error}");
+            diagnostics.record_task_failure("terminal output", &error);
         }
     }
 }
