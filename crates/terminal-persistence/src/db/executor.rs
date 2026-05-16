@@ -11,7 +11,7 @@ use crate::{
     v2::{TerminalPersistenceV2Config, TerminalPersistenceV2Error},
 };
 
-type PersistenceJob = Box<dyn FnOnce() + Send + 'static>;
+type PersistenceJob = Box<dyn FnOnce(&mut SqliteConnection) + Send + 'static>;
 
 enum ExecutorMessage {
     Job(PersistenceJob),
@@ -21,8 +21,6 @@ enum ExecutorMessage {
 pub struct PersistenceExecutor {
     sender: mpsc::Sender<ExecutorMessage>,
     join: Option<JoinHandle<()>>,
-    path: PathBuf,
-    config: TerminalPersistenceV2Config,
 }
 
 impl PersistenceExecutor {
@@ -38,26 +36,28 @@ impl PersistenceExecutor {
         let worker_config = config.clone();
 
         let join = thread::Builder::new().name(worker_name(&path)).spawn(move || {
-            match establish_initialized_connection(&worker_path, &worker_config) {
-                Ok(_connection) => {
-                    let _ = ready_sender.send(Ok(()));
-                }
-                Err(error) => {
-                    let _ = ready_sender.send(Err(error));
-                    return;
-                }
-            }
+            let mut connection =
+                match establish_initialized_connection(&worker_path, &worker_config) {
+                    Ok(connection) => {
+                        let _ = ready_sender.send(Ok(()));
+                        connection
+                    }
+                    Err(error) => {
+                        let _ = ready_sender.send(Err(error));
+                        return;
+                    }
+                };
 
             while let Ok(message) = receiver.recv() {
                 match message {
-                    ExecutorMessage::Job(job) => job(),
+                    ExecutorMessage::Job(job) => job(&mut connection),
                     ExecutorMessage::Shutdown => break,
                 }
             }
         })?;
 
         match ready_receiver.recv().map_err(|_| TerminalPersistenceV2Error::ExecutorStopped)? {
-            Ok(()) => Ok(Self { sender, join: Some(join), path, config }),
+            Ok(()) => Ok(Self { sender, join: Some(join) }),
             Err(error) => {
                 let _ = join.join();
                 Err(error)
@@ -74,8 +74,26 @@ impl PersistenceExecutor {
     {
         let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
         self.sender
-            .send(ExecutorMessage::Job(Box::new(move || {
+            .send(ExecutorMessage::Job(Box::new(move |_connection| {
                 let _ = reply_sender.send(operation());
+            })))
+            .map_err(|_| TerminalPersistenceV2Error::ExecutorStopped)?;
+        reply_receiver.recv().map_err(|_| TerminalPersistenceV2Error::ExecutorStopped)?
+    }
+
+    pub fn execute_with_connection<T>(
+        &self,
+        operation: impl FnOnce(&mut SqliteConnection) -> Result<T, TerminalPersistenceV2Error>
+        + Send
+        + 'static,
+    ) -> Result<T, TerminalPersistenceV2Error>
+    where
+        T: Send + 'static,
+    {
+        let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
+        self.sender
+            .send(ExecutorMessage::Job(Box::new(move |connection| {
+                let _ = reply_sender.send(operation(connection));
             })))
             .map_err(|_| TerminalPersistenceV2Error::ExecutorStopped)?;
         reply_receiver.recv().map_err(|_| TerminalPersistenceV2Error::ExecutorStopped)?
@@ -90,10 +108,7 @@ impl PersistenceExecutor {
     where
         T: Send + 'static,
     {
-        let path = self.path.clone();
-        let config = self.config.clone();
-        self.execute(move || {
-            let mut connection = establish_initialized_connection(&path, &config)?;
+        self.execute_with_connection(move |connection| {
             connection.immediate_transaction::<_, TerminalPersistenceV2Error, _>(operation)
         })
     }
@@ -154,6 +169,36 @@ mod tests {
             .unwrap();
 
         assert_eq!(value, 41);
+        assert_eq!(count, 1);
+        drop(executor);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn executor_reuses_worker_connection_for_connection_jobs() {
+        let path = std::env::temp_dir()
+            .join(format!("terminal-persistence-executor-{}.sqlite3", Uuid::new_v4()));
+        let executor =
+            PersistenceExecutor::start(&path, TerminalPersistenceV2Config::test()).unwrap();
+
+        executor
+            .execute_with_connection(|connection| {
+                sql_query("CREATE TEMP TABLE worker_connection_probe (value TEXT NOT NULL)")
+                    .execute(connection)?;
+                sql_query("INSERT INTO worker_connection_probe (value) VALUES ('same')")
+                    .execute(connection)?;
+                Ok(())
+            })
+            .unwrap();
+
+        let count = executor
+            .execute_with_connection(|connection| {
+                let row = sql_query("SELECT COUNT(*) AS count FROM worker_connection_probe")
+                    .get_result::<CountRow>(connection)?;
+                Ok(row.count)
+            })
+            .unwrap();
+
         assert_eq!(count, 1);
         drop(executor);
         let _ = std::fs::remove_file(path);
