@@ -6,6 +6,7 @@
 **Verified implementation commit before closeout docs/fix**: `c1a1940410fa8672ff6ec3d558395812f5096fb4`  
 **Latest branch commit**: run `git rev-parse HEAD` on this branch; this document is kept in the latest closeout commit.
 **Primary plan**: [terminal-persistence-v2-implementation-plan.md](./terminal-persistence-v2-implementation-plan.md)
+**Completion plan to 100%**: [terminal-persistence-v2-completion-plan.md](./terminal-persistence-v2-completion-plan.md)
 
 ## Executive status
 
