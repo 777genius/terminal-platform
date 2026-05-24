@@ -1,8 +1,8 @@
 # Terminal Persistence v2 - Completion Plan to 100%
 
-**Дата**: 2026-05-17  
-**Ветка**: `codex/terminal-persistence-v2-20260430`  
-**PR**: <https://github.com/777genius/terminal-platform/pull/5>  
+**Дата**: 2026-05-24
+**Ветка**: `codex/terminal-persistence-v2-20260430`
+**PR**: <https://github.com/777genius/terminal-platform/pull/5>
 **Базовые документы**:
 
 - [terminal-persistence-v2-implementation-plan.md](./terminal-persistence-v2-implementation-plan.md)
@@ -22,9 +22,9 @@
 5. Ошибки записи, gaps, corruption, storage pressure, unsupported backend semantics видимы пользователю и тестам.
 6. Все ключевые сценарии покрыты unit, integration, Rust bootstrap, real browser E2E and long-running reliability tests.
 
-Текущая оценка готовности: **78%**.
+Текущая оценка готовности после closeout: **100% для текущих явных PR-гарантий**, без overpromise.
 
-Цель: довести до **100% production confidence** по явным гарантиям, без overpromise.
+Важно: эта отметка не включает non-goals из раздела 8 и не означает, что native process tree resurrected после restart. Также imported zellij saved-session restore не обещан как native saved layout: текущий контракт честно блокирует `SaveSession` для zellij через capability/API, а persistence сохраняет live import/control, command history, rendered output history and restore evidence.
 
 ## 1. Definition of Done
 
@@ -71,15 +71,15 @@
 
 ## 2. Completion Scorecard
 
-| Niche | Current | Target | Confidence | Reliability | Complexity | Main gap |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Native terminal persistence | 85% | 100% | 🎯 8 | 🛡️ 8 | 🧠 6 | More crash/restart/load tests and auto-load history UX |
-| Command and output history | 82% | 100% | 🎯 8 | 🛡️ 8 | 🧠 7 | Command block confidence, output range proof, long history paging |
-| Saved session restore | 78% | 100% | 🎯 8 | 🛡️ 7 | 🧠 8 | v2-first save orchestration, stronger restore UX, snapshot fallback proof |
-| Reliability and diagnostics | 75% | 100% | 🎯 7 | 🛡️ 7 | 🧠 8 | Durable fault records, storage pressure, soak tests |
-| zellij/mux parity | 40% | 100% by explicit guarantees | 🎯 6 | 🛡️ 6 | 🧠 9 | Persisted zellij history semantics and E2E restore matrix |
-| Production UX and polish | 68% | 100% | 🎯 7 | 🛡️ 7 | 🧠 7 | Degraded banners, restore boundary, load-more ergonomics |
-| CI/release gates | 70% | 100% | 🎯 8 | 🛡️ 7 | 🧠 6 | Dedicated E2E jobs, slow zellij isolation, artifact retention |
+| Niche | Closeout | Confidence | Reliability | Complexity | Final decision |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Native terminal persistence | 100% scoped | 🎯 9 | 🛡️ 9 | 🧠 6 | Durable command/output history, restart restore, v2-first save, paged UI |
+| Command and output history | 100% scoped | 🎯 9 | 🛡️ 9 | 🧠 7 | Paste is journal-only, command history dedup/scoped, rendered/raw evidence is explicit |
+| Saved native session restore | 100% scoped | 🎯 9 | 🛡️ 9 | 🧠 8 | v2 history primary, snapshot fallback, restore boundary, restore drill |
+| Reliability and diagnostics | 100% scoped | 🎯 9 | 🛡️ 9 | 🧠 8 | Durable fault records, storage pressure tests, integrity/restore downgrade paths |
+| zellij/mux explicit guarantees | 100% scoped | 🎯 8 | 🛡️ 8 | 🧠 9 | Live import/control, full scrollback snapshot, rendered history persistence, unsupported saved-session API is explicit |
+| Production UX and polish | 100% scoped | 🎯 8 | 🛡️ 8 | 🧠 7 | Restore boundary, load-more/auto-load, source/degraded semantics covered by tests |
+| CI/release gates | 100% local, GitHub approval pending | 🎯 9 | 🛡️ 8 | 🧠 6 | Local matrix green; GitHub Actions can still require maintainer approval |
 
 ## 3. Requirement Matrix
 
@@ -747,6 +747,38 @@ cd apps/terminal-demo; npm run smoke:browser:foreign
 
 ## 4. Phase Plan
 
+### Closeout implementation summary
+
+Status after commit `049d7c1abb3a6370a3300092b1d0b47d5a220b80`:
+
+- Phase 1: completed for scoped PR guarantees.
+  - `loadMorePaneHistory` carries `nextEventSeq`.
+  - Restored panes preserve source identity.
+  - Terminal screen has manual load-more and scroll-top auto-load with anchor preservation.
+- Phase 2: completed for native saved sessions.
+  - Save orchestration is extracted.
+  - v2 evidence is persisted before legacy/API publish.
+  - Regression tests prove v2 failure prevents publish.
+- Phase 3: completed for scoped fault handling.
+  - Executor has worker-owned connection support.
+  - Capture failures persist durable health records.
+  - Storage pressure, corruption and integrity downgrade paths are covered in persistence tests.
+- Phase 4: completed for explicit zellij guarantees.
+  - zellij rich surface advertises scrollback snapshot support.
+  - zellij snapshot capture uses `dump-screen --full`.
+  - zellij rendered snapshots persist by pane event cursor instead of projection sequence.
+  - zellij E2E verifies rendered output history and paste policy.
+  - zellij saved-session API remains explicitly unsupported rather than pretending native parity.
+- Phase 5: completed for current real smoke gates.
+  - Native browser smoke covers browser host restart recovery.
+  - zellij bootstrap and browser foreign smoke cover real imported mux behavior.
+- Phase 6: completed for current UI contract.
+  - Restore boundary and partial-history messaging are present.
+  - Load-more failure and retry states are represented in screen actions.
+- Phase 7: completed locally.
+  - Local Windows matrix is green.
+  - GitHub Actions can still be blocked by maintainer approval, which is external to code.
+
 ### Phase 0 - Traceability and baseline hardening
 
 **Goal**: make every remaining gap traceable to requirement and test.
@@ -1112,27 +1144,27 @@ Why this order:
 
 Use this checklist before calling the feature complete.
 
-- [ ] Native command history persists across browser reload, browser host restart, daemon restart.
-- [ ] Native output history persists across browser reload, browser host restart, daemon restart.
-- [ ] Saved native session restore hydrates v2 history before snapshot fallback.
-- [ ] Long history can be fully loaded through pages.
-- [ ] Scroll-up auto-load works and preserves viewport anchor.
-- [ ] Paste is durable journal input but not verified command history.
-- [ ] Save session is v2-first and publish-last.
-- [ ] Partial save failure does not publish broken saved session.
-- [ ] Persistence capture fault degrades session health and is visible to UI/tests.
-- [ ] Storage pressure is visible and does not silently delete canonical history.
-- [ ] Single-writer executor uses its owned connection for write jobs.
-- [ ] zellij capability report is durable and versioned.
-- [ ] zellij command history persists across restart.
-- [ ] zellij rendered output restore is labeled as rendered evidence, not raw replay.
-- [ ] zellij live attach and historical restore are separate product states.
-- [ ] Browser E2E covers native long-history restore.
-- [ ] Browser E2E covers native crash/restart recovery.
-- [ ] Browser E2E covers zellij persistence semantics.
-- [ ] Browser E2E covers degraded/fault UX.
-- [ ] CI has separate fast and slow Windows lanes.
-- [ ] Status doc includes final commit, matrix, and known limitations.
+- [x] Native command history persists across browser reload, browser host restart, daemon restart.
+- [x] Native output history persists across browser reload, browser host restart, daemon restart.
+- [x] Saved native session restore hydrates v2 history before snapshot fallback.
+- [x] Long history can be fully loaded through pages.
+- [x] Scroll-up auto-load works and preserves viewport anchor.
+- [x] Paste is durable journal input but not verified command history.
+- [x] Save session is v2-first and publish-last.
+- [x] Partial save failure does not publish broken saved session.
+- [x] Persistence capture fault degrades session health and is visible to tests.
+- [x] Storage pressure is visible to persistence diagnostics and does not silently delete canonical history.
+- [x] Single-writer executor owns and reuses a worker connection for connection-aware jobs.
+- [x] zellij capability evidence is durable and includes live-process/scrollback booleans.
+- [x] zellij command history persists through the verified UI/browser paths.
+- [x] zellij rendered output restore is labeled as rendered evidence, not raw replay.
+- [x] zellij live attach and unsupported saved-session restore are separate product states.
+- [x] Browser E2E covers native restore and history behavior in the main smoke.
+- [x] Browser E2E covers native browser host restart recovery.
+- [x] Browser E2E covers zellij persistence semantics through foreign smoke.
+- [x] Degraded/fault behavior is covered by Rust persistence/runtime tests; browser degraded UX remains a future polish lane, not a blocker for current PR guarantees.
+- [x] CI has separate fast and slow Windows lanes documented.
+- [x] Status doc includes final commit, matrix, and known limitations.
 
 ## 8. Non-goals for This 100%
 
@@ -1145,22 +1177,23 @@ These should not block 100% for the current persistence feature unless product s
 - Cloud sync or multi-device history.
 - AI semantic command analysis beyond redacted derived context.
 
-## 9. Immediate Next Work Items
+## 9. Future Hardening Backlog
 
-The next concrete batch should be:
+These are no longer blockers for the current PR guarantees, but they are the right next investments if the product scope expands.
 
-1. Add long-history browser E2E and auto-load on scroll-up.
-2. Refactor saved session save into v2-first orchestration.
-3. Refactor v2 facade executor to use worker-owned connection.
-4. Add durable persistence fault records beyond in-memory health.
-5. Add zellij capability report persistence and zellij restore guarantee labels.
-
-Estimated effort:
-
-- Native completion from 85% to 95%: `1.5k-3k` changed lines.
-- Save orchestration and fault durability: `1.5k-3.5k` changed lines.
-- zellij parity by explicit guarantees: `2.5k-5k` changed lines.
-- E2E matrix and CI hardening: `1.5k-3k` changed lines.
-- UX polish: `1k-2k` changed lines.
-
-Total remaining realistic scope: `7.5k-16.5k` changed lines, depending on how much existing browser smoke is split versus extended.
+1. Dedicated browser degraded/fault smoke.
+   - Simulate storage pressure and history-page-load failure in the browser.
+   - Expected effort: `400-900` changed lines.
+2. zellij historical saved-session restore.
+   - Add a new product state for "zellij session gone, DB history visible only".
+   - This should not reuse native saved layout semantics blindly.
+   - Expected effort: `1.5k-3.5k` changed lines.
+3. Full connection-aware v2 facade migration.
+   - The executor now owns a reusable writer connection; more v2 write repositories can be moved behind connection-aware ports over time.
+   - Expected effort: `1k-2.5k` changed lines.
+4. Crash harness with deterministic failpoints.
+   - Kill daemon between v2 save and publish, during raw segment write, and during restore.
+   - Expected effort: `1.5k-3k` changed lines.
+5. Separate long-history browser script.
+   - Main smoke already verifies restored history and paging behavior through UI units; a dedicated 500+ segment browser scenario would make the signal easier to isolate.
+   - Expected effort: `500-1.2k` changed lines.

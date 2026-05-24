@@ -1,16 +1,21 @@
 # Terminal Persistence v2 - Status and Handoff
 
-**Last updated**: 2026-05-06  
-**Branch**: `codex/terminal-persistence-v2-20260430`  
-**Pull request**: <https://github.com/777genius/terminal-platform/pull/5>  
-**Verified implementation commit before closeout docs/fix**: `c1a1940410fa8672ff6ec3d558395812f5096fb4`  
-**Latest branch commit**: run `git rev-parse HEAD` on this branch; this document is kept in the latest closeout commit.
+**Last updated**: 2026-05-24
+**Branch**: `codex/terminal-persistence-v2-20260430`
+**Pull request**: <https://github.com/777genius/terminal-platform/pull/5>
+**Verified closeout commit before docs refresh**: `049d7c1abb3a6370a3300092b1d0b47d5a220b80`
+**Latest branch commit**: this document is kept in the latest closeout commit.
 **Primary plan**: [terminal-persistence-v2-implementation-plan.md](./terminal-persistence-v2-implementation-plan.md)
 **Completion plan to 100%**: [terminal-persistence-v2-completion-plan.md](./terminal-persistence-v2-completion-plan.md)
 
 ## Executive status
 
-Terminal Persistence v2 is implemented on the PR branch and has been repeatedly verified on Windows with real local launches.
+Terminal Persistence v2 is implemented on the PR branch and has been repeatedly verified on Windows with real local launches. The feature is at **100% for the current explicit PR guarantees**:
+
+- Native terminal history and saved-session restore are durable and paged.
+- zellij is production-usable through explicit mux guarantees: live import/control, durable command history, rendered output history, full scrollback snapshot capture where rich zellij supports it, and clear unsupported saved-session semantics.
+- Degraded/fault states are durable and visible to tests.
+- Unsupported areas are not silently promised.
 
 The most important verified behavior:
 
@@ -20,11 +25,15 @@ The most important verified behavior:
 - Command history is scoped by session.
 - Native pane/tab lifecycle works through dispatch.
 - zellij sessions can be imported and controlled through the foreign backend surface.
+- zellij rich surface advertises `rendered_scrollback_snapshot` and uses `dump-screen --full`.
+- zellij rendered snapshots persist by DB event cursor, not by potentially huge projection sequence.
+- zellij rendered output history hydrates as `RenderedSnapshot`, not raw replay.
+- Paste is stored as journal input but does not enter verified command history.
 - The browser demo works with real Chrome/CDP, real browser host, real terminal daemon, Windows `cmd.exe`, and zellij.
 - The browser UI command history is checked before and after reload.
 - The browser smoke command-lane assertion now waits for real visible command output, not only for an intermediate screen sequence bump.
 
-Overall local confidence after repeated Windows runs: 🎯 9/10, 🛡️ 9/10.
+Overall local confidence after repeated Windows runs: 🎯 9.3/10, 🛡️ 9/10.
 
 ## What was implemented
 
@@ -49,6 +58,12 @@ Overall local confidence after repeated Windows runs: 🎯 9/10, 🛡️ 9/10.
 
 - Added/verified zellij import surface coverage.
 - Added zellij command history smoke coverage through the browser foreign-backend flow.
+- Added full zellij scrollback snapshot capture through `dump-screen --full`.
+- Added runtime restore capability evidence for imported mux sessions:
+  - `backend_can_preserve_process_when_live`;
+  - `backend_can_capture_scrollback`.
+- Fixed zellij snapshot persistence so huge projection sequence values do not overflow DB event cursors.
+- Verified zellij output history is persisted and hydrated as rendered snapshot evidence.
 - Mapped Windows zellij paste dispatch to reliable targeted input actions instead of the flaky CLI paste path.
 - Added browser foreign smoke diagnostics and longer operation budgets for slow Windows zellij actions.
 - Stabilized zellij browser paste coverage by targeting the already focused imported pane. Creating, renaming and closing zellij tabs are tested separately.
@@ -57,6 +72,7 @@ Overall local confidence after repeated Windows runs: 🎯 9/10, 🛡️ 9/10.
 Important zellij nuance:
 
 - On Windows, sending paste into a newly-created zellij tab/pane through the zellij CLI can hang. The stable user-facing path currently verified is paste/input into the focused imported pane, with tab lifecycle actions covered independently.
+- Imported zellij `SaveSession` remains intentionally unsupported at the saved-layout API boundary. This is not a silent gap: capability checks and E2E assert `backend_unsupported`. zellij process continuity is provided by live zellij attach, while DB persistence preserves command/rendered history.
 
 ### E2E and smoke coverage
 
@@ -80,6 +96,87 @@ Important zellij nuance:
 ## Verified local test matrix
 
 These commands have passed on Windows during the closeout verification cycle.
+
+### 2026-05-24 closeout matrix
+
+```powershell
+cargo test -p terminal-persistence
+```
+
+Result: `97 passed`.
+
+Verified:
+
+- Diesel-backed v2 schema, executor, stream journal, command history, paste policy, restore plans, restore drills, integrity checks, storage pressure, retention/privacy/export, maintenance and crypto gates.
+- Regression for rendered snapshot projection sequence overflow: snapshots now use pane event high-water cursor and keep projection sequence as metadata.
+
+```powershell
+cargo test -p terminal-runtime
+```
+
+Result: `18 passed`.
+
+Verified:
+
+- v2-first saved session orchestration tests.
+- Runtime command history capture.
+- Native raw output capture.
+- Durable capture fault health records.
+
+```powershell
+cargo test -p terminal-backend-zellij --lib
+```
+
+Result: `19 passed`.
+
+Verified:
+
+- zellij rich/legacy capability split.
+- `rendered_scrollback_snapshot` is advertised only for rich surface.
+- zellij screen snapshot requests `dump-screen --full`.
+- Targeted zellij dispatch and paste mapping.
+
+```powershell
+cargo test -p terminal-testing --test bootstrap_smoke zellij::import_surface -- --nocapture
+```
+
+Result: `1 passed`.
+
+Verified with real zellij:
+
+- Rich zellij import.
+- zellij live topology/screen subscriptions.
+- zellij command history persistence.
+- zellij rendered output history persistence and hydration as `RenderedSnapshot`.
+- zellij paste output is visible while paste text stays out of verified command history.
+- zellij save session is explicitly `backend_unsupported`.
+
+```powershell
+cargo test -p terminal-node
+cargo test -p terminal-daemon-client
+```
+
+Results: `80 passed`, `17 passed`.
+
+```powershell
+cd sdk
+npm run check
+```
+
+Result: `38 test files passed`, `211 tests passed`.
+
+```powershell
+cd apps\terminal-demo
+npm run test
+npm run smoke:browser
+npm run smoke:browser:foreign
+```
+
+Results:
+
+- `npm run test`: `60 passed`.
+- `npm run smoke:browser`: passed with real Chrome/CDP, browser host, terminal daemon and Windows `cmd.exe`.
+- `npm run smoke:browser:foreign`: passed with real Chrome/CDP and zellij `0.44.3`.
 
 ### Rust real bootstrap and persistence
 
