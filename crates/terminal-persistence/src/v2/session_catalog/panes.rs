@@ -48,6 +48,15 @@ impl TerminalPersistenceV2 {
     ) -> Result<String, TerminalPersistenceV2Error> {
         validate_positive_dimensions(input.rows, input.cols)?;
         let mut connection = self.connection()?;
+        self.upsert_runtime_pane_with_connection(&mut connection, input)
+    }
+
+    pub(crate) fn upsert_runtime_pane_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        input: PaneInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
+        validate_positive_dimensions(input.rows, input.cols)?;
         let now = self.config.clock.now_ms();
         let pane_id = input.id.unwrap_or_else(new_id);
         let stream_id = input.stream_id.unwrap_or_else(|| DEFAULT_STREAM_ID.to_string());

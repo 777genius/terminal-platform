@@ -6,6 +6,14 @@ impl TerminalPersistenceV2 {
         input: StoragePressureEventInput,
     ) -> Result<StoragePressureRecord, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        self.record_storage_pressure_event_with_connection(&mut connection, input)
+    }
+
+    pub(in crate::v2) fn record_storage_pressure_event_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        input: StoragePressureEventInput,
+    ) -> Result<StoragePressureRecord, TerminalPersistenceV2Error> {
         let now = self.config.clock.now_ms();
         let row = NewStoragePressureEventRow {
             id: input.id.unwrap_or_else(new_id),
@@ -21,9 +29,7 @@ impl TerminalPersistenceV2 {
             metadata_json: json_metadata(&input.metadata)?,
         };
         validate_storage_pressure_domain(&row.state, &row.action_taken)?;
-        insert_into(terminal_storage_pressure_events::table)
-            .values(&row)
-            .execute(&mut connection)?;
+        insert_into(terminal_storage_pressure_events::table).values(&row).execute(connection)?;
         Ok(StoragePressureRecord::from(row))
     }
 
@@ -66,30 +72,34 @@ impl TerminalPersistenceV2 {
         })
     }
 
-    pub(super) fn record_storage_pressure_write_failure(
+    pub(in crate::v2) fn record_storage_pressure_write_failure_with_connection(
         &self,
+        connection: &mut SqliteConnection,
         operation: &str,
         reason: &str,
         error: Option<String>,
     ) -> Result<StoragePressureRecord, TerminalPersistenceV2Error> {
         let db_file_bytes = file_len_i64(&self.path)?;
         let wal_file_bytes = file_len_i64(&sqlite_sidecar_path(&self.path, "-wal"))?;
-        self.record_storage_pressure_event(StoragePressureEventInput {
-            id: None,
-            state: Some("full".to_string()),
-            db_file_bytes,
-            wal_file_bytes,
-            disk_free_bytes: None,
-            temp_free_bytes: None,
-            quota_bytes: None,
-            action_taken: Some("fail_closed".to_string()),
-            reason: Some(reason.to_string()),
-            metadata: Some(serde_json::json!({
-                "operation": operation,
-                "error": error,
-                "no_silent_delete": true,
-                "canonical_history_preserved": true,
-            })),
-        })
+        self.record_storage_pressure_event_with_connection(
+            connection,
+            StoragePressureEventInput {
+                id: None,
+                state: Some("full".to_string()),
+                db_file_bytes,
+                wal_file_bytes,
+                disk_free_bytes: None,
+                temp_free_bytes: None,
+                quota_bytes: None,
+                action_taken: Some("fail_closed".to_string()),
+                reason: Some(reason.to_string()),
+                metadata: Some(serde_json::json!({
+                    "operation": operation,
+                    "error": error,
+                    "no_silent_delete": true,
+                    "canonical_history_preserved": true,
+                })),
+            },
+        )
     }
 }

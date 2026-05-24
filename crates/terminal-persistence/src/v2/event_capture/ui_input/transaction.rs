@@ -10,12 +10,26 @@ use journal::{advance_ui_input_cursor, insert_ui_input_journal_event};
 use receipts::{insert_ui_input_capture_receipt, reuse_ui_input_receipt_if_possible};
 
 impl TerminalPersistenceV2 {
+    #[cfg(test)]
     pub(in crate::v2) fn append_ui_input_event_and_command(
         &self,
         input: &UiInputEventInput,
         writer_generation: &str,
     ) -> Result<(), TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        self.append_ui_input_event_and_command_with_connection(
+            &mut connection,
+            input,
+            writer_generation,
+        )
+    }
+
+    pub(crate) fn append_ui_input_event_and_command_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        input: &UiInputEventInput,
+        writer_generation: &str,
+    ) -> Result<(), TerminalPersistenceV2Error> {
         let now = self.config.clock.now_ms();
         let tx = UiInputTransaction::new(input, now)?;
 

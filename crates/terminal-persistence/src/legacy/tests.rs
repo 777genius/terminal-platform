@@ -12,7 +12,9 @@ use terminal_projection::{
 };
 
 use crate::v2::{
-    PersistenceFaultHealthRecordInput, RestoreGuaranteeLevel, TerminalOutputEventInput,
+    HistoryGapEventInput, PersistenceFaultHealthRecordInput, RestoreGuaranteeLevel,
+    ScreenSnapshotEventInput, TerminalOutputEventInput, TopologySnapshotEventInput,
+    UiInputEventInput,
 };
 
 use super::{PersistenceError, SavedNativeSession, SessionRouteRecord, SqliteSessionStore};
@@ -549,6 +551,140 @@ fn v2_facade_saved_session_import_uses_worker_connection() {
 
     assert_eq!(screen_count, 1);
     assert_eq!(drill_count, 1);
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn v2_facade_hot_capture_paths_use_worker_connection() {
+    let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+    let path =
+        std::env::temp_dir().join(format!("terminal-platform-v2-worker-capture-{nonce}.sqlite3"));
+    let store = SqliteSessionStore::open(&path).expect("store should open");
+    let executor = store.v2_executor().expect("v2 executor should start");
+    executor
+        .execute_with_connection(|connection| {
+            sql_query("CREATE TEMP TABLE worker_capture_probe (kind TEXT)").execute(connection)?;
+            for (trigger_name, table_name, kind) in [
+                ("worker_capture_probe_ui", "terminal_journal_events", "ui_input"),
+                ("worker_capture_probe_output", "terminal_stream_segments", "output"),
+                ("worker_capture_probe_gap", "terminal_history_gaps", "gap"),
+                ("worker_capture_probe_screen", "terminal_screen_snapshots", "screen"),
+                ("worker_capture_probe_topology", "terminal_topology_snapshots", "topology"),
+            ] {
+                sql_query(format!(
+                    "
+                    CREATE TEMP TRIGGER {trigger_name}
+                    AFTER INSERT ON {table_name}
+                    BEGIN
+                        INSERT INTO worker_capture_probe (kind) VALUES ('{kind}');
+                    END
+                    "
+                ))
+                .execute(connection)?;
+            }
+            Ok(())
+        })
+        .expect("worker temp capture triggers should install");
+
+    let session_id = SessionId::new();
+    let pane_id = PaneId::new();
+    let route = SessionRoute {
+        backend: BackendKind::Native,
+        authority: RouteAuthority::LocalDaemon,
+        external: None,
+    };
+
+    store
+        .record_v2_ui_input(UiInputEventInput {
+            session_id: session_id.0.to_string(),
+            route: route.clone(),
+            title: Some("worker capture shell".to_string()),
+            launch: None,
+            pane_id: pane_id.0.to_string(),
+            data: "git status\r".to_string(),
+            is_paste: false,
+            source_event_id: Some("worker-capture-ui".to_string()),
+            rows: Some(24),
+            cols: Some(80),
+            shell_kind: Some("cmd".to_string()),
+        })
+        .expect("ui input should persist through worker connection");
+    store
+        .record_v2_terminal_output(TerminalOutputEventInput {
+            session_id: session_id.0.to_string(),
+            route: route.clone(),
+            title: Some("worker capture shell".to_string()),
+            launch: None,
+            pane_id: pane_id.0.to_string(),
+            tab_id: None,
+            payload: b"worker output\r\n".to_vec(),
+            rows: Some(24),
+            cols: Some(80),
+            source_sequence: Some(1),
+            occurred_at_ms: None,
+            capture_semantics: Some("raw_vt_stream".to_string()),
+        })
+        .expect("terminal output should persist through worker connection");
+    store
+        .record_v2_history_gap(HistoryGapEventInput {
+            session_id: session_id.0.to_string(),
+            route: route.clone(),
+            title: Some("worker capture shell".to_string()),
+            launch: None,
+            pane_id: pane_id.0.to_string(),
+            tab_id: None,
+            rows: Some(24),
+            cols: Some(80),
+            skipped_events: 2,
+            estimated_dropped_bytes: Some(16),
+            reason: "worker_capture_probe".to_string(),
+            occurred_at_ms: None,
+        })
+        .expect("history gap should persist through worker connection");
+
+    let screen = sample_snapshot(session_id, "worker capture shell", "worker screen")
+        .screens
+        .into_iter()
+        .next()
+        .expect("sample screen should exist");
+    store
+        .record_v2_screen_snapshot(ScreenSnapshotEventInput {
+            session_id: session_id.0.to_string(),
+            route: route.clone(),
+            title: Some("worker capture shell".to_string()),
+            launch: None,
+            tab_id: None,
+            screen,
+            buffer_kind: Some("normal".to_string()),
+            capture_semantics: Some("rendered_plaintext_snapshot".to_string()),
+        })
+        .expect("screen snapshot should persist through worker connection");
+    store
+        .record_v2_topology_snapshot(TopologySnapshotEventInput {
+            session_id: session_id.0.to_string(),
+            route,
+            title: Some("worker capture shell".to_string()),
+            launch: None,
+            topology: TopologySnapshot {
+                session_id,
+                backend_kind: BackendKind::Native,
+                focused_tab: None,
+                tabs: Vec::new(),
+            },
+        })
+        .expect("topology snapshot should persist through worker connection");
+
+    let inserted_count = executor
+        .execute_with_connection(|connection| {
+            let row = sql_query("SELECT COUNT(*) AS count FROM worker_capture_probe")
+                .get_result::<WorkerProbeCount>(connection)?;
+            Ok(row.count)
+        })
+        .expect("worker capture temp trigger count should load");
+
+    assert_eq!(inserted_count, 7);
 
     drop(store);
     let _ = std::fs::remove_file(path);

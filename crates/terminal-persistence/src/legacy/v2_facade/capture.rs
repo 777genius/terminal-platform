@@ -25,7 +25,9 @@ impl SqliteSessionStore {
     ) -> Result<(), TerminalPersistenceV2Error> {
         retry_v2_write(|| {
             let input = input.clone();
-            self.with_v2_store_serialized(move |store| store.record_ui_input_event(input))
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_ui_input_event_with_connection(connection, input)
+            })
         })
     }
 
@@ -35,8 +37,8 @@ impl SqliteSessionStore {
     ) -> Result<(), TerminalPersistenceV2Error> {
         retry_v2_write(|| {
             let input = input.clone();
-            self.with_v2_store_serialized(move |store| {
-                store.record_terminal_output_event(input)?;
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_terminal_output_event_with_connection(connection, input)?;
                 Ok(())
             })
         })
@@ -48,8 +50,8 @@ impl SqliteSessionStore {
     ) -> Result<(), TerminalPersistenceV2Error> {
         retry_v2_write(|| {
             let input = input.clone();
-            self.with_v2_store_serialized(move |store| {
-                store.record_history_gap_event(input)?;
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_history_gap_event_with_connection(connection, input)?;
                 Ok(())
             })
         })
@@ -61,8 +63,8 @@ impl SqliteSessionStore {
     ) -> Result<(), TerminalPersistenceV2Error> {
         retry_v2_write(|| {
             let input = input.clone();
-            self.with_v2_store_serialized(move |store| {
-                store.record_screen_snapshot_event(input)?;
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_screen_snapshot_event_with_connection(connection, input)?;
                 Ok(())
             })
         })
@@ -74,8 +76,8 @@ impl SqliteSessionStore {
     ) -> Result<(), TerminalPersistenceV2Error> {
         retry_v2_write(|| {
             let input = input.clone();
-            self.with_v2_store_serialized(move |store| {
-                store.record_topology_snapshot_event(input)?;
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_topology_snapshot_event_with_connection(connection, input)?;
                 Ok(())
             })
         })

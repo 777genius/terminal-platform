@@ -13,8 +13,19 @@ impl TerminalPersistenceV2 {
         input: StreamSegmentInput,
     ) -> Result<StreamSegmentReceipt, TerminalPersistenceV2Error> {
         validate_stream_segment_input(&input)?;
+        let mut connection = self.connection()?;
+        self.append_stream_segment_with_connection(&mut connection, input)
+    }
+
+    pub(crate) fn append_stream_segment_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        input: StreamSegmentInput,
+    ) -> Result<StreamSegmentReceipt, TerminalPersistenceV2Error> {
+        validate_stream_segment_input(&input)?;
         if self.config.failpoints.stream_segment_before_transaction_storage_full {
-            self.record_storage_pressure_write_failure(
+            self.record_storage_pressure_write_failure_with_connection(
+                connection,
                 "append_stream_segment",
                 "synthetic_sqlite_full",
                 None,
@@ -24,7 +35,6 @@ impl TerminalPersistenceV2 {
             ));
         }
 
-        let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
         let occurred_at_ms = input.occurred_at_ms.unwrap_or(now);
         let stream_id = input.stream_id.clone().unwrap_or_else(|| DEFAULT_STREAM_ID.to_string());
@@ -60,7 +70,8 @@ impl TerminalPersistenceV2 {
         if let Err(error) = &append_result
             && is_storage_full_like_error(error)
         {
-            let _ = self.record_storage_pressure_write_failure(
+            let _ = self.record_storage_pressure_write_failure_with_connection(
+                connection,
                 "append_stream_segment",
                 "sqlite_full",
                 Some(error.to_string()),

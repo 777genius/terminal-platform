@@ -1,21 +1,37 @@
 use super::super::super::*;
-use super::registration::{finish_writer_operation, upsert_terminal_output_target};
+use super::registration::{finish_writer_operation, upsert_terminal_output_target_with_connection};
 
 impl TerminalPersistenceV2 {
     pub fn record_terminal_output_event(
         &self,
         input: TerminalOutputEventInput,
     ) -> Result<StreamSegmentReceipt, TerminalPersistenceV2Error> {
-        upsert_terminal_output_target(self, &input)?;
-        if self.is_session_private(&input.session_id)? {
+        let mut connection = self.connection()?;
+        self.record_terminal_output_event_with_connection(&mut connection, input)
+    }
+
+    pub(crate) fn record_terminal_output_event_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        input: TerminalOutputEventInput,
+    ) -> Result<StreamSegmentReceipt, TerminalPersistenceV2Error> {
+        upsert_terminal_output_target_with_connection(self, connection, &input)?;
+        if self.is_session_private_with_connection(connection, &input.session_id)? {
             return Err(TerminalPersistenceV2Error::InvalidData(
                 "private mode suppresses durable terminal output capture".to_string(),
             ));
         }
 
-        let lease = self.acquire_writer_generation_with_retry("runtime-output-capture", 60_000)?;
-        let append_result = self.append_stream_segment(stream_segment_input(input, &lease.id));
-        let release_result = self.release_writer_generation(&lease.id);
+        let lease = self.acquire_writer_generation_with_retry_on_connection(
+            connection,
+            "runtime-output-capture",
+            60_000,
+        )?;
+        let append_result = self.append_stream_segment_with_connection(
+            connection,
+            stream_segment_input(input, &lease.id),
+        );
+        let release_result = self.release_writer_generation_with_connection(connection, &lease.id);
         finish_writer_operation(append_result, release_result)
     }
 }

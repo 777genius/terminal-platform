@@ -78,19 +78,6 @@ impl TerminalPersistenceV2 {
         })
     }
 
-    pub(super) fn acquire_writer_generation_with_retry(
-        &self,
-        process_id: &str,
-        lease_ms: i64,
-    ) -> Result<WriterGenerationLease, TerminalPersistenceV2Error> {
-        let mut connection = self.connection()?;
-        self.acquire_writer_generation_with_retry_on_connection(
-            &mut connection,
-            process_id,
-            lease_ms,
-        )
-    }
-
     pub(in crate::v2) fn acquire_writer_generation_with_retry_on_connection(
         &self,
         connection: &mut SqliteConnection,

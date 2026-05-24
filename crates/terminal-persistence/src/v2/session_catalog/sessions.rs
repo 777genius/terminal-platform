@@ -52,6 +52,14 @@ impl TerminalPersistenceV2 {
         input: SessionInput,
     ) -> Result<String, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        self.upsert_runtime_session_with_connection(&mut connection, input)
+    }
+
+    pub(crate) fn upsert_runtime_session_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        input: SessionInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
         let now = self.config.clock.now_ms();
         let session_id = input.id.unwrap_or_else(new_id);
         let route_json = serde_json::to_string(&input.route)?;

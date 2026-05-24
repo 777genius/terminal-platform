@@ -10,34 +10,6 @@ use crate::{
 use super::super::SqliteSessionStore;
 
 impl SqliteSessionStore {
-    pub(in crate::legacy) fn with_v2_store_serialized<T>(
-        &self,
-        operation: impl FnOnce(TerminalPersistenceV2) -> Result<T, TerminalPersistenceV2Error>
-        + Send
-        + 'static,
-    ) -> Result<T, TerminalPersistenceV2Error>
-    where
-        T: Send + 'static,
-    {
-        let path = self.path.clone();
-        let config = self.v2_config.clone();
-        self.execute_v2_serialized(move || {
-            let store = TerminalPersistenceV2::open_with_config(&path, config)?;
-            operation(store)
-        })
-    }
-
-    pub(in crate::legacy) fn execute_v2_serialized<T>(
-        &self,
-        operation: impl FnOnce() -> Result<T, TerminalPersistenceV2Error> + Send + 'static,
-    ) -> Result<T, TerminalPersistenceV2Error>
-    where
-        T: Send + 'static,
-    {
-        let executor = self.v2_executor()?;
-        executor.execute(operation)
-    }
-
     pub(in crate::legacy) fn with_v2_worker_connection<T>(
         &self,
         operation: impl FnOnce(
