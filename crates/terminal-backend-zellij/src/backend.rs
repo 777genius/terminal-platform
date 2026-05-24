@@ -3,6 +3,9 @@ mod capabilities;
 mod command;
 mod discovery;
 
+#[cfg(test)]
+pub(crate) use capabilities::capabilities_for_surface;
+
 use terminal_backend_api::{
     BackendCapabilities, BackendError, BackendScope, BackendSessionBinding, BackendSessionPort,
     BackendSessionSummary, BoxFuture, CreateSessionSpec, DiscoveredSession, MuxBackendPort,

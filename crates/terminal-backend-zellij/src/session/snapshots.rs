@@ -88,15 +88,9 @@ impl ZellijAttachedSession {
     ) -> Result<ScreenSnapshot, BackendError> {
         let pane_target = self.pane_target(pane_id)?;
         let _io_permit = self.io_lane.lock().expect("zellij io lane should not be poisoned");
-        let output = self.backend.run_owned(
-            Some(&self.target),
-            &[
-                "action".to_string(),
-                "dump-screen".to_string(),
-                "--pane-id".to_string(),
-                pane_target.backend_ref.clone(),
-            ],
-        )?;
+        let output = self
+            .backend
+            .run_owned(Some(&self.target), &dump_screen_scrollback_args(&pane_target))?;
 
         Ok(screen_snapshot_from_lines(
             pane_id,
@@ -117,4 +111,14 @@ impl ZellijAttachedSession {
 
         Ok(screen_snapshot_from_lines(pane_id, &pane_target, lines, source))
     }
+}
+
+pub(crate) fn dump_screen_scrollback_args(pane_target: &ZellijPaneTarget) -> Vec<String> {
+    vec![
+        "action".to_string(),
+        "dump-screen".to_string(),
+        "--pane-id".to_string(),
+        pane_target.backend_ref.clone(),
+        "--full".to_string(),
+    ]
 }

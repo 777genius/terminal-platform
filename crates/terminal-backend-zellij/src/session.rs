@@ -14,6 +14,9 @@ mod commands;
 mod snapshots;
 mod subscriptions;
 
+#[cfg(test)]
+pub(crate) use snapshots::dump_screen_scrollback_args;
+
 #[derive(Clone)]
 pub(crate) struct ZellijAttachedSession {
     pub(crate) backend: Arc<ZellijBackend>,
