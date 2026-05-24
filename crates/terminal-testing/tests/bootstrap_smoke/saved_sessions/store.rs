@@ -64,6 +64,92 @@ async fn bootstrap_smoke_save_v2_failure_does_not_publish_visible_saved_session(
 
 #[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_save_publish_failure_records_unpublished_v2_evidence() {
+    let store_path = unique_sqlite_path("bootstrap-native-save-publish-failpoint");
+    let mut config = TerminalPersistenceV2Config::test();
+    config.failpoints.saved_session_legacy_publish_before_commit = true;
+    let store = SqliteSessionStore::open_with_v2_config(&store_path, config)
+        .expect("isolated sqlite store should open with publish failpoint config");
+    let fixture = daemon_fixture_with_daemon(
+        "bootstrap-native-save-publish-failpoint",
+        TerminalDaemon::with_persistence(store.clone()),
+    )
+    .expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec {
+                title: Some("publish-failpoint-shell".to_string()),
+                launch: Some(cat_launch_spec()),
+            },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    let save_error = fixture
+        .client
+        .dispatch(created.session.session_id, MuxCommand::SaveSession)
+        .await
+        .expect_err("save should fail when legacy publish fails after v2 evidence");
+    let listed = fixture
+        .client
+        .list_saved_sessions()
+        .await
+        .expect("list_saved_sessions should still succeed after publish failure");
+    let lookup_error = fixture
+        .client
+        .saved_session(created.session.session_id)
+        .await
+        .expect_err("failed legacy publish must not expose visible saved session");
+    let legacy_saved = store
+        .load_native_session(created.session.session_id)
+        .expect("direct legacy lookup should succeed");
+    let v2_restore_plan = store
+        .native_session_v2_restore_plan(created.session.session_id)
+        .expect("v2 restore plan lookup should succeed");
+    let v2_store =
+        TerminalPersistenceV2::open_with_config(&store_path, TerminalPersistenceV2Config::test())
+            .expect("v2 store should reopen for health inspection");
+    let health = v2_store
+        .list_open_data_health_records(Some(&created.session.session_id.0.to_string()))
+        .expect("health records should list");
+
+    assert_eq!(save_error.code, "backend_internal");
+    assert!(save_error.message.contains("saved_session_legacy_publish_before_commit"));
+    assert!(
+        !listed.sessions.iter().any(|session| session.session_id == created.session.session_id)
+    );
+    assert_eq!(lookup_error.code, "backend_not_found");
+    assert!(legacy_saved.is_none());
+    assert!(v2_restore_plan.is_some());
+    assert!(health.iter().any(|record| {
+        record.detection_kind == "manual"
+            && record.severity == "error"
+            && record.action_state == "open"
+            && record.affected_ref.as_deref().is_some_and(|value| {
+                value.contains("saved_session_legacy_publish_after_v2_evidence")
+            })
+            && record.details_json.as_ref().is_some_and(|details| {
+                details["operation"] == "saved_session_legacy_publish_after_v2_evidence"
+                    && details["detail"].as_str().is_some_and(|detail| {
+                        detail.contains("saved_session_legacy_publish_before_commit")
+                    })
+            })
+    }));
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(any(unix, windows))]
+#[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_saves_native_session_snapshot_to_store() {
     let fixture = daemon_fixture("bootstrap-native-save").expect("fixture should start");
     let created = fixture

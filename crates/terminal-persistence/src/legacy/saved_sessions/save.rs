@@ -7,6 +7,12 @@ impl SqliteSessionStore {
         &self,
         session: &SavedNativeSession,
     ) -> Result<(), PersistenceError> {
+        if self.v2_config.failpoints.saved_session_legacy_publish_before_commit {
+            return Err(PersistenceError::InvalidData(
+                "failpoint saved_session_legacy_publish_before_commit".to_string(),
+            ));
+        }
+
         let mut connection = self.open_connection()?;
         let transaction = connection.transaction()?;
         transaction.execute(

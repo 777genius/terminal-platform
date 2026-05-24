@@ -65,4 +65,5 @@ pub struct PersistenceFailpoints {
     pub stream_segment_after_segment_insert: bool,
     pub stream_segment_before_transaction_storage_full: bool,
     pub saved_session_v2_snapshot_before_import: bool,
+    pub saved_session_legacy_publish_before_commit: bool,
 }

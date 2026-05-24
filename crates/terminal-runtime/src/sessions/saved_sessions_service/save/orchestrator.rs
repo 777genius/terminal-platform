@@ -1,5 +1,7 @@
 use terminal_backend_api::BackendError;
-use terminal_persistence::{SavedNativeSession, SqliteSessionStore};
+use terminal_persistence::{
+    PersistenceFaultHealthRecordInput, SavedNativeSession, SqliteSessionStore,
+};
 
 pub(super) trait SavedSessionPersistencePort {
     fn persist_native_v2_evidence(&self, snapshot: &SavedNativeSession)
@@ -8,6 +10,12 @@ pub(super) trait SavedSessionPersistencePort {
     fn publish_native_legacy_snapshot(
         &self,
         snapshot: &SavedNativeSession,
+    ) -> Result<(), BackendError>;
+
+    fn record_native_publish_failure_after_v2_evidence(
+        &self,
+        snapshot: &SavedNativeSession,
+        error: &BackendError,
     ) -> Result<(), BackendError>;
 }
 
@@ -31,6 +39,32 @@ impl SavedSessionPersistencePort for SqliteSessionStore {
             BackendError::internal(format!("failed to publish saved native session - {error}"))
         })
     }
+
+    fn record_native_publish_failure_after_v2_evidence(
+        &self,
+        snapshot: &SavedNativeSession,
+        error: &BackendError,
+    ) -> Result<(), BackendError> {
+        self.record_v2_persistence_fault_health_record(PersistenceFaultHealthRecordInput {
+            session_id: Some(snapshot.session_id.0.to_string()),
+            pane_id: None,
+            operation: "saved_session_legacy_publish_after_v2_evidence".to_string(),
+            detail: error.message.clone(),
+            error_kind: Some("legacy_publish_failed".to_string()),
+            metadata: Some(serde_json::json!({
+                "save_semantics": "v2_evidence_persisted_legacy_publish_failed",
+                "legacy_visible": false,
+                "backend": "native",
+            })),
+        })
+        .map(|_record_id| ())
+        .map_err(|record_error| {
+            BackendError::internal(format!(
+                "failed to record saved-session publish failure after v2 evidence - {record_error}; original publish error - {}",
+                error.message
+            ))
+        })
+    }
 }
 
 pub(super) struct SavedSessionSaveOrchestrator<'a, P: SavedSessionPersistencePort + ?Sized> {
@@ -44,7 +78,14 @@ impl<'a, P: SavedSessionPersistencePort + ?Sized> SavedSessionSaveOrchestrator<'
 
     pub(super) fn save_native(&self, snapshot: SavedNativeSession) -> Result<(), BackendError> {
         self.persistence.persist_native_v2_evidence(&snapshot)?;
-        self.persistence.publish_native_legacy_snapshot(&snapshot)
+        match self.persistence.publish_native_legacy_snapshot(&snapshot) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.persistence
+                    .record_native_publish_failure_after_v2_evidence(&snapshot, &error)?;
+                Err(error)
+            }
+        }
     }
 }
 
@@ -67,6 +108,7 @@ mod tests {
         calls: Mutex<Vec<&'static str>>,
         fail_v2: bool,
         fail_publish: bool,
+        fail_publish_marker: bool,
     }
 
     impl SavedSessionPersistencePort for FakePersistence {
@@ -88,6 +130,21 @@ mod tests {
             self.calls.lock().expect("calls should lock").push("publish");
             if self.fail_publish {
                 return Err(BackendError::internal("publish failed"));
+            }
+            Ok(())
+        }
+
+        fn record_native_publish_failure_after_v2_evidence(
+            &self,
+            _snapshot: &SavedNativeSession,
+            error: &BackendError,
+        ) -> Result<(), BackendError> {
+            self.calls.lock().expect("calls should lock").push("mark_unpublished");
+            if self.fail_publish_marker {
+                return Err(BackendError::internal(format!(
+                    "mark unpublished failed after {}",
+                    error.message
+                )));
             }
             Ok(())
         }
@@ -125,7 +182,30 @@ mod tests {
             .expect_err("publish failure should fail save");
 
         assert!(error.message.contains("publish failed"));
-        assert_eq!(*persistence.calls.lock().expect("calls should lock"), vec!["v2", "publish"]);
+        assert_eq!(
+            *persistence.calls.lock().expect("calls should lock"),
+            vec!["v2", "publish", "mark_unpublished"]
+        );
+    }
+
+    #[test]
+    fn save_native_reports_marker_failure_after_publish_failure() {
+        let persistence = FakePersistence {
+            fail_publish: true,
+            fail_publish_marker: true,
+            ..FakePersistence::default()
+        };
+
+        let error = SavedSessionSaveOrchestrator::new(&persistence)
+            .save_native(test_snapshot())
+            .expect_err("marker failure should fail save explicitly");
+
+        assert!(error.message.contains("mark unpublished failed"));
+        assert!(error.message.contains("publish failed"));
+        assert_eq!(
+            *persistence.calls.lock().expect("calls should lock"),
+            vec!["v2", "publish", "mark_unpublished"]
+        );
     }
 
     fn test_snapshot() -> SavedNativeSession {
