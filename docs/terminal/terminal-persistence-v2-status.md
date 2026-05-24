@@ -6,6 +6,7 @@
 **Verified daemon process restart commit**: `f8cb0c2669e40e15b5fbce80b089e36a4b086704`
 **Verified v2 facade worker-connection commit**: `06253d715e25b2c675e2d2f6f7b60f82b1e7b20e`
 **Verified v2 saved restore worker-connection commit**: `d61643770c80d6a1224b2fca63188e6e880a4183`
+**Verified v2 hot capture worker-connection commit**: `e2b58f2a7a32161655658aa01e061c7acefb0f2c`
 **Latest branch commit**: this document is kept in the latest closeout commit.
 **Primary plan**: [terminal-persistence-v2-implementation-plan.md](./terminal-persistence-v2-implementation-plan.md)
 **Completion plan to 100%**: [terminal-persistence-v2-completion-plan.md](./terminal-persistence-v2-completion-plan.md)
@@ -30,6 +31,7 @@ The most important verified behavior:
 - Native output history survives a real external `terminal-daemon` process kill/restart: the test launches the binary, writes history into SQLite, kills the process, starts a new process on the same DB and verifies `GetPaneHistory`.
 - v2 facade diagnostic and backend-capability writes now use the single writer's worker-owned SQLite connection. The regression test proves this with a TEMP trigger that can only fire on that exact connection.
 - Native saved-session v2 import, restore drill, restore plan, pane-history hydration and command-history reads now use connection-aware ports through the worker-owned SQLite connection. Worker startup also verifies v2 defaults before accepting jobs.
+- Hot runtime capture facade paths now use worker-owned SQLite connection as well: UI input, terminal output, history gaps, runtime screen snapshots and runtime topology snapshots. The old facade path that serialized jobs while opening hidden fresh v2 connections has been removed.
 - Command/output history survives daemon restart.
 - Retried command history submissions are deduped by `client_event_id`.
 - Command history is scoped by session.
@@ -122,7 +124,7 @@ These commands have passed on Windows during the closeout verification cycle.
 cargo test -p terminal-persistence
 ```
 
-Latest result after saved-session worker-connection facade hardening: `100 passed`.
+Latest result after hot-capture worker-connection facade hardening: `101 passed`.
 
 Closeout baseline before worker-connection regressions: `98 passed`.
 
@@ -133,11 +135,20 @@ Verified:
 - Regression for rendered snapshot projection sequence overflow: snapshots now use pane event high-water cursor and keep projection sequence as metadata.
 - Regression for v2 facade worker-owned diagnostic writes: `v2_facade_fault_health_write_uses_worker_connection`.
 - Regression for v2 saved-session import and restore drill through worker-owned connection: `v2_facade_saved_session_import_uses_worker_connection`.
+- Regression for all hot runtime capture facade paths through worker-owned connection: `v2_facade_hot_capture_paths_use_worker_connection`.
 
 Targeted worker-connection regression:
 
 ```powershell
 cargo test -p terminal-persistence v2_facade_fault_health_write_uses_worker_connection -- --nocapture
+```
+
+Result: `1 passed`.
+
+Targeted hot-capture worker-connection regression:
+
+```powershell
+cargo test -p terminal-persistence v2_facade_hot_capture_paths_use_worker_connection -- --nocapture
 ```
 
 Result: `1 passed`.
