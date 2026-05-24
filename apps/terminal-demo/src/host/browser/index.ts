@@ -25,6 +25,8 @@ const demoAutoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION === "1
 const failNextWorkspacePaneHistory = process.env.TERMINAL_DEMO_FAIL_NEXT_WORKSPACE_PANE_HISTORY === "1";
 const workspacePaneHistoryFaultMarkerPath =
   process.env.TERMINAL_DEMO_FAIL_WORKSPACE_PANE_HISTORY_MARKER_PATH ?? null;
+const workspaceDispatchStoragePressureMarkerPath =
+  process.env.TERMINAL_DEMO_FAIL_WORKSPACE_DISPATCH_STORAGE_PRESSURE_MARKER_PATH ?? null;
 const demoDefaultShellProgram = resolveDemoDefaultShellProgram({
   validateWindowsPaths: true,
 });
@@ -57,6 +59,7 @@ async function bootstrap(): Promise<void> {
     gatewayFaultInjection: createGatewayFaultInjection({
       failNextWorkspacePaneHistory,
       workspacePaneHistoryFaultMarkerPath,
+      workspaceDispatchStoragePressureMarkerPath,
     }),
   });
 
@@ -85,9 +88,14 @@ async function bootstrap(): Promise<void> {
 function createGatewayFaultInjection(options: {
   failNextWorkspacePaneHistory: boolean;
   workspacePaneHistoryFaultMarkerPath: string | null;
+  workspaceDispatchStoragePressureMarkerPath: string | null;
 }): TerminalRuntimeGatewayFaultInjectionPort | null {
   let shouldFailWorkspacePaneHistory = options.failNextWorkspacePaneHistory;
-  if (!shouldFailWorkspacePaneHistory && !options.workspacePaneHistoryFaultMarkerPath) {
+  if (
+    !shouldFailWorkspacePaneHistory
+    && !options.workspacePaneHistoryFaultMarkerPath
+    && !options.workspaceDispatchStoragePressureMarkerPath
+  ) {
     return null;
   }
 
@@ -109,7 +117,28 @@ function createGatewayFaultInjection(options: {
       fs.rmSync(options.workspacePaneHistoryFaultMarkerPath, { force: true });
       throw new Error("Simulated workspace pane history failure for degraded persistence smoke");
     },
+    beforeWorkspaceDispatchMuxCommand() {
+      if (!options.workspaceDispatchStoragePressureMarkerPath) {
+        return;
+      }
+
+      if (!fs.existsSync(options.workspaceDispatchStoragePressureMarkerPath)) {
+        return;
+      }
+
+      fs.rmSync(options.workspaceDispatchStoragePressureMarkerPath, { force: true });
+      throw createGatewayError(
+        "storage_pressure",
+        "Simulated terminal persistence storage pressure for degraded persistence smoke",
+      );
+    },
   };
+}
+
+function createGatewayError(code: string, message: string): Error & { code: string } {
+  const error = new Error(message) as Error & { code: string };
+  error.code = code;
+  return error;
 }
 
 async function shutdown(exitCode = 0): Promise<void> {

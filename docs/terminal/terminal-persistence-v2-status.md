@@ -22,7 +22,7 @@ The most important verified behavior:
 - Native terminal sessions persist saved session metadata and command/output history.
 - Native saved-session restore hydrates v2 pane history through the bound transport API before falling back to snapshots.
 - Native long-history restore is verified in a dedicated real-browser smoke with paging and load-more.
-- Native degraded restore is verified in a dedicated real-browser smoke: the gateway forces one v2 pane-history failure during saved-session restore, the UI records `saved_pane_history_hydration_failed`, uses snapshot fallback, renders the restore boundary, and remains usable for new commands.
+- Native degraded restore is verified in a dedicated real-browser smoke: the gateway forces one v2 pane-history failure during saved-session restore, the UI records `saved_pane_history_hydration_failed`, uses snapshot fallback, renders the restore boundary, then forces one typed `storage_pressure` command-dispatch failure and remains usable for new commands.
 - Command/output history survives daemon restart.
 - Retried command history submissions are deduped by `client_event_id`.
 - Command history is scoped by session.
@@ -46,7 +46,7 @@ Overall local confidence after repeated Windows runs: 🎯 9.3/10, 🛡️ 9/10.
 - Added durable command/output history behavior across daemon restart.
 - Fixed restored saved-session history hydration so the SDK calls `getPaneHistory` with its transport binding intact. This closes the real WebSocket path where detached methods fell back to visual snapshots.
 - Added a dedicated browser long-history persistence smoke that forces the v2 history payload past the first-page byte budget, restores the session, verifies `v2_pane_history`, and loads pages until the end marker is visible in DOM history.
-- Added a dedicated browser degraded persistence smoke that injects a gateway-level v2 pane-history failure exactly before saved-session restore and verifies snapshot fallback, workspace diagnostics, DOM history/boundary rendering and post-restore command usability.
+- Added a dedicated browser degraded persistence smoke that injects a gateway-level v2 pane-history failure exactly before saved-session restore and a typed `storage_pressure` failure during command dispatch, then verifies snapshot fallback, workspace diagnostics, browser notices, DOM history/boundary rendering and post-restore command usability.
 - Added history dedupe behavior for retried submits using `client_event_id`.
 - Added session scoping so commands from one session do not leak into another session history.
 - Added explicit saved-session restore compatibility/degraded semantics in API-facing behavior.
@@ -172,7 +172,7 @@ cd sdk
 npm run check
 ```
 
-Result: `38 test files passed`, `211 tests passed`.
+Result: `38 test files passed`, `212 tests passed`.
 
 ```powershell
 cd apps\terminal-demo
@@ -185,9 +185,9 @@ npm run smoke:browser:foreign
 
 Results:
 
-- `npm run test`: `61 passed`.
+- `npm run test`: `62 passed`.
 - `npm run smoke:browser`: passed with real Chrome/CDP, browser host, terminal daemon and Windows `cmd.exe`.
-- `npm run smoke:browser:persistence-degraded`: passed with real Chrome/CDP, browser host, terminal daemon and Windows `cmd.exe`; verified forced v2 pane-history failure during saved-session restore records `saved_pane_history_hydration_failed`, falls back to saved snapshot history, keeps restore boundary DOM visible, and accepts a post-restore command.
+- `npm run smoke:browser:persistence-degraded`: passed with real Chrome/CDP, browser host, terminal daemon and Windows `cmd.exe`; verified forced v2 pane-history failure during saved-session restore records `saved_pane_history_hydration_failed`, falls back to saved snapshot history, keeps restore boundary DOM visible, verifies typed `storage_pressure` command-dispatch diagnostics in workspace state/browser notices, and accepts a post-restore command.
 - `npm run smoke:browser:persistence-long-history`: passed with real Chrome/CDP, browser host, terminal daemon and Windows `cmd.exe`; verified saved-session restore uses `v2_pane_history`, the first restored page is paged, `loadMorePaneHistory` reaches the end marker, and history/boundary DOM lines render.
 - `npm run smoke:browser:foreign`: passed with real Chrome/CDP and zellij `0.44.3`.
 
@@ -287,6 +287,7 @@ Verified with real Chrome/CDP, browser host and terminal daemon:
 - Stale auto-start URL scenario.
 - Browser host restart recovery.
 - Dedicated degraded saved-session restore through snapshot fallback after injected v2 pane-history failure.
+- Browser-facing typed storage-pressure diagnostic after injected command-dispatch failure.
 - Explicit launch scenario.
 - Dedicated long-history saved-session restore through `v2_pane_history`.
 - Paged history cursor/load-more behavior after restore.
@@ -317,7 +318,7 @@ Verified with real Chrome/CDP and zellij `0.44.2`:
 npm test
 ```
 
-Result: `61 passed`.
+Result: `62 passed`.
 
 ```powershell
 npm run test:offline

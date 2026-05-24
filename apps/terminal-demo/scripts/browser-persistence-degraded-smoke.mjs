@@ -36,6 +36,10 @@ const paneHistoryFaultMarkerPath = path.join(
   os.tmpdir(),
   `terminal-demo-pane-history-fault-${process.pid}-${Date.now()}.flag`,
 );
+const dispatchStoragePressureFaultMarkerPath = path.join(
+  os.tmpdir(),
+  `terminal-demo-dispatch-storage-pressure-${process.pid}-${Date.now()}.flag`,
+);
 const browserBootstrapPath = path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json");
 const keepArtifacts = process.env.TERMINAL_DEMO_DEGRADED_KEEP_ARTIFACTS === "1";
 const submitKey = process.platform === "win32" ? "\r" : "\n";
@@ -97,6 +101,7 @@ async function main() {
       runtimeSlug,
       sessionStorePath,
       paneHistoryFaultMarkerPath,
+      dispatchStoragePressureFaultMarkerPath,
     });
     const result = await runDegradedRestoreScenario(browserUrl);
     const unexpectedIssues = result.issues.filter((issue) => {
@@ -111,6 +116,8 @@ async function main() {
       || !result.markerConsumed
       || !result.restoredWithSnapshotFallback
       || !result.diagnosticRecorded
+      || !result.storagePressureDiagnosticRecorded
+      || !result.storagePressureMarkerConsumed
       || !result.usableAfterFallback
     ) {
       throw new Error(`Degraded browser smoke did not prove fallback persistence: ${JSON.stringify(result)}`);
@@ -230,6 +237,40 @@ async function runDegradedRestoreScenario(browserUrl) {
     }, 45_000);
 
     const markerConsumed = !(await pathExists(paneHistoryFaultMarkerPath));
+
+    await fs.writeFile(
+      dispatchStoragePressureFaultMarkerPath,
+      "fail-next-workspace-dispatch-storage-pressure\n",
+      "utf8",
+    );
+    const storagePressure = await dispatchInput(
+      send,
+      seedCommand("TPV2-DEGRADED-STORAGE-PRESSURE-SHOULD-NOT-RUN"),
+      "degraded-storage-pressure",
+    );
+    const storagePressureMarkerConsumed = !(await pathExists(dispatchStoragePressureFaultMarkerPath));
+    const storagePressureDiagnostic = await waitForBrowserValue(
+      send,
+      "storage pressure diagnostic",
+      diagnosticsSummaryExpression(),
+      (state) => {
+        return Boolean(
+          state?.diagnostics?.some((diagnostic) => {
+            return diagnostic.code === "storage_pressure"
+              && /storage pressure/i.test(diagnostic.message ?? "");
+          })
+          && /storage_pressure/i.test(state?.noticeText ?? ""),
+        );
+      },
+      20_000,
+    );
+    if (storagePressure.ok || storagePressure.errorCode !== "storage_pressure") {
+      throw new Error(`Storage pressure dispatch did not fail with typed code: ${JSON.stringify(storagePressure)}`);
+    }
+    if (!storagePressureMarkerConsumed) {
+      throw new Error("Storage pressure marker was not consumed by gateway fault injection");
+    }
+
     const postRestore = await dispatchInput(send, seedCommand(postRestoreMarker), "degraded-post-restore");
     if (!postRestore.ok) {
       throw new Error(`Unable to dispatch after degraded restore: ${JSON.stringify(postRestore)}`);
@@ -248,10 +289,16 @@ async function runDegradedRestoreScenario(browserUrl) {
       diagnosticRecorded: restored.diagnostics.some((diagnostic) => {
         return diagnostic.code === "saved_pane_history_hydration_failed";
       }),
+      storagePressureDiagnosticRecorded: storagePressureDiagnostic.diagnostics.some((diagnostic) => {
+        return diagnostic.code === "storage_pressure";
+      }),
+      storagePressureMarkerConsumed,
       usableAfterFallback: afterPostRestore.screenText.includes(postRestoreMarker),
       seed,
       savedSession: saved,
       restored,
+      storagePressure,
+      storagePressureDiagnostic,
       postRestore,
       afterPostRestore,
     };
@@ -274,13 +321,23 @@ async function dispatchInput(send, data, clientEventPrefix) {
     if (!sessionId || !paneId || !commands?.dispatchMuxCommand) {
       return { ok: false, reason: 'active session or dispatch command missing', sessionId, paneId };
     }
-    await commands.dispatchMuxCommand(sessionId, {
-      kind: 'send_input',
-      pane_id: paneId,
-      data: ${JSON.stringify(data)},
-      client_event_id: ${JSON.stringify(clientEventPrefix)} + '-' + Date.now(),
-    });
-    return { ok: true, sessionId, paneId };
+    try {
+      await commands.dispatchMuxCommand(sessionId, {
+        kind: 'send_input',
+        pane_id: paneId,
+        data: ${JSON.stringify(data)},
+        client_event_id: ${JSON.stringify(clientEventPrefix)} + '-' + Date.now(),
+      });
+      return { ok: true, sessionId, paneId };
+    } catch (error) {
+      return {
+        ok: false,
+        sessionId,
+        paneId,
+        errorCode: error?.code ?? null,
+        message: error?.message ?? String(error),
+      };
+    }
   })()`);
 }
 
@@ -387,6 +444,31 @@ function historySummaryExpression() {
   })()`;
 }
 
+function diagnosticsSummaryExpression() {
+  return `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const advancedDetails = document.querySelector('details.details-panel');
+    if (advancedDetails) {
+      advancedDetails.open = true;
+    }
+    const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+    const appNoticeText = [...document.querySelectorAll('.degraded-list__item')]
+      .map((item) => item.textContent ?? '')
+      .join('\\n');
+    const workspaceNoticeText = [...(workspaceRoot?.querySelectorAll('[part="diagnostics"] li') ?? [])]
+      .map((item) => item.textContent ?? '')
+      .join('\\n');
+    return {
+      diagnostics: (state?.diagnostics ?? []).map((diagnostic) => ({
+        code: diagnostic.code ?? null,
+        message: diagnostic.message ?? null,
+        severity: diagnostic.severity ?? null,
+      })),
+      noticeText: [appNoticeText, workspaceNoticeText].filter(Boolean).join('\\n'),
+    };
+  })()`;
+}
+
 async function startBrowserHost(rendererUrlValue, options) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -403,6 +485,8 @@ async function startBrowserHost(rendererUrlValue, options) {
         TERMINAL_DEMO_RUNTIME_SLUG: options.runtimeSlug,
         TERMINAL_DEMO_SESSION_STORE_PATH: options.sessionStorePath,
         TERMINAL_DEMO_FAIL_WORKSPACE_PANE_HISTORY_MARKER_PATH: options.paneHistoryFaultMarkerPath,
+        TERMINAL_DEMO_FAIL_WORKSPACE_DISPATCH_STORAGE_PRESSURE_MARKER_PATH:
+          options.dispatchStoragePressureFaultMarkerPath,
       },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -445,6 +529,7 @@ async function shutdown() {
   await stopProcess(chromeProcess);
   await removeChromeUserDataDir(chromeUserDataDir);
   await removeFileWithWindowsRetries(paneHistoryFaultMarkerPath);
+  await removeFileWithWindowsRetries(dispatchStoragePressureFaultMarkerPath);
   if (keepArtifacts) {
     process.stderr.write(`[browser-degraded] keeping session store: ${sessionStorePath}\n`);
     return;

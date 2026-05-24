@@ -27,7 +27,7 @@ import type {
 } from "@terminal-platform/runtime-types";
 import type { WorkspaceSubscription, WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
 import type { WorkspacePaneHistoryRequestOptions } from "@terminal-platform/workspace-contracts";
-import { WorkspaceError } from "@terminal-platform/workspace-contracts";
+import { WorkspaceError, type WorkspaceErrorCode } from "@terminal-platform/workspace-contracts";
 
 import { decodeWorkspaceWebSocketPayload, encodeWorkspaceWebSocketPayload } from "./json-codec.js";
 import type {
@@ -735,10 +735,19 @@ function toError(error: unknown): Error {
 
 function toGatewayError(error: { message: string; code?: string }): WorkspaceError {
   return new WorkspaceError({
-    code: "transport_failed",
+    code: normalizeGatewayErrorCode(error.code),
     message: error.message,
     recoverable: true,
   });
+}
+
+function normalizeGatewayErrorCode(code: string | undefined): WorkspaceErrorCode {
+  switch (code) {
+    case "storage_pressure":
+      return code;
+    default:
+      return "transport_failed";
+  }
 }
 
 function unsupportedCreateBackend(backend: BackendKind): WorkspaceError {

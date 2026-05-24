@@ -1116,10 +1116,12 @@ Must verify:
 Must verify:
 
 - gateway-induced v2 pane-history failure during saved-session restore;
+- gateway-induced `storage_pressure` failure during command dispatch;
 - snapshot fallback is used instead of losing restored context;
 - `saved_pane_history_hydration_failed` diagnostic is visible in workspace state;
+- `storage_pressure` diagnostic is visible in workspace state and browser notices;
 - restored history and restore boundary still render in DOM;
-- terminal remains usable after degradation.
+- terminal remains usable after both degradations.
 
 ## 6. Suggested Implementation Order
 
@@ -1164,6 +1166,7 @@ Use this checklist before calling the feature complete.
 - [x] Browser E2E covers native restore and history behavior in the main smoke.
 - [x] Dedicated browser E2E covers native long-history restore, v2 paging cursors, load-more, and DOM history/boundary rendering.
 - [x] Dedicated browser E2E covers degraded restore when v2 pane-history hydration fails and snapshot fallback must keep the terminal usable.
+- [x] Dedicated browser E2E covers browser-facing storage-pressure diagnostics during command dispatch and proves the next command still works.
 - [x] Browser E2E covers native browser host restart recovery.
 - [x] Browser E2E covers zellij persistence semantics through foreign smoke.
 - [x] Degraded/fault behavior is covered by Rust persistence/runtime tests plus a real browser degraded restore smoke.
@@ -1185,17 +1188,13 @@ These should not block 100% for the current persistence feature unless product s
 
 These are no longer blockers for the current PR guarantees, but they are the right next investments if the product scope expands.
 
-1. Browser storage-pressure UX smoke.
-   - Simulate storage pressure in the browser-facing flow and assert user-visible maintenance affordance.
-   - Rust persistence/runtime storage-pressure coverage already exists for current PR guarantees.
-   - Expected effort: `400-900` changed lines.
-2. zellij historical saved-session restore.
+1. zellij historical saved-session restore.
    - Add a new product state for "zellij session gone, DB history visible only".
    - This should not reuse native saved layout semantics blindly.
    - Expected effort: `1.5k-3.5k` changed lines.
-3. Full connection-aware v2 facade migration.
+2. Full connection-aware v2 facade migration.
    - The executor now owns a reusable writer connection; more v2 write repositories can be moved behind connection-aware ports over time.
    - Expected effort: `1k-2.5k` changed lines.
-4. Crash harness with deterministic failpoints.
+3. Crash harness with deterministic failpoints.
    - Kill daemon between v2 save and publish, during raw segment write, and during restore.
    - Expected effort: `1.5k-3k` changed lines.

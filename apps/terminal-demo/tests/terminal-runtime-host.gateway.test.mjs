@@ -394,6 +394,67 @@ test("gateway fault injection fails one workspace pane history request without c
   }
 });
 
+test("gateway fault injection fails one workspace dispatch request without calling SDK client", loopbackTestOptions, async () => {
+  const dispatchCalls = [];
+  const sdkClient = {
+    ...createSdkClient(),
+    dispatchMuxCommand: async (...args) => {
+      dispatchCalls.push(args);
+      return { changed: true };
+    },
+  };
+  let injectedFailures = 0;
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(createRuntime()),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(createRuntime()),
+    clientProvider: {
+      getClient: async () => sdkClient,
+    },
+    faultInjection: {
+      beforeWorkspaceDispatchMuxCommand: (request) => {
+        assert.equal(request.sessionId, "session-1");
+        assert.equal(request.command.kind, "send_input");
+        if (injectedFailures === 0) {
+          injectedFailures += 1;
+          const error = new Error("Simulated storage pressure");
+          error.code = "storage_pressure";
+          throw error;
+        }
+      },
+    },
+  });
+
+  const client = createControlClient(gateway.controlPlaneUrl);
+  const command = {
+    kind: "send_input",
+    pane_id: "pane-1",
+    data: "echo storage-pressure\r",
+  };
+  try {
+    await client.connect();
+
+    await assert.rejects(
+      () => client.request("workspace_dispatch_mux_command", {
+        sessionId: "session-1",
+        command,
+      }),
+      /Simulated storage pressure/,
+    );
+    assert.equal(dispatchCalls.length, 0);
+
+    const result = await client.request("workspace_dispatch_mux_command", {
+      sessionId: "session-1",
+      command,
+    });
+    assert.equal(result.changed, true);
+    assert.equal(dispatchCalls.length, 1);
+  } finally {
+    await client.close();
+    await gateway.dispose();
+  }
+});
+
 test("gateway rejects malformed control payloads before application ports", loopbackTestOptions, async () => {
   let discoverCalls = 0;
   const runtime = createRuntime({

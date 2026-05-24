@@ -85,6 +85,37 @@ describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
     expect(attempts).toBe(3);
   });
 
+  it("preserves storage pressure gateway errors for workspace diagnostics", async () => {
+    const storagePressureError = new Error("simulated storage pressure") as Error & { code: string };
+    storagePressureError.code = "storage_pressure";
+    const fixture = {
+      ...createMemoryWorkspaceTransport(),
+      dispatchMuxCommand: async () => {
+        throw storagePressureError;
+      },
+    } as WorkspaceTransportClient;
+    const gateway = await startWorkspaceGateway(fixture);
+    cleanups.push(() => gateway.dispose());
+
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: gateway.controlUrl,
+      streamUrl: gateway.streamUrl,
+      webSocketFactory: createNodeWebSocket,
+    });
+    cleanups.push(() => transport.close());
+
+    const session = (await transport.listSessions())[0]!;
+    await expect(transport.dispatchMuxCommand(session.session_id, {
+      kind: "send_input",
+      pane_id: "pane-1",
+      data: "echo should-fail\r",
+    })).rejects.toMatchObject({
+      code: "storage_pressure",
+      message: "simulated storage pressure",
+      recoverable: true,
+    });
+  });
+
   it("streams subscription events over the websocket stream plane", async () => {
     const fixture = createMemoryWorkspaceTransport();
     const gateway = await startWorkspaceGateway(fixture);
@@ -220,10 +251,17 @@ async function handleControlMessage(
       ok: false,
       error: {
         message: error instanceof Error ? error.message : String(error),
+        ...readErrorCode(error),
       },
     };
     socket.send(encodeWorkspaceWebSocketPayload(response));
   }
+}
+
+function readErrorCode(error: unknown): { code?: string } {
+  return error instanceof Error && "code" in error && typeof error.code === "string"
+    ? { code: error.code }
+    : {};
 }
 
 async function dispatchControl(

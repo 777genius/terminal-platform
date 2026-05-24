@@ -39,9 +39,17 @@ export interface TerminalRuntimeGatewayWorkspacePaneHistoryRequest {
   readonly maxBytes: number | null;
 }
 
+export interface TerminalRuntimeGatewayWorkspaceDispatchRequest {
+  readonly sessionId: string;
+  readonly command: unknown;
+}
+
 export interface TerminalRuntimeGatewayFaultInjectionPort {
   beforeWorkspacePaneHistory?(
     request: TerminalRuntimeGatewayWorkspacePaneHistoryRequest,
+  ): Promise<void> | void;
+  beforeWorkspaceDispatchMuxCommand?(
+    request: TerminalRuntimeGatewayWorkspaceDispatchRequest,
   ): Promise<void> | void;
 }
 
@@ -456,9 +464,14 @@ export class TerminalRuntimeGatewayServer {
       }
       case "workspace_dispatch_mux_command": {
         const client = await this.#clientProvider.getClient();
+        const request = {
+          sessionId: readStringPayload(payload, "sessionId"),
+          command: readObjectPayload<TerminalPlatformMuxCommand>(payload, "command"),
+        };
+        await this.#faultInjection?.beforeWorkspaceDispatchMuxCommand?.(request);
         return client.dispatchMuxCommand(
-          readStringPayload(payload, "sessionId"),
-          readObjectPayload<TerminalPlatformMuxCommand>(payload, "command"),
+          request.sessionId,
+          request.command,
         );
       }
       default:
