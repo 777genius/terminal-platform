@@ -321,7 +321,7 @@ Current PR check status observed through `gh`:
 gh pr checks 5
 ```
 
-Observed result after pushing `67c3f5510a959204e76eed68db20031e99e568cb`:
+Observed result after the latest PR check completed:
 
 ```text
 CodeRabbit pass Review completed
@@ -341,7 +341,7 @@ Observed result for the latest pushed branch:
 - conclusion: `action_required`
 - jobs: empty
 - failed logs: unavailable because no jobs started
-- latest observed run id: `26372395074`
+- latest observed `ci` runs complete immediately with `action_required`
 
 Attempted action:
 
