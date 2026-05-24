@@ -29,8 +29,10 @@ impl TerminalPersistenceV2 {
             })),
         })?;
 
+        let high_water_event_seq =
+            self.pane_last_event_seq(&input.session_id, &input.screen.pane_id.0.to_string())?;
+        let projection_sequence = input.screen.sequence;
         let lease = self.acquire_writer_generation_with_retry("runtime-screen-snapshot", 60_000)?;
-        let high_water_event_seq = u64_to_i64(input.screen.sequence, "screen sequence")?;
         let write_result = self.write_screen_snapshot(ScreenSnapshotInput {
             id: None,
             session_id: input.session_id,
@@ -48,6 +50,7 @@ impl TerminalPersistenceV2 {
             projection_version: Some("runtime_screen_snapshot_v1".to_string()),
             metadata: Some(serde_json::json!({
                 "capture_source": "rendered_screen_snapshot",
+                "projection_sequence": projection_sequence,
                 "capture_semantics": input.capture_semantics
                     .unwrap_or_else(|| "rendered_plaintext_snapshot".to_string())
             })),
@@ -59,6 +62,22 @@ impl TerminalPersistenceV2 {
             (Ok(_), Err(error)) => Err(error),
             (Err(error), _) => Err(error),
         }
+    }
+
+    fn pane_last_event_seq(
+        &self,
+        session_id: &str,
+        pane_id: &str,
+    ) -> Result<i64, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        Ok(terminal_panes::table
+            .filter(terminal_panes::session_id.eq(session_id))
+            .filter(terminal_panes::id.eq(pane_id))
+            .select(terminal_panes::last_event_seq)
+            .first::<i64>(&mut connection)
+            .optional()?
+            .unwrap_or(0)
+            .max(0))
     }
 
     pub fn record_topology_snapshot_event(

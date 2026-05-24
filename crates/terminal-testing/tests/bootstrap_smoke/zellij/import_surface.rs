@@ -42,6 +42,9 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                     assert_eq!(error.degraded_reason, Some(DegradedModeReason::MissingCapability));
                     assert!(listed.sessions.is_empty());
                 } else {
+                    assert!(capabilities.capabilities.rendered_viewport_stream);
+                    assert!(capabilities.capabilities.rendered_scrollback_snapshot);
+
                     let imported = tokio::time::timeout(
                         zellij_operation_timeout(),
                         fixture
@@ -179,6 +182,13 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                             &input_marker,
                         )
                         .await;
+                        let pane_history = wait_for_pane_history_payload(
+                            &fixture,
+                            imported.session.session_id,
+                            focused_pane,
+                            input_marker.as_bytes(),
+                        )
+                        .await;
                         let input_history = wait_for_command_history_entry(
                             &fixture,
                             Some(imported.session.session_id),
@@ -193,6 +203,10 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                         .await;
 
                         assert!(input.changed);
+                        assert_eq!(
+                            pane_history.replay_strategy,
+                            terminal_protocol::PaneHistoryReplayStrategy::RenderedSnapshot
+                        );
                         assert_eq!(input_history.display_text, input_command);
                     }
 
@@ -208,7 +222,7 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                                 imported.session.session_id,
                                 MuxCommand::SendPaste(SendPasteSpec {
                                     pane_id: focused_pane,
-                                    data: paste_command,
+                                    data: paste_command.clone(),
                                     client_event_id: Some(format!(
                                         "zellij-paste-{}",
                                         imported.session.session_id.0.simple()
@@ -243,9 +257,18 @@ async fn bootstrap_smoke_discovers_zellij_session_and_handles_import_surface() {
                             &paste_marker,
                         )
                         .await;
+                        let history_after_paste = fixture
+                            .client
+                            .command_history(Some(imported.session.session_id), Some(50))
+                            .await
+                            .expect("zellij command history should load after paste");
 
                         assert!(paste.changed);
                         assert!(paste_enter.changed);
+                        assert!(!history_after_paste.entries.iter().any(|entry| {
+                            entry.display_text.contains(&paste_marker)
+                                || entry.display_text == paste_command
+                        }));
                     }
 
                     let save_error = tokio::time::timeout(
