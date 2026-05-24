@@ -24,6 +24,8 @@
 
 Текущая оценка готовности после closeout: **100% для текущих явных PR-гарантий**, без overpromise.
 
+Дополнительная проверка после closeout: save-session path теперь имеет deterministic failpoint `saved_session_v2_snapshot_before_import`, который доказывает v2-first/publish-last семантику на двух уровнях: persistence unit и real daemon bootstrap. Если v2 evidence fails before legacy publish, пользователь не видит битую saved session.
+
 Важно: эта отметка не включает non-goals из раздела 8 и не означает, что native process tree resurrected после restart. Также imported zellij saved-session restore не обещан как native saved layout: текущий контракт честно блокирует `SaveSession` для zellij через capability/API, а persistence сохраняет live import/control, command history, rendered output history and restore evidence.
 
 ## 1. Definition of Done
@@ -749,7 +751,7 @@ cd apps/terminal-demo; npm run smoke:browser:foreign
 
 ### Closeout implementation summary
 
-Status after commit `049d7c1abb3a6370a3300092b1d0b47d5a220b80`:
+Status after commit `0c0864682559618222472355fa2cee8148bd7e94`:
 
 - Phase 1: completed for scoped PR guarantees.
   - `loadMorePaneHistory` carries `nextEventSeq`.
@@ -759,6 +761,7 @@ Status after commit `049d7c1abb3a6370a3300092b1d0b47d5a220b80`:
   - Save orchestration is extracted.
   - v2 evidence is persisted before legacy/API publish.
   - Regression tests prove v2 failure prevents publish.
+  - Deterministic v2 snapshot-before-import failpoint proves failed v2 evidence does not publish a visible legacy saved session.
 - Phase 3: completed for scoped fault handling.
   - Executor has worker-owned connection support.
   - Capture failures persist durable health records.
@@ -773,6 +776,7 @@ Status after commit `049d7c1abb3a6370a3300092b1d0b47d5a220b80`:
   - Native browser smoke covers browser host restart recovery.
   - zellij bootstrap and browser foreign smoke cover real imported mux behavior.
   - Dedicated degraded browser smoke covers v2 pane-history failure during saved-session restore, snapshot fallback, diagnostic recording, and continued terminal usability.
+  - Rust bootstrap covers v2 save failure before publish and proves no broken saved session is listed or directly loadable.
 - Phase 6: completed for current UI contract.
   - Restore boundary and partial-history messaging are present.
   - Load-more failure and retry states are represented in screen actions.
@@ -1156,6 +1160,7 @@ Use this checklist before calling the feature complete.
 - [x] Paste is durable journal input but not verified command history.
 - [x] Save session is v2-first and publish-last.
 - [x] Partial save failure does not publish broken saved session.
+- [x] Dedicated Rust persistence unit and real daemon bootstrap cover v2 save failure before legacy/API publish.
 - [x] Persistence capture fault degrades session health and is visible to tests.
 - [x] Storage pressure is visible to persistence diagnostics and does not silently delete canonical history.
 - [x] Single-writer executor owns and reuses a worker connection for connection-aware jobs.
@@ -1195,6 +1200,7 @@ These are no longer blockers for the current PR guarantees, but they are the rig
 2. Full connection-aware v2 facade migration.
    - The executor now owns a reusable writer connection; more v2 write repositories can be moved behind connection-aware ports over time.
    - Expected effort: `1k-2.5k` changed lines.
-3. Crash harness with deterministic failpoints.
-   - Kill daemon between v2 save and publish, during raw segment write, and during restore.
-   - Expected effort: `1.5k-3k` changed lines.
+3. Remaining process-kill crash harness.
+   - Deterministic v2 failure before legacy/API publish is covered now.
+   - Remaining hardening is to kill the daemon during raw segment write, after v2 evidence but before publish, and during restore hydration.
+   - Expected effort: `1k-2.5k` changed lines.
