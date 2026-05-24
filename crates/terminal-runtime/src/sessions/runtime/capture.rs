@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 use terminal_backend_api::{BackendSessionPort, BackendSubscriptionEvent, SubscriptionSpec};
 use terminal_domain::PaneId;
 use terminal_persistence::SqliteSessionStore;
-use terminal_projection::TopologySnapshot;
+use terminal_projection::{ProjectionSource, TopologySnapshot};
 use tokio::sync::oneshot;
 
 use crate::registry::{SessionDescriptor, SessionRegistry};
@@ -105,6 +105,9 @@ async fn start_capture_for_topology(
         let initial_screen = session.screen_snapshot(pane_id).await.ok();
         let rows = initial_screen.as_ref().map(|screen| i32::from(screen.rows));
         let cols = initial_screen.as_ref().map(|screen| i32::from(screen.cols));
+        let can_capture_scrollback = initial_screen
+            .as_ref()
+            .is_some_and(|screen| screen.source == ProjectionSource::ZellijDumpSnapshot);
 
         match session.subscribe_raw_output(pane_id).await {
             Ok(subscription) => {
@@ -114,6 +117,7 @@ async fn start_capture_for_topology(
                     descriptor,
                     "raw_stream",
                     "raw_vt_stream",
+                    false,
                     "medium",
                     "native raw output subscription opened",
                 );
@@ -137,8 +141,9 @@ async fn start_capture_for_topology(
                         descriptor,
                         "rendered_stream",
                         "rendered_plaintext_snapshot",
+                        can_capture_scrollback,
                         "low",
-                        "rendered pane surface subscription opened after raw output fallback",
+                        rendered_capture_evidence_reason(can_capture_scrollback),
                     );
                     spawn_v2_rendered_capture_loop(
                         persistence.clone(),
@@ -154,5 +159,13 @@ async fn start_capture_for_topology(
         if let Some(screen) = initial_screen {
             persist_screen_snapshot(persistence, diagnostics, descriptor, tab_id, screen).await;
         }
+    }
+}
+
+fn rendered_capture_evidence_reason(can_capture_scrollback: bool) -> &'static str {
+    if can_capture_scrollback {
+        "rendered pane surface subscription opened after raw output fallback with initial scrollback snapshot"
+    } else {
+        "rendered pane surface subscription opened after raw output fallback"
     }
 }

@@ -84,6 +84,7 @@ pub(super) fn persist_backend_capability_report(
     descriptor: &SessionDescriptor,
     capture_strategy: &str,
     capture_semantics: &str,
+    can_capture_scrollback: bool,
     command_boundary_confidence: &str,
     evidence_reason: &str,
 ) {
@@ -97,8 +98,9 @@ pub(super) fn persist_backend_capability_report(
         probe_status: "passed".to_string(),
         capture_strategy: capture_strategy.to_string(),
         capture_semantics: capture_semantics.to_string(),
-        can_preserve_process_when_live: false,
-        can_capture_scrollback: false,
+        can_preserve_process_when_live: descriptor.route.authority
+            == RouteAuthority::ImportedForeign,
+        can_capture_scrollback,
         command_boundary_confidence: command_boundary_confidence.to_string(),
         evidence: Some(serde_json::json!({
             "source": "runtime_v2_history_capture",

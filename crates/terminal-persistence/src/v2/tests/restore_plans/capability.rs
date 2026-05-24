@@ -193,6 +193,12 @@ fn stale_backend_capability_report_downgrades_restore_plan() {
             && evidence.value == "rendered_plaintext_snapshot"
     }));
     assert!(plan.evidence.iter().any(|evidence| {
+        evidence.kind == "backend_can_preserve_process_when_live" && evidence.value == "true"
+    }));
+    assert!(plan.evidence.iter().any(|evidence| {
+        evidence.kind == "backend_can_capture_scrollback" && evidence.value == "true"
+    }));
+    assert!(plan.evidence.iter().any(|evidence| {
         evidence.kind == "backend_capability_stale" && evidence.value == "true"
     }));
 }

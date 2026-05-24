@@ -100,6 +100,14 @@ fn append_capability_evidence(
             value: report.capture_semantics.clone(),
         });
         evidence.push(RestoreEvidence {
+            kind: "backend_can_preserve_process_when_live".to_string(),
+            value: sqlite_bool_evidence(report.can_preserve_process_when_live).to_string(),
+        });
+        evidence.push(RestoreEvidence {
+            kind: "backend_can_capture_scrollback".to_string(),
+            value: sqlite_bool_evidence(report.can_capture_scrollback).to_string(),
+        });
+        evidence.push(RestoreEvidence {
             kind: "backend_capability_stale".to_string(),
             value: capability_report_is_stale(report, now).to_string(),
         });
@@ -110,4 +118,8 @@ fn append_capability_evidence(
             });
         }
     }
+}
+
+fn sqlite_bool_evidence(value: i32) -> bool {
+    value != 0
 }
