@@ -2,6 +2,68 @@ use super::super::{prelude::*, support::*};
 
 #[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
+async fn bootstrap_smoke_save_v2_failure_does_not_publish_visible_saved_session() {
+    let store_path = unique_sqlite_path("bootstrap-native-save-v2-failpoint");
+    let mut config = TerminalPersistenceV2Config::test();
+    config.failpoints.saved_session_v2_snapshot_before_import = true;
+    let store = SqliteSessionStore::open_with_v2_config(&store_path, config)
+        .expect("isolated sqlite store should open with failpoint config");
+    let fixture = daemon_fixture_with_daemon(
+        "bootstrap-native-save-v2-failpoint",
+        TerminalDaemon::with_persistence(store.clone()),
+    )
+    .expect("fixture should start");
+    let created = fixture
+        .client
+        .create_session(
+            BackendKind::Native,
+            CreateSessionSpec {
+                title: Some("save-failpoint-shell".to_string()),
+                launch: Some(cat_launch_spec()),
+            },
+        )
+        .await
+        .expect("create_session should succeed");
+    let topology = fixture
+        .client
+        .topology_snapshot(created.session.session_id)
+        .await
+        .expect("topology_snapshot should succeed");
+    let pane_id = topology.tabs[0].focused_pane.expect("focused pane should exist");
+
+    wait_for_screen_line(&fixture, created.session.session_id, pane_id, "ready").await;
+    let save_error = fixture
+        .client
+        .dispatch(created.session.session_id, MuxCommand::SaveSession)
+        .await
+        .expect_err("save should fail before legacy publication when v2 evidence fails");
+    let listed = fixture
+        .client
+        .list_saved_sessions()
+        .await
+        .expect("list_saved_sessions should still succeed after failed save");
+    let lookup_error = fixture
+        .client
+        .saved_session(created.session.session_id)
+        .await
+        .expect_err("failed v2 save must not publish a visible saved session");
+    let legacy_saved = store
+        .load_native_session(created.session.session_id)
+        .expect("direct legacy lookup should succeed");
+
+    assert_eq!(save_error.code, "backend_internal");
+    assert!(save_error.message.contains("saved_session_v2_snapshot_before_import"));
+    assert!(
+        !listed.sessions.iter().any(|session| session.session_id == created.session.session_id)
+    );
+    assert_eq!(lookup_error.code, "backend_not_found");
+    assert!(legacy_saved.is_none());
+
+    fixture.shutdown().await.expect("fixture should stop cleanly");
+}
+
+#[cfg(any(unix, windows))]
+#[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_saves_native_session_snapshot_to_store() {
     let fixture = daemon_fixture("bootstrap-native-save").expect("fixture should start");
     let created = fixture

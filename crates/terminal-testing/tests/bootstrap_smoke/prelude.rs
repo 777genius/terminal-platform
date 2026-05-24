@@ -39,7 +39,7 @@ pub(super) use terminal_mux_domain::PaneTreeNode;
 #[cfg(any(unix, windows))]
 pub(super) use terminal_mux_domain::{SplitDirection, TabSnapshot};
 #[cfg(any(unix, windows))]
-pub(super) use terminal_persistence::SqliteSessionStore;
+pub(super) use terminal_persistence::{SqliteSessionStore, TerminalPersistenceV2Config};
 #[cfg(any(unix, windows))]
 pub(super) use terminal_projection::{
     ProjectionSource, ScreenDelta, ScreenSnapshot, TopologySnapshot,

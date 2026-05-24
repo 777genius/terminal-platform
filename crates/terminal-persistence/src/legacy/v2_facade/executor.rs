@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     db::executor::PersistenceExecutor,
-    v2::{TerminalPersistenceV2, TerminalPersistenceV2Config, TerminalPersistenceV2Error},
+    v2::{TerminalPersistenceV2, TerminalPersistenceV2Error},
 };
 
 use super::super::SqliteSessionStore;
@@ -18,11 +18,9 @@ impl SqliteSessionStore {
         T: Send + 'static,
     {
         let path = self.path.clone();
+        let config = self.v2_config.clone();
         self.execute_v2_serialized(move || {
-            let store = TerminalPersistenceV2::open_with_config(
-                &path,
-                TerminalPersistenceV2Config::default(),
-            )?;
+            let store = TerminalPersistenceV2::open_with_config(&path, config)?;
             operation(store)
         })
     }
@@ -50,10 +48,7 @@ impl SqliteSessionStore {
             return Ok(Arc::clone(executor));
         }
 
-        let executor = Arc::new(PersistenceExecutor::start(
-            &self.path,
-            TerminalPersistenceV2Config::default(),
-        )?);
+        let executor = Arc::new(PersistenceExecutor::start(&self.path, self.v2_config.clone())?);
         *guard = Some(Arc::clone(&executor));
         Ok(executor)
     }

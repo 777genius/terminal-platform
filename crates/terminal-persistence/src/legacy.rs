@@ -12,6 +12,7 @@ use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 use thiserror::Error;
 
 use crate::db::executor::PersistenceExecutor;
+use crate::v2::TerminalPersistenceV2Config;
 
 use self::retry::retry_persistence_operation;
 
@@ -65,6 +66,7 @@ pub struct SessionRouteRecord {
 #[derive(Clone)]
 pub struct SqliteSessionStore {
     path: PathBuf,
+    v2_config: TerminalPersistenceV2Config,
     v2_executor: Arc<Mutex<Option<Arc<PersistenceExecutor>>>>,
 }
 
@@ -94,12 +96,19 @@ pub enum PersistenceError {
 
 impl SqliteSessionStore {
     pub fn open(path: impl Into<PathBuf>) -> Result<Self, PersistenceError> {
+        Self::open_with_v2_config(path, TerminalPersistenceV2Config::default())
+    }
+
+    pub fn open_with_v2_config(
+        path: impl Into<PathBuf>,
+        v2_config: TerminalPersistenceV2Config,
+    ) -> Result<Self, PersistenceError> {
         let path = path.into();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        let store = Self { path, v2_executor: Arc::new(Mutex::new(None)) };
+        let store = Self { path, v2_config, v2_executor: Arc::new(Mutex::new(None)) };
         retry_persistence_operation(|| store.ensure_schema())?;
         Ok(store)
     }

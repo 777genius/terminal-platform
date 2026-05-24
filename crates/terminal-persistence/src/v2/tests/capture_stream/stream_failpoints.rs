@@ -157,3 +157,87 @@ fn stream_segment_storage_full_failpoint_records_pressure_without_history_mutati
     assert_eq!(metadata["no_silent_delete"], true);
     assert_eq!(metadata["canonical_history_preserved"], true);
 }
+
+#[test]
+fn saved_session_v2_snapshot_failpoint_fails_before_history_mutation() {
+    let mut config = TerminalPersistenceV2Config::test();
+    config.failpoints.saved_session_v2_snapshot_before_import = true;
+    let path = std::env::temp_dir().join(format!(
+        "terminal-persistence-v2-saved-session-failpoint-{}.sqlite3",
+        Uuid::new_v4()
+    ));
+    let store = TerminalPersistenceV2::open_with_config(path, config)
+        .expect("store should open with failpoint config");
+    let saved = saved_native_session_snapshot();
+
+    let error = store
+        .import_saved_native_session_snapshot(&saved)
+        .expect_err("saved-session failpoint should abort before import");
+    let mut connection = store.connection().expect("connection should open");
+    let session_count = terminal_sessions::table
+        .filter(terminal_sessions::id.eq(saved.session_id.0.to_string()))
+        .count()
+        .get_result::<i64>(&mut connection)
+        .expect("session count should load");
+    let pane_count = terminal_panes::table
+        .filter(terminal_panes::session_id.eq(saved.session_id.0.to_string()))
+        .count()
+        .get_result::<i64>(&mut connection)
+        .expect("pane count should load");
+    let snapshot_count = terminal_screen_snapshots::table
+        .filter(terminal_screen_snapshots::session_id.eq(saved.session_id.0.to_string()))
+        .count()
+        .get_result::<i64>(&mut connection)
+        .expect("screen snapshot count should load");
+    let drill_count = terminal_restore_drills::table
+        .filter(terminal_restore_drills::session_id.eq(saved.session_id.0.to_string()))
+        .count()
+        .get_result::<i64>(&mut connection)
+        .expect("restore drill count should load");
+
+    assert!(
+        matches!(error, TerminalPersistenceV2Error::InvalidData(message) if message.contains("saved_session_v2_snapshot_before_import"))
+    );
+    assert_eq!(session_count, 0);
+    assert_eq!(pane_count, 0);
+    assert_eq!(snapshot_count, 0);
+    assert_eq!(drill_count, 0);
+}
+
+fn saved_native_session_snapshot() -> SavedNativeSession {
+    let session_id = SessionId::new();
+    let tab_id = TabId::new();
+    let pane_id = PaneId::new();
+
+    SavedNativeSession {
+        session_id,
+        route: route(),
+        title: Some("saved-session-failpoint".to_string()),
+        launch: None,
+        manifest: SavedSessionManifest::current(),
+        topology: TopologySnapshot {
+            session_id,
+            backend_kind: BackendKind::Native,
+            tabs: vec![TabSnapshot {
+                tab_id,
+                title: Some("main".to_string()),
+                root: PaneTreeNode::Leaf { pane_id },
+                focused_pane: Some(pane_id),
+            }],
+            focused_tab: Some(tab_id),
+        },
+        screens: vec![ScreenSnapshot {
+            pane_id,
+            sequence: 1,
+            rows: 24,
+            cols: 80,
+            source: ProjectionSource::NativeEmulator,
+            surface: ScreenSurface {
+                title: Some("saved-session-failpoint".to_string()),
+                cursor: None,
+                lines: vec![ScreenLine { text: "ready".to_string() }],
+            },
+        }],
+        saved_at_ms: 1_700_000_000_000,
+    }
+}

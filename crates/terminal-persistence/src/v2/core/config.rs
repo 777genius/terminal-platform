@@ -64,4 +64,5 @@ impl Default for StoragePressureConfig {
 pub struct PersistenceFailpoints {
     pub stream_segment_after_segment_insert: bool,
     pub stream_segment_before_transaction_storage_full: bool,
+    pub saved_session_v2_snapshot_before_import: bool,
 }

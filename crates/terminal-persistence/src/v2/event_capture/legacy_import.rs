@@ -5,6 +5,12 @@ impl TerminalPersistenceV2 {
         &self,
         saved: &SavedNativeSession,
     ) -> Result<RestorePlan, TerminalPersistenceV2Error> {
+        if self.config.failpoints.saved_session_v2_snapshot_before_import {
+            return Err(TerminalPersistenceV2Error::InvalidData(
+                "failpoint saved_session_v2_snapshot_before_import".to_string(),
+            ));
+        }
+
         let lease = self.acquire_writer_generation_with_retry("legacy-save-session", 60_000)?;
         let import_result = self.import_saved_native_session_snapshot_with_writer(saved, &lease.id);
         let release_result = self.release_writer_generation(&lease.id);
