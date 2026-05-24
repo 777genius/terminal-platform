@@ -752,7 +752,7 @@ cd apps/terminal-demo; npm run smoke:browser:foreign
 
 ### Closeout implementation summary
 
-Status after commit `3ded92865f2b40778c5f8335a01194e47f59ac4f`:
+Status after commit `a3045eea92376bcb6a6fa0288f0e7701213407ba`:
 
 - Phase 1: completed for scoped PR guarantees.
   - `loadMorePaneHistory` carries `nextEventSeq`.
@@ -784,6 +784,7 @@ Status after commit `3ded92865f2b40778c5f8335a01194e47f59ac4f`:
 - Phase 5: completed for current real smoke gates.
   - Native browser smoke covers browser host restart recovery.
   - External `terminal-daemon` process restart test covers real OS process kill and DB-backed output-history restore.
+  - External `terminal-daemon` process restart test covers real `SaveSession`, process kill, same-DB restart, `GetSavedSession`, `RestoreSavedSession`, v2 restore evidence and source pane-history availability.
   - zellij bootstrap and browser foreign smoke cover real imported mux behavior.
   - Dedicated degraded browser smoke covers v2 pane-history failure during saved-session restore, snapshot fallback, diagnostic recording, and continued terminal usability.
   - Rust bootstrap covers v2 save failure before publish and proves no broken saved session is listed or directly loadable.
@@ -1187,6 +1188,7 @@ Use this checklist before calling the feature complete.
 - [x] Dedicated browser E2E covers browser-facing storage-pressure diagnostics during command dispatch and proves the next command still works.
 - [x] Browser E2E covers native browser host restart recovery.
 - [x] Rust integration test covers real `terminal-daemon` process kill/restart with v2 output history restored from SQLite.
+- [x] Rust integration test covers real `terminal-daemon` process kill/restart with saved native session reload and restore from the same SQLite DB.
 - [x] Browser E2E covers zellij persistence semantics through foreign smoke.
 - [x] Degraded/fault behavior is covered by Rust persistence/runtime tests plus a real browser degraded restore smoke.
 - [x] CI has separate fast and slow Windows lanes documented.
@@ -1221,5 +1223,6 @@ These are no longer blockers for the current PR guarantees, but they are the rig
    - Deterministic non-publish windows are covered before v2 mutation and after v2 evidence.
    - Deterministic raw stream mid-write rollback is covered at both direct v2 storage level and legacy facade worker-connection level.
    - Actual daemon process kill/restart after durable output capture is covered now.
-   - Remaining hardening is lower-level chaos only: OS process-kill exactly during SQLite fsync/raw segment write, exactly after v2 evidence but before publish, and during restore hydration.
+   - Actual daemon process kill/restart plus saved native session reload/restore after restart is covered now.
+   - Remaining hardening is lower-level chaos only: OS process-kill exactly during SQLite fsync/raw segment write, exactly after v2 evidence but before publish, and exactly during restore hydration.
    - Expected effort: `0` changed lines for current PR guarantees; `1k-2.5k` changed lines if product scope requires OS-level chaos harnesses.

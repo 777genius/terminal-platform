@@ -4,6 +4,7 @@
 **Branch**: `codex/terminal-persistence-v2-20260430`
 **Pull request**: <https://github.com/777genius/terminal-platform/pull/5>
 **Verified daemon process restart commit**: `f8cb0c2669e40e15b5fbce80b089e36a4b086704`
+**Verified saved-session restore after daemon restart commit**: `a3045eea92376bcb6a6fa0288f0e7701213407ba`
 **Verified v2 facade worker-connection commit**: `06253d715e25b2c675e2d2f6f7b60f82b1e7b20e`
 **Verified v2 saved restore worker-connection commit**: `d61643770c80d6a1224b2fca63188e6e880a4183`
 **Verified v2 hot capture worker-connection commit**: `e2b58f2a7a32161655658aa01e061c7acefb0f2c`
@@ -30,6 +31,7 @@ The most important verified behavior:
 - Native save-session failure before legacy/API publish is verified with a deterministic v2 failpoint: failed v2 evidence does not create a visible or directly loadable broken saved session.
 - Native legacy/API publish failure after successful v2 evidence is verified with a deterministic failpoint: no visible saved session is published, v2 restore evidence remains inspectable, and an open durable health record explains the unpublished evidence.
 - Native output history survives a real external `terminal-daemon` process kill/restart: the test launches the binary, writes history into SQLite, kills the process, starts a new process on the same DB and verifies `GetPaneHistory`.
+- Native saved-session restore survives a real external `terminal-daemon` process kill/restart: the test saves a session, kills the daemon process, restarts on the same SQLite DB, reloads the saved session, restores it, verifies v2 restore evidence and verifies the source pane history remains available.
 - v2 facade diagnostic and backend-capability writes now use the single writer's worker-owned SQLite connection. The regression test proves this with a TEMP trigger that can only fire on that exact connection.
 - Native saved-session v2 import, restore drill, restore plan, pane-history hydration and command-history reads now use connection-aware ports through the worker-owned SQLite connection. Worker startup also verifies v2 defaults before accepting jobs.
 - Hot runtime capture facade paths now use worker-owned SQLite connection as well: UI input, terminal output, history gaps, runtime screen snapshots and runtime topology snapshots. The old facade path that serialized jobs while opening hidden fresh v2 connections has been removed.
@@ -61,6 +63,7 @@ Overall local confidence after repeated Windows runs: 🎯 9.3/10, 🛡️ 9/10.
 - Added deterministic save-session v2 failpoint coverage through `saved_session_v2_snapshot_before_import`, including a persistence unit that proves no v2 rows are mutated and a real daemon bootstrap that proves legacy/API saved-session publish does not happen after v2 evidence failure.
 - Added deterministic legacy publish failpoint coverage through `saved_session_legacy_publish_before_commit`, including runtime orchestrator tests and a real daemon bootstrap that proves successful v2 evidence plus failed legacy publish records a durable unpublished-evidence health marker.
 - Added external daemon-process restart coverage in `terminal-daemon`: the integration test uses the real `terminal-daemon` binary, normal transport protocol requests, a real native shell, process kill and same-DB restart.
+- Added external daemon-process saved-session restore coverage in `terminal-daemon`: `SaveSession`, process kill, process restart, `GetSavedSession`, `RestoreSavedSession`, v2 restore evidence and `GetPaneHistory` are verified in one same-DB scenario.
 - Added facade-level mid-write rollback coverage for stream segment capture through the worker-owned connection.
 - Added history dedupe behavior for retried submits using `client_event_id`.
 - Added session scoping so commands from one session do not leak into another session history.
@@ -199,7 +202,7 @@ Verified:
 cargo test -p terminal-daemon
 ```
 
-Result: `21 unit tests passed`, `1 process restart integration test passed`.
+Result: `21 unit tests passed`, `2 process restart integration tests passed`.
 
 Verified:
 
@@ -207,6 +210,15 @@ Verified:
 - Real `terminal-daemon` binary starts with an explicit session store.
 - Normal native shell output is captured into v2 history.
 - Killing the daemon process and starting a new daemon process on the same SQLite store preserves `GetPaneHistory` output history.
+- `SaveSession` before daemon process kill, then `GetSavedSession` and `RestoreSavedSession` after same-DB restart, preserves v2 restore evidence and source pane history.
+
+Targeted saved-session process restart regression:
+
+```powershell
+cargo test -p terminal-daemon --test process_restart_persistence daemon_process_restart_restores_saved_session_with_v2_history_evidence -- --nocapture
+```
+
+Result: `1 passed`.
 
 ```powershell
 cargo test -p terminal-backend-zellij --lib
