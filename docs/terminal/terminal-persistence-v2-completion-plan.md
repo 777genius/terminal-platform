@@ -24,7 +24,7 @@
 
 Текущая оценка готовности после closeout: **100% для текущих явных PR-гарантий**, без overpromise.
 
-Дополнительная проверка после closeout: save-session path теперь имеет deterministic failpoints для двух опасных окон. `saved_session_v2_snapshot_before_import` доказывает, что failure до v2 mutation не публикует битую saved session. `saved_session_legacy_publish_before_commit` доказывает, что failure после успешной v2 evidence write, но до legacy/API publish, не создаёт видимую saved session и оставляет durable health marker, объясняющий unpublished v2 evidence. Отдельный external-process test запускает реальный `terminal-daemon` binary, пишет output history в SQLite, убивает daemon process, запускает новый process на той же DB и проверяет restore через `GetPaneHistory`.
+Дополнительная проверка после closeout: save-session path теперь имеет deterministic failpoints для двух опасных окон. `saved_session_v2_snapshot_before_import` доказывает, что failure до v2 mutation не публикует битую saved session. `saved_session_legacy_publish_before_commit` доказывает, что failure после успешной v2 evidence write, но до legacy/API publish, не создаёт видимую saved session и оставляет durable health marker, объясняющий unpublished v2 evidence. Отдельный external-process test запускает реальный `terminal-daemon` binary, пишет output history в SQLite, убивает daemon process, запускает новый process на той же DB и проверяет restore через `GetPaneHistory`. После этого v2 facade получил проверенный worker-connection write path для diagnostic and backend-capability records: тест с TEMP trigger доказывает, что запись идёт через single-writer SQLite connection, а не через новое скрытое подключение.
 
 Важно: эта отметка не включает non-goals из раздела 8 и не означает, что native process tree resurrected после restart. Также imported zellij saved-session restore не обещан как native saved layout: текущий контракт честно блокирует `SaveSession` для zellij через capability/API, а persistence сохраняет live import/control, command history, rendered output history and restore evidence.
 
@@ -752,7 +752,7 @@ cd apps/terminal-demo; npm run smoke:browser:foreign
 
 ### Closeout implementation summary
 
-Status after commit `f8cb0c2669e40e15b5fbce80b089e36a4b086704`:
+Status after commit `06253d715e25b2c675e2d2f6f7b60f82b1e7b20e`:
 
 - Phase 1: completed for scoped PR guarantees.
   - `loadMorePaneHistory` carries `nextEventSeq`.
@@ -766,6 +766,7 @@ Status after commit `f8cb0c2669e40e15b5fbce80b089e36a4b086704`:
   - Deterministic legacy-publish-before-commit failpoint proves successful v2 evidence plus failed legacy publish leaves no visible saved session and records an open v2 health marker.
 - Phase 3: completed for scoped fault handling.
   - Executor has worker-owned connection support.
+  - v2 facade diagnostic and backend-capability writes use worker-owned connection and are covered by a TEMP-trigger regression.
   - Capture failures persist durable health records.
   - Storage pressure, corruption and integrity downgrade paths are covered in persistence tests.
 - Phase 4: completed for explicit zellij guarantees.
@@ -1204,8 +1205,10 @@ These are no longer blockers for the current PR guarantees, but they are the rig
    - This should not reuse native saved layout semantics blindly.
    - Expected effort: `1.5k-3.5k` changed lines.
 2. Full connection-aware v2 facade migration.
-   - The executor now owns a reusable writer connection; more v2 write repositories can be moved behind connection-aware ports over time.
-   - Expected effort: `1k-2.5k` changed lines.
+   - The executor now owns a reusable writer connection.
+   - Diagnostic and backend-capability write ports already use that connection and are regression-tested.
+   - Remaining migration: hot stream output, session import, history hydration and snapshot repositories should gain connection-aware ports as they are touched, especially where atomic multi-step operations matter.
+   - Expected effort: `700-2k` changed lines.
 3. Remaining mid-write and restore crash harness.
    - Deterministic non-publish windows are covered before v2 mutation and after v2 evidence.
    - Actual daemon process kill/restart after durable output capture is covered now.
