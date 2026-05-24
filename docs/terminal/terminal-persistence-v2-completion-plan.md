@@ -24,7 +24,7 @@
 
 Текущая оценка готовности после closeout: **100% для текущих явных PR-гарантий**, без overpromise.
 
-Дополнительная проверка после closeout: save-session path теперь имеет deterministic failpoints для двух опасных окон. `saved_session_v2_snapshot_before_import` доказывает, что failure до v2 mutation не публикует битую saved session. `saved_session_legacy_publish_before_commit` доказывает, что failure после успешной v2 evidence write, но до legacy/API publish, не создаёт видимую saved session и оставляет durable health marker, объясняющий unpublished v2 evidence. Отдельный external-process test запускает реальный `terminal-daemon` binary, пишет output history в SQLite, убивает daemon process, запускает новый process на той же DB и проверяет restore через `GetPaneHistory`. После этого v2 facade получил проверенный worker-connection write path для diagnostic and backend-capability records: тест с TEMP trigger доказывает, что запись идёт через single-writer SQLite connection, а не через новое скрытое подключение.
+Дополнительная проверка после closeout: save-session path теперь имеет deterministic failpoints для двух опасных окон. `saved_session_v2_snapshot_before_import` доказывает, что failure до v2 mutation не публикует битую saved session. `saved_session_legacy_publish_before_commit` доказывает, что failure после успешной v2 evidence write, но до legacy/API publish, не создаёт видимую saved session и оставляет durable health marker, объясняющий unpublished v2 evidence. Отдельный external-process test запускает реальный `terminal-daemon` binary, пишет output history в SQLite, убивает daemon process, запускает новый process на той же DB и проверяет restore через `GetPaneHistory`. После этого v2 facade получил проверенный worker-connection path для diagnostic/backend-capability records, native saved-session import, restore drill, restore plan, pane-history hydration and command-history reads: TEMP-trigger тесты доказывают, что критичные записи идут через single-writer SQLite connection, а не через новое скрытое подключение.
 
 Важно: эта отметка не включает non-goals из раздела 8 и не означает, что native process tree resurrected после restart. Также imported zellij saved-session restore не обещан как native saved layout: текущий контракт честно блокирует `SaveSession` для zellij через capability/API, а persistence сохраняет live import/control, command history, rendered output history and restore evidence.
 
@@ -752,7 +752,7 @@ cd apps/terminal-demo; npm run smoke:browser:foreign
 
 ### Closeout implementation summary
 
-Status after commit `06253d715e25b2c675e2d2f6f7b60f82b1e7b20e`:
+Status after commit `d61643770c80d6a1224b2fca63188e6e880a4183`:
 
 - Phase 1: completed for scoped PR guarantees.
   - `loadMorePaneHistory` carries `nextEventSeq`.
@@ -761,12 +761,15 @@ Status after commit `06253d715e25b2c675e2d2f6f7b60f82b1e7b20e`:
 - Phase 2: completed for native saved sessions.
   - Save orchestration is extracted.
   - v2 evidence is persisted before legacy/API publish.
+  - Native saved-session v2 import, restore drill and final restore plan now run through connection-aware ports on the worker-owned SQLite connection.
   - Regression tests prove v2 failure prevents publish.
   - Deterministic v2 snapshot-before-import failpoint proves failed v2 evidence does not publish a visible legacy saved session.
   - Deterministic legacy-publish-before-commit failpoint proves successful v2 evidence plus failed legacy publish leaves no visible saved session and records an open v2 health marker.
 - Phase 3: completed for scoped fault handling.
   - Executor has worker-owned connection support.
+  - Executor worker startup verifies v2 defaults before accepting jobs, so connection jobs have the same seeded schema guarantees as `TerminalPersistenceV2::open_with_config`.
   - v2 facade diagnostic and backend-capability writes use worker-owned connection and are covered by a TEMP-trigger regression.
+  - v2 facade pane-history hydration and command-history reads use worker-owned connection-aware read ports.
   - Capture failures persist durable health records.
   - Storage pressure, corruption and integrity downgrade paths are covered in persistence tests.
 - Phase 4: completed for explicit zellij guarantees.
@@ -1206,9 +1209,9 @@ These are no longer blockers for the current PR guarantees, but they are the rig
    - Expected effort: `1.5k-3.5k` changed lines.
 2. Full connection-aware v2 facade migration.
    - The executor now owns a reusable writer connection.
-   - Diagnostic and backend-capability write ports already use that connection and are regression-tested.
-   - Remaining migration: hot stream output, session import, history hydration and snapshot repositories should gain connection-aware ports as they are touched, especially where atomic multi-step operations matter.
-   - Expected effort: `700-2k` changed lines.
+   - Diagnostic/backend-capability writes, native saved-session import, restore drill, restore plan, pane-history hydration and command-history reads already use that connection and are regression-tested where writes can be proven with TEMP triggers.
+   - Remaining migration: hot runtime stream output, UI input, runtime screen/topology snapshots and history-gap capture should gain connection-aware ports as they are touched, especially where atomic multi-step operations matter.
+   - Expected effort: `500-1.4k` changed lines.
 3. Remaining mid-write and restore crash harness.
    - Deterministic non-publish windows are covered before v2 mutation and after v2 evidence.
    - Actual daemon process kill/restart after durable output capture is covered now.
