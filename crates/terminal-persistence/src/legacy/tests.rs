@@ -13,8 +13,8 @@ use terminal_projection::{
 
 use crate::v2::{
     HistoryGapEventInput, PersistenceFaultHealthRecordInput, RestoreGuaranteeLevel,
-    ScreenSnapshotEventInput, TerminalOutputEventInput, TopologySnapshotEventInput,
-    UiInputEventInput,
+    ScreenSnapshotEventInput, TerminalOutputEventInput, TerminalPersistenceV2Config,
+    TopologySnapshotEventInput, UiInputEventInput,
 };
 
 use super::{PersistenceError, SavedNativeSession, SessionRouteRecord, SqliteSessionStore};
@@ -685,6 +685,67 @@ fn v2_facade_hot_capture_paths_use_worker_connection() {
         .expect("worker capture temp trigger count should load");
 
     assert_eq!(inserted_count, 7);
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn v2_facade_stream_failpoint_rolls_back_worker_transaction() {
+    let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+    let path =
+        std::env::temp_dir().join(format!("terminal-platform-v2-worker-rollback-{nonce}.sqlite3"));
+    let mut config = TerminalPersistenceV2Config::test();
+    config.failpoints.stream_segment_after_segment_insert = true;
+    let store = SqliteSessionStore::open_with_v2_config(&path, config).expect("store should open");
+    let executor = store.v2_executor().expect("v2 executor should start");
+    let session_id = SessionId::new();
+    let pane_id = PaneId::new();
+    let route = SessionRoute {
+        backend: BackendKind::Native,
+        authority: RouteAuthority::LocalDaemon,
+        external: None,
+    };
+
+    let error = store
+        .record_v2_terminal_output(TerminalOutputEventInput {
+            session_id: session_id.0.to_string(),
+            route,
+            title: Some("worker rollback shell".to_string()),
+            launch: None,
+            pane_id: pane_id.0.to_string(),
+            tab_id: None,
+            payload: b"this partial segment must roll back\r\n".to_vec(),
+            rows: Some(24),
+            cols: Some(80),
+            source_sequence: Some(1),
+            occurred_at_ms: None,
+            capture_semantics: Some("raw_vt_stream".to_string()),
+        })
+        .expect_err("stream failpoint should abort facade output capture");
+
+    assert!(error.to_string().contains("stream_segment_after_segment_insert"));
+
+    let (segment_count, event_count, active_writer_count) = executor
+        .execute_with_connection(|connection| {
+            let segment_count = sql_query("SELECT COUNT(*) AS count FROM terminal_stream_segments")
+                .get_result::<WorkerProbeCount>(connection)?
+                .count;
+            let event_count = sql_query("SELECT COUNT(*) AS count FROM terminal_journal_events")
+                .get_result::<WorkerProbeCount>(connection)?
+                .count;
+            let active_writer_count = sql_query(
+                "SELECT COUNT(*) AS count FROM terminal_writer_generations WHERE state = 'active'",
+            )
+            .get_result::<WorkerProbeCount>(connection)?
+            .count;
+            Ok((segment_count, event_count, active_writer_count))
+        })
+        .expect("worker rollback probe should load");
+
+    assert_eq!(segment_count, 0);
+    assert_eq!(event_count, 0);
+    assert_eq!(active_writer_count, 0);
 
     drop(store);
     let _ = std::fs::remove_file(path);
