@@ -28,7 +28,8 @@ pub(super) async fn run_v2_history_capture(
     session: Box<dyn BackendSessionPort>,
     ready_tx: oneshot::Sender<()>,
 ) {
-    let diagnostics = CapturePersistenceDiagnostics::new(registry, descriptor.session_id);
+    let diagnostics =
+        CapturePersistenceDiagnostics::new(persistence.clone(), registry, descriptor.session_id);
     let mut ready_tx = Some(ready_tx);
     let mut captured_panes = HashSet::new();
     let Ok(initial_topology) = session.topology_snapshot().await else {

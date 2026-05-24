@@ -15,6 +15,16 @@ pub struct StoragePressureEventInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistenceFaultHealthRecordInput {
+    pub session_id: Option<String>,
+    pub pane_id: Option<String>,
+    pub operation: String,
+    pub detail: String,
+    pub error_kind: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteRequestInput {
     pub id: Option<String>,
     pub session_id: Option<String>,

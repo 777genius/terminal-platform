@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use terminal_domain::{PaneId, RouteAuthority, SessionId, SessionRoute};
 use terminal_persistence::{
-    BackendCapabilityReportInput, HistoryGapEventInput, ScreenSnapshotEventInput,
-    SqliteSessionStore, TerminalPersistenceV2Error, TopologySnapshotEventInput,
+    BackendCapabilityReportInput, HistoryGapEventInput, PersistenceFaultHealthRecordInput,
+    ScreenSnapshotEventInput, SqliteSessionStore, TerminalPersistenceV2Error,
+    TopologySnapshotEventInput,
 };
 use terminal_projection::{
     ScreenSnapshot, SessionHealthReason, SessionHealthSnapshot, TopologySnapshot,
@@ -13,18 +14,24 @@ use crate::registry::{SessionDescriptor, SessionRegistry};
 
 #[derive(Clone)]
 pub(super) struct CapturePersistenceDiagnostics {
+    persistence: SqliteSessionStore,
     registry: Arc<dyn SessionRegistry>,
     session_id: SessionId,
 }
 
 impl CapturePersistenceDiagnostics {
-    pub(super) fn new(registry: Arc<dyn SessionRegistry>, session_id: SessionId) -> Self {
-        Self { registry, session_id }
+    pub(super) fn new(
+        persistence: SqliteSessionStore,
+        registry: Arc<dyn SessionRegistry>,
+        session_id: SessionId,
+    ) -> Self {
+        Self { persistence, registry, session_id }
     }
 
     pub(super) fn record_failure(&self, operation: &str, error: &TerminalPersistenceV2Error) {
         let detail = format!("terminal history persistence failed during {operation} - {error}");
         eprintln!("terminal-runtime: {detail}");
+        self.record_durable_fault(operation, &detail, "terminal_persistence_v2_error");
         self.registry.update_health(
             self.session_id,
             SessionHealthSnapshot::degraded(
@@ -39,6 +46,7 @@ impl CapturePersistenceDiagnostics {
         let detail =
             format!("terminal history persistence task failed during {operation} - {error}");
         eprintln!("terminal-runtime: {detail}");
+        self.record_durable_fault(operation, &detail, "join_error");
         self.registry.update_health(
             self.session_id,
             SessionHealthSnapshot::degraded(
@@ -47,6 +55,26 @@ impl CapturePersistenceDiagnostics {
                 detail,
             ),
         );
+    }
+
+    fn record_durable_fault(&self, operation: &str, detail: &str, error_kind: &str) {
+        if let Err(error) = self.persistence.record_v2_persistence_fault_health_record(
+            PersistenceFaultHealthRecordInput {
+                session_id: Some(self.session_id.0.to_string()),
+                pane_id: None,
+                operation: operation.to_string(),
+                detail: detail.to_string(),
+                error_kind: Some(error_kind.to_string()),
+                metadata: Some(serde_json::json!({
+                    "source": "runtime_capture_diagnostics",
+                    "session_id": self.session_id.0.to_string(),
+                })),
+            },
+        ) {
+            eprintln!(
+                "terminal-runtime: failed to persist history fault health record during {operation} - {error}"
+            );
+        }
     }
 }
 
@@ -217,7 +245,32 @@ mod tests {
             launch: None,
             health: SessionHealthSnapshot::ready(session_id),
         });
-        let diagnostics = CapturePersistenceDiagnostics::new(registry.clone(), session_id);
+        let path = std::env::temp_dir()
+            .join(format!("terminal-runtime-capture-diagnostics-{}.sqlite3", session_id.0));
+        let persistence = SqliteSessionStore::open(&path).expect("test persistence should open");
+        let v2 = terminal_persistence::TerminalPersistenceV2::open_with_config(
+            &path,
+            terminal_persistence::TerminalPersistenceV2Config::test(),
+        )
+        .expect("v2 store should open");
+        v2.upsert_runtime_session(terminal_persistence::SessionInput {
+            id: Some(session_id.0.to_string()),
+            route: SessionRoute {
+                backend: BackendKind::Native,
+                authority: RouteAuthority::LocalDaemon,
+                external: None,
+            },
+            title: Some("shell".to_string()),
+            launch: None,
+            source: Some("test".to_string()),
+            durability_profile: None,
+            retention_policy_id: None,
+            private_mode: false,
+            metadata: None,
+        })
+        .expect("session row should exist");
+        let diagnostics =
+            CapturePersistenceDiagnostics::new(persistence, registry.clone(), session_id);
 
         diagnostics.record_failure(
             "screen snapshot",
@@ -230,5 +283,17 @@ mod tests {
         assert!(health.detail.as_deref().is_some_and(
             |detail| detail.contains("screen snapshot") && detail.contains("sqlite full")
         ));
+        let records = v2
+            .list_open_data_health_records(Some(&session_id.0.to_string()))
+            .expect("health records should list");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].detection_kind, "manual");
+        assert_eq!(records[0].severity, "error");
+        assert!(records[0].details_json.as_ref().is_some_and(|detail| {
+            let detail = detail.to_string();
+            detail.contains("screen snapshot") && detail.contains("sqlite full")
+        }));
+
+        let _ = std::fs::remove_file(path);
     }
 }

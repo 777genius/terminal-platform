@@ -1,7 +1,7 @@
 use crate::v2::{
-    BackendCapabilityReportInput, HistoryGapEventInput, ScreenSnapshotEventInput,
-    TerminalOutputEventInput, TerminalPersistenceV2Error, TopologySnapshotEventInput,
-    UiInputEventInput,
+    BackendCapabilityReportInput, HistoryGapEventInput, PersistenceFaultHealthRecordInput,
+    ScreenSnapshotEventInput, TerminalOutputEventInput, TerminalPersistenceV2Error,
+    TopologySnapshotEventInput, UiInputEventInput,
 };
 
 use super::super::{SqliteSessionStore, retry::retry_v2_write};
@@ -77,6 +77,18 @@ impl SqliteSessionStore {
             self.with_v2_store_serialized(move |store| {
                 store.record_topology_snapshot_event(input)?;
                 Ok(())
+            })
+        })
+    }
+
+    pub fn record_v2_persistence_fault_health_record(
+        &self,
+        input: PersistenceFaultHealthRecordInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let input = input.clone();
+            self.with_v2_store_serialized(move |store| {
+                store.record_persistence_fault_health_record(input)
             })
         })
     }

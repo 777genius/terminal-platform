@@ -2,6 +2,40 @@ use super::super::super::*;
 use super::super::support::*;
 
 #[test]
+fn persistence_fault_health_record_is_durable_and_deduped() {
+    let store = test_store("persistence-fault-health");
+    let (session_id, pane_id, _writer) = session_and_pane(&store);
+    let input = PersistenceFaultHealthRecordInput {
+        session_id: Some(session_id.clone()),
+        pane_id: Some(pane_id.clone()),
+        operation: "screen snapshot".to_string(),
+        detail: "terminal history persistence failed during screen snapshot - sqlite full"
+            .to_string(),
+        error_kind: Some("terminal_persistence_v2_error".to_string()),
+        metadata: Some(serde_json::json!({ "source": "test" })),
+    };
+
+    let first = store
+        .record_persistence_fault_health_record(input.clone())
+        .expect("fault health record should save");
+    let second = store
+        .record_persistence_fault_health_record(input)
+        .expect("duplicate open fault should dedupe");
+    let health =
+        store.list_open_data_health_records(Some(&session_id)).expect("health records should list");
+
+    assert_eq!(first, second);
+    assert_eq!(health.len(), 1);
+    assert_eq!(health[0].pane_id.as_deref(), Some(pane_id.as_str()));
+    assert_eq!(health[0].detection_kind, "manual");
+    assert_eq!(health[0].severity, "error");
+    assert_eq!(health[0].action_state, "open");
+    assert!(
+        health[0].affected_ref.as_deref().is_some_and(|value| value.contains("persistence_fault"))
+    );
+}
+
+#[test]
 fn integrity_check_flags_unversioned_canonical_json() {
     let store = test_store("unversioned-payload-json");
     let (session_id, pane_id, writer) = session_and_pane(&store);
