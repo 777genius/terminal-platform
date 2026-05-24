@@ -24,7 +24,7 @@
 
 Текущая оценка готовности после closeout: **100% для текущих явных PR-гарантий**, без overpromise.
 
-Дополнительная проверка после closeout: save-session path теперь имеет deterministic failpoints для двух опасных окон. `saved_session_v2_snapshot_before_import` доказывает, что failure до v2 mutation не публикует битую saved session. `saved_session_legacy_publish_before_commit` доказывает, что failure после успешной v2 evidence write, но до legacy/API publish, не создаёт видимую saved session и оставляет durable health marker, объясняющий unpublished v2 evidence.
+Дополнительная проверка после closeout: save-session path теперь имеет deterministic failpoints для двух опасных окон. `saved_session_v2_snapshot_before_import` доказывает, что failure до v2 mutation не публикует битую saved session. `saved_session_legacy_publish_before_commit` доказывает, что failure после успешной v2 evidence write, но до legacy/API publish, не создаёт видимую saved session и оставляет durable health marker, объясняющий unpublished v2 evidence. Отдельный external-process test запускает реальный `terminal-daemon` binary, пишет output history в SQLite, убивает daemon process, запускает новый process на той же DB и проверяет restore через `GetPaneHistory`.
 
 Важно: эта отметка не включает non-goals из раздела 8 и не означает, что native process tree resurrected после restart. Также imported zellij saved-session restore не обещан как native saved layout: текущий контракт честно блокирует `SaveSession` для zellij через capability/API, а persistence сохраняет live import/control, command history, rendered output history and restore evidence.
 
@@ -696,6 +696,7 @@ PR cannot be considered ready unless critical matrix passes:
 cargo fmt --check
 cargo test -p terminal-persistence
 cargo test -p terminal-runtime
+cargo test -p terminal-daemon
 cargo test -p terminal-node
 cargo test -p terminal-daemon-client
 npm run check
@@ -751,7 +752,7 @@ cd apps/terminal-demo; npm run smoke:browser:foreign
 
 ### Closeout implementation summary
 
-Status after commit `31b1b4b7b1ef866573994e31a2ccb083184a1c14`:
+Status after commit `f8cb0c2669e40e15b5fbce80b089e36a4b086704`:
 
 - Phase 1: completed for scoped PR guarantees.
   - `loadMorePaneHistory` carries `nextEventSeq`.
@@ -775,6 +776,7 @@ Status after commit `31b1b4b7b1ef866573994e31a2ccb083184a1c14`:
   - zellij saved-session API remains explicitly unsupported rather than pretending native parity.
 - Phase 5: completed for current real smoke gates.
   - Native browser smoke covers browser host restart recovery.
+  - External `terminal-daemon` process restart test covers real OS process kill and DB-backed output-history restore.
   - zellij bootstrap and browser foreign smoke cover real imported mux behavior.
   - Dedicated degraded browser smoke covers v2 pane-history failure during saved-session restore, snapshot fallback, diagnostic recording, and continued terminal usability.
   - Rust bootstrap covers v2 save failure before publish and proves no broken saved session is listed or directly loadable.
@@ -1176,6 +1178,7 @@ Use this checklist before calling the feature complete.
 - [x] Dedicated browser E2E covers degraded restore when v2 pane-history hydration fails and snapshot fallback must keep the terminal usable.
 - [x] Dedicated browser E2E covers browser-facing storage-pressure diagnostics during command dispatch and proves the next command still works.
 - [x] Browser E2E covers native browser host restart recovery.
+- [x] Rust integration test covers real `terminal-daemon` process kill/restart with v2 output history restored from SQLite.
 - [x] Browser E2E covers zellij persistence semantics through foreign smoke.
 - [x] Degraded/fault behavior is covered by Rust persistence/runtime tests plus a real browser degraded restore smoke.
 - [x] CI has separate fast and slow Windows lanes documented.
@@ -1203,7 +1206,8 @@ These are no longer blockers for the current PR guarantees, but they are the rig
 2. Full connection-aware v2 facade migration.
    - The executor now owns a reusable writer connection; more v2 write repositories can be moved behind connection-aware ports over time.
    - Expected effort: `1k-2.5k` changed lines.
-3. Remaining process-kill crash harness.
+3. Remaining mid-write and restore crash harness.
    - Deterministic non-publish windows are covered before v2 mutation and after v2 evidence.
-   - Remaining hardening is actual OS process-kill coverage during raw segment write, after v2 evidence but before publish, and during restore hydration.
+   - Actual daemon process kill/restart after durable output capture is covered now.
+   - Remaining hardening is OS process-kill exactly during raw segment write, exactly after v2 evidence but before publish, and during restore hydration.
    - Expected effort: `1k-2.5k` changed lines.

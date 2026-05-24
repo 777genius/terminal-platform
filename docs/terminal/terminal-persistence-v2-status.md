@@ -3,7 +3,7 @@
 **Last updated**: 2026-05-25
 **Branch**: `codex/terminal-persistence-v2-20260430`
 **Pull request**: <https://github.com/777genius/terminal-platform/pull/5>
-**Verified save consistency failpoint commit**: `31b1b4b7b1ef866573994e31a2ccb083184a1c14`
+**Verified daemon process restart commit**: `f8cb0c2669e40e15b5fbce80b089e36a4b086704`
 **Latest branch commit**: this document is kept in the latest closeout commit.
 **Primary plan**: [terminal-persistence-v2-implementation-plan.md](./terminal-persistence-v2-implementation-plan.md)
 **Completion plan to 100%**: [terminal-persistence-v2-completion-plan.md](./terminal-persistence-v2-completion-plan.md)
@@ -25,6 +25,7 @@ The most important verified behavior:
 - Native degraded restore is verified in a dedicated real-browser smoke: the gateway forces one v2 pane-history failure during saved-session restore, the UI records `saved_pane_history_hydration_failed`, uses snapshot fallback, renders the restore boundary, then forces one typed `storage_pressure` command-dispatch failure and remains usable for new commands.
 - Native save-session failure before legacy/API publish is verified with a deterministic v2 failpoint: failed v2 evidence does not create a visible or directly loadable broken saved session.
 - Native legacy/API publish failure after successful v2 evidence is verified with a deterministic failpoint: no visible saved session is published, v2 restore evidence remains inspectable, and an open durable health record explains the unpublished evidence.
+- Native output history survives a real external `terminal-daemon` process kill/restart: the test launches the binary, writes history into SQLite, kills the process, starts a new process on the same DB and verifies `GetPaneHistory`.
 - Command/output history survives daemon restart.
 - Retried command history submissions are deduped by `client_event_id`.
 - Command history is scoped by session.
@@ -51,6 +52,7 @@ Overall local confidence after repeated Windows runs: 🎯 9.3/10, 🛡️ 9/10.
 - Added a dedicated browser degraded persistence smoke that injects a gateway-level v2 pane-history failure exactly before saved-session restore and a typed `storage_pressure` failure during command dispatch, then verifies snapshot fallback, workspace diagnostics, browser notices, DOM history/boundary rendering and post-restore command usability.
 - Added deterministic save-session v2 failpoint coverage through `saved_session_v2_snapshot_before_import`, including a persistence unit that proves no v2 rows are mutated and a real daemon bootstrap that proves legacy/API saved-session publish does not happen after v2 evidence failure.
 - Added deterministic legacy publish failpoint coverage through `saved_session_legacy_publish_before_commit`, including runtime orchestrator tests and a real daemon bootstrap that proves successful v2 evidence plus failed legacy publish records a durable unpublished-evidence health marker.
+- Added external daemon-process restart coverage in `terminal-daemon`: the integration test uses the real `terminal-daemon` binary, normal transport protocol requests, a real native shell, process kill and same-DB restart.
 - Added history dedupe behavior for retried submits using `client_event_id`.
 - Added session scoping so commands from one session do not leak into another session history.
 - Added explicit saved-session restore compatibility/degraded semantics in API-facing behavior.
@@ -145,6 +147,19 @@ Verified:
 - Runtime command history capture.
 - Native raw output capture.
 - Durable capture fault health records.
+
+```powershell
+cargo test -p terminal-daemon
+```
+
+Result: `21 unit tests passed`, `1 process restart integration test passed`.
+
+Verified:
+
+- Protocol/request routing stays green.
+- Real `terminal-daemon` binary starts with an explicit session store.
+- Normal native shell output is captured into v2 history.
+- Killing the daemon process and starting a new daemon process on the same SQLite store preserves `GetPaneHistory` output history.
 
 ```powershell
 cargo test -p terminal-backend-zellij --lib
@@ -467,6 +482,7 @@ Run these in order on Windows:
 cargo test -p terminal-testing --test bootstrap_smoke daemon_native -- --nocapture
 cargo test -p terminal-testing --test bootstrap_smoke saved_sessions -- --nocapture
 cargo test -p terminal-testing --test bootstrap_smoke native_layout -- --nocapture
+cargo test -p terminal-daemon
 cargo test -p terminal-testing --test bootstrap_smoke zellij::import_surface -- --nocapture
 cargo test -p terminal-backend-zellij --lib
 ```
