@@ -1160,6 +1160,7 @@ Use this checklist before calling the feature complete.
 - [x] zellij rendered output restore is labeled as rendered evidence, not raw replay.
 - [x] zellij live attach and unsupported saved-session restore are separate product states.
 - [x] Browser E2E covers native restore and history behavior in the main smoke.
+- [x] Dedicated browser E2E covers native long-history restore, v2 paging cursors, load-more, and DOM history/boundary rendering.
 - [x] Browser E2E covers native browser host restart recovery.
 - [x] Browser E2E covers zellij persistence semantics through foreign smoke.
 - [x] Degraded/fault behavior is covered by Rust persistence/runtime tests; browser degraded UX remains a future polish lane, not a blocker for current PR guarantees.
@@ -1194,6 +1195,3 @@ These are no longer blockers for the current PR guarantees, but they are the rig
 4. Crash harness with deterministic failpoints.
    - Kill daemon between v2 save and publish, during raw segment write, and during restore.
    - Expected effort: `1.5k-3k` changed lines.
-5. Separate long-history browser script.
-   - Main smoke already verifies restored history and paging behavior through UI units; a dedicated 500+ segment browser scenario would make the signal easier to isolate.
-   - Expected effort: `500-1.2k` changed lines.

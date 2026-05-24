@@ -581,7 +581,7 @@ export class SessionCommandService {
     } catch (error) {
       this.#context.recordDiagnostic({
         code: "pane_history_hydration_failed",
-        message: `failed to hydrate pane history for ${paneId}`,
+        message: `failed to hydrate pane history for ${paneId} - ${errorMessage(error)}`,
         severity: "warn",
         recoverable: true,
         cause: error,
@@ -595,7 +595,7 @@ export class SessionCommandService {
     attachedSession: NonNullable<WorkspaceSnapshot["attachedSession"]>,
   ): Promise<Record<string, WorkspaceHistoricalPaneSnapshot>> {
     const historicalPanes = buildRestoredHistoricalPanes(saved, attachedSession, this.#context.now());
-    const getPaneHistory = transport.getPaneHistory;
+    const getPaneHistory = transport.getPaneHistory?.bind(transport);
     if (!getPaneHistory) {
       return historicalPanes;
     }
@@ -623,7 +623,7 @@ export class SessionCommandService {
       } catch (error) {
         this.#context.recordDiagnostic({
           code: "saved_pane_history_hydration_failed",
-          message: `failed to hydrate saved pane history for ${sourcePaneId}`,
+          message: `failed to hydrate saved pane history for ${sourcePaneId} - ${errorMessage(error)}`,
           severity: "warn",
           recoverable: true,
           cause: error,
@@ -1042,6 +1042,10 @@ function normalizeHistoryLines(lines: readonly string[]): string[] {
     normalized.pop();
   }
   return normalized;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

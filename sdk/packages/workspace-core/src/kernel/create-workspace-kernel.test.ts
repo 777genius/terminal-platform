@@ -675,10 +675,16 @@ describe("createWorkspaceKernel saved session maintenance", () => {
     const kernel = createWorkspaceKernel({
       transport: {
         ...createUnusedTransport(),
+        historyRequests,
         listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
         getSavedSession: async () => savedRecord,
-        getPaneHistory: async (sessionId, paneId, options) => {
-          historyRequests.push({ sessionId, paneId, fromEventSeq: options?.fromEventSeq });
+        getPaneHistory: async function (
+          this: { historyRequests: typeof historyRequests },
+          sessionId,
+          paneId,
+          options,
+        ) {
+          this.historyRequests.push({ sessionId, paneId, fromEventSeq: options?.fromEventSeq });
           return createPaneHistory(sessionId, paneId, "journal output\r\n", {
             fromEventSeq: 1n,
             eventSeqLow: 1n,
