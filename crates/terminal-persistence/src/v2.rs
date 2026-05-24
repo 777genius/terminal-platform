@@ -93,6 +93,12 @@ impl TerminalPersistenceV2 {
         Self { path: path.into(), config }
     }
 
+    pub(crate) fn prepare_worker_connection(
+        connection: &mut SqliteConnection,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        verify_seeded_defaults(connection)
+    }
+
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path

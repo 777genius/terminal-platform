@@ -18,8 +18,9 @@ impl SqliteSessionStore {
         retry_v2_write(|| {
             let session_id = session_id.clone();
             let pane_id = pane_id.clone();
-            self.with_v2_store_serialized(move |store| {
-                store.hydrate_pane_history(
+            self.with_v2_worker_connection(move |store, connection| {
+                store.hydrate_pane_history_with_connection(
+                    connection,
                     &session_id,
                     &pane_id,
                     from_event_seq,
@@ -38,8 +39,8 @@ impl SqliteSessionStore {
         let session_id = session_id.map(ToOwned::to_owned);
         retry_v2_write(|| {
             let session_id = session_id.clone();
-            self.with_v2_store_serialized(move |store| {
-                store.list_command_history(session_id.as_deref(), limit)
+            self.with_v2_worker_connection(move |store, connection| {
+                store.list_command_history_with_connection(connection, session_id.as_deref(), limit)
             })
         })
     }

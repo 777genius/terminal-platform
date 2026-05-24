@@ -15,11 +15,30 @@ impl TerminalPersistenceV2 {
         max_bytes: Option<i64>,
     ) -> Result<PaneHistoryHydrationRecord, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        self.hydrate_pane_history_with_connection(
+            &mut connection,
+            session_id,
+            pane_id,
+            from_event_seq,
+            max_segments,
+            max_bytes,
+        )
+    }
+
+    pub(crate) fn hydrate_pane_history_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        session_id: &str,
+        pane_id: &str,
+        from_event_seq: Option<i64>,
+        max_segments: Option<i64>,
+        max_bytes: Option<i64>,
+    ) -> Result<PaneHistoryHydrationRecord, TerminalPersistenceV2Error> {
         let limits = PaneHistoryLimits::from_inputs(from_event_seq, max_segments, max_bytes);
         let now = self.config.clock.now_ms();
 
         let latest_topology = load_latest_valid_topology_snapshot(
-            &mut connection,
+            connection,
             session_id,
             now,
             "hydrate_pane_history",
@@ -29,7 +48,7 @@ impl TerminalPersistenceV2 {
             .map(|topology| parse_pane_high_water_json(&topology.pane_high_water_json))
             .transpose()?;
         let latest_screen_snapshot = load_latest_valid_screen_snapshot(
-            &mut connection,
+            connection,
             session_id,
             Some(pane_id),
             topology_pane_high_water.as_ref(),
@@ -39,22 +58,22 @@ impl TerminalPersistenceV2 {
         .map(ScreenSnapshotRecord::from);
 
         let fetched_segments = load_stream_segment_rows(
-            &mut connection,
+            connection,
             session_id,
             pane_id,
             limits.from_event_seq,
             limits.max_segments,
         )?;
         let hydrated_segments = collect_hydratable_segments(
-            &mut connection,
+            connection,
             session_id,
             fetched_segments,
             limits.max_segments,
             limits.max_bytes,
             now,
         )?;
-        let gaps = load_history_gaps(&mut connection, session_id, pane_id)?;
-        let restore_plan = self.restore_plan(session_id)?;
+        let gaps = load_history_gaps(connection, session_id, pane_id)?;
+        let restore_plan = self.restore_plan_with_connection(connection, session_id)?;
         let replay_strategy = PaneHistoryReplayStrategy::from_evidence(
             &hydrated_segments.segments,
             latest_screen_snapshot.as_ref(),

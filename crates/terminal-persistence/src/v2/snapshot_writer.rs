@@ -7,6 +7,15 @@ impl TerminalPersistenceV2 {
     ) -> Result<String, TerminalPersistenceV2Error> {
         validate_positive_dimensions(input.rows, input.cols)?;
         let mut connection = self.connection()?;
+        self.write_screen_snapshot_with_connection(&mut connection, input)
+    }
+
+    pub(in crate::v2) fn write_screen_snapshot_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        input: ScreenSnapshotInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
+        validate_positive_dimensions(input.rows, input.cols)?;
         let now = self.config.clock.now_ms();
         let screen_json = serde_json::to_string(&input.screen)?;
         let checksum = blake3_hash_text(&screen_json);
@@ -62,6 +71,14 @@ impl TerminalPersistenceV2 {
         input: TopologySnapshotInput,
     ) -> Result<String, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        self.write_topology_snapshot_with_connection(&mut connection, input)
+    }
+
+    pub(in crate::v2) fn write_topology_snapshot_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        input: TopologySnapshotInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
         let now = self.config.clock.now_ms();
         let pane_high_water_json = serde_json::to_string(&input.pane_high_water)?;
         let topology_json = serde_json::to_string(&input.topology)?;

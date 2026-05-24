@@ -10,10 +10,13 @@ impl SqliteSessionStore {
         let session = session.clone();
         retry_v2_write(|| {
             let session = session.clone();
-            self.with_v2_store_serialized(move |store| {
-                store.import_saved_native_session_snapshot(&session)?;
-                store.run_restore_drill(&session.session_id.0.to_string())?;
-                store.restore_plan(&session.session_id.0.to_string())
+            self.with_v2_worker_connection(move |store, connection| {
+                store.import_saved_native_session_snapshot_with_connection(connection, &session)?;
+                store.run_restore_drill_with_connection(
+                    connection,
+                    &session.session_id.0.to_string(),
+                )?;
+                store.restore_plan_with_connection(connection, &session.session_id.0.to_string())
             })
         })
     }
@@ -23,8 +26,8 @@ impl SqliteSessionStore {
         session_id: terminal_domain::SessionId,
     ) -> Result<Option<RestorePlan>, TerminalPersistenceV2Error> {
         retry_v2_write(|| {
-            self.with_v2_store_serialized(move |store| {
-                match store.restore_plan(&session_id.0.to_string()) {
+            self.with_v2_worker_connection(move |store, connection| {
+                match store.restore_plan_with_connection(connection, &session_id.0.to_string()) {
                     Ok(plan) => Ok(Some(plan)),
                     Err(TerminalPersistenceV2Error::Query(diesel::result::Error::NotFound)) => {
                         Ok(None)

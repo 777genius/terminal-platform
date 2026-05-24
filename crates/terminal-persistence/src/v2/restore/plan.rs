@@ -14,8 +14,16 @@ impl TerminalPersistenceV2 {
         session_id: &str,
     ) -> Result<RestorePlan, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        self.restore_plan_with_connection(&mut connection, session_id)
+    }
+
+    pub(crate) fn restore_plan_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        session_id: &str,
+    ) -> Result<RestorePlan, TerminalPersistenceV2Error> {
         let now = self.config.clock.now_ms();
-        let inputs = load_restore_plan_inputs(&mut connection, session_id, now)?;
+        let inputs = load_restore_plan_inputs(connection, session_id, now)?;
         let guarantee_level = choose_restore_guarantee(&inputs, now);
         let evidence = build_restore_evidence(session_id, &inputs, now);
 

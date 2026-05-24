@@ -38,7 +38,15 @@ impl PersistenceExecutor {
         let join = thread::Builder::new().name(worker_name(&path)).spawn(move || {
             let mut connection =
                 match establish_initialized_connection(&worker_path, &worker_config) {
-                    Ok(connection) => {
+                    Ok(mut connection) => {
+                        if let Err(error) =
+                            crate::v2::TerminalPersistenceV2::prepare_worker_connection(
+                                &mut connection,
+                            )
+                        {
+                            let _ = ready_sender.send(Err(error));
+                            return;
+                        }
                         let _ = ready_sender.send(Ok(()));
                         connection
                     }

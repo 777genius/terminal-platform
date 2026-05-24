@@ -1,11 +1,11 @@
 use super::super::*;
 
 impl TerminalPersistenceV2 {
-    pub(in crate::v2) fn upsert_legacy_visual_session(
+    pub(in crate::v2) fn upsert_legacy_visual_session_with_connection(
         &self,
+        connection: &mut SqliteConnection,
         saved: &SavedNativeSession,
     ) -> Result<(), TerminalPersistenceV2Error> {
-        let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
         let row = NewTerminalSessionRow {
             id: saved.session_id.0.to_string(),
@@ -38,7 +38,7 @@ impl TerminalPersistenceV2 {
                 terminal_sessions::state.eq(row.state.clone()),
                 terminal_sessions::metadata_json.eq(row.metadata_json.clone()),
             ))
-            .execute(&mut connection)?;
+            .execute(connection)?;
 
         let cursor = NewSessionCursorRow {
             session_id: saved.session_id.0.to_string(),
@@ -50,17 +50,17 @@ impl TerminalPersistenceV2 {
             .values(&cursor)
             .on_conflict(terminal_session_cursors::session_id)
             .do_nothing()
-            .execute(&mut connection)?;
+            .execute(connection)?;
 
         Ok(())
     }
 
-    pub(in crate::v2) fn upsert_legacy_visual_pane(
+    pub(in crate::v2) fn upsert_legacy_visual_pane_with_connection(
         &self,
+        connection: &mut SqliteConnection,
         saved: &SavedNativeSession,
         screen: &terminal_projection::ScreenSnapshot,
     ) -> Result<(), TerminalPersistenceV2Error> {
-        let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
         let pane_id = screen.pane_id.0.to_string();
         let stream_id = DEFAULT_STREAM_ID.to_string();
@@ -89,7 +89,7 @@ impl TerminalPersistenceV2 {
                 terminal_panes::cols.eq(row.cols),
                 terminal_panes::metadata_json.eq(row.metadata_json.clone()),
             ))
-            .execute(&mut connection)?;
+            .execute(connection)?;
 
         let cursor = NewStreamCursorRow {
             id: stream_cursor_id(&pane_id, &stream_id),
@@ -104,7 +104,7 @@ impl TerminalPersistenceV2 {
             .values(&cursor)
             .on_conflict(terminal_stream_cursors::id)
             .do_nothing()
-            .execute(&mut connection)?;
+            .execute(connection)?;
 
         Ok(())
     }

@@ -488,6 +488,73 @@ fn v2_facade_fault_health_write_uses_worker_connection() {
 }
 
 #[test]
+fn v2_facade_saved_session_import_uses_worker_connection() {
+    let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+    let path =
+        std::env::temp_dir().join(format!("terminal-platform-v2-worker-save-{nonce}.sqlite3"));
+    let store = SqliteSessionStore::open(&path).expect("store should open");
+    let executor = store.v2_executor().expect("v2 executor should start");
+    executor
+        .execute_with_connection(|connection| {
+            sql_query("CREATE TEMP TABLE worker_saved_session_probe (kind TEXT)")
+                .execute(connection)?;
+            sql_query(
+                "
+                CREATE TEMP TRIGGER worker_saved_session_probe_screen
+                AFTER INSERT ON terminal_screen_snapshots
+                BEGIN
+                    INSERT INTO worker_saved_session_probe (kind) VALUES ('screen');
+                END
+                ",
+            )
+            .execute(connection)?;
+            sql_query(
+                "
+                CREATE TEMP TRIGGER worker_saved_session_probe_drill
+                AFTER INSERT ON terminal_restore_drills
+                BEGIN
+                    INSERT INTO worker_saved_session_probe (kind) VALUES ('drill');
+                END
+                ",
+            )
+            .execute(connection)?;
+            Ok(())
+        })
+        .expect("worker temp triggers should install");
+
+    let session_id = SessionId::new();
+    let snapshot = sample_snapshot(session_id, "worker-save-shell", "worker save history");
+    store
+        .save_native_session_v2_snapshot(&snapshot)
+        .expect("v2 saved session snapshot should persist through worker connection");
+
+    let screen_count = executor
+        .execute_with_connection(|connection| {
+            let row = sql_query(
+                "SELECT COUNT(*) AS count FROM worker_saved_session_probe WHERE kind = 'screen'",
+            )
+            .get_result::<WorkerProbeCount>(connection)?;
+            Ok(row.count)
+        })
+        .expect("worker screen temp trigger count should load");
+    let drill_count = executor
+        .execute_with_connection(|connection| {
+            let row = sql_query(
+                "SELECT COUNT(*) AS count FROM worker_saved_session_probe WHERE kind = 'drill'",
+            )
+            .get_result::<WorkerProbeCount>(connection)?;
+            Ok(row.count)
+        })
+        .expect("worker drill temp trigger count should load");
+
+    assert_eq!(screen_count, 1);
+    assert_eq!(drill_count, 1);
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn upgrades_legacy_saved_session_schema_without_session_routes_table() {
     let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
     let path =

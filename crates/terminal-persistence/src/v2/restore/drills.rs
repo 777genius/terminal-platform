@@ -10,6 +10,25 @@ impl TerminalPersistenceV2 {
         error: Option<&str>,
     ) -> Result<String, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        self.record_restore_drill_with_connection(
+            &mut connection,
+            session_id,
+            plan,
+            result,
+            duration_ms,
+            error,
+        )
+    }
+
+    pub(in crate::v2) fn record_restore_drill_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        session_id: &str,
+        plan: &RestorePlan,
+        result: &str,
+        duration_ms: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<String, TerminalPersistenceV2Error> {
         let now = self.config.clock.now_ms();
         let id = new_id();
         let evidence_json = Some(serde_json::to_string(&plan.evidence)?);
@@ -26,7 +45,7 @@ impl TerminalPersistenceV2 {
             error: error.map(ToOwned::to_owned),
             metadata_json: None,
         };
-        insert_into(terminal_restore_drills::table).values(&row).execute(&mut connection)?;
+        insert_into(terminal_restore_drills::table).values(&row).execute(connection)?;
         Ok(id)
     }
 
@@ -34,9 +53,17 @@ impl TerminalPersistenceV2 {
         &self,
         session_id: &str,
     ) -> Result<RestoreDrillRecord, TerminalPersistenceV2Error> {
-        let started_at_ms = self.config.clock.now_ms();
-        let plan = self.restore_plan(session_id)?;
         let mut connection = self.connection()?;
+        self.run_restore_drill_with_connection(&mut connection, session_id)
+    }
+
+    pub(crate) fn run_restore_drill_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        session_id: &str,
+    ) -> Result<RestoreDrillRecord, TerminalPersistenceV2Error> {
+        let started_at_ms = self.config.clock.now_ms();
+        let plan = self.restore_plan_with_connection(connection, session_id)?;
         connection.immediate_transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
             let validation = validate_history_checksums(connection, Some(session_id))?;
             let replay_safety = collect_restore_replay_safety(connection, session_id)?;

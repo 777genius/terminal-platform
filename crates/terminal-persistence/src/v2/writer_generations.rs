@@ -6,13 +6,22 @@ impl TerminalPersistenceV2 {
         process_id: impl Into<String>,
         lease_ms: i64,
     ) -> Result<WriterGenerationLease, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        self.acquire_writer_generation_with_connection(&mut connection, process_id, lease_ms)
+    }
+
+    pub(in crate::v2) fn acquire_writer_generation_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        process_id: impl Into<String>,
+        lease_ms: i64,
+    ) -> Result<WriterGenerationLease, TerminalPersistenceV2Error> {
         if lease_ms <= 0 {
             return Err(TerminalPersistenceV2Error::InvalidData(
                 "writer lease_ms must be positive".to_string(),
             ));
         }
 
-        let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
         let process_id = process_id.into();
         let id = new_id();
@@ -74,11 +83,25 @@ impl TerminalPersistenceV2 {
         process_id: &str,
         lease_ms: i64,
     ) -> Result<WriterGenerationLease, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        self.acquire_writer_generation_with_retry_on_connection(
+            &mut connection,
+            process_id,
+            lease_ms,
+        )
+    }
+
+    pub(in crate::v2) fn acquire_writer_generation_with_retry_on_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        process_id: &str,
+        lease_ms: i64,
+    ) -> Result<WriterGenerationLease, TerminalPersistenceV2Error> {
         const ATTEMPTS: usize = 40;
         const BACKOFF: Duration = Duration::from_millis(25);
 
         for attempt in 0..ATTEMPTS {
-            match self.acquire_writer_generation(process_id, lease_ms) {
+            match self.acquire_writer_generation_with_connection(connection, process_id, lease_ms) {
                 Ok(lease) => return Ok(lease),
                 Err(TerminalPersistenceV2Error::WriterAlreadyActive) if attempt + 1 < ATTEMPTS => {
                     thread::sleep(BACKOFF);
@@ -129,6 +152,14 @@ impl TerminalPersistenceV2 {
         writer_generation: &str,
     ) -> Result<(), TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        self.release_writer_generation_with_connection(&mut connection, writer_generation)
+    }
+
+    pub(in crate::v2) fn release_writer_generation_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        writer_generation: &str,
+    ) -> Result<(), TerminalPersistenceV2Error> {
         let now = self.config.clock.now_ms();
         connection.transaction::<_, TerminalPersistenceV2Error, _>(|connection| {
             let updated = diesel::update(
