@@ -321,9 +321,11 @@ Current PR check status observed through `gh`:
 gh pr checks 5
 ```
 
-Observed result:
+Observed result after pushing `c536a5c402d04637ca57ee6f6b4001c48053d3b9`:
 
-- `CodeRabbit` - `pass`
+```text
+no checks reported on the 'codex/terminal-persistence-v2-20260430' branch
+```
 
 GitHub Actions workflow status observed through:
 
@@ -332,13 +334,14 @@ gh run list --branch codex/terminal-persistence-v2-20260430 --limit 10
 gh run view <latest-run-id> --json status,conclusion,event,headBranch,headSha,displayTitle,url,jobs
 ```
 
-Observed result for the latest pushed HEAD:
+Observed result for the latest pushed branch:
 
 - workflow: `ci`
 - status: `completed`
 - conclusion: `action_required`
 - jobs: empty
 - failed logs: unavailable because no jobs started
+- latest observed run id: `26372375619`
 
 Attempted action:
 
@@ -369,7 +372,7 @@ Interpretation:
 - There is no failing CI/CD job output for the current HEAD.
 - The workflow is blocked by repository-level GitHub Actions approval/admin permission.
 - A maintainer/admin must approve or rerun the workflow from GitHub Actions for it to become fully green.
-- Until that external approval happens, local verification is green and PR checks visible through `gh pr checks` are green, but GitHub Actions cannot be honestly called green.
+- Until that external approval happens, local verification is green, but GitHub Actions cannot be honestly called green.
 
 ## Known limitations and follow-ups
 
@@ -383,7 +386,7 @@ Status: expected test cost.
 
 Status: external blocker.
 
-The branch is pushed and PR check `CodeRabbit` passes. GitHub Actions `ci` does not start jobs and returns `action_required`. This requires repository admin/maintainer action.
+The branch is pushed. `gh pr checks 5` currently reports no checks on the PR branch. GitHub Actions `ci` does not start jobs and returns `action_required`. This requires repository admin/maintainer action.
 
 Recommended maintainer action:
 
