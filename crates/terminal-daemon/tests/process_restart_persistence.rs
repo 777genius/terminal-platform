@@ -9,8 +9,9 @@ use terminal_domain::{BackendKind, PaneId, SessionId};
 use terminal_projection::{ScreenSnapshot, TopologySnapshot};
 use terminal_protocol::{
     CreateSessionRequest, CreateSessionResponse, DispatchMuxCommandRequest, GetPaneHistoryRequest,
-    GetScreenSnapshotRequest, GetTopologySnapshotRequest, LocalSocketAddress, PaneHistoryResponse,
-    RequestPayload, ResponsePayload,
+    GetSavedSessionRequest, GetScreenSnapshotRequest, GetTopologySnapshotRequest,
+    LocalSocketAddress, PaneHistoryResponse, RequestPayload, ResponsePayload,
+    RestoreSavedSessionRequest, RestoreSavedSessionResponse, SavedSessionResponse,
 };
 use terminal_transport::LocalSocketTransportClient;
 
@@ -46,6 +47,78 @@ async fn daemon_process_kill_preserves_v2_output_history_after_restart() {
     assert_eq!(history.session_id, created.session.session_id);
     assert_eq!(history.pane_id, pane_id);
     assert!(history.total_payload_bytes > 0);
+
+    restarted.kill_and_wait();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn daemon_process_restart_restores_saved_session_with_v2_history_evidence() {
+    let suffix = unique_suffix("daemon-process-restore-history");
+    let runtime_slug = format!("terminal-platform-{suffix}");
+    let store_path = std::env::temp_dir().join(format!("{suffix}.sqlite3"));
+    let marker = format!("KILLRESTORE{}", short_suffix());
+    let mut daemon = DaemonProcess::spawn(&runtime_slug, &store_path);
+    let client = LocalSocketTransportClient::new(LocalSocketAddress::from_runtime_slug(
+        runtime_slug.clone(),
+    ));
+
+    wait_for_daemon_ready(&client, &mut daemon).await;
+    let created = create_native_shell_session(&client).await;
+    let topology = topology_snapshot(&client, created.session.session_id).await;
+    let pane_id = topology.tabs[0].focused_pane.expect("created session should have focused pane");
+
+    wait_for_screen_line(&client, created.session.session_id, pane_id, "ready").await;
+    send_input(&client, created.session.session_id, pane_id, &format!("echo {marker}")).await;
+    wait_for_screen_line(&client, created.session.session_id, pane_id, &marker).await;
+    wait_for_pane_history_line(&client, created.session.session_id, pane_id, &marker).await;
+    save_session(&client, created.session.session_id).await;
+    let saved_before_restart = saved_session(&client, created.session.session_id).await;
+    let saved_v2_before_restart = saved_before_restart
+        .session
+        .restore_semantics_v2
+        .as_ref()
+        .expect("saved session should expose v2 restore semantics before restart");
+
+    assert_eq!(saved_v2_before_restart.source_session_id, created.session.session_id);
+    assert_eq!(saved_v2_before_restart.restored_session_id, None);
+    assert!(!saved_v2_before_restart.evidence_refs.is_empty());
+
+    send_input(&client, created.session.session_id, pane_id, "exit").await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    daemon.kill_and_wait();
+
+    let mut restarted = DaemonProcess::spawn(&runtime_slug, &store_path);
+    wait_for_daemon_ready(&client, &mut restarted).await;
+    let saved_after_restart = saved_session(&client, created.session.session_id).await;
+    let saved_v2_after_restart = saved_after_restart
+        .session
+        .restore_semantics_v2
+        .as_ref()
+        .expect("saved session should expose v2 restore semantics after restart");
+    let restored = restore_saved_session(&client, created.session.session_id).await;
+    let restored_v2 = restored
+        .restore_semantics_v2
+        .as_ref()
+        .expect("restore response should expose v2 restore semantics after restart");
+    let restored_topology = topology_snapshot(&client, restored.session.session_id).await;
+    let restored_pane_id =
+        restored_topology.tabs[0].focused_pane.expect("restored session should have focused pane");
+    let history =
+        wait_for_pane_history_line(&client, created.session.session_id, pane_id, &marker).await;
+
+    assert_eq!(saved_after_restart.session.session_id, created.session.session_id);
+    assert_eq!(saved_v2_after_restart.source_session_id, created.session.session_id);
+    assert_eq!(saved_v2_after_restart.restored_session_id, None);
+    assert!(!saved_v2_after_restart.evidence_refs.is_empty());
+    assert_eq!(restored.saved_session_id, created.session.session_id);
+    assert_ne!(restored.session.session_id, created.session.session_id);
+    assert_eq!(restored_v2.source_session_id, created.session.session_id);
+    assert_eq!(restored_v2.restored_session_id, Some(restored.session.session_id));
+    assert!(!restored_v2.evidence_refs.is_empty());
+    assert_eq!(history.session_id, created.session.session_id);
+    assert_eq!(history.pane_id, pane_id);
+
+    wait_for_screen_line(&client, restored.session.session_id, restored_pane_id, "ready").await;
 
     restarted.kill_and_wait();
 }
@@ -180,6 +253,53 @@ async fn send_input(
     match response.payload {
         ResponsePayload::DispatchMuxCommand(_) => {}
         other => panic!("unexpected dispatch response: {other:?}"),
+    }
+}
+
+async fn save_session(client: &LocalSocketTransportClient, session_id: SessionId) {
+    let response = client
+        .send_request(RequestPayload::DispatchMuxCommand(DispatchMuxCommandRequest {
+            session_id,
+            command: MuxCommand::SaveSession,
+        }))
+        .await
+        .expect("save session request should succeed");
+
+    match response.payload {
+        ResponsePayload::DispatchMuxCommand(_) => {}
+        other => panic!("unexpected save session response: {other:?}"),
+    }
+}
+
+async fn saved_session(
+    client: &LocalSocketTransportClient,
+    session_id: SessionId,
+) -> SavedSessionResponse {
+    let response = client
+        .send_request(RequestPayload::GetSavedSession(GetSavedSessionRequest { session_id }))
+        .await
+        .expect("saved session request should succeed");
+
+    match response.payload {
+        ResponsePayload::SavedSession(saved) => saved,
+        other => panic!("unexpected saved session response: {other:?}"),
+    }
+}
+
+async fn restore_saved_session(
+    client: &LocalSocketTransportClient,
+    session_id: SessionId,
+) -> RestoreSavedSessionResponse {
+    let response = client
+        .send_request(RequestPayload::RestoreSavedSession(RestoreSavedSessionRequest {
+            session_id,
+        }))
+        .await
+        .expect("restore saved session request should succeed");
+
+    match response.payload {
+        ResponsePayload::RestoreSavedSession(restored) => restored,
+        other => panic!("unexpected restore saved session response: {other:?}"),
     }
 }
 
