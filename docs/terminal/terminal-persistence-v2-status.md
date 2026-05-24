@@ -3,7 +3,7 @@
 **Last updated**: 2026-05-25
 **Branch**: `codex/terminal-persistence-v2-20260430`
 **Pull request**: <https://github.com/777genius/terminal-platform/pull/5>
-**Verified save-before-publish failpoint commit**: `0c0864682559618222472355fa2cee8148bd7e94`
+**Verified save consistency failpoint commit**: `31b1b4b7b1ef866573994e31a2ccb083184a1c14`
 **Latest branch commit**: this document is kept in the latest closeout commit.
 **Primary plan**: [terminal-persistence-v2-implementation-plan.md](./terminal-persistence-v2-implementation-plan.md)
 **Completion plan to 100%**: [terminal-persistence-v2-completion-plan.md](./terminal-persistence-v2-completion-plan.md)
@@ -24,6 +24,7 @@ The most important verified behavior:
 - Native long-history restore is verified in a dedicated real-browser smoke with paging and load-more.
 - Native degraded restore is verified in a dedicated real-browser smoke: the gateway forces one v2 pane-history failure during saved-session restore, the UI records `saved_pane_history_hydration_failed`, uses snapshot fallback, renders the restore boundary, then forces one typed `storage_pressure` command-dispatch failure and remains usable for new commands.
 - Native save-session failure before legacy/API publish is verified with a deterministic v2 failpoint: failed v2 evidence does not create a visible or directly loadable broken saved session.
+- Native legacy/API publish failure after successful v2 evidence is verified with a deterministic failpoint: no visible saved session is published, v2 restore evidence remains inspectable, and an open durable health record explains the unpublished evidence.
 - Command/output history survives daemon restart.
 - Retried command history submissions are deduped by `client_event_id`.
 - Command history is scoped by session.
@@ -49,6 +50,7 @@ Overall local confidence after repeated Windows runs: 🎯 9.3/10, 🛡️ 9/10.
 - Added a dedicated browser long-history persistence smoke that forces the v2 history payload past the first-page byte budget, restores the session, verifies `v2_pane_history`, and loads pages until the end marker is visible in DOM history.
 - Added a dedicated browser degraded persistence smoke that injects a gateway-level v2 pane-history failure exactly before saved-session restore and a typed `storage_pressure` failure during command dispatch, then verifies snapshot fallback, workspace diagnostics, browser notices, DOM history/boundary rendering and post-restore command usability.
 - Added deterministic save-session v2 failpoint coverage through `saved_session_v2_snapshot_before_import`, including a persistence unit that proves no v2 rows are mutated and a real daemon bootstrap that proves legacy/API saved-session publish does not happen after v2 evidence failure.
+- Added deterministic legacy publish failpoint coverage through `saved_session_legacy_publish_before_commit`, including runtime orchestrator tests and a real daemon bootstrap that proves successful v2 evidence plus failed legacy publish records a durable unpublished-evidence health marker.
 - Added history dedupe behavior for retried submits using `client_event_id`.
 - Added session scoping so commands from one session do not leak into another session history.
 - Added explicit saved-session restore compatibility/degraded semantics in API-facing behavior.
@@ -126,11 +128,20 @@ Verified:
 cargo test -p terminal-runtime
 ```
 
-Result: `18 passed`.
+Result: `19 passed`.
+
+Targeted saved-session regression after the latest publish-failure marker change:
+
+```powershell
+cargo test -p terminal-runtime saved_session -- --nocapture
+```
+
+Result: `5 passed`.
 
 Verified:
 
 - v2-first saved session orchestration tests.
+- Publish failure after v2 evidence records an unpublished-evidence marker through the persistence port.
 - Runtime command history capture.
 - Native raw output capture.
 - Durable capture fault health records.
@@ -218,7 +229,7 @@ Verified:
 cargo test -p terminal-testing --test bootstrap_smoke saved_sessions -- --nocapture
 ```
 
-Result: `11 passed`.
+Result: `12 passed`.
 
 Verified:
 
@@ -233,6 +244,7 @@ Verified:
 - Dedupe retried command history submits by `client_event_id`.
 - Scope command history by session.
 - V2 save evidence failure does not publish a visible saved session, does not load through saved-session API, and does not leave a direct legacy saved-session row.
+- Legacy publish failure after v2 evidence does not publish a visible saved session, keeps v2 restore evidence inspectable, and records an open durable data-health marker.
 
 ```powershell
 cargo test -p terminal-testing --test bootstrap_smoke native_layout -- --nocapture

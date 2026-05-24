@@ -24,7 +24,7 @@
 
 Текущая оценка готовности после closeout: **100% для текущих явных PR-гарантий**, без overpromise.
 
-Дополнительная проверка после closeout: save-session path теперь имеет deterministic failpoint `saved_session_v2_snapshot_before_import`, который доказывает v2-first/publish-last семантику на двух уровнях: persistence unit и real daemon bootstrap. Если v2 evidence fails before legacy publish, пользователь не видит битую saved session.
+Дополнительная проверка после closeout: save-session path теперь имеет deterministic failpoints для двух опасных окон. `saved_session_v2_snapshot_before_import` доказывает, что failure до v2 mutation не публикует битую saved session. `saved_session_legacy_publish_before_commit` доказывает, что failure после успешной v2 evidence write, но до legacy/API publish, не создаёт видимую saved session и оставляет durable health marker, объясняющий unpublished v2 evidence.
 
 Важно: эта отметка не включает non-goals из раздела 8 и не означает, что native process tree resurrected после restart. Также imported zellij saved-session restore не обещан как native saved layout: текущий контракт честно блокирует `SaveSession` для zellij через capability/API, а persistence сохраняет live import/control, command history, rendered output history and restore evidence.
 
@@ -751,7 +751,7 @@ cd apps/terminal-demo; npm run smoke:browser:foreign
 
 ### Closeout implementation summary
 
-Status after commit `0c0864682559618222472355fa2cee8148bd7e94`:
+Status after commit `31b1b4b7b1ef866573994e31a2ccb083184a1c14`:
 
 - Phase 1: completed for scoped PR guarantees.
   - `loadMorePaneHistory` carries `nextEventSeq`.
@@ -762,6 +762,7 @@ Status after commit `0c0864682559618222472355fa2cee8148bd7e94`:
   - v2 evidence is persisted before legacy/API publish.
   - Regression tests prove v2 failure prevents publish.
   - Deterministic v2 snapshot-before-import failpoint proves failed v2 evidence does not publish a visible legacy saved session.
+  - Deterministic legacy-publish-before-commit failpoint proves successful v2 evidence plus failed legacy publish leaves no visible saved session and records an open v2 health marker.
 - Phase 3: completed for scoped fault handling.
   - Executor has worker-owned connection support.
   - Capture failures persist durable health records.
@@ -777,6 +778,7 @@ Status after commit `0c0864682559618222472355fa2cee8148bd7e94`:
   - zellij bootstrap and browser foreign smoke cover real imported mux behavior.
   - Dedicated degraded browser smoke covers v2 pane-history failure during saved-session restore, snapshot fallback, diagnostic recording, and continued terminal usability.
   - Rust bootstrap covers v2 save failure before publish and proves no broken saved session is listed or directly loadable.
+  - Rust bootstrap covers legacy publish failure after v2 evidence and proves v2 restore plan plus durable health marker remain inspectable.
 - Phase 6: completed for current UI contract.
   - Restore boundary and partial-history messaging are present.
   - Load-more failure and retry states are represented in screen actions.
@@ -1161,6 +1163,7 @@ Use this checklist before calling the feature complete.
 - [x] Save session is v2-first and publish-last.
 - [x] Partial save failure does not publish broken saved session.
 - [x] Dedicated Rust persistence unit and real daemon bootstrap cover v2 save failure before legacy/API publish.
+- [x] Dedicated real daemon bootstrap covers legacy/API publish failure after successful v2 evidence write and records durable unpublished evidence marker.
 - [x] Persistence capture fault degrades session health and is visible to tests.
 - [x] Storage pressure is visible to persistence diagnostics and does not silently delete canonical history.
 - [x] Single-writer executor owns and reuses a worker connection for connection-aware jobs.
@@ -1201,6 +1204,6 @@ These are no longer blockers for the current PR guarantees, but they are the rig
    - The executor now owns a reusable writer connection; more v2 write repositories can be moved behind connection-aware ports over time.
    - Expected effort: `1k-2.5k` changed lines.
 3. Remaining process-kill crash harness.
-   - Deterministic v2 failure before legacy/API publish is covered now.
-   - Remaining hardening is to kill the daemon during raw segment write, after v2 evidence but before publish, and during restore hydration.
+   - Deterministic non-publish windows are covered before v2 mutation and after v2 evidence.
+   - Remaining hardening is actual OS process-kill coverage during raw segment write, after v2 evidence but before publish, and during restore hydration.
    - Expected effort: `1k-2.5k` changed lines.
