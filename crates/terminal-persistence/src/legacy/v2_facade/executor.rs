@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use diesel::sqlite::SqliteConnection;
+
 use crate::{
     db::executor::PersistenceExecutor,
     v2::{TerminalPersistenceV2, TerminalPersistenceV2Error},
@@ -34,6 +36,27 @@ impl SqliteSessionStore {
     {
         let executor = self.v2_executor()?;
         executor.execute(operation)
+    }
+
+    pub(in crate::legacy) fn with_v2_worker_connection<T>(
+        &self,
+        operation: impl FnOnce(
+            &TerminalPersistenceV2,
+            &mut SqliteConnection,
+        ) -> Result<T, TerminalPersistenceV2Error>
+        + Send
+        + 'static,
+    ) -> Result<T, TerminalPersistenceV2Error>
+    where
+        T: Send + 'static,
+    {
+        let path = self.path.clone();
+        let config = self.v2_config.clone();
+        let executor = self.v2_executor()?;
+        executor.execute_with_connection(move |connection| {
+            let store = TerminalPersistenceV2::worker_view(path, config);
+            operation(&store, connection)
+        })
     }
 
     pub(in crate::legacy) fn v2_executor(

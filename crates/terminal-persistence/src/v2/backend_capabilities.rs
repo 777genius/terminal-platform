@@ -5,11 +5,19 @@ impl TerminalPersistenceV2 {
         &self,
         input: BackendCapabilityReportInput,
     ) -> Result<String, TerminalPersistenceV2Error> {
+        let mut connection = self.connection()?;
+        self.record_backend_capability_report_with_connection(&mut connection, input)
+    }
+
+    pub(crate) fn record_backend_capability_report_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        input: BackendCapabilityReportInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
         validate_capture_semantics_domain(&input.capture_semantics)?;
         validate_capture_strategy_domain(&input.capture_strategy)?;
         validate_command_boundary_confidence_domain(&input.command_boundary_confidence)?;
         validate_backend_probe_status_domain(&input.probe_status)?;
-        let mut connection = self.connection()?;
         let now = self.config.clock.now_ms();
         let id = input.id.unwrap_or_else(new_id);
         let evidence_json = json_metadata(&input.evidence)?;
@@ -31,9 +39,7 @@ impl TerminalPersistenceV2 {
             expires_at_ms: input.expires_at_ms.unwrap_or(now + 24 * 60 * 60 * 1_000),
             stale_reason: None,
         };
-        insert_into(terminal_backend_capability_reports::table)
-            .values(&row)
-            .execute(&mut connection)?;
+        insert_into(terminal_backend_capability_reports::table).values(&row).execute(connection)?;
         Ok(id)
     }
 

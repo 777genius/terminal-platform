@@ -1,5 +1,6 @@
 use std::{sync::Arc, thread};
 
+use diesel::{RunQueryDsl, sql_query};
 use rusqlite::{Connection, params};
 use terminal_backend_api::ShellLaunchSpec;
 use terminal_domain::{
@@ -10,7 +11,9 @@ use terminal_projection::{
     ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
 };
 
-use crate::v2::{RestoreGuaranteeLevel, TerminalOutputEventInput};
+use crate::v2::{
+    PersistenceFaultHealthRecordInput, RestoreGuaranteeLevel, TerminalOutputEventInput,
+};
 
 use super::{PersistenceError, SavedNativeSession, SessionRouteRecord, SqliteSessionStore};
 
@@ -424,6 +427,61 @@ fn v2_facade_serializes_concurrent_output_capture() {
     for index in 0..12 {
         assert!(payload_text.contains(&format!("serialized-line-{index}")));
     }
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[derive(diesel::QueryableByName)]
+struct WorkerProbeCount {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    count: i64,
+}
+
+#[test]
+fn v2_facade_fault_health_write_uses_worker_connection() {
+    let nonce = SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve");
+    let path =
+        std::env::temp_dir().join(format!("terminal-platform-v2-worker-facade-{nonce}.sqlite3"));
+    let store = SqliteSessionStore::open(&path).expect("store should open");
+    let executor = store.v2_executor().expect("v2 executor should start");
+    executor
+        .execute_with_connection(|connection| {
+            sql_query("CREATE TEMP TABLE worker_fault_probe (value TEXT)").execute(connection)?;
+            sql_query(
+                "
+                CREATE TEMP TRIGGER worker_fault_probe_insert
+                AFTER INSERT ON terminal_data_health_records
+                BEGIN
+                    INSERT INTO worker_fault_probe (value) VALUES (NEW.affected_ref);
+                END
+                ",
+            )
+            .execute(connection)?;
+            Ok(())
+        })
+        .expect("worker temp trigger should install");
+
+    store
+        .record_v2_persistence_fault_health_record(PersistenceFaultHealthRecordInput {
+            session_id: None,
+            pane_id: None,
+            operation: "worker_connection_probe".to_string(),
+            detail: "probe fault".to_string(),
+            error_kind: Some("probe".to_string()),
+            metadata: None,
+        })
+        .expect("fault health record should persist through worker connection");
+
+    let count = executor
+        .execute_with_connection(|connection| {
+            let row = sql_query("SELECT COUNT(*) AS count FROM worker_fault_probe")
+                .get_result::<WorkerProbeCount>(connection)?;
+            Ok(row.count)
+        })
+        .expect("worker temp trigger count should load");
+
+    assert_eq!(count, 1);
 
     drop(store);
     let _ = std::fs::remove_file(path);

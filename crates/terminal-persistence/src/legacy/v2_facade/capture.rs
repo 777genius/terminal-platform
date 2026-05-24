@@ -13,8 +13,8 @@ impl SqliteSessionStore {
     ) -> Result<String, TerminalPersistenceV2Error> {
         retry_v2_write(|| {
             let input = input.clone();
-            self.with_v2_store_serialized(move |store| {
-                store.record_backend_capability_report(input)
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_backend_capability_report_with_connection(connection, input)
             })
         })
     }
@@ -87,8 +87,8 @@ impl SqliteSessionStore {
     ) -> Result<String, TerminalPersistenceV2Error> {
         retry_v2_write(|| {
             let input = input.clone();
-            self.with_v2_store_serialized(move |store| {
-                store.record_persistence_fault_health_record(input)
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_persistence_fault_health_record_with_connection(connection, input)
             })
         })
     }

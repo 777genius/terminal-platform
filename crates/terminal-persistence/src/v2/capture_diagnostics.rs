@@ -6,6 +6,14 @@ impl TerminalPersistenceV2 {
         input: PersistenceFaultHealthRecordInput,
     ) -> Result<String, TerminalPersistenceV2Error> {
         let mut connection = self.connection()?;
+        self.record_persistence_fault_health_record_with_connection(&mut connection, input)
+    }
+
+    pub(crate) fn record_persistence_fault_health_record_with_connection(
+        &self,
+        connection: &mut SqliteConnection,
+        input: PersistenceFaultHealthRecordInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
         let now = self.config.clock.now_ms();
         let affected_ref = format!(
             "persistence_fault:{}:{}:{}",
@@ -19,7 +27,7 @@ impl TerminalPersistenceV2 {
             .filter(terminal_data_health_records::action_state.ne("resolved"))
             .filter(terminal_data_health_records::action_state.ne("ignored"))
             .select(DataHealthRecordRow::as_select())
-            .first::<DataHealthRecordRow>(&mut connection)
+            .first::<DataHealthRecordRow>(connection)
             .optional()?;
         if let Some(existing) = existing {
             return Ok(existing.id);
@@ -57,7 +65,7 @@ impl TerminalPersistenceV2 {
             metadata_json: json_metadata(&metadata)?,
         };
         let id = row.id.clone();
-        insert_into(terminal_data_health_records::table).values(&row).execute(&mut connection)?;
+        insert_into(terminal_data_health_records::table).values(&row).execute(connection)?;
         Ok(id)
     }
 

@@ -86,6 +86,13 @@ impl TerminalPersistenceV2 {
         Ok(Self { path, config })
     }
 
+    pub(crate) fn worker_view(
+        path: impl Into<PathBuf>,
+        config: TerminalPersistenceV2Config,
+    ) -> Self {
+        Self { path: path.into(), config }
+    }
+
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
