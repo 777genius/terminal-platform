@@ -1,6 +1,6 @@
 # Terminal Persistence v2 - Status and Handoff
 
-**Last updated**: 2026-05-24
+**Last updated**: 2026-05-25
 **Branch**: `codex/terminal-persistence-v2-20260430`
 **Pull request**: <https://github.com/777genius/terminal-platform/pull/5>
 **Verified closeout commit before docs refresh**: `049d7c1abb3a6370a3300092b1d0b47d5a220b80`
@@ -22,6 +22,7 @@ The most important verified behavior:
 - Native terminal sessions persist saved session metadata and command/output history.
 - Native saved-session restore hydrates v2 pane history through the bound transport API before falling back to snapshots.
 - Native long-history restore is verified in a dedicated real-browser smoke with paging and load-more.
+- Native degraded restore is verified in a dedicated real-browser smoke: the gateway forces one v2 pane-history failure during saved-session restore, the UI records `saved_pane_history_hydration_failed`, uses snapshot fallback, renders the restore boundary, and remains usable for new commands.
 - Command/output history survives daemon restart.
 - Retried command history submissions are deduped by `client_event_id`.
 - Command history is scoped by session.
@@ -45,6 +46,7 @@ Overall local confidence after repeated Windows runs: 🎯 9.3/10, 🛡️ 9/10.
 - Added durable command/output history behavior across daemon restart.
 - Fixed restored saved-session history hydration so the SDK calls `getPaneHistory` with its transport binding intact. This closes the real WebSocket path where detached methods fell back to visual snapshots.
 - Added a dedicated browser long-history persistence smoke that forces the v2 history payload past the first-page byte budget, restores the session, verifies `v2_pane_history`, and loads pages until the end marker is visible in DOM history.
+- Added a dedicated browser degraded persistence smoke that injects a gateway-level v2 pane-history failure exactly before saved-session restore and verifies snapshot fallback, workspace diagnostics, DOM history/boundary rendering and post-restore command usability.
 - Added history dedupe behavior for retried submits using `client_event_id`.
 - Added session scoping so commands from one session do not leak into another session history.
 - Added explicit saved-session restore compatibility/degraded semantics in API-facing behavior.
@@ -85,6 +87,9 @@ Important zellij nuance:
   - Stale auto-start URL recovery.
   - Browser host restart recovery.
   - Explicit launch.
+- Added dedicated browser persistence smoke coverage for:
+  - Long-history saved-session restore with v2 paging.
+  - Degraded saved-session restore when v2 pane-history hydration fails.
 - Added and hardened browser foreign-backend smoke coverage for:
   - zellij session import.
   - Sending command input.
@@ -173,14 +178,16 @@ Result: `38 test files passed`, `211 tests passed`.
 cd apps\terminal-demo
 npm run test
 npm run smoke:browser
+npm run smoke:browser:persistence-degraded
 npm run smoke:browser:persistence-long-history
 npm run smoke:browser:foreign
 ```
 
 Results:
 
-- `npm run test`: `60 passed`.
+- `npm run test`: `61 passed`.
 - `npm run smoke:browser`: passed with real Chrome/CDP, browser host, terminal daemon and Windows `cmd.exe`.
+- `npm run smoke:browser:persistence-degraded`: passed with real Chrome/CDP, browser host, terminal daemon and Windows `cmd.exe`; verified forced v2 pane-history failure during saved-session restore records `saved_pane_history_hydration_failed`, falls back to saved snapshot history, keeps restore boundary DOM visible, and accepts a post-restore command.
 - `npm run smoke:browser:persistence-long-history`: passed with real Chrome/CDP, browser host, terminal daemon and Windows `cmd.exe`; verified saved-session restore uses `v2_pane_history`, the first restored page is paged, `loadMorePaneHistory` reaches the end marker, and history/boundary DOM lines render.
 - `npm run smoke:browser:foreign`: passed with real Chrome/CDP and zellij `0.44.3`.
 
@@ -268,6 +275,7 @@ Verified:
 
 ```powershell
 npm run smoke:browser
+npm run smoke:browser:persistence-degraded
 npm run smoke:browser:persistence-long-history
 ```
 
@@ -278,6 +286,7 @@ Verified with real Chrome/CDP, browser host and terminal daemon:
 - Auto-start scenario.
 - Stale auto-start URL scenario.
 - Browser host restart recovery.
+- Dedicated degraded saved-session restore through snapshot fallback after injected v2 pane-history failure.
 - Explicit launch scenario.
 - Dedicated long-history saved-session restore through `v2_pane_history`.
 - Paged history cursor/load-more behavior after restore.
@@ -308,7 +317,7 @@ Verified with real Chrome/CDP and zellij `0.44.2`:
 npm test
 ```
 
-Result: `60 passed`.
+Result: `61 passed`.
 
 ```powershell
 npm run test:offline
@@ -452,6 +461,7 @@ cd apps\terminal-demo
 npm test
 npm run test:offline
 npm run smoke:browser
+npm run smoke:browser:persistence-degraded
 npm run smoke:browser:persistence-long-history
 npm run smoke:browser:foreign
 ```

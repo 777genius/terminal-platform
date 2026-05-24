@@ -31,11 +31,26 @@ import {
 } from "../../../core/application/index.js";
 import type { TerminalPlatformClientProvider } from "../../infrastructure/TerminalPlatformClientProvider.js";
 
+export interface TerminalRuntimeGatewayWorkspacePaneHistoryRequest {
+  readonly sessionId: string;
+  readonly paneId: string;
+  readonly fromEventSeq: number | null;
+  readonly maxSegments: number | null;
+  readonly maxBytes: number | null;
+}
+
+export interface TerminalRuntimeGatewayFaultInjectionPort {
+  beforeWorkspacePaneHistory?(
+    request: TerminalRuntimeGatewayWorkspacePaneHistoryRequest,
+  ): Promise<void> | void;
+}
+
 interface TerminalRuntimeGatewayServerOptions {
   runtimeSlug: string;
   controlService: TerminalRuntimeControlService;
   sessionStreamService: TerminalRuntimeSessionStreamService;
   clientProvider: TerminalPlatformClientProvider;
+  faultInjection?: TerminalRuntimeGatewayFaultInjectionPort | null;
 }
 
 interface ControlConnectionRecord {
@@ -116,6 +131,7 @@ export class TerminalRuntimeGatewayServer {
   readonly #controlService: TerminalRuntimeControlService;
   readonly #sessionStreamService: TerminalRuntimeSessionStreamService;
   readonly #clientProvider: TerminalPlatformClientProvider;
+  readonly #faultInjection: TerminalRuntimeGatewayFaultInjectionPort | null;
   readonly #server: WebSocketServer;
   readonly #controlConnections = new Set<ControlConnectionRecord>();
   readonly #streamConnections = new Set<StreamConnectionRecord>();
@@ -125,6 +141,7 @@ export class TerminalRuntimeGatewayServer {
     this.#controlService = options.controlService;
     this.#sessionStreamService = options.sessionStreamService;
     this.#clientProvider = options.clientProvider;
+    this.#faultInjection = options.faultInjection ?? null;
     this.#server = new WebSocketServer({
       host: "127.0.0.1",
       port: 0,
@@ -386,12 +403,20 @@ export class TerminalRuntimeGatewayServer {
       }
       case "workspace_pane_history": {
         const client = await this.#clientProvider.getClient();
+        const request = {
+          sessionId: readStringPayload(payload, "sessionId"),
+          paneId: readStringPayload(payload, "paneId"),
+          fromEventSeq: readOptionalNumberPayload(payload, "fromEventSeq") ?? null,
+          maxSegments: readOptionalNumberPayload(payload, "maxSegments") ?? null,
+          maxBytes: readOptionalNumberPayload(payload, "maxBytes") ?? null,
+        };
+        await this.#faultInjection?.beforeWorkspacePaneHistory?.(request);
         return client.paneHistory(
-          readStringPayload(payload, "sessionId"),
-          readStringPayload(payload, "paneId"),
-          readOptionalNumberPayload(payload, "fromEventSeq") ?? null,
-          readOptionalNumberPayload(payload, "maxSegments") ?? null,
-          readOptionalNumberPayload(payload, "maxBytes") ?? null,
+          request.sessionId,
+          request.paneId,
+          request.fromEventSeq,
+          request.maxSegments,
+          request.maxBytes,
         );
       }
       case "workspace_prune_saved_sessions": {

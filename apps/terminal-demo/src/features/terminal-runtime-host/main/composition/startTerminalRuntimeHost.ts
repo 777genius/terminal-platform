@@ -11,6 +11,7 @@ import {
   DEFAULT_TERMINAL_RUNTIME_SLUG,
   normalizeTerminalShellProgram,
 } from "./shell-policy.js";
+import type { TerminalRuntimeGatewayFaultInjectionPort } from "../adapters/input/TerminalRuntimeGatewayServer.js";
 
 export {
   DEFAULT_TERMINAL_RUNTIME_SLUG,
@@ -20,6 +21,7 @@ export {
   resolveDemoDefaultWorkingDirectory,
   resolveDemoDefaultShellProgram,
 } from "./shell-policy.js";
+export type { TerminalRuntimeGatewayFaultInjectionPort } from "../adapters/input/TerminalRuntimeGatewayServer.js";
 
 export interface TerminalRuntimeHostHandle {
   controlPlaneUrl: string;
@@ -58,6 +60,7 @@ export async function startTerminalRuntimeHost(options?: {
   forceRestartReadyDaemon?: boolean;
   initialNativeSession?: TerminalRuntimeInitialNativeSession | null;
   sessionStorePath?: string | null;
+  gatewayFaultInjection?: TerminalRuntimeGatewayFaultInjectionPort | null;
 }): Promise<TerminalRuntimeHostHandle> {
   const runtimeSlug = options?.runtimeSlug ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
   return startTerminalRuntimeHostWithDependencies(options, {
@@ -75,6 +78,7 @@ export async function startTerminalRuntimeHostWithDependencies(
   options: {
     runtimeSlug?: string;
     initialNativeSession?: TerminalRuntimeInitialNativeSession | null;
+    gatewayFaultInjection?: TerminalRuntimeGatewayFaultInjectionPort | null;
   } | undefined,
   dependencies: TerminalRuntimeHostDependencies,
 ): Promise<TerminalRuntimeHostHandle> {
@@ -98,6 +102,7 @@ export async function startTerminalRuntimeHostWithDependencies(
       controlService,
       sessionStreamService,
       clientProvider,
+      faultInjection: options?.gatewayFaultInjection ?? null,
     });
 
     return {

@@ -1,6 +1,6 @@
 # Terminal Persistence v2 - Completion Plan to 100%
 
-**Дата**: 2026-05-24
+**Дата**: 2026-05-25
 **Ветка**: `codex/terminal-persistence-v2-20260430`
 **PR**: <https://github.com/777genius/terminal-platform/pull/5>
 **Базовые документы**:
@@ -772,6 +772,7 @@ Status after commit `049d7c1abb3a6370a3300092b1d0b47d5a220b80`:
 - Phase 5: completed for current real smoke gates.
   - Native browser smoke covers browser host restart recovery.
   - zellij bootstrap and browser foreign smoke cover real imported mux behavior.
+  - Dedicated degraded browser smoke covers v2 pane-history failure during saved-session restore, snapshot fallback, diagnostic recording, and continued terminal usability.
 - Phase 6: completed for current UI contract.
   - Restore boundary and partial-history messaging are present.
   - Load-more failure and retry states are represented in screen actions.
@@ -820,6 +821,7 @@ Status after commit `049d7c1abb3a6370a3300092b1d0b47d5a220b80`:
 npm run check
 cd apps/terminal-demo; npm run smoke:browser
 cd apps/terminal-demo; node ./scripts/browser-persistence-long-history-smoke.mjs
+cd apps/terminal-demo; node ./scripts/browser-persistence-degraded-smoke.mjs
 ```
 
 ### Phase 2 - Save orchestration v2-first
@@ -1113,10 +1115,10 @@ Must verify:
 
 Must verify:
 
-- simulated storage pressure;
-- simulated v2 history page load failure;
-- UI retry state;
-- `HistoryPersistenceFault` or storage pressure diagnostic visible;
+- gateway-induced v2 pane-history failure during saved-session restore;
+- snapshot fallback is used instead of losing restored context;
+- `saved_pane_history_hydration_failed` diagnostic is visible in workspace state;
+- restored history and restore boundary still render in DOM;
 - terminal remains usable after degradation.
 
 ## 6. Suggested Implementation Order
@@ -1161,9 +1163,10 @@ Use this checklist before calling the feature complete.
 - [x] zellij live attach and unsupported saved-session restore are separate product states.
 - [x] Browser E2E covers native restore and history behavior in the main smoke.
 - [x] Dedicated browser E2E covers native long-history restore, v2 paging cursors, load-more, and DOM history/boundary rendering.
+- [x] Dedicated browser E2E covers degraded restore when v2 pane-history hydration fails and snapshot fallback must keep the terminal usable.
 - [x] Browser E2E covers native browser host restart recovery.
 - [x] Browser E2E covers zellij persistence semantics through foreign smoke.
-- [x] Degraded/fault behavior is covered by Rust persistence/runtime tests; browser degraded UX remains a future polish lane, not a blocker for current PR guarantees.
+- [x] Degraded/fault behavior is covered by Rust persistence/runtime tests plus a real browser degraded restore smoke.
 - [x] CI has separate fast and slow Windows lanes documented.
 - [x] Status doc includes final commit, matrix, and known limitations.
 
@@ -1182,8 +1185,9 @@ These should not block 100% for the current persistence feature unless product s
 
 These are no longer blockers for the current PR guarantees, but they are the right next investments if the product scope expands.
 
-1. Dedicated browser degraded/fault smoke.
-   - Simulate storage pressure and history-page-load failure in the browser.
+1. Browser storage-pressure UX smoke.
+   - Simulate storage pressure in the browser-facing flow and assert user-visible maintenance affordance.
+   - Rust persistence/runtime storage-pressure coverage already exists for current PR guarantees.
    - Expected effort: `400-900` changed lines.
 2. zellij historical saved-session restore.
    - Add a new product state for "zellij session gone, DB history visible only".

@@ -319,6 +319,81 @@ test("gateway exposes raw workspace handshake for SDK clients", loopbackTestOpti
   }
 });
 
+test("gateway fault injection fails one workspace pane history request without calling SDK client", loopbackTestOptions, async () => {
+  const paneHistoryCalls = [];
+  const sdkClient = {
+    ...createSdkClient(),
+    paneHistory: async (...args) => {
+      paneHistoryCalls.push(args);
+      return {
+        session_id: args[0],
+        pane_id: args[1],
+        from_event_seq: BigInt(args[2] ?? 1),
+        next_event_seq: null,
+        has_more_segments: false,
+        total_payload_bytes: 0n,
+        replay_strategy: "raw_vt_stream",
+        restore_plan: {
+          restore_guarantee_level: "raw_vt_replay",
+        },
+        segments: [],
+        gaps: [],
+        latest_screen_snapshot: null,
+      };
+    },
+  };
+  let injectedFailures = 0;
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(createRuntime()),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(createRuntime()),
+    clientProvider: {
+      getClient: async () => sdkClient,
+    },
+    faultInjection: {
+      beforeWorkspacePaneHistory: (request) => {
+        assert.equal(request.sessionId, "saved-session-1");
+        assert.equal(request.paneId, "pane-1");
+        if (injectedFailures === 0) {
+          injectedFailures += 1;
+          throw new Error("Simulated workspace pane history failure for degraded persistence smoke");
+        }
+      },
+    },
+  });
+
+  const client = createControlClient(gateway.controlPlaneUrl);
+  try {
+    await client.connect();
+
+    await assert.rejects(
+      () => client.request("workspace_pane_history", {
+        sessionId: "saved-session-1",
+        paneId: "pane-1",
+        fromEventSeq: 1,
+        maxSegments: 256,
+        maxBytes: 1_048_576,
+      }),
+      /Simulated workspace pane history failure/,
+    );
+    assert.equal(paneHistoryCalls.length, 0);
+
+    const history = await client.request("workspace_pane_history", {
+      sessionId: "saved-session-1",
+      paneId: "pane-1",
+      fromEventSeq: 1,
+      maxSegments: 256,
+      maxBytes: 1_048_576,
+    });
+    assert.equal(history.session_id, "saved-session-1");
+    assert.equal(history.pane_id, "pane-1");
+    assert.equal(paneHistoryCalls.length, 1);
+  } finally {
+    await client.close();
+    await gateway.dispose();
+  }
+});
+
 test("gateway rejects malformed control payloads before application ports", loopbackTestOptions, async () => {
   let discoverCalls = 0;
   const runtime = createRuntime({
