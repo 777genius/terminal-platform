@@ -7,6 +7,7 @@
 **Verified v2 facade worker-connection commit**: `06253d715e25b2c675e2d2f6f7b60f82b1e7b20e`
 **Verified v2 saved restore worker-connection commit**: `d61643770c80d6a1224b2fca63188e6e880a4183`
 **Verified v2 hot capture worker-connection commit**: `e2b58f2a7a32161655658aa01e061c7acefb0f2c`
+**Verified v2 facade rollback commit**: `3ded92865f2b40778c5f8335a01194e47f59ac4f`
 **Latest branch commit**: this document is kept in the latest closeout commit.
 **Primary plan**: [terminal-persistence-v2-implementation-plan.md](./terminal-persistence-v2-implementation-plan.md)
 **Completion plan to 100%**: [terminal-persistence-v2-completion-plan.md](./terminal-persistence-v2-completion-plan.md)
@@ -32,6 +33,7 @@ The most important verified behavior:
 - v2 facade diagnostic and backend-capability writes now use the single writer's worker-owned SQLite connection. The regression test proves this with a TEMP trigger that can only fire on that exact connection.
 - Native saved-session v2 import, restore drill, restore plan, pane-history hydration and command-history reads now use connection-aware ports through the worker-owned SQLite connection. Worker startup also verifies v2 defaults before accepting jobs.
 - Hot runtime capture facade paths now use worker-owned SQLite connection as well: UI input, terminal output, history gaps, runtime screen snapshots and runtime topology snapshots. The old facade path that serialized jobs while opening hidden fresh v2 connections has been removed.
+- Facade output capture now has a deterministic stream mid-write rollback regression: if the raw segment append fails after the segment insert point, no stream segment, no journal event and no active writer lock are left behind on the worker connection.
 - Command/output history survives daemon restart.
 - Retried command history submissions are deduped by `client_event_id`.
 - Command history is scoped by session.
@@ -59,6 +61,7 @@ Overall local confidence after repeated Windows runs: 🎯 9.3/10, 🛡️ 9/10.
 - Added deterministic save-session v2 failpoint coverage through `saved_session_v2_snapshot_before_import`, including a persistence unit that proves no v2 rows are mutated and a real daemon bootstrap that proves legacy/API saved-session publish does not happen after v2 evidence failure.
 - Added deterministic legacy publish failpoint coverage through `saved_session_legacy_publish_before_commit`, including runtime orchestrator tests and a real daemon bootstrap that proves successful v2 evidence plus failed legacy publish records a durable unpublished-evidence health marker.
 - Added external daemon-process restart coverage in `terminal-daemon`: the integration test uses the real `terminal-daemon` binary, normal transport protocol requests, a real native shell, process kill and same-DB restart.
+- Added facade-level mid-write rollback coverage for stream segment capture through the worker-owned connection.
 - Added history dedupe behavior for retried submits using `client_event_id`.
 - Added session scoping so commands from one session do not leak into another session history.
 - Added explicit saved-session restore compatibility/degraded semantics in API-facing behavior.
@@ -124,7 +127,7 @@ These commands have passed on Windows during the closeout verification cycle.
 cargo test -p terminal-persistence
 ```
 
-Latest result after hot-capture worker-connection facade hardening: `101 passed`.
+Latest result after facade rollback hardening: `102 passed`.
 
 Closeout baseline before worker-connection regressions: `98 passed`.
 
@@ -136,6 +139,7 @@ Verified:
 - Regression for v2 facade worker-owned diagnostic writes: `v2_facade_fault_health_write_uses_worker_connection`.
 - Regression for v2 saved-session import and restore drill through worker-owned connection: `v2_facade_saved_session_import_uses_worker_connection`.
 - Regression for all hot runtime capture facade paths through worker-owned connection: `v2_facade_hot_capture_paths_use_worker_connection`.
+- Regression for mid-write stream segment rollback through the facade worker connection: `v2_facade_stream_failpoint_rolls_back_worker_transaction`.
 
 Targeted worker-connection regression:
 
@@ -149,6 +153,14 @@ Targeted hot-capture worker-connection regression:
 
 ```powershell
 cargo test -p terminal-persistence v2_facade_hot_capture_paths_use_worker_connection -- --nocapture
+```
+
+Result: `1 passed`.
+
+Targeted facade stream rollback regression:
+
+```powershell
+cargo test -p terminal-persistence v2_facade_stream_failpoint_rolls_back_worker_transaction -- --nocapture
 ```
 
 Result: `1 passed`.

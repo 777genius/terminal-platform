@@ -752,7 +752,7 @@ cd apps/terminal-demo; npm run smoke:browser:foreign
 
 ### Closeout implementation summary
 
-Status after commit `e2b58f2a7a32161655658aa01e061c7acefb0f2c`:
+Status after commit `3ded92865f2b40778c5f8335a01194e47f59ac4f`:
 
 - Phase 1: completed for scoped PR guarantees.
   - `loadMorePaneHistory` carries `nextEventSeq`.
@@ -771,6 +771,7 @@ Status after commit `e2b58f2a7a32161655658aa01e061c7acefb0f2c`:
   - v2 facade diagnostic and backend-capability writes use worker-owned connection and are covered by a TEMP-trigger regression.
   - v2 facade pane-history hydration and command-history reads use worker-owned connection-aware read ports.
   - v2 facade hot capture writes use worker-owned connection-aware ports for UI input, raw terminal output, history gaps, runtime screen snapshots and runtime topology snapshots.
+  - v2 facade raw stream capture has deterministic rollback coverage through the worker-owned connection: a mid-write failpoint after segment insert leaves no stream segment, no journal event and no active writer lock.
   - `with_v2_store_serialized` / `execute_v2_serialized` hidden fresh-connection facade path has been removed.
   - Capture failures persist durable health records.
   - Storage pressure, corruption and integrity downgrade paths are covered in persistence tests.
@@ -1175,6 +1176,7 @@ Use this checklist before calling the feature complete.
 - [x] Persistence capture fault degrades session health and is visible to tests.
 - [x] Storage pressure is visible to persistence diagnostics and does not silently delete canonical history.
 - [x] Single-writer executor owns and reuses a worker connection for connection-aware jobs.
+- [x] Facade raw stream capture rolls back cleanly on deterministic mid-write failure and does not leave partial stream/journal rows or active writer locks.
 - [x] zellij capability evidence is durable and includes live-process/scrollback booleans.
 - [x] zellij command history persists through the verified UI/browser paths.
 - [x] zellij rendered output restore is labeled as rendered evidence, not raw replay.
@@ -1217,6 +1219,7 @@ These are no longer blockers for the current PR guarantees, but they are the rig
    - Expected effort: `0` changed lines for the current facade; future work only when new facade operations are added.
 3. Remaining mid-write and restore crash harness.
    - Deterministic non-publish windows are covered before v2 mutation and after v2 evidence.
+   - Deterministic raw stream mid-write rollback is covered at both direct v2 storage level and legacy facade worker-connection level.
    - Actual daemon process kill/restart after durable output capture is covered now.
-   - Remaining hardening is OS process-kill exactly during raw segment write, exactly after v2 evidence but before publish, and during restore hydration.
-   - Expected effort: `1k-2.5k` changed lines.
+   - Remaining hardening is lower-level chaos only: OS process-kill exactly during SQLite fsync/raw segment write, exactly after v2 evidence but before publish, and during restore hydration.
+   - Expected effort: `0` changed lines for current PR guarantees; `1k-2.5k` changed lines if product scope requires OS-level chaos harnesses.
