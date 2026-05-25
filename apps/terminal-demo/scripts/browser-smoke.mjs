@@ -2827,7 +2827,7 @@ async function runSmokeScenario(browserUrl) {
           savedAtMs: savedSession.saved_at_ms != null ? String(savedSession.saved_at_ms) : null,
           restoreGuarantee: savedSession.restore_semantics_v2?.restore_guarantee_level ?? null,
           replayScreenBuffers:
-            savedSession.restore_semantics_v2?.guarantees?.replays_saved_screen_buffers ?? null,
+            savedSession.restore_semantics_v2?.replays_saved_screen_buffers ?? null,
         };
       });
       if (!savedWait.ok || !savedWait.value?.savedSessionId) {
