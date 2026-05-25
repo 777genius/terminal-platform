@@ -286,6 +286,37 @@ Results:
 - `npm run smoke:browser:persistence-long-history`: passed with real Chrome/CDP, browser host, terminal daemon and Windows `cmd.exe`; verified saved-session restore uses `v2_pane_history`, the first restored page is paged, `loadMorePaneHistory` reaches the end marker, and history/boundary DOM lines render.
 - `npm run smoke:browser:foreign`: passed with real Chrome/CDP and zellij `0.44.3`.
 
+### 2026-05-25 additional Windows E2E recheck
+
+This recheck was run after the Windows command-boundary hardening commit `62c3c3977021f6c670a434e567282f20b0f9956f`.
+
+```powershell
+cd apps\terminal-demo
+npm run smoke:browser
+npm run smoke:browser:persistence-long-history
+npm run smoke:browser:persistence-degraded
+npm run smoke:browser:foreign
+```
+
+Results:
+
+- `npm run smoke:browser`: passed with real Chrome/CDP `148.0.7778.179`, browser host, terminal daemon, Windows `cmd.exe`, auto-start, stale auto-start recovery, browser host restart recovery and explicit launch.
+- `npm run smoke:browser:persistence-long-history`: passed with real Chrome/CDP, terminal daemon, Windows `cmd.exe`, saved-session restore through `v2_pane_history`, paged first restore and load-more to the end marker.
+- `npm run smoke:browser:persistence-degraded`: passed with real Chrome/CDP, terminal daemon, Windows `cmd.exe`, forced v2 pane-history failure, snapshot fallback, restore boundary rendering, typed `storage_pressure` diagnostics and post-restore command usability.
+- `npm run smoke:browser:foreign`: passed with real Chrome/CDP and zellij `0.44.3`; tmux was skipped because the Windows tool was unavailable. The scenario covered zellij import, command history before and after browser reload, paste, `new_tab`, control input, `rename_tab`, unsupported split and `close_tab`.
+
+```powershell
+cargo test -p terminal-testing --test bootstrap_smoke saved_sessions::history -- --nocapture
+cargo test -p terminal-testing --test bootstrap_smoke saved_sessions::restore -- --nocapture
+cargo test -p terminal-testing --test bootstrap_smoke daemon_native::pty::bootstrap_smoke_flushes_each_native_input_without_followup_command -- --nocapture
+```
+
+Results:
+
+- `saved_sessions::history`: `3 passed`.
+- `saved_sessions::restore`: `2 passed`.
+- `bootstrap_smoke_flushes_each_native_input_without_followup_command`: `1 passed`.
+
 ### Rust real bootstrap and persistence
 
 ```powershell
