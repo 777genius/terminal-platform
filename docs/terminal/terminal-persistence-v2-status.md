@@ -9,6 +9,7 @@
 **Verified v2 saved restore worker-connection commit**: `d61643770c80d6a1224b2fca63188e6e880a4183`
 **Verified v2 hot capture worker-connection commit**: `e2b58f2a7a32161655658aa01e061c7acefb0f2c`
 **Verified v2 facade rollback commit**: `3ded92865f2b40778c5f8335a01194e47f59ac4f`
+**Verified Windows command-boundary hardening commit**: `62c3c3977021f6c670a434e567282f20b0f9956f`
 **Latest branch commit**: this document is kept in the latest closeout commit.
 **Primary plan**: [terminal-persistence-v2-implementation-plan.md](./terminal-persistence-v2-implementation-plan.md)
 **Completion plan to 100%**: [terminal-persistence-v2-completion-plan.md](./terminal-persistence-v2-completion-plan.md)
@@ -37,6 +38,7 @@ The most important verified behavior:
 - Hot runtime capture facade paths now use worker-owned SQLite connection as well: UI input, terminal output, history gaps, runtime screen snapshots and runtime topology snapshots. The old facade path that serialized jobs while opening hidden fresh v2 connections has been removed.
 - Facade output capture now has a deterministic stream mid-write rollback regression: if the raw segment append fails after the segment insert point, no stream segment, no journal event and no active writer lock are left behind on the worker connection.
 - Command/output history survives daemon restart.
+- Windows command capture now has explicit CRLF/single-line boundary coverage: `cmd.exe` CRLF submits become one verified command, accidental multi-line `SendInput` remains journal-only, and `cmd.exe`/Windows PowerShell/PowerShell 7 metadata is classified explicitly.
 - Retried command history submissions are deduped by `client_event_id`.
 - Command history is scoped by session.
 - Native pane/tab lifecycle works through dispatch.
@@ -73,6 +75,7 @@ Overall local confidence after repeated Windows runs: 🎯 9.3/10, 🛡️ 9/10.
 ### Runtime and Windows reliability
 
 - Fixed input submit timing so command history capture is awaited after UI input instead of only becoming visible after a later command.
+- Hardened Windows command-boundary policy: only single-line UI submits become verified rerunnable command history; multi-line input remains durable journal evidence but is not promoted to command history.
 - Hardened Windows browser bootstrap and smoke coverage.
 - Improved Windows working directory launch behavior for `cmd.exe`.
 - Stabilized Windows process cleanup behavior around browser host and runtime temp artifacts.
@@ -130,7 +133,7 @@ These commands have passed on Windows during the closeout verification cycle.
 cargo test -p terminal-persistence
 ```
 
-Latest result after facade rollback hardening: `102 passed`.
+Latest result after Windows command-boundary hardening: `104 passed`.
 
 Closeout baseline before worker-connection regressions: `98 passed`.
 
@@ -143,6 +146,10 @@ Verified:
 - Regression for v2 saved-session import and restore drill through worker-owned connection: `v2_facade_saved_session_import_uses_worker_connection`.
 - Regression for all hot runtime capture facade paths through worker-owned connection: `v2_facade_hot_capture_paths_use_worker_connection`.
 - Regression for mid-write stream segment rollback through the facade worker connection: `v2_facade_stream_failpoint_rolls_back_worker_transaction`.
+- Windows command-boundary regressions:
+  - `records_windows_crlf_submit_as_single_verified_command`;
+  - `multiline_send_input_is_journal_only_not_verified_command_history`;
+  - extended `windows_shell_metadata_profiles_cmd_and_powershell_inputs` with PowerShell 7 (`pwsh.exe`) and launch cwd metadata.
 
 Targeted worker-connection regression:
 

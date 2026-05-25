@@ -752,7 +752,7 @@ cd apps/terminal-demo; npm run smoke:browser:foreign
 
 ### Closeout implementation summary
 
-Status after commit `a3045eea92376bcb6a6fa0288f0e7701213407ba`:
+Status after commit `62c3c3977021f6c670a434e567282f20b0f9956f`:
 
 - Phase 1: completed for scoped PR guarantees.
   - `loadMorePaneHistory` carries `nextEventSeq`.
@@ -775,6 +775,7 @@ Status after commit `a3045eea92376bcb6a6fa0288f0e7701213407ba`:
   - `with_v2_store_serialized` / `execute_v2_serialized` hidden fresh-connection facade path has been removed.
   - Capture failures persist durable health records.
   - Storage pressure, corruption and integrity downgrade paths are covered in persistence tests.
+  - Windows command-boundary policy is explicit: CRLF single-line submit becomes verified command history, accidental multi-line `SendInput` remains journal-only, and `cmd.exe`/Windows PowerShell/PowerShell 7 metadata is covered.
 - Phase 4: completed for explicit zellij guarantees.
   - zellij rich surface advertises scrollback snapshot support.
   - zellij snapshot capture uses `dump-screen --full`.
@@ -1170,6 +1171,8 @@ Use this checklist before calling the feature complete.
 - [x] Long history can be fully loaded through pages.
 - [x] Scroll-up auto-load works and preserves viewport anchor.
 - [x] Paste is durable journal input but not verified command history.
+- [x] Accidental multi-line Windows `SendInput` is durable journal input but not verified rerunnable command history.
+- [x] Windows CRLF single-command submits are normalized into one verified command history entry.
 - [x] Save session is v2-first and publish-last.
 - [x] Partial save failure does not publish broken saved session.
 - [x] Dedicated Rust persistence unit and real daemon bootstrap cover v2 save failure before legacy/API publish.
