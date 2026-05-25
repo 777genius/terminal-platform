@@ -86,5 +86,9 @@ pub(in crate::v2) fn command_text_from_ui_input(data: &str) -> Option<String> {
         return None;
     }
     let command = trimmed_end.trim();
-    if command.is_empty() { None } else { Some(command.to_string()) }
+    if command.is_empty() || command.contains(['\r', '\n']) {
+        None
+    } else {
+        Some(command.to_string())
+    }
 }

@@ -77,12 +77,104 @@ fn records_paste_as_journal_event_without_verified_command_history() {
 }
 
 #[test]
+fn records_windows_crlf_submit_as_single_verified_command() {
+    let store = test_store("windows-crlf-submit");
+    let session_id = Uuid::new_v4().to_string();
+    let pane_id = Uuid::new_v4().to_string();
+
+    store
+        .record_ui_input_event(UiInputEventInput {
+            session_id: session_id.clone(),
+            route: route(),
+            title: Some("cmd".to_string()),
+            launch: Some(ShellLaunchSpec::new(r"C:\Windows\System32\cmd.exe")),
+            pane_id: pane_id.clone(),
+            data: "echo windows-crlf-ok\r\n".to_string(),
+            is_paste: false,
+            source_event_id: Some("windows-crlf-submit".to_string()),
+            rows: None,
+            cols: None,
+            shell_kind: None,
+        })
+        .expect("windows CRLF submit should persist");
+
+    let history =
+        store.list_command_history(Some(&session_id), 10).expect("command history should load");
+    let mut connection = store.connection().expect("connection should open");
+    let shell_kind = terminal_command_history_entries::table
+        .filter(terminal_command_history_entries::session_id.eq(Some(session_id.clone())))
+        .select(terminal_command_history_entries::shell_kind)
+        .first::<Option<String>>(&mut connection)
+        .expect("command history shell kind should load");
+    let metadata_json = terminal_command_blocks::table
+        .filter(terminal_command_blocks::session_id.eq(&session_id))
+        .filter(terminal_command_blocks::pane_id.eq(&pane_id))
+        .select(terminal_command_blocks::metadata_json)
+        .first::<Option<String>>(&mut connection)
+        .expect("command block metadata should load");
+    let metadata: Value =
+        serde_json::from_str(metadata_json.as_deref().expect("metadata should exist"))
+            .expect("metadata should be json");
+
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].display_text, "echo windows-crlf-ok");
+    assert_eq!(shell_kind.as_deref(), Some("cmd"));
+    assert_eq!(metadata["shell_profile"]["input_terminator"], "cr");
+    assert_eq!(metadata["shell_profile"]["windows_profile"], true);
+}
+
+#[test]
+fn multiline_send_input_is_journal_only_not_verified_command_history() {
+    let store = test_store("windows-multiline-input-not-command");
+    let session_id = Uuid::new_v4().to_string();
+    let pane_id = Uuid::new_v4().to_string();
+
+    store
+        .record_ui_input_event(UiInputEventInput {
+            session_id: session_id.clone(),
+            route: route(),
+            title: Some("cmd".to_string()),
+            launch: Some(ShellLaunchSpec::new(r"C:\Windows\System32\cmd.exe")),
+            pane_id: pane_id.clone(),
+            data: "echo first\r\necho second\r\n".to_string(),
+            is_paste: false,
+            source_event_id: Some("windows-multiline-submit".to_string()),
+            rows: None,
+            cols: None,
+            shell_kind: None,
+        })
+        .expect("multi-line input should persist as journal event");
+
+    let history =
+        store.list_command_history(Some(&session_id), 10).expect("command history should load");
+    let mut connection = store.connection().expect("connection should open");
+    let event_type = terminal_journal_events::table
+        .filter(terminal_journal_events::session_id.eq(&session_id))
+        .filter(terminal_journal_events::pane_id.eq(Some(pane_id.clone())))
+        .select(terminal_journal_events::event_type)
+        .first::<String>(&mut connection)
+        .expect("journal event should load");
+    let command_block_count = terminal_command_blocks::table
+        .filter(terminal_command_blocks::session_id.eq(&session_id))
+        .filter(terminal_command_blocks::pane_id.eq(&pane_id))
+        .count()
+        .get_result::<i64>(&mut connection)
+        .expect("command block count should load");
+
+    assert!(history.is_empty());
+    assert_eq!(event_type, "terminal_input");
+    assert_eq!(command_block_count, 0);
+}
+
+#[test]
 fn windows_shell_metadata_profiles_cmd_and_powershell_inputs() {
     let store = test_store("windows-shell-profiles");
     let cmd_session_id = Uuid::new_v4().to_string();
     let cmd_pane_id = Uuid::new_v4().to_string();
     let powershell_session_id = Uuid::new_v4().to_string();
     let powershell_pane_id = Uuid::new_v4().to_string();
+    let pwsh_session_id = Uuid::new_v4().to_string();
+    let pwsh_pane_id = Uuid::new_v4().to_string();
 
     store
         .record_ui_input_event(UiInputEventInput {
@@ -116,6 +208,24 @@ fn windows_shell_metadata_profiles_cmd_and_powershell_inputs() {
             shell_kind: None,
         })
         .expect("powershell input should persist");
+    store
+        .record_ui_input_event(UiInputEventInput {
+            session_id: pwsh_session_id.clone(),
+            route: route(),
+            title: Some("pwsh".to_string()),
+            launch: Some(
+                ShellLaunchSpec::new(r"C:\Program Files\PowerShell\7\pwsh.exe")
+                    .with_cwd(r"C:\Users\User\PROJECT_IT\terminal-platform"),
+            ),
+            pane_id: pwsh_pane_id,
+            data: "Get-ChildItem\r\n".to_string(),
+            is_paste: false,
+            source_event_id: Some("pwsh-submit".to_string()),
+            rows: None,
+            cols: None,
+            shell_kind: None,
+        })
+        .expect("pwsh input should persist");
 
     let mut connection = store.connection().expect("connection should open");
     let cmd_shell = terminal_command_history_entries::table
@@ -130,6 +240,11 @@ fn windows_shell_metadata_profiles_cmd_and_powershell_inputs() {
         .select(terminal_command_history_entries::shell_kind)
         .first::<Option<String>>(&mut connection)
         .expect("powershell history should load");
+    let pwsh_shell = terminal_command_history_entries::table
+        .filter(terminal_command_history_entries::session_id.eq(Some(pwsh_session_id.clone())))
+        .select(terminal_command_history_entries::shell_kind)
+        .first::<Option<String>>(&mut connection)
+        .expect("pwsh history should load");
     let powershell_metadata = terminal_command_blocks::table
         .filter(terminal_command_blocks::session_id.eq(powershell_session_id))
         .select(terminal_command_blocks::metadata_json)
@@ -139,12 +254,25 @@ fn windows_shell_metadata_profiles_cmd_and_powershell_inputs() {
         powershell_metadata.as_deref().expect("powershell command metadata should exist"),
     )
     .expect("powershell command metadata should be json");
+    let pwsh_metadata = terminal_command_blocks::table
+        .filter(terminal_command_blocks::session_id.eq(pwsh_session_id))
+        .select(terminal_command_blocks::metadata_json)
+        .first::<Option<String>>(&mut connection)
+        .expect("pwsh command block metadata should load");
+    let pwsh_metadata: Value =
+        serde_json::from_str(pwsh_metadata.as_deref().expect("pwsh command metadata should exist"))
+            .expect("pwsh command metadata should be json");
 
     assert_eq!(cmd_shell.as_deref(), Some("cmd"));
     assert_eq!(powershell_shell.as_deref(), Some("powershell"));
+    assert_eq!(pwsh_shell.as_deref(), Some("pwsh"));
     assert_eq!(metadata["shell_profile"]["shell_kind"], "powershell");
     assert_eq!(metadata["shell_profile"]["windows_profile"], true);
     assert_eq!(metadata["shell_profile"]["command_boundary_confidence"], "high");
+    assert_eq!(pwsh_metadata["shell_profile"]["shell_kind"], "pwsh");
+    assert_eq!(pwsh_metadata["shell_profile"]["windows_profile"], true);
+    assert_eq!(pwsh_metadata["shell_profile"]["cwd_source"], "launch_cwd");
+    assert_eq!(pwsh_metadata["shell_profile"]["input_terminator"], "cr");
 }
 
 #[test]
