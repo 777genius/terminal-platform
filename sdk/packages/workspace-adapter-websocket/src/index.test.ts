@@ -143,6 +143,38 @@ describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
   });
 });
 
+describe("workspace websocket adapter failure handling", () => {
+  it("rejects control requests when websocket send throws synchronously", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createOpenThenThrowingSendWebSocket,
+    });
+
+    await expect(transport.listSessions()).rejects.toThrow("simulated websocket send failure");
+    await transport.close();
+  });
+
+  it("settles pending control retry waits when the transport closes", async () => {
+    let attempts = 0;
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: () => {
+        attempts += 1;
+        return createFailingWebSocket();
+      },
+    });
+    const pending = transport.listSessions();
+
+    await sleep(20);
+    expect(attempts).toBeGreaterThan(0);
+    await transport.close();
+
+    await expect(withTimeout(pending, 500)).rejects.toThrow("Failed to connect to workspace control plane");
+  });
+});
+
 async function startWorkspaceGateway(transport: WorkspaceTransportClient): Promise<{
   controlUrl: string;
   streamUrl: string;
@@ -460,4 +492,59 @@ function createFailingWebSocket(): globalThis.WebSocket {
   });
 
   return socket;
+}
+
+function createOpenThenThrowingSendWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 0,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    send() {
+      throw new Error("simulated websocket send failure");
+    },
+    close() {
+      socket.readyState = 3;
+      emit("close");
+    },
+  } as unknown as globalThis.WebSocket & { readyState: number };
+
+  const emit = (type: string) => {
+    for (const listener of listeners.get(type) ?? []) {
+      listener.call(socket, { type } as Event);
+    }
+  };
+
+  queueMicrotask(() => {
+    socket.readyState = 1;
+    emit("open");
+  });
+
+  return socket;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

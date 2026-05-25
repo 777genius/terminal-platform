@@ -134,12 +134,19 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
     }
 
     if (this.#socket?.readyState === WebSocket.OPEN) {
-      this.send(this.#socket, {
-        type: "stream_unsubscribe_session_state",
-        subscriptionId,
-        sessionId: record.sessionId,
-      });
-      await record.closed.promise;
+      try {
+        this.send(this.#socket, {
+          type: "stream_unsubscribe_session_state",
+          subscriptionId,
+          sessionId: record.sessionId,
+        });
+        await record.closed.promise;
+      } catch (error) {
+        this.finalizeSubscription(record, {
+          notifyClosed: false,
+          rejectPendingWith: toError(error),
+        });
+      }
       return;
     }
 

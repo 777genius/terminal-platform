@@ -79,6 +79,11 @@ interface SubscriptionRecord {
   closed: Deferred<void>;
 }
 
+interface RetryWaiter {
+  timer: ReturnType<typeof setTimeout>;
+  resolve(): void;
+}
+
 export function createWorkspaceWebSocketTransport(
   options: CreateWorkspaceWebSocketTransportOptions,
 ): WorkspaceTransportClient {
@@ -110,7 +115,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
   #streamSocket: WebSocket | null = null;
   #streamConnectPromise: Promise<WebSocket> | null = null;
   #streamReconnectLoopPromise: Promise<void> | null = null;
-  #streamReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly #retryWaiters = new Set<RetryWaiter>();
   readonly #pendingControlRequests = new Map<
     string,
     PendingControlRequest<keyof WorkspaceGatewayControlRequestMap>
@@ -268,7 +273,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     }
 
     this.#closed = true;
-    this.clearStreamReconnectTimer();
+    this.clearRetryWaiters();
     this.#streamReconnectLoopPromise = null;
     this.rejectAllControlRequests(new Error("workspace websocket transport closed"));
 
@@ -313,7 +318,12 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         payload,
       } as WorkspaceGatewayControlClientMessage;
 
-      socket.send(encodeWorkspaceWebSocketPayload(envelope));
+      try {
+        socket.send(encodeWorkspaceWebSocketPayload(envelope));
+      } catch (error) {
+        this.#pendingControlRequests.delete(requestId);
+        reject(toError(error));
+      }
     });
   }
 
@@ -571,11 +581,17 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
 
     const socket = this.#streamSocket;
     if (socket?.readyState === WEB_SOCKET_OPEN) {
-      this.sendStream(socket, {
-        type: "workspace_unsubscribe",
-        subscriptionId,
-      });
-      await record.closed.promise;
+      try {
+        this.sendStream(socket, {
+          type: "workspace_unsubscribe",
+          subscriptionId,
+        });
+        await record.closed.promise;
+      } catch {
+        this.finalizeSubscription(record, {
+          notifyWaitersWithNull: true,
+        });
+      }
       return;
     }
 
@@ -621,19 +637,23 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     const backoffMs = RECONNECT_BACKOFF_MS[Math.min(attempt - 1, RECONNECT_BACKOFF_MS.length - 1)];
 
     await new Promise<void>((resolve) => {
-      this.clearStreamReconnectTimer();
-      this.#streamReconnectTimer = setTimeout(() => {
-        this.#streamReconnectTimer = null;
-        resolve();
-      }, backoffMs);
+      const waiter: RetryWaiter = {
+        timer: setTimeout(() => {
+          this.#retryWaiters.delete(waiter);
+          resolve();
+        }, backoffMs),
+        resolve,
+      };
+      this.#retryWaiters.add(waiter);
     });
   }
 
-  private clearStreamReconnectTimer(): void {
-    if (this.#streamReconnectTimer) {
-      clearTimeout(this.#streamReconnectTimer);
-      this.#streamReconnectTimer = null;
+  private clearRetryWaiters(): void {
+    for (const waiter of this.#retryWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve();
     }
+    this.#retryWaiters.clear();
   }
 
   private sendStream(socket: WebSocket, message: WorkspaceGatewayStreamClientMessage): void {
