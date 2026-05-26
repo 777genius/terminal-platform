@@ -36,6 +36,7 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
   readonly #url: string;
   #socket: WebSocket | null = null;
   #connectPromise: Promise<WebSocket> | null = null;
+  #rejectConnect: ((error: Error) => void) | null = null;
   #disposed = false;
   #reconnectLoopPromise: Promise<void> | null = null;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -109,6 +110,8 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
     this.#disposed = true;
     this.clearReconnectTimer();
     this.#reconnectLoopPromise = null;
+    this.#rejectConnect?.(new Error("Terminal session stream is disposed"));
+    this.#rejectConnect = null;
 
     if (
       this.#socket
@@ -193,6 +196,7 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
     this.#connectPromise ??= new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(this.#url);
       this.#socket = socket;
+      this.#rejectConnect = reject;
       const cleanup = () => {
         socket.removeEventListener("open", onOpen);
         socket.removeEventListener("error", onError);
@@ -202,6 +206,7 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
         if (this.#disposed) {
           this.#socket = null;
           this.#connectPromise = null;
+          this.#rejectConnect = null;
           closeWebSocketBestEffort(socket);
           reject(new Error("Terminal session stream is disposed"));
           return;
@@ -209,6 +214,7 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
 
         this.#socket = socket;
         this.#connectPromise = null;
+        this.#rejectConnect = null;
         resolve(socket);
       };
       const onError = () => {
@@ -217,6 +223,7 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
         if (isCurrentSocket) {
           this.#socket = null;
           this.#connectPromise = null;
+          this.#rejectConnect = null;
         }
         reject(new Error("Failed to connect to terminal session stream"));
       };
@@ -227,8 +234,12 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
         this.handleMessage(event.data.toString());
       });
       socket.addEventListener("close", () => {
+        const isCurrentSocket = this.#socket === socket;
         cleanup();
         this.handleSocketClosed(socket);
+        if (isCurrentSocket) {
+          this.#rejectConnect = null;
+        }
         reject(new Error(this.#disposed
           ? "Terminal session stream is disposed"
           : "Terminal session stream connection closed"));

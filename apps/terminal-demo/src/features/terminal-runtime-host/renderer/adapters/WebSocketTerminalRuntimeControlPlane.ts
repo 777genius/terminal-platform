@@ -31,6 +31,7 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
   readonly #url: string;
   #socket: WebSocket | null = null;
   #connectPromise: Promise<WebSocket> | null = null;
+  #rejectConnect: ((error: Error) => void) | null = null;
   #disposed = false;
   #connectRetryTimer: ReturnType<typeof setTimeout> | null = null;
   #resolveConnectRetry: (() => void) | null = null;
@@ -87,6 +88,8 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
     this.#disposed = true;
     this.clearConnectRetryTimer();
     this.rejectAll(new Error("Terminal control plane disposed"));
+    this.#rejectConnect?.(new Error("Terminal control plane disposed"));
+    this.#rejectConnect = null;
     if (
       this.#socket
       && (this.#socket.readyState === WebSocket.CONNECTING || this.#socket.readyState === WebSocket.OPEN)
@@ -164,6 +167,7 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
     this.#connectPromise ??= new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(this.#url);
       this.#socket = socket;
+      this.#rejectConnect = reject;
       const cleanup = () => {
         socket.removeEventListener("open", onOpen);
         socket.removeEventListener("error", onError);
@@ -173,6 +177,7 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
         if (this.#disposed) {
           this.#socket = null;
           this.#connectPromise = null;
+          this.#rejectConnect = null;
           closeWebSocketBestEffort(socket);
           reject(new Error("Terminal control plane disposed"));
           return;
@@ -180,6 +185,7 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
 
         this.#socket = socket;
         this.#connectPromise = null;
+        this.#rejectConnect = null;
         resolve(socket);
       };
       const onError = () => {
@@ -188,6 +194,7 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
         if (isCurrentSocket) {
           this.#socket = null;
           this.#connectPromise = null;
+          this.#rejectConnect = null;
         }
         reject(new Error("Failed to connect to terminal control plane"));
       };
@@ -203,6 +210,7 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
         if (isCurrentSocket) {
           this.#socket = null;
           this.#connectPromise = null;
+          this.#rejectConnect = null;
         }
         reject(new Error(this.#disposed
           ? "Terminal control plane disposed"

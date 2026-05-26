@@ -216,6 +216,29 @@ test("session stream dispose rejects an in-flight websocket connection", async (
   }
 });
 
+test("session stream dispose rejects an in-flight websocket connection when close event is lost", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = createConnectingNeverClosingSessionStreamWebSocket();
+  const adapter = new WebSocketTerminalRuntimeSessionStateStream("ws://127.0.0.1/terminal-gateway/stream");
+  const subscription = adapter.subscribeSessionState("session-1", {
+    onState: () => {},
+  });
+  const rejected = assert.rejects(subscription, /Terminal session stream is disposed/);
+
+  try {
+    await delay(0);
+    adapter.dispose();
+    await Promise.race([
+      rejected,
+      delay(500).then(() => {
+        throw new Error("session stream connect promise did not reject after lost close event");
+      }),
+    ]);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
 test("session stream subscription dispose settles when unsubscribe send fails", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = createThrowingUnsubscribeWebSocket();
@@ -346,6 +369,33 @@ function createConnectingCloseableSessionStreamWebSocket() {
       for (const listener of this.#listeners.get(type) ?? []) {
         listener.call(this, event);
       }
+    }
+  };
+}
+
+function createConnectingNeverClosingSessionStreamWebSocket() {
+  return class ConnectingNeverClosingSessionStreamWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    readyState = ConnectingNeverClosingSessionStreamWebSocket.CONNECTING;
+    #listeners = new Map();
+
+    addEventListener(type, listener) {
+      const bucket = this.#listeners.get(type) ?? new Set();
+      bucket.add(listener);
+      this.#listeners.set(type, bucket);
+    }
+
+    removeEventListener(type, listener) {
+      this.#listeners.get(type)?.delete(listener);
+    }
+
+    send() {}
+
+    close() {
+      this.readyState = ConnectingNeverClosingSessionStreamWebSocket.CLOSING;
     }
   };
 }

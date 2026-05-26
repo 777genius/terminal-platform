@@ -202,6 +202,36 @@ describe("workspace websocket adapter failure handling", () => {
     await withTimeout(rejected, 500);
   });
 
+  it("rejects in-flight control connection attempts when websocket close event is lost", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createConnectingNeverClosingWebSocket,
+    });
+    const pending = transport.listSessions();
+    const rejected = expect(pending).rejects.toThrow("workspace websocket transport closed");
+
+    await sleep(0);
+    await transport.close();
+    await withTimeout(rejected, 500);
+  });
+
+  it("rejects in-flight stream connection attempts when websocket close event is lost", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createConnectingNeverClosingWebSocket,
+    });
+    const pending = transport.openSubscription("session-1", {
+      kind: "session_topology",
+    });
+    const rejected = expect(pending).rejects.toThrow("workspace websocket transport closed");
+
+    await sleep(0);
+    await transport.close();
+    await withTimeout(rejected, 500);
+  });
+
   it("settles subscription close when the unsubscribe acknowledgement is lost", async () => {
     const transport = createWorkspaceWebSocketTransport({
       controlUrl: "ws://127.0.0.1/terminal-gateway/control",
@@ -631,6 +661,27 @@ function createConnectingCloseableWebSocket(): globalThis.WebSocket {
       listener.call(socket, { type } as Event);
     }
   };
+
+  return socket;
+}
+
+function createConnectingNeverClosingWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 0,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    send() {},
+    close() {
+      socket.readyState = 2;
+    },
+  } as unknown as globalThis.WebSocket & { readyState: number };
 
   return socket;
 }

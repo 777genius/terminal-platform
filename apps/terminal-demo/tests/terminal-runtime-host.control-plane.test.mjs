@@ -91,6 +91,27 @@ test("control plane dispose rejects an in-flight websocket connection", async ()
   }
 });
 
+test("control plane dispose rejects an in-flight websocket connection when close event is lost", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = createConnectingNeverClosingWebSocket();
+  const adapter = new WebSocketTerminalRuntimeControlPlane("ws://127.0.0.1/terminal-gateway/control");
+  const request = adapter.handshakeInfo();
+  const rejected = assert.rejects(request, /Terminal control plane disposed/);
+
+  try {
+    await delay(0);
+    adapter.dispose();
+    await Promise.race([
+      rejected,
+      delay(500).then(() => {
+        throw new Error("control plane connect promise did not reject after lost close event");
+      }),
+    ]);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
 test("control plane dispose ignores websocket close failures", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = createOpenThrowingCloseWebSocket();
@@ -186,6 +207,33 @@ function createConnectingCloseableWebSocket() {
       for (const listener of this.#listeners.get(type) ?? []) {
         listener.call(this, event);
       }
+    }
+  };
+}
+
+function createConnectingNeverClosingWebSocket() {
+  return class ConnectingNeverClosingWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    readyState = ConnectingNeverClosingWebSocket.CONNECTING;
+    #listeners = new Map();
+
+    addEventListener(type, listener) {
+      const bucket = this.#listeners.get(type) ?? new Set();
+      bucket.add(listener);
+      this.#listeners.set(type, bucket);
+    }
+
+    removeEventListener(type, listener) {
+      this.#listeners.get(type)?.delete(listener);
+    }
+
+    send() {}
+
+    close() {
+      this.readyState = ConnectingNeverClosingWebSocket.CLOSING;
     }
   };
 }
