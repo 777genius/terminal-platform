@@ -187,6 +187,20 @@ describe("workspace websocket adapter failure handling", () => {
     await expect(withTimeout(transport.close(), 750)).resolves.toBeUndefined();
     await expect(pending).rejects.toThrow("workspace websocket transport closed");
   });
+
+  it("rejects in-flight connection attempts when the transport closes", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createConnectingCloseableWebSocket,
+    });
+    const pending = transport.listSessions();
+    const rejected = expect(pending).rejects.toThrow("workspace websocket transport closed");
+
+    await sleep(0);
+    await transport.close();
+    await withTimeout(rejected, 500);
+  });
 });
 
 async function startWorkspaceGateway(transport: WorkspaceTransportClient): Promise<{
@@ -571,6 +585,34 @@ function createOpenNeverClosingWebSocket(): globalThis.WebSocket {
     socket.readyState = 1;
     emit("open");
   });
+
+  return socket;
+}
+
+function createConnectingCloseableWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 0,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    send() {},
+    close() {
+      socket.readyState = 3;
+      emit("close");
+    },
+  } as unknown as globalThis.WebSocket & { readyState: number };
+
+  const emit = (type: string) => {
+    for (const listener of listeners.get(type) ?? []) {
+      listener.call(socket, { type } as Event);
+    }
+  };
 
   return socket;
 }

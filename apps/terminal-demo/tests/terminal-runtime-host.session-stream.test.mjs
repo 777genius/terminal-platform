@@ -193,6 +193,29 @@ test("session stream dispose releases pending startup retry waits", loopbackTest
   );
 });
 
+test("session stream dispose rejects an in-flight websocket connection", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = createConnectingCloseableSessionStreamWebSocket();
+  const adapter = new WebSocketTerminalRuntimeSessionStateStream("ws://127.0.0.1/terminal-gateway/stream");
+  const subscription = adapter.subscribeSessionState("session-1", {
+    onState: () => {},
+  });
+  const rejected = assert.rejects(subscription, /Terminal session stream is disposed/);
+
+  try {
+    await delay(0);
+    adapter.dispose();
+    await Promise.race([
+      rejected,
+      delay(500).then(() => {
+        throw new Error("session stream connect promise did not reject after dispose");
+      }),
+    ]);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
 test("session stream subscription dispose settles when unsubscribe send fails", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = createThrowingUnsubscribeWebSocket();
@@ -269,6 +292,40 @@ async function probeLoopbackTcp() {
     server.once("listening", onListening);
     server.listen(0, "127.0.0.1");
   });
+}
+
+function createConnectingCloseableSessionStreamWebSocket() {
+  return class ConnectingCloseableSessionStreamWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    readyState = ConnectingCloseableSessionStreamWebSocket.CONNECTING;
+    #listeners = new Map();
+
+    addEventListener(type, listener) {
+      const bucket = this.#listeners.get(type) ?? new Set();
+      bucket.add(listener);
+      this.#listeners.set(type, bucket);
+    }
+
+    removeEventListener(type, listener) {
+      this.#listeners.get(type)?.delete(listener);
+    }
+
+    send() {}
+
+    close() {
+      this.readyState = ConnectingCloseableSessionStreamWebSocket.CLOSED;
+      this.#emit("close", { type: "close" });
+    }
+
+    #emit(type, event) {
+      for (const listener of this.#listeners.get(type) ?? []) {
+        listener.call(this, event);
+      }
+    }
+  };
 }
 
 function createOpenThrowingCloseSessionStreamWebSocket() {

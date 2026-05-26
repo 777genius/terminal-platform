@@ -183,11 +183,12 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
         resolve(socket);
       };
       const onError = () => {
+        const isCurrentSocket = this.#socket === socket;
         cleanup();
-        if (this.#socket === socket) {
+        if (isCurrentSocket) {
           this.#socket = null;
+          this.#connectPromise = null;
         }
-        this.#connectPromise = null;
         reject(new Error("Failed to connect to terminal control plane"));
       };
 
@@ -197,9 +198,15 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
         this.handleMessage(event.data.toString());
       });
       socket.addEventListener("close", () => {
-        if (this.#socket === socket) {
+        const isCurrentSocket = this.#socket === socket;
+        cleanup();
+        if (isCurrentSocket) {
           this.#socket = null;
+          this.#connectPromise = null;
         }
+        reject(new Error(this.#disposed
+          ? "Terminal control plane disposed"
+          : "Terminal control plane connection closed"));
         this.rejectAll(new Error("Terminal control plane connection closed"));
       });
     });

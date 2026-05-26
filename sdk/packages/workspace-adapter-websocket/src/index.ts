@@ -355,6 +355,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
 
     this.#controlConnectPromise ??= new Promise<WebSocket>((resolve, reject) => {
       const socket = this.#webSocketFactory(this.#controlUrl, this.#protocols);
+      this.#controlSocket = socket;
       const cleanup = () => {
         socket.removeEventListener("open", onOpen);
         socket.removeEventListener("error", onError);
@@ -366,8 +367,12 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         resolve(socket);
       };
       const onError = () => {
+        const isCurrentSocket = this.#controlSocket === socket;
         cleanup();
-        this.#controlConnectPromise = null;
+        if (isCurrentSocket) {
+          this.#controlSocket = null;
+          this.#controlConnectPromise = null;
+        }
         reject(new Error("Failed to connect to workspace control plane"));
       };
 
@@ -377,9 +382,15 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         this.handleControlMessage(event.data.toString());
       });
       socket.addEventListener("close", () => {
-        if (this.#controlSocket === socket) {
+        const isCurrentSocket = this.#controlSocket === socket;
+        cleanup();
+        if (isCurrentSocket) {
           this.#controlSocket = null;
+          this.#controlConnectPromise = null;
         }
+        reject(new Error(this.#closed
+          ? "workspace websocket transport closed"
+          : "Workspace control plane connection closed"));
         this.rejectAllControlRequests(new Error("Workspace control plane connection closed"));
       });
     });
@@ -441,6 +452,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
 
     this.#streamConnectPromise ??= new Promise<WebSocket>((resolve, reject) => {
       const socket = this.#webSocketFactory(this.#streamUrl, this.#protocols);
+      this.#streamSocket = socket;
       const cleanup = () => {
         socket.removeEventListener("open", onOpen);
         socket.removeEventListener("error", onError);
@@ -452,8 +464,12 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         resolve(socket);
       };
       const onError = () => {
+        const isCurrentSocket = this.#streamSocket === socket;
         cleanup();
-        this.#streamConnectPromise = null;
+        if (isCurrentSocket) {
+          this.#streamSocket = null;
+          this.#streamConnectPromise = null;
+        }
         reject(new Error("Failed to connect to workspace stream plane"));
       };
 
@@ -463,7 +479,11 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         this.handleStreamMessage(event.data.toString());
       });
       socket.addEventListener("close", () => {
+        cleanup();
         this.handleStreamSocketClosed(socket);
+        reject(new Error(this.#closed
+          ? "workspace websocket transport closed"
+          : "Workspace stream plane connection closed"));
       });
     });
 

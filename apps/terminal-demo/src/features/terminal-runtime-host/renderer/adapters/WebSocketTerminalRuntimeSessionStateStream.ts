@@ -207,11 +207,12 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
         resolve(socket);
       };
       const onError = () => {
+        const isCurrentSocket = this.#socket === socket;
         cleanup();
-        if (this.#socket === socket) {
+        if (isCurrentSocket) {
           this.#socket = null;
+          this.#connectPromise = null;
         }
-        this.#connectPromise = null;
         reject(new Error("Failed to connect to terminal session stream"));
       };
 
@@ -221,7 +222,11 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
         this.handleMessage(event.data.toString());
       });
       socket.addEventListener("close", () => {
+        cleanup();
         this.handleSocketClosed(socket);
+        reject(new Error(this.#disposed
+          ? "Terminal session stream is disposed"
+          : "Terminal session stream connection closed"));
       });
     });
 
