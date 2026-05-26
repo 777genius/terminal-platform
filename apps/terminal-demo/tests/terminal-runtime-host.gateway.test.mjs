@@ -660,6 +660,55 @@ test("gateway bridges workspace subscriptions over the stream plane for SDK clie
   }
 });
 
+test("gateway closes stream transport instead of throwing when server send fails", loopbackTestOptions, async () => {
+  const originalSend = WebSocket.prototype.send;
+  WebSocket.prototype.send = function patchedSend(data, ...args) {
+    if (String(data).includes("\"type\":\"workspace_subscription_ack\"")) {
+      throw new Error("Simulated server-side websocket send failure");
+    }
+
+    return originalSend.call(this, data, ...args);
+  };
+
+  const subscription = createDeferredWorkspaceSubscription("native-sub-1", null);
+  const sdkClient = {
+    ...createSdkClient(),
+    openSubscription: async () => subscription,
+  };
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(createRuntime()),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(createRuntime()),
+    clientProvider: {
+      getClient: async () => sdkClient,
+    },
+  });
+
+  const streamClient = createStreamClient(gateway.sessionStreamUrl);
+  try {
+    await streamClient.connect();
+
+    const closed = once(streamClient.socket, "close");
+    streamClient.send({
+      type: "workspace_subscribe",
+      subscriptionId: "workspace-sub-1",
+      sessionId: "session-1",
+      spec: {
+        kind: "pane_surface",
+        pane_id: "pane-1",
+      },
+    });
+
+    await closed;
+    await waitForCondition(() => subscription.closeCalls === 1);
+    assert.equal(subscription.closeCalls, 1);
+  } finally {
+    WebSocket.prototype.send = originalSend;
+    await closeSocketIfOpen(streamClient.socket);
+    await gateway.dispose();
+  }
+});
+
 function createSdkClient() {
   return {
     handshakeInfo: async () => ({
@@ -748,6 +797,35 @@ function createDeferredWorkspaceSubscription(subscriptionId, event) {
       releaseCloseWait();
     },
   };
+}
+
+async function waitForCondition(predicate, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error("Timed out waiting for condition");
+}
+
+async function closeSocketIfOpen(socket) {
+  if (socket.readyState === WebSocket.CLOSED) {
+    return;
+  }
+
+  const closed = once(socket, "close").catch(() => undefined);
+  if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+    socket.close();
+  }
+
+  await Promise.race([
+    closed,
+    new Promise((resolve) => setTimeout(resolve, 500)),
+  ]);
 }
 
 async function probeLoopbackTcp() {

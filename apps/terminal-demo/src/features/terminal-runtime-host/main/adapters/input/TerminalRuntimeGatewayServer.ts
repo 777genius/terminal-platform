@@ -485,7 +485,7 @@ export class TerminalRuntimeGatewayServer {
     sessionId: string,
   ): Promise<void> {
     if (connection.subscriptions.has(subscriptionId)) {
-      this.sendStream(connection.socket, {
+      this.sendStream(connection, {
         type: "stream_subscription_rejected",
         subscriptionId,
         sessionId,
@@ -507,7 +507,7 @@ export class TerminalRuntimeGatewayServer {
     try {
       const handle = await this.#sessionStreamService.watchSessionState(sessionId, {
         onState: (state) => {
-          this.sendStream(connection.socket, {
+          this.sendStream(connection, {
             type: "session_state",
             subscriptionId,
             sessionId,
@@ -515,7 +515,7 @@ export class TerminalRuntimeGatewayServer {
           });
         },
         onError: (error) => {
-          this.sendStream(connection.socket, {
+          this.sendStream(connection, {
             type: "subscription_error",
             subscriptionId,
             sessionId,
@@ -524,7 +524,7 @@ export class TerminalRuntimeGatewayServer {
         },
         onClosed: () => {
           connection.subscriptions.delete(subscriptionId);
-          this.sendStream(connection.socket, {
+          this.sendStream(connection, {
             type: "subscription_closed",
             subscriptionId,
             sessionId,
@@ -538,14 +538,16 @@ export class TerminalRuntimeGatewayServer {
       }
 
       record.handle = handle;
-      this.sendStream(connection.socket, {
+      if (!this.sendStream(connection, {
         type: "stream_subscription_ack",
         subscriptionId,
         sessionId,
-      });
+      })) {
+        return;
+      }
     } catch (error) {
       connection.subscriptions.delete(subscriptionId);
-      this.sendStream(connection.socket, {
+      this.sendStream(connection, {
         type: "stream_subscription_rejected",
         subscriptionId,
         sessionId,
@@ -562,7 +564,7 @@ export class TerminalRuntimeGatewayServer {
     const record = connection.subscriptions.get(subscriptionId);
     if (!record || record.kind !== "legacy_session_state" || !record.handle) {
       connection.subscriptions.delete(subscriptionId);
-      this.sendStream(connection.socket, {
+      this.sendStream(connection, {
         type: "subscription_closed",
         subscriptionId,
         sessionId,
@@ -578,7 +580,7 @@ export class TerminalRuntimeGatewayServer {
     message: Extract<WorkspaceGatewayStreamClientMessage, { type: "workspace_subscribe" }>,
   ): Promise<void> {
     if (connection.subscriptions.has(message.subscriptionId)) {
-      this.sendWorkspaceStream(connection.socket, {
+      this.sendWorkspaceStream(connection, {
         type: "workspace_subscription_rejected",
         subscriptionId: message.subscriptionId,
         error: {
@@ -606,17 +608,19 @@ export class TerminalRuntimeGatewayServer {
       }
 
       record.subscription = subscription;
-      this.sendWorkspaceStream(connection.socket, {
+      if (!this.sendWorkspaceStream(connection, {
         type: "workspace_subscription_ack",
         subscriptionId: message.subscriptionId,
         meta: {
           subscription_id: subscription.subscriptionId,
         },
-      });
+      })) {
+        return;
+      }
       record.pump = this.pumpWorkspaceSubscription(connection, message.subscriptionId, record);
     } catch (error) {
       connection.subscriptions.delete(message.subscriptionId);
-      this.sendWorkspaceStream(connection.socket, {
+      this.sendWorkspaceStream(connection, {
         type: "workspace_subscription_rejected",
         subscriptionId: message.subscriptionId,
         error: serializeError(error),
@@ -631,7 +635,7 @@ export class TerminalRuntimeGatewayServer {
     const record = connection.subscriptions.get(subscriptionId);
     if (!record || record.kind !== "workspace") {
       connection.subscriptions.delete(subscriptionId);
-      this.sendWorkspaceStream(connection.socket, {
+      this.sendWorkspaceStream(connection, {
         type: "workspace_subscription_closed",
         subscriptionId,
       });
@@ -640,7 +644,7 @@ export class TerminalRuntimeGatewayServer {
 
     connection.subscriptions.delete(subscriptionId);
     await record.subscription?.close();
-    this.sendWorkspaceStream(connection.socket, {
+    this.sendWorkspaceStream(connection, {
       type: "workspace_subscription_closed",
       subscriptionId,
     });
@@ -662,7 +666,7 @@ export class TerminalRuntimeGatewayServer {
           break;
         }
 
-        this.sendWorkspaceStream(connection.socket, {
+        this.sendWorkspaceStream(connection, {
           type: "workspace_subscription_event",
           subscriptionId,
           event,
@@ -670,7 +674,7 @@ export class TerminalRuntimeGatewayServer {
       }
     } catch (error) {
       if (connection.subscriptions.get(subscriptionId) === record) {
-        this.sendWorkspaceStream(connection.socket, {
+        this.sendWorkspaceStream(connection, {
           type: "workspace_subscription_error",
           subscriptionId,
           error: serializeError(error),
@@ -679,7 +683,7 @@ export class TerminalRuntimeGatewayServer {
     } finally {
       if (connection.subscriptions.get(subscriptionId) === record) {
         connection.subscriptions.delete(subscriptionId);
-        this.sendWorkspaceStream(connection.socket, {
+        this.sendWorkspaceStream(connection, {
           type: "workspace_subscription_closed",
           subscriptionId,
         });
@@ -734,22 +738,35 @@ export class TerminalRuntimeGatewayServer {
     await Promise.allSettled(stops);
   }
 
-  private sendControl(socket: WebSocket, message: GatewayControlResponseMessage): void {
-    this.send(socket, message);
+  private sendControl(socket: WebSocket, message: GatewayControlResponseMessage): boolean {
+    return this.send(socket, message);
   }
 
   private sendStream(
-    socket: WebSocket,
+    connection: StreamConnectionRecord,
     message: TerminalGatewayStreamServerMessage,
-  ): void {
-    this.send(socket, message);
+  ): boolean {
+    return this.sendStreamConnection(connection, message);
   }
 
   private sendWorkspaceStream(
-    socket: WebSocket,
+    connection: StreamConnectionRecord,
     message: WorkspaceGatewayStreamServerMessage,
-  ): void {
-    this.send(socket, message);
+  ): boolean {
+    return this.sendStreamConnection(connection, message);
+  }
+
+  private sendStreamConnection(
+    connection: StreamConnectionRecord,
+    message: TerminalGatewayStreamServerMessage | WorkspaceGatewayStreamServerMessage,
+  ): boolean {
+    const sent = this.send(connection.socket, message);
+    if (!sent) {
+      this.#streamConnections.delete(connection);
+      void this.disposeStreamConnection(connection);
+    }
+
+    return sent;
   }
 
   private send(
@@ -757,12 +774,18 @@ export class TerminalRuntimeGatewayServer {
     message: GatewayControlResponseMessage
       | TerminalGatewayStreamServerMessage
       | WorkspaceGatewayStreamServerMessage,
-  ): void {
+  ): boolean {
     if (socket.readyState !== WebSocket.OPEN) {
-      return;
+      return false;
     }
 
-    socket.send(encodeGatewayPayload(message));
+    try {
+      socket.send(encodeGatewayPayload(message));
+      return true;
+    } catch {
+      closeFailedGatewaySocket(socket);
+      return false;
+    }
   }
 
   private sendSuccessResponse(
@@ -778,6 +801,18 @@ export class TerminalRuntimeGatewayServer {
       ok: true,
       result,
     });
+  }
+}
+
+function closeFailedGatewaySocket(socket: WebSocket): void {
+  try {
+    socket.close(1011, "Gateway send failed");
+  } catch {
+    try {
+      socket.terminate();
+    } catch {
+      // The socket is already unusable. There is no reliable recovery path here.
+    }
   }
 }
 
