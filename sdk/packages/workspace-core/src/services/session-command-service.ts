@@ -142,14 +142,14 @@ export class SessionCommandService {
             ...snapshot.catalog,
             sessions: mergeSession(snapshot.catalog.sessions, restored.session),
           },
-          attachedSession: attachedSession ?? snapshot.attachedSession,
+          attachedSession,
           historicalPanes: {
             ...(snapshot.historicalPanes ?? {}),
             ...historicalPanes,
           },
           selection: {
             activeSessionId: restored.session.session_id,
-            activePaneId: attachedSession?.focused_screen?.pane_id ?? snapshot.selection.activePaneId,
+            activePaneId: attachedSession?.focused_screen?.pane_id ?? null,
           },
         }));
 

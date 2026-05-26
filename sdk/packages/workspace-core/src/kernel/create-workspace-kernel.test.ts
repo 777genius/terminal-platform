@@ -734,9 +734,22 @@ describe("createWorkspaceKernel saved session maintenance", () => {
   it("keeps restore successful when immediate attach for history fails", async () => {
     const savedRecord = createSavedSessionRecord("saved-attach-fails", "saved-pane-1", "historical output");
     const restoredSessionId = "restored-attach-fails";
+    const previousSessionId = "previous-live-session";
+    const previousPaneId = "previous-live-pane";
+    const previousTopology = createLiveTopology(previousSessionId, previousPaneId);
+    const previousAttachedSession = createAttachedSession(
+      previousSessionId,
+      previousPaneId,
+      previousTopology,
+      "previous live output",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription("previous-live-subscription");
     const kernel = createWorkspaceKernel({
       transport: {
         ...createUnusedTransport(),
+        attachCalls: 0,
+        openSubscription: async () => subscription,
         listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
         getSavedSession: async () => savedRecord,
         restoreSavedSession: async () => ({
@@ -750,17 +763,26 @@ describe("createWorkspaceKernel saved session maintenance", () => {
           },
           restore_semantics: savedRecord.restore_semantics,
         }),
-        attachSession: async () => {
+        attachSession: async function (this: { attachCalls: number }) {
+          this.attachCalls += 1;
+          if (this.attachCalls === 1) {
+            return previousAttachedSession;
+          }
           throw new Error("attach unavailable");
         },
       } as WorkspaceTransportClient,
       now: () => 6_000,
     });
 
+    await kernel.commands.attachSession(previousSessionId);
     await kernel.commands.refreshSavedSessions();
     await kernel.commands.restoreSavedSession(savedRecord.session_id);
 
-    expect(kernel.getSnapshot().selection.activeSessionId).toBe(restoredSessionId);
+    expect(kernel.getSnapshot().selection).toEqual({
+      activeSessionId: restoredSessionId,
+      activePaneId: null,
+    });
+    expect(kernel.getSnapshot().attachedSession).toBeNull();
     expect(kernel.getSnapshot().catalog.sessions.map((session) => session.session_id)).toContain(restoredSessionId);
     expect(kernel.diagnostics.list()).toEqual([
       {

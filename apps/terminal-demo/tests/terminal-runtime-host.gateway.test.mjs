@@ -660,6 +660,52 @@ test("gateway bridges workspace subscriptions over the stream plane for SDK clie
   }
 });
 
+test("gateway settles workspace unsubscribe when SDK subscription close hangs", loopbackTestOptions, async () => {
+  const subscription = createHangingWorkspaceSubscription("native-sub-hanging");
+  const sdkClient = {
+    ...createSdkClient(),
+    openSubscription: async () => subscription,
+  };
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(createRuntime()),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(createRuntime()),
+    clientProvider: {
+      getClient: async () => sdkClient,
+    },
+  });
+
+  const streamClient = createStreamClient(gateway.sessionStreamUrl);
+  try {
+    await streamClient.connect();
+
+    streamClient.send({
+      type: "workspace_subscribe",
+      subscriptionId: "workspace-sub-hanging",
+      sessionId: "session-1",
+      spec: {
+        kind: "session_topology",
+      },
+    });
+
+    const ack = await streamClient.waitForEvent((event) => event.type === "workspace_subscription_ack");
+    assert.equal(ack.subscriptionId, "workspace-sub-hanging");
+
+    streamClient.send({
+      type: "workspace_unsubscribe",
+      subscriptionId: "workspace-sub-hanging",
+    });
+    const closed = await streamClient.waitForEvent((event) => event.type === "workspace_subscription_closed");
+    assert.equal(closed.subscriptionId, "workspace-sub-hanging");
+    assert.equal(subscription.closeCalls, 1);
+  } finally {
+    await Promise.all([
+      streamClient.close(),
+      gateway.dispose(),
+    ]);
+  }
+});
+
 test("gateway closes stream transport instead of throwing when server send fails", loopbackTestOptions, async () => {
   const originalSend = WebSocket.prototype.send;
   WebSocket.prototype.send = function patchedSend(data, ...args) {
@@ -795,6 +841,21 @@ function createDeferredWorkspaceSubscription(subscriptionId, event) {
     async close() {
       this.closeCalls += 1;
       releaseCloseWait();
+    },
+  };
+}
+
+function createHangingWorkspaceSubscription(subscriptionId) {
+  return {
+    subscriptionId,
+    closeCalls: 0,
+    async nextEvent() {
+      await new Promise(() => {});
+      return null;
+    },
+    async close() {
+      this.closeCalls += 1;
+      await new Promise(() => {});
     },
   };
 }

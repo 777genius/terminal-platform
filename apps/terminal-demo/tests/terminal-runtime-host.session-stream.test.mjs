@@ -238,6 +238,28 @@ test("session stream subscription dispose settles when unsubscribe send fails", 
   }
 });
 
+test("session stream subscription dispose settles when unsubscribe acknowledgement is lost", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = createIgnoringUnsubscribeWebSocket();
+  const adapter = new WebSocketTerminalRuntimeSessionStateStream("ws://127.0.0.1/terminal-gateway/stream");
+
+  try {
+    const subscription = await adapter.subscribeSessionState("session-1", {
+      onState: () => {},
+    });
+
+    await Promise.race([
+      subscription.dispose(),
+      delay(750).then(() => {
+        throw new Error("session stream subscription dispose did not settle after lost unsubscribe acknowledgement");
+      }),
+    ]);
+  } finally {
+    adapter.dispose();
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
 test("session stream dispose ignores websocket close failures", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = createOpenThrowingCloseSessionStreamWebSocket();
@@ -427,6 +449,60 @@ function createThrowingUnsubscribeWebSocket() {
 
     close() {
       this.readyState = ThrowingUnsubscribeWebSocket.CLOSED;
+      this.#emit("close", { type: "close" });
+    }
+
+    #emit(type, event) {
+      for (const listener of this.#listeners.get(type) ?? []) {
+        listener.call(this, event);
+      }
+    }
+  };
+}
+
+function createIgnoringUnsubscribeWebSocket() {
+  return class IgnoringUnsubscribeWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    readyState = IgnoringUnsubscribeWebSocket.CONNECTING;
+    #listeners = new Map();
+
+    constructor() {
+      queueMicrotask(() => {
+        this.readyState = IgnoringUnsubscribeWebSocket.OPEN;
+        this.#emit("open", { type: "open" });
+      });
+    }
+
+    addEventListener(type, listener) {
+      const bucket = this.#listeners.get(type) ?? new Set();
+      bucket.add(listener);
+      this.#listeners.set(type, bucket);
+    }
+
+    removeEventListener(type, listener) {
+      this.#listeners.get(type)?.delete(listener);
+    }
+
+    send(payload) {
+      const message = JSON.parse(payload);
+      if (message.type === "stream_subscribe_session_state") {
+        queueMicrotask(() => {
+          this.#emit("message", {
+            data: JSON.stringify({
+              type: "stream_subscription_ack",
+              subscriptionId: message.subscriptionId,
+              sessionId: message.sessionId,
+            }),
+          });
+        });
+      }
+    }
+
+    close() {
+      this.readyState = IgnoringUnsubscribeWebSocket.CLOSED;
       this.#emit("close", { type: "close" });
     }
 

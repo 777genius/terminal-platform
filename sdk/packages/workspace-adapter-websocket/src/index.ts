@@ -43,6 +43,7 @@ const RECONNECT_BACKOFF_MS = [100, 200, 400, 800, 1_600, 2_000] as const;
 const WEB_SOCKET_CONNECTING = 0;
 const WEB_SOCKET_OPEN = 1;
 const WEB_SOCKET_CLOSE_TIMEOUT_MS = 250;
+const SUBSCRIPTION_CLOSE_TIMEOUT_MS = 250;
 
 export interface CreateWorkspaceWebSocketTransportOptions {
   controlUrl: string;
@@ -607,7 +608,11 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
           type: "workspace_unsubscribe",
           subscriptionId,
         });
-        await record.closed.promise;
+        await withTimeout(
+          record.closed.promise,
+          SUBSCRIPTION_CLOSE_TIMEOUT_MS,
+          `Workspace subscription ${subscriptionId} close acknowledgement timed out`,
+        );
       } catch {
         this.finalizeSubscription(record, {
           notifyWaitersWithNull: true,
@@ -768,6 +773,26 @@ function createDeferred<T>(): Deferred<T> {
     resolve,
     reject,
   };
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function toError(error: unknown): Error {

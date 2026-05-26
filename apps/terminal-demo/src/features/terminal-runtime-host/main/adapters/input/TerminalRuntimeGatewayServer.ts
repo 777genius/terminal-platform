@@ -115,6 +115,7 @@ type TerminalPlatformCreateSessionRequest = Parameters<TerminalPlatformClient["c
 type TerminalPlatformSessionRoute = Parameters<TerminalPlatformClient["importSession"]>[0];
 type TerminalPlatformMuxCommand = Parameters<TerminalPlatformClient["dispatchMuxCommand"]>[1];
 
+const WORKSPACE_SUBSCRIPTION_CLOSE_TIMEOUT_MS = 250;
 const TERMINAL_BACKEND_KINDS = new Set<TerminalBackendKind>(["native", "tmux", "zellij"]);
 const TERMINAL_MUX_COMMAND_KINDS = new Set<TerminalMuxCommand["kind"]>([
   "split_pane",
@@ -643,7 +644,17 @@ export class TerminalRuntimeGatewayServer {
     }
 
     connection.subscriptions.delete(subscriptionId);
-    await record.subscription?.close();
+    if (record.subscription) {
+      try {
+        await withTimeout(
+          record.subscription.close(),
+          WORKSPACE_SUBSCRIPTION_CLOSE_TIMEOUT_MS,
+          `Workspace subscription ${subscriptionId} close timed out`,
+        );
+      } catch {
+        // The gateway has already detached the client-visible subscription.
+      }
+    }
     this.sendWorkspaceStream(connection, {
       type: "workspace_subscription_closed",
       subscriptionId,
@@ -931,6 +942,26 @@ function serializeError(error: unknown): TerminalGatewayErrorEnvelope {
   return {
     message: typeof error === "string" ? error : "Unknown gateway error",
   };
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function asGatewayPayload(value: unknown): GatewayPayloadRecord {

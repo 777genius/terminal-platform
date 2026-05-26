@@ -201,6 +201,24 @@ describe("workspace websocket adapter failure handling", () => {
     await transport.close();
     await withTimeout(rejected, 500);
   });
+
+  it("settles subscription close when the unsubscribe acknowledgement is lost", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createOpenIgnoringWorkspaceUnsubscribeWebSocket,
+    });
+
+    try {
+      const subscription = await transport.openSubscription("session-1", {
+        kind: "session_topology",
+      });
+
+      await expect(withTimeout(subscription.close(), 750)).resolves.toBeUndefined();
+    } finally {
+      await transport.close();
+    }
+  });
 });
 
 async function startWorkspaceGateway(transport: WorkspaceTransportClient): Promise<{
@@ -613,6 +631,54 @@ function createConnectingCloseableWebSocket(): globalThis.WebSocket {
       listener.call(socket, { type } as Event);
     }
   };
+
+  return socket;
+}
+
+function createOpenIgnoringWorkspaceUnsubscribeWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 0,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    send(payload: string) {
+      const message = decodeWorkspaceWebSocketPayload<WorkspaceGatewayStreamClientMessage>(payload);
+      if (message.type === "workspace_subscribe") {
+        queueMicrotask(() => {
+          emit("message", {
+            data: encodeWorkspaceWebSocketPayload({
+              type: "workspace_subscription_ack",
+              subscriptionId: message.subscriptionId,
+              meta: {
+                subscription_id: `memory-subscription-${message.subscriptionId}`,
+              },
+            } satisfies WorkspaceGatewayStreamServerMessage),
+          });
+        });
+      }
+    },
+    close() {
+      socket.readyState = 3;
+      emit("close");
+    },
+  } as unknown as globalThis.WebSocket & { readyState: number };
+
+  const emit = (type: string, event: Partial<Event> = {}) => {
+    for (const listener of listeners.get(type) ?? []) {
+      listener.call(socket, { type, ...event } as Event);
+    }
+  };
+
+  queueMicrotask(() => {
+    socket.readyState = 1;
+    emit("open");
+  });
 
   return socket;
 }
