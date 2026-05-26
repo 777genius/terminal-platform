@@ -215,6 +215,24 @@ test("session stream subscription dispose settles when unsubscribe send fails", 
   }
 });
 
+test("session stream dispose ignores websocket close failures", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = createOpenThrowingCloseSessionStreamWebSocket();
+  const adapter = new WebSocketTerminalRuntimeSessionStateStream("ws://127.0.0.1/terminal-gateway/stream");
+
+  try {
+    await adapter.subscribeSessionState("session-1", {
+      onState: () => {},
+    });
+
+    assert.doesNotThrow(() => {
+      adapter.dispose();
+    });
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
 async function reserveLoopbackPort() {
   const server = createServer();
   server.listen(0, "127.0.0.1");
@@ -251,6 +269,59 @@ async function probeLoopbackTcp() {
     server.once("listening", onListening);
     server.listen(0, "127.0.0.1");
   });
+}
+
+function createOpenThrowingCloseSessionStreamWebSocket() {
+  return class OpenThrowingCloseSessionStreamWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    readyState = OpenThrowingCloseSessionStreamWebSocket.CONNECTING;
+    #listeners = new Map();
+
+    constructor() {
+      queueMicrotask(() => {
+        this.readyState = OpenThrowingCloseSessionStreamWebSocket.OPEN;
+        this.#emit("open", { type: "open" });
+      });
+    }
+
+    addEventListener(type, listener) {
+      const bucket = this.#listeners.get(type) ?? new Set();
+      bucket.add(listener);
+      this.#listeners.set(type, bucket);
+    }
+
+    removeEventListener(type, listener) {
+      this.#listeners.get(type)?.delete(listener);
+    }
+
+    send(payload) {
+      const message = JSON.parse(payload);
+      if (message.type === "stream_subscribe_session_state") {
+        queueMicrotask(() => {
+          this.#emit("message", {
+            data: JSON.stringify({
+              type: "stream_subscription_ack",
+              subscriptionId: message.subscriptionId,
+              sessionId: message.sessionId,
+            }),
+          });
+        });
+      }
+    }
+
+    close() {
+      throw new Error("simulated close failure");
+    }
+
+    #emit(type, event) {
+      for (const listener of this.#listeners.get(type) ?? []) {
+        listener.call(this, event);
+      }
+    }
+  };
 }
 
 function createThrowingUnsubscribeWebSocket() {

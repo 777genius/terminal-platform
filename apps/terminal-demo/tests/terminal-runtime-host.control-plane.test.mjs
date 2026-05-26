@@ -70,6 +70,24 @@ test("control plane dispose releases pending startup retry waits", loopbackTestO
   );
 });
 
+test("control plane dispose ignores websocket close failures", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = createOpenThrowingCloseWebSocket();
+  const adapter = new WebSocketTerminalRuntimeControlPlane("ws://127.0.0.1/terminal-gateway/control");
+  const request = adapter.handshakeInfo();
+
+  try {
+    await delay(0);
+
+    assert.doesNotThrow(() => {
+      adapter.dispose();
+    });
+    await assert.rejects(request, /Terminal control plane disposed/);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
 async function reserveLoopbackPort() {
   const server = createServer();
   server.listen(0, "127.0.0.1");
@@ -114,6 +132,46 @@ function createHandshakeInfo() {
       status: "ready",
     },
     degradedSemantics: [],
+  };
+}
+
+function createOpenThrowingCloseWebSocket() {
+  return class OpenThrowingCloseWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    readyState = OpenThrowingCloseWebSocket.CONNECTING;
+    #listeners = new Map();
+
+    constructor() {
+      queueMicrotask(() => {
+        this.readyState = OpenThrowingCloseWebSocket.OPEN;
+        this.#emit("open", { type: "open" });
+      });
+    }
+
+    addEventListener(type, listener) {
+      const bucket = this.#listeners.get(type) ?? new Set();
+      bucket.add(listener);
+      this.#listeners.set(type, bucket);
+    }
+
+    removeEventListener(type, listener) {
+      this.#listeners.get(type)?.delete(listener);
+    }
+
+    send() {}
+
+    close() {
+      throw new Error("simulated close failure");
+    }
+
+    #emit(type, event) {
+      for (const listener of this.#listeners.get(type) ?? []) {
+        listener.call(this, event);
+      }
+    }
   };
 }
 

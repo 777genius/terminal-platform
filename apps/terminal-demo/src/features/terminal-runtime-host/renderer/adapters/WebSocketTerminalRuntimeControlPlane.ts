@@ -91,7 +91,7 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
       this.#socket
       && (this.#socket.readyState === WebSocket.CONNECTING || this.#socket.readyState === WebSocket.OPEN)
     ) {
-      this.#socket.close(1000, "Disposed");
+      closeWebSocketBestEffort(this.#socket);
     }
     this.#socket = null;
     this.#connectPromise = null;
@@ -173,7 +173,7 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
         if (this.#disposed) {
           this.#socket = null;
           this.#connectPromise = null;
-          socket.close(1000, "Disposed");
+          closeWebSocketBestEffort(socket);
           reject(new Error("Terminal control plane disposed"));
           return;
         }
@@ -255,6 +255,14 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
     }
     this.#resolveConnectRetry?.();
     this.#resolveConnectRetry = null;
+  }
+}
+
+function closeWebSocketBestEffort(socket: WebSocket): void {
+  try {
+    socket.close(1000, "Disposed");
+  } catch {
+    // Dispose must remain best-effort because browser teardown can leave sockets unusable.
   }
 }
 

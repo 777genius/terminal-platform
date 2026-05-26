@@ -113,7 +113,7 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
       this.#socket
       && (this.#socket.readyState === WebSocket.CONNECTING || this.#socket.readyState === WebSocket.OPEN)
     ) {
-      this.#socket.close(1000, "Disposed");
+      closeWebSocketBestEffort(this.#socket);
     }
 
     this.#socket = null;
@@ -197,7 +197,7 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
         if (this.#disposed) {
           this.#socket = null;
           this.#connectPromise = null;
-          socket.close(1000, "Disposed");
+          closeWebSocketBestEffort(socket);
           reject(new Error("Terminal session stream is disposed"));
           return;
         }
@@ -415,6 +415,14 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
     health: TerminalWorkspaceSessionStreamHealth,
   ): void {
     record.onStatusChange?.(health);
+  }
+}
+
+function closeWebSocketBestEffort(socket: WebSocket): void {
+  try {
+    socket.close(1000, "Disposed");
+  } catch {
+    // Dispose must remain best-effort because browser teardown can leave sockets unusable.
   }
 }
 

@@ -42,6 +42,7 @@ const INITIAL_CONNECT_MAX_ATTEMPTS = 6;
 const RECONNECT_BACKOFF_MS = [100, 200, 400, 800, 1_600, 2_000] as const;
 const WEB_SOCKET_CONNECTING = 0;
 const WEB_SOCKET_OPEN = 1;
+const WEB_SOCKET_CLOSE_TIMEOUT_MS = 250;
 
 export interface CreateWorkspaceWebSocketTransportOptions {
   controlUrl: string;
@@ -785,14 +786,32 @@ async function closeSocket(socket: WebSocket | null): Promise<void> {
 
   if (socket.readyState === WEB_SOCKET_OPEN || socket.readyState === WEB_SOCKET_CONNECTING) {
     await new Promise<void>((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+        }
+        socket.removeEventListener("close", finish);
+        resolve();
+      };
+
       socket.addEventListener(
         "close",
-        () => {
-          resolve();
-        },
+        finish,
         { once: true },
       );
-      socket.close(1000, "Disposed");
+      timer = setTimeout(finish, WEB_SOCKET_CLOSE_TIMEOUT_MS);
+      try {
+        socket.close(1000, "Disposed");
+      } catch {
+        finish();
+      }
     });
   }
 }
