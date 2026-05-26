@@ -242,6 +242,83 @@ fn hydrate_pane_history_filters_gaps_to_requested_page() {
 }
 
 #[test]
+fn hydrate_pane_history_keeps_cursor_for_trailing_gap_page() {
+    let store = test_store("history-trailing-gap-page");
+    let (session_id, pane_id, writer) = session_and_pane(&store);
+    let first = store
+        .append_stream_segment(StreamSegmentInput::terminal_output(
+            session_id.clone(),
+            pane_id.clone(),
+            writer.id.clone(),
+            b"before trailing gap\r\n".to_vec(),
+        ))
+        .expect("first segment should persist");
+    store
+        .append_history_gap_event(
+            &session_id,
+            &pane_id,
+            &writer.id,
+            2,
+            Some(128),
+            "test trailing receiver lag",
+            Some(42),
+        )
+        .expect("trailing gap should persist");
+    store.release_writer_generation(&writer.id).expect("writer should release");
+
+    let first_page = store
+        .hydrate_pane_history(&session_id, &pane_id, Some(1), Some(1), Some(1024))
+        .expect("first history page should hydrate");
+    assert_eq!(first_page.segments.len(), 1);
+    assert_eq!(first_page.segments[0].id, first.segment_id);
+    assert!(first_page.gaps.is_empty());
+    assert_eq!(first_page.next_event_seq, Some(2));
+    assert!(first_page.has_more_segments);
+
+    let second_page = store
+        .hydrate_pane_history(&session_id, &pane_id, first_page.next_event_seq, Some(1), Some(1024))
+        .expect("trailing gap page should hydrate");
+    assert!(second_page.segments.is_empty());
+    assert_eq!(second_page.gaps.len(), 1);
+    assert_eq!(second_page.gaps[0].event_seq_low, Some(2));
+    assert_eq!(second_page.gaps[0].event_seq_high, Some(3));
+    assert_eq!(second_page.next_event_seq, None);
+    assert!(!second_page.has_more_segments);
+}
+
+#[test]
+fn hydrate_pane_history_filters_gaps_before_limit_for_late_pages() {
+    let store = test_store("history-gap-prefilter-before-limit");
+    let (session_id, pane_id, writer) = session_and_pane(&store);
+    let target_event_seq = MAX_HISTORY_GAP_LIMIT + 2;
+
+    for index in 0..(MAX_HISTORY_GAP_LIMIT + 5) {
+        store
+            .append_history_gap_event(
+                &session_id,
+                &pane_id,
+                &writer.id,
+                1,
+                Some(index),
+                &format!("test gap {index}"),
+                Some(index),
+            )
+            .expect("gap should persist");
+    }
+    store.release_writer_generation(&writer.id).expect("writer should release");
+
+    let late_page = store
+        .hydrate_pane_history(&session_id, &pane_id, Some(target_event_seq), Some(1), Some(1024))
+        .expect("late gap page should hydrate");
+
+    assert!(late_page.segments.is_empty());
+    assert!(late_page.gaps.iter().any(|gap| {
+        gap.event_seq_low == Some(target_event_seq)
+            && gap.reason == format!("test gap {}", target_event_seq - 1)
+    }));
+}
+
+#[test]
 fn hydrate_pane_history_advances_through_corrupt_segment_when_page_is_small() {
     let store = test_store("history-corrupt-page-window");
     let (session_id, pane_id, writer) = session_and_pane(&store);

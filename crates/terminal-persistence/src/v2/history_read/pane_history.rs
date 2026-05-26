@@ -1,6 +1,6 @@
 use super::{
     super::*,
-    gaps::load_history_gaps,
+    gaps::{has_history_gap_at_or_after, load_history_gaps},
     limits::PaneHistoryLimits,
     segments::{collect_hydratable_segments, load_stream_segment_rows},
 };
@@ -81,6 +81,17 @@ impl TerminalPersistenceV2 {
             limits.from_event_seq,
             page_event_seq_high,
         )?;
+        let has_more_segments = if hydrated_segments.has_more_segments {
+            true
+        } else {
+            hydrated_segments
+                .next_event_seq
+                .map(|event_seq| {
+                    has_history_gap_at_or_after(connection, session_id, pane_id, event_seq)
+                })
+                .transpose()?
+                .unwrap_or(false)
+        };
         let restore_plan = self.restore_plan_with_connection(connection, session_id)?;
         let replay_strategy = PaneHistoryReplayStrategy::from_evidence(
             &hydrated_segments.segments,
@@ -99,7 +110,7 @@ impl TerminalPersistenceV2 {
             segments: hydrated_segments.segments,
             gaps,
             replay_strategy,
-            has_more_segments: hydrated_segments.has_more_segments,
+            has_more_segments,
             next_event_seq: hydrated_segments.next_event_seq,
             total_payload_bytes: hydrated_segments.total_payload_bytes,
         })
