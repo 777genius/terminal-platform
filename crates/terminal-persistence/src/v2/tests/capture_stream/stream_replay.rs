@@ -282,7 +282,7 @@ fn hydrate_pane_history_keeps_cursor_for_trailing_gap_page() {
     assert_eq!(second_page.gaps.len(), 1);
     assert_eq!(second_page.gaps[0].event_seq_low, Some(2));
     assert_eq!(second_page.gaps[0].event_seq_high, Some(3));
-    assert_eq!(second_page.next_event_seq, None);
+    assert_eq!(second_page.next_event_seq, Some(4));
     assert!(!second_page.has_more_segments);
 }
 
@@ -316,6 +316,50 @@ fn hydrate_pane_history_filters_gaps_before_limit_for_late_pages() {
         gap.event_seq_low == Some(target_event_seq)
             && gap.reason == format!("test gap {}", target_event_seq - 1)
     }));
+}
+
+#[test]
+fn hydrate_pane_history_pages_gap_only_history() {
+    let store = test_store("history-gap-only-pagination");
+    let (session_id, pane_id, writer) = session_and_pane(&store);
+
+    for index in 0..(MAX_HISTORY_GAP_LIMIT + 2) {
+        store
+            .append_history_gap_event(
+                &session_id,
+                &pane_id,
+                &writer.id,
+                1,
+                Some(index),
+                &format!("gap-only {index}"),
+                Some(index),
+            )
+            .expect("gap should persist");
+    }
+    store.release_writer_generation(&writer.id).expect("writer should release");
+
+    let first_page = store
+        .hydrate_pane_history(&session_id, &pane_id, Some(1), Some(10), Some(1024))
+        .expect("first gap-only page should hydrate");
+    assert!(first_page.segments.is_empty());
+    assert_eq!(first_page.gaps.len(), MAX_HISTORY_GAP_LIMIT as usize);
+    assert_eq!(first_page.next_event_seq, Some(MAX_HISTORY_GAP_LIMIT + 1));
+    assert!(first_page.has_more_segments);
+
+    let second_page = store
+        .hydrate_pane_history(
+            &session_id,
+            &pane_id,
+            first_page.next_event_seq,
+            Some(10),
+            Some(1024),
+        )
+        .expect("second gap-only page should hydrate");
+    assert!(second_page.segments.is_empty());
+    assert_eq!(second_page.gaps.len(), 2);
+    assert_eq!(second_page.gaps[0].event_seq_low, Some(MAX_HISTORY_GAP_LIMIT + 1));
+    assert_eq!(second_page.next_event_seq, Some(MAX_HISTORY_GAP_LIMIT + 3));
+    assert!(!second_page.has_more_segments);
 }
 
 #[test]

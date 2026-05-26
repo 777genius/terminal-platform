@@ -1,6 +1,6 @@
 use super::{
     super::*,
-    gaps::{has_history_gap_at_or_after, load_history_gaps},
+    gaps::{has_history_gap_at_or_after, load_history_gaps, next_event_seq_after_gaps},
     limits::PaneHistoryLimits,
     segments::{collect_hydratable_segments, load_stream_segment_rows},
 };
@@ -81,11 +81,14 @@ impl TerminalPersistenceV2 {
             limits.from_event_seq,
             page_event_seq_high,
         )?;
+        let next_event_seq = max_optional_event_seq(
+            hydrated_segments.next_event_seq,
+            next_event_seq_after_gaps(&gaps),
+        );
         let has_more_segments = if hydrated_segments.has_more_segments {
             true
         } else {
-            hydrated_segments
-                .next_event_seq
+            next_event_seq
                 .map(|event_seq| {
                     has_history_gap_at_or_after(connection, session_id, pane_id, event_seq)
                 })
@@ -111,8 +114,16 @@ impl TerminalPersistenceV2 {
             gaps,
             replay_strategy,
             has_more_segments,
-            next_event_seq: hydrated_segments.next_event_seq,
+            next_event_seq,
             total_payload_bytes: hydrated_segments.total_payload_bytes,
         })
+    }
+}
+
+fn max_optional_event_seq(left: Option<i64>, right: Option<i64>) -> Option<i64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
     }
 }

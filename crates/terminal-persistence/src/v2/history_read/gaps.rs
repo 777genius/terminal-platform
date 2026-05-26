@@ -12,6 +12,8 @@ pub(super) fn load_history_gaps(
         .filter(
             terminal_history_gaps::pane_id.is_null().or(terminal_history_gaps::pane_id.eq(pane_id)),
         )
+        .filter(terminal_history_gaps::event_seq_low.is_not_null())
+        .filter(terminal_history_gaps::event_seq_high.is_not_null())
         .filter(terminal_history_gaps::event_seq_high.ge(Some(from_event_seq)))
         .into_boxed();
 
@@ -20,7 +22,10 @@ pub(super) fn load_history_gaps(
     }
 
     let mut gaps = rows
-        .order(terminal_history_gaps::opened_at_ms.asc())
+        .order((
+            terminal_history_gaps::event_seq_low.asc(),
+            terminal_history_gaps::opened_at_ms.asc(),
+        ))
         .limit(MAX_HISTORY_GAP_LIMIT)
         .select(HistoryGapRow::as_select())
         .load::<HistoryGapRow>(connection)
@@ -41,7 +46,7 @@ pub(super) fn load_history_gaps(
             .filter(
                 terminal_history_gaps::event_seq_low
                     .is_null()
-                    .or(terminal_history_gaps::event_seq_high.is_null()),
+                    .and(terminal_history_gaps::event_seq_high.is_null()),
             )
             .order(terminal_history_gaps::opened_at_ms.asc())
             .limit(remaining_limit)
@@ -57,6 +62,10 @@ pub(super) fn load_history_gaps(
     Ok(gaps)
 }
 
+pub(super) fn next_event_seq_after_gaps(gaps: &[HistoryGapRecord]) -> Option<i64> {
+    gaps.iter().filter_map(|gap| gap.event_seq_high?.checked_add(1)).max()
+}
+
 pub(super) fn has_history_gap_at_or_after(
     connection: &mut SqliteConnection,
     session_id: &str,
@@ -68,6 +77,8 @@ pub(super) fn has_history_gap_at_or_after(
         .filter(
             terminal_history_gaps::pane_id.is_null().or(terminal_history_gaps::pane_id.eq(pane_id)),
         )
+        .filter(terminal_history_gaps::event_seq_low.is_not_null())
+        .filter(terminal_history_gaps::event_seq_high.is_not_null())
         .filter(terminal_history_gaps::event_seq_high.ge(Some(from_event_seq)))
         .count()
         .get_result::<i64>(connection)?;
@@ -87,7 +98,7 @@ pub(super) fn has_history_gap_at_or_after(
         .filter(
             terminal_history_gaps::event_seq_low
                 .is_null()
-                .or(terminal_history_gaps::event_seq_high.is_null()),
+                .and(terminal_history_gaps::event_seq_high.is_null()),
         )
         .count()
         .get_result::<i64>(connection)?;
