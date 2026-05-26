@@ -185,6 +185,108 @@ fn hydrate_pane_history_respects_byte_budget_for_long_output() {
 }
 
 #[test]
+fn hydrate_pane_history_filters_gaps_to_requested_page() {
+    let store = test_store("history-gap-page-window");
+    let (session_id, pane_id, writer) = session_and_pane(&store);
+    let first = store
+        .append_stream_segment(StreamSegmentInput::terminal_output(
+            session_id.clone(),
+            pane_id.clone(),
+            writer.id.clone(),
+            b"before gap\r\n".to_vec(),
+        ))
+        .expect("first segment should persist");
+    store
+        .append_history_gap_event(
+            &session_id,
+            &pane_id,
+            &writer.id,
+            2,
+            Some(128),
+            "test receiver lag",
+            Some(42),
+        )
+        .expect("gap should persist");
+    let after_gap = store
+        .append_stream_segment(StreamSegmentInput::terminal_output(
+            session_id.clone(),
+            pane_id.clone(),
+            writer.id.clone(),
+            b"after gap\r\n".to_vec(),
+        ))
+        .expect("post-gap segment should persist");
+    store.release_writer_generation(&writer.id).expect("writer should release");
+
+    assert_eq!(first.event_seq_low, 1);
+    assert_eq!(after_gap.event_seq_low, 4);
+
+    let first_page = store
+        .hydrate_pane_history(&session_id, &pane_id, Some(1), Some(1), Some(1024))
+        .expect("first history page should hydrate");
+    assert_eq!(first_page.segments.len(), 1);
+    assert_eq!(first_page.segments[0].id, first.segment_id);
+    assert!(first_page.gaps.is_empty());
+    assert_eq!(first_page.next_event_seq, Some(2));
+    assert!(first_page.has_more_segments);
+
+    let second_page = store
+        .hydrate_pane_history(&session_id, &pane_id, first_page.next_event_seq, Some(1), Some(1024))
+        .expect("second history page should hydrate");
+    assert_eq!(second_page.segments.len(), 1);
+    assert_eq!(second_page.segments[0].id, after_gap.segment_id);
+    assert_eq!(second_page.gaps.len(), 1);
+    assert_eq!(second_page.gaps[0].event_seq_low, Some(2));
+    assert_eq!(second_page.gaps[0].event_seq_high, Some(3));
+    assert_eq!(second_page.next_event_seq, Some(5));
+    assert!(!second_page.has_more_segments);
+}
+
+#[test]
+fn hydrate_pane_history_advances_through_corrupt_segment_when_page_is_small() {
+    let store = test_store("history-corrupt-page-window");
+    let (session_id, pane_id, writer) = session_and_pane(&store);
+    let corrupt = store
+        .append_stream_segment(StreamSegmentInput::terminal_output(
+            session_id.clone(),
+            pane_id.clone(),
+            writer.id.clone(),
+            b"corrupt me\r\n".to_vec(),
+        ))
+        .expect("corrupt candidate should persist");
+    let healthy = store
+        .append_stream_segment(StreamSegmentInput::terminal_output(
+            session_id.clone(),
+            pane_id.clone(),
+            writer.id.clone(),
+            b"still visible\r\n".to_vec(),
+        ))
+        .expect("healthy segment should persist");
+    store.release_writer_generation(&writer.id).expect("writer should release");
+    let mut connection = store.connection().expect("connection should open");
+    diesel::update(
+        terminal_stream_segments::table
+            .filter(terminal_stream_segments::id.eq(&corrupt.segment_id)),
+    )
+    .set(terminal_stream_segments::checksum.eq("not-the-real-checksum"))
+    .execute(&mut connection)
+    .expect("test should corrupt checksum");
+
+    let hydrated = store
+        .hydrate_pane_history(&session_id, &pane_id, Some(1), Some(1), Some(1024))
+        .expect("hydration should skip corrupt bytes and keep paging usable");
+
+    assert_eq!(hydrated.segments.len(), 1);
+    assert_eq!(hydrated.segments[0].id, healthy.segment_id);
+    assert_eq!(hydrated.next_event_seq, Some(3));
+    assert!(!hydrated.has_more_segments);
+    assert!(hydrated.gaps.iter().any(|gap| {
+        gap.gap_kind == "corrupted_segment"
+            && gap.event_seq_low == Some(corrupt.event_seq_low)
+            && gap.event_seq_high == Some(corrupt.event_seq_high)
+    }));
+}
+
+#[test]
 fn legacy_visual_snapshot_import_preserves_raw_stream_cursor() {
     let store = test_store("visual-import-preserves-cursor");
     let (session_id, pane_id, writer) = session_and_pane(&store);

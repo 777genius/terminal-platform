@@ -67,12 +67,20 @@ impl TerminalPersistenceV2 {
         let hydrated_segments = collect_hydratable_segments(
             connection,
             session_id,
+            pane_id,
             fetched_segments,
             limits.max_segments,
             limits.max_bytes,
             now,
         )?;
-        let gaps = load_history_gaps(connection, session_id, pane_id)?;
+        let page_event_seq_high = hydrated_segments.next_event_seq.map(|event_seq| event_seq - 1);
+        let gaps = load_history_gaps(
+            connection,
+            session_id,
+            pane_id,
+            limits.from_event_seq,
+            page_event_seq_high,
+        )?;
         let restore_plan = self.restore_plan_with_connection(connection, session_id)?;
         let replay_strategy = PaneHistoryReplayStrategy::from_evidence(
             &hydrated_segments.segments,
