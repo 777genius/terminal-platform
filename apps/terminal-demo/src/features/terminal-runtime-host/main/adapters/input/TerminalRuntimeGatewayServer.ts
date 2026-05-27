@@ -115,7 +115,7 @@ type TerminalPlatformCreateSessionRequest = Parameters<TerminalPlatformClient["c
 type TerminalPlatformSessionRoute = Parameters<TerminalPlatformClient["importSession"]>[0];
 type TerminalPlatformMuxCommand = Parameters<TerminalPlatformClient["dispatchMuxCommand"]>[1];
 
-const WORKSPACE_SUBSCRIPTION_CLOSE_TIMEOUT_MS = 250;
+const STREAM_SUBSCRIPTION_CLOSE_TIMEOUT_MS = 250;
 const TERMINAL_BACKEND_KINDS = new Set<TerminalBackendKind>(["native", "tmux", "zellij"]);
 const TERMINAL_MUX_COMMAND_KINDS = new Set<TerminalMuxCommand["kind"]>([
   "split_pane",
@@ -646,11 +646,7 @@ export class TerminalRuntimeGatewayServer {
     connection.subscriptions.delete(subscriptionId);
     if (record.subscription) {
       try {
-        await withTimeout(
-          record.subscription.close(),
-          WORKSPACE_SUBSCRIPTION_CLOSE_TIMEOUT_MS,
-          `Workspace subscription ${subscriptionId} close timed out`,
-        );
+        await this.closeWorkspaceSubscription(subscriptionId, record.subscription);
       } catch {
         // The gateway has already detached the client-visible subscription.
       }
@@ -736,17 +732,41 @@ export class TerminalRuntimeGatewayServer {
   }
 
   private async disposeStreamConnection(connection: StreamConnectionRecord): Promise<void> {
-    const stops = [...connection.subscriptions.values()]
-      .map((record) => {
-        if (record.kind === "legacy_session_state") {
-          return record.handle?.dispose() ?? null;
-        }
-
-        return record.subscription?.close() ?? null;
-      })
+    const stops = [...connection.subscriptions.entries()]
+      .map(([subscriptionId, record]) => this.disposeStreamSubscription(subscriptionId, record))
       .filter(Boolean);
     connection.subscriptions.clear();
     await Promise.allSettled(stops);
+  }
+
+  private disposeStreamSubscription(
+    subscriptionId: string,
+    record: StreamSubscriptionRecord,
+  ): Promise<void> | null {
+    if (record.kind === "legacy_session_state") {
+      return record.handle
+        ? withTimeout(
+            record.handle.dispose(),
+            STREAM_SUBSCRIPTION_CLOSE_TIMEOUT_MS,
+            `Session state subscription ${subscriptionId} dispose timed out`,
+          )
+        : null;
+    }
+
+    return record.subscription
+      ? this.closeWorkspaceSubscription(subscriptionId, record.subscription)
+      : null;
+  }
+
+  private closeWorkspaceSubscription(
+    subscriptionId: string,
+    subscription: NonNullable<WorkspaceStreamSubscriptionRecord["subscription"]>,
+  ): Promise<void> {
+    return withTimeout(
+      subscription.close(),
+      STREAM_SUBSCRIPTION_CLOSE_TIMEOUT_MS,
+      `Workspace subscription ${subscriptionId} close timed out`,
+    );
   }
 
   private sendControl(socket: WebSocket, message: GatewayControlResponseMessage): boolean {

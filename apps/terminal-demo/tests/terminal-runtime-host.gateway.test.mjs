@@ -205,6 +205,10 @@ function createRuntime(overrides = {}) {
     },
     dispatchMuxCommand: async () => ({ changed: true }),
     watchSessionState: async (sessionId, handlers) => {
+      if (overrides.watchSessionState) {
+        return overrides.watchSessionState(sessionId, handlers);
+      }
+
       queueMicrotask(() => {
         handlers.onState({
           session: {
@@ -706,6 +710,126 @@ test("gateway settles workspace unsubscribe when SDK subscription close hangs", 
   }
 });
 
+test("gateway dispose settles legacy session subscriptions when runtime dispose hangs", loopbackTestOptions, async () => {
+  const handle = createHangingLegacySessionStateHandle();
+  const runtime = createRuntime({
+    watchSessionState: async (sessionId, handlers) => {
+      queueMicrotask(() => {
+        handlers.onState({
+          session: {
+            session_id: sessionId,
+            origin: {
+              backend: "native",
+              authority: "local_daemon",
+              foreignReferenceLabel: null,
+            },
+            title: "Workspace",
+            degradedSemantics: [],
+          },
+          topology: {
+            session_id: sessionId,
+            backend_kind: "native",
+            focused_tab: "tab-1",
+            tabs: [
+              {
+                tab_id: "tab-1",
+                title: "Shell",
+                focused_pane: "pane-1",
+                root: {
+                  kind: "leaf",
+                  pane_id: "pane-1",
+                },
+              },
+            ],
+          },
+          focusedScreen: null,
+        });
+      });
+      return handle;
+    },
+  });
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(runtime),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(runtime),
+  });
+
+  const streamClient = createStreamClient(gateway.sessionStreamUrl);
+  let disposed = false;
+  try {
+    await streamClient.connect();
+
+    streamClient.send({
+      type: "stream_subscribe_session_state",
+      subscriptionId: "legacy-sub-hanging",
+      sessionId: "session-1",
+    });
+
+    const ack = await streamClient.waitForEvent((event) => event.type === "stream_subscription_ack");
+    assert.equal(ack.subscriptionId, "legacy-sub-hanging");
+
+    const result = await Promise.race([
+      gateway.dispose().then(() => "disposed"),
+      new Promise((resolve) => setTimeout(() => resolve("timeout"), 1000)),
+    ]);
+    disposed = result === "disposed";
+    assert.equal(result, "disposed");
+    assert.equal(handle.disposeCalls, 1);
+  } finally {
+    await closeSocketIfOpen(streamClient.socket);
+    if (!disposed) {
+      void gateway.dispose().catch(() => undefined);
+    }
+  }
+});
+
+test("gateway dispose settles workspace subscriptions when SDK close hangs", loopbackTestOptions, async () => {
+  const subscription = createHangingWorkspaceSubscription("native-sub-dispose-hanging");
+  const sdkClient = {
+    ...createSdkClient(),
+    openSubscription: async () => subscription,
+  };
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(createRuntime()),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(createRuntime()),
+    clientProvider: {
+      getClient: async () => sdkClient,
+    },
+  });
+
+  const streamClient = createStreamClient(gateway.sessionStreamUrl);
+  let disposed = false;
+  try {
+    await streamClient.connect();
+
+    streamClient.send({
+      type: "workspace_subscribe",
+      subscriptionId: "workspace-sub-dispose-hanging",
+      sessionId: "session-1",
+      spec: {
+        kind: "session_topology",
+      },
+    });
+
+    const ack = await streamClient.waitForEvent((event) => event.type === "workspace_subscription_ack");
+    assert.equal(ack.subscriptionId, "workspace-sub-dispose-hanging");
+
+    const result = await Promise.race([
+      gateway.dispose().then(() => "disposed"),
+      new Promise((resolve) => setTimeout(() => resolve("timeout"), 1000)),
+    ]);
+    disposed = result === "disposed";
+    assert.equal(result, "disposed");
+    assert.equal(subscription.closeCalls, 1);
+  } finally {
+    await closeSocketIfOpen(streamClient.socket);
+    if (!disposed) {
+      void gateway.dispose().catch(() => undefined);
+    }
+  }
+});
+
 test("gateway closes stream transport instead of throwing when server send fails", loopbackTestOptions, async () => {
   const originalSend = WebSocket.prototype.send;
   WebSocket.prototype.send = function patchedSend(data, ...args) {
@@ -855,6 +979,16 @@ function createHangingWorkspaceSubscription(subscriptionId) {
     },
     async close() {
       this.closeCalls += 1;
+      await new Promise(() => {});
+    },
+  };
+}
+
+function createHangingLegacySessionStateHandle() {
+  return {
+    disposeCalls: 0,
+    async dispose() {
+      this.disposeCalls += 1;
       await new Promise(() => {});
     },
   };
