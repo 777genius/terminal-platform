@@ -745,11 +745,11 @@ describe("createWorkspaceKernel saved session maintenance", () => {
       1n,
     );
     const subscription = new TestWorkspaceSubscription("previous-live-subscription");
+    let openSubscriptionCalls = 0;
     const kernel = createWorkspaceKernel({
       transport: {
         ...createUnusedTransport(),
         attachCalls: 0,
-        openSubscription: async () => subscription,
         listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
         getSavedSession: async () => savedRecord,
         restoreSavedSession: async () => ({
@@ -770,11 +770,16 @@ describe("createWorkspaceKernel saved session maintenance", () => {
           }
           throw new Error("attach unavailable");
         },
+        openSubscription: async () => {
+          openSubscriptionCalls += 1;
+          return subscription;
+        },
       } as WorkspaceTransportClient,
       now: () => 6_000,
     });
 
     await kernel.commands.attachSession(previousSessionId);
+    await waitUntil(() => openSubscriptionCalls > 0);
     await kernel.commands.refreshSavedSessions();
     await kernel.commands.restoreSavedSession(savedRecord.session_id);
 
@@ -794,6 +799,7 @@ describe("createWorkspaceKernel saved session maintenance", () => {
         cause: expect.any(Error),
       },
     ]);
+    expect(subscription.isClosed()).toBe(true);
 
     await kernel.dispose();
   });
@@ -898,6 +904,10 @@ class TestWorkspaceSubscription implements WorkspaceSubscription {
     return {
       subscription_id: this.#subscriptionId,
     };
+  }
+
+  isClosed(): boolean {
+    return this.#closed;
   }
 
   push(event: SubscriptionEvent): void {

@@ -155,6 +155,8 @@ export class SessionCommandService {
 
         if (attachedSession) {
           this.#syncLiveSessionSubscriptions(attachedSession);
+        } else {
+          await this.#closeLiveSessionSubscriptions("restored session attach failed");
         }
         await this.#catalogService.refreshSavedSessions();
       } catch (error) {
@@ -644,6 +646,23 @@ export class SessionCommandService {
     const record = this.#paneSubscription;
     this.#paneSubscription = null;
     await record?.subscription.close();
+  }
+
+  async #closeLiveSessionSubscriptions(reason: string): Promise<void> {
+    try {
+      await Promise.all([
+        this.#closeTopologySubscription(),
+        this.#closePaneSubscription(),
+      ]);
+    } catch (error) {
+      this.#context.recordDiagnostic({
+        code: "live_subscription_close_failed",
+        message: `failed to close live session subscriptions after ${reason} - ${errorMessage(error)}`,
+        severity: "warn",
+        recoverable: true,
+        cause: error,
+      });
+    }
   }
 
   #handleTransportError(error: unknown, message: string) {
