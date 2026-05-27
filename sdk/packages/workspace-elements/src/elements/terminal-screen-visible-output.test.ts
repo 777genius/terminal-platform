@@ -42,6 +42,22 @@ describe("terminal screen visible output", () => {
     });
   });
 
+  it("marks partial restored history when the first loaded page has no visible lines", () => {
+    const lines = createVisibleOutputLines(
+      createHistory({ hasMoreSegments: true, lines: [] }),
+      createScreen(["live prompt"]),
+    );
+
+    expect(lines).toEqual([
+      {
+        text: "--- restored history is partial; more persisted output is available ---",
+        source: "boundary",
+      },
+      { text: "--- restored history above; live process below ---", source: "boundary" },
+      { text: "live prompt", source: "live" },
+    ]);
+  });
+
   it("auto-loads older history only near the top while idle", () => {
     expect(shouldAutoLoadMoreHistoryFromViewport(
       { scrollTop: 0 } as HTMLElement,
@@ -77,7 +93,7 @@ describe("terminal screen visible output", () => {
   });
 });
 
-function createHistory(options: { hasMoreSegments: boolean }): HistoricalPane {
+function createHistory(options: { hasMoreSegments: boolean; lines?: string[] }): HistoricalPane {
   return {
     sessionId: "session-1",
     paneId: "pane-1",
@@ -86,7 +102,7 @@ function createHistory(options: { hasMoreSegments: boolean }): HistoricalPane {
     source: "v2_pane_history",
     replayStrategy: "raw_vt_stream",
     restoreGuaranteeLevel: "basic_history",
-    lines: ["old command", "old output"],
+    lines: options.lines ?? ["old command", "old output"],
     capturedAtMs: 1000n,
     hasGaps: false,
     hasMoreSegments: options.hasMoreSegments,

@@ -1408,7 +1408,7 @@ export function createVisibleOutputLines(
     ? [{ text: RESTORED_HISTORY_PARTIAL_TEXT, source: "boundary" }]
     : [];
 
-  if (historyLines.length === 0) {
+  if (historyLines.length === 0 && historyBoundaryLines.length === 0) {
     return liveLines;
   }
 
