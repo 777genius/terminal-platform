@@ -498,6 +498,67 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     await kernel.dispose();
   });
 
+  it("does not mix snapshot fallback into partial v2 history pages", async () => {
+    const sessionId = "history-session-snapshot-page";
+    const paneId = "history-pane-snapshot-page";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
+    const subscription = new TestWorkspaceSubscription("history-snapshot-page-subscription");
+    const historyRequests: Array<{ fromEventSeq?: number | bigint | null }> = [];
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async (_sessionId, _paneId, options) => {
+          historyRequests.push({ fromEventSeq: options?.fromEventSeq });
+          if (options?.fromEventSeq === 2n) {
+            return createPaneHistory(sessionId, paneId, "journal page\r\n", {
+              fromEventSeq: 2n,
+              eventSeqLow: 2n,
+              eventSeqHigh: 2n,
+              hasMoreSegments: false,
+              nextEventSeq: null,
+              segmentId: "segment-2",
+            });
+          }
+
+          return createPaneHistory(sessionId, paneId, "", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: true,
+            includeSegment: false,
+            latestScreenText: "latest snapshot fallback",
+            nextEventSeq: 2n,
+          });
+        },
+      } as WorkspaceTransportClient,
+      now: () => 7_600,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: [],
+      hasMoreSegments: true,
+      nextEventSeq: 2n,
+    });
+
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+
+    expect(historyRequests.map((request) => request.fromEventSeq)).toEqual([1n, 2n]);
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["journal page"],
+      hasMoreSegments: false,
+      nextEventSeq: null,
+    });
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]?.lines).not.toContain("latest snapshot fallback");
+
+    await kernel.dispose();
+  });
+
   it("hydrates command history from persistence during bootstrap", async () => {
     const kernel = createWorkspaceKernel({
       transport: {
@@ -1028,6 +1089,8 @@ interface CreatePaneHistoryOptions {
   readonly eventSeqLow?: bigint;
   readonly eventSeqHigh?: bigint;
   readonly hasMoreSegments?: boolean;
+  readonly includeSegment?: boolean;
+  readonly latestScreenText?: string;
   readonly nextEventSeq?: bigint | null;
   readonly segmentId?: string;
   readonly createdAtMs?: bigint;
@@ -1063,20 +1126,43 @@ function createPaneHistory(
         },
       ],
     },
-    latest_screen_snapshot: null,
-    segments: [
-      {
-        id: options.segmentId ?? "segment-1",
-        event_seq_low: eventSeqLow,
-        event_seq_high: eventSeqHigh,
-        byte_low: 0n,
-        byte_high: BigInt(encoded.byteLength),
-        payload: Array.from(encoded),
-        checksum: "test-checksum",
-        capture_semantics: "raw_vt_stream",
-        created_at_ms: options.createdAtMs ?? 7_000n,
-      },
-    ],
+    latest_screen_snapshot: options.latestScreenText == null
+      ? null
+      : {
+          id: "snapshot-1",
+          pane_id: paneId,
+          projection_source: "native_emulator",
+          buffer_kind: "screen",
+          rows: 24,
+          cols: 80,
+          base_event_seq: fromEventSeq,
+          high_water_event_seq: eventSeqHigh,
+          high_water_byte_seq: null,
+          screen_json: JSON.stringify({
+            surface: {
+              lines: [{ text: options.latestScreenText }],
+            },
+          }),
+          parser_version: "test-parser",
+          projection_version: "test-projection",
+          checksum: "test-snapshot-checksum",
+          created_at_ms: options.createdAtMs ?? 7_000n,
+        },
+    segments: options.includeSegment === false
+      ? []
+      : [
+          {
+            id: options.segmentId ?? "segment-1",
+            event_seq_low: eventSeqLow,
+            event_seq_high: eventSeqHigh,
+            byte_low: 0n,
+            byte_high: BigInt(encoded.byteLength),
+            payload: Array.from(encoded),
+            checksum: "test-checksum",
+            capture_semantics: "raw_vt_stream",
+            created_at_ms: options.createdAtMs ?? 7_000n,
+          },
+        ],
     gaps: [],
     replay_strategy: "raw_vt_stream",
     has_more_segments: options.hasMoreSegments ?? false,

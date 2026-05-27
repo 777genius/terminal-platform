@@ -35,6 +35,7 @@ export class SessionCommandService {
   readonly #context: ServiceContext;
   readonly #catalogService: CatalogService;
   readonly #lane = new AsyncLane();
+  readonly #paneHistoryHydrations = new Map<string, Promise<void>>();
   #disposed = false;
   #topologySubscription: LiveTopologySubscription | null = null;
   #paneSubscription: LivePaneSubscription | null = null;
@@ -542,9 +543,43 @@ export class SessionCommandService {
     if (!paneId || !transport.getPaneHistory) {
       return;
     }
+    const getPaneHistory = transport.getPaneHistory.bind(transport);
 
+    const existingHistory = this.#context.getSnapshot().historicalPanes?.[paneId];
+    if (
+      existingHistory?.sessionId === sessionId
+      && existingHistory.sourceSessionId === sessionId
+      && existingHistory.sourcePaneId === paneId
+      && existingHistory.fromEventSeq === PANE_HISTORY_INITIAL_EVENT_SEQ
+    ) {
+      return;
+    }
+
+    const hydrationKey = paneHistoryHydrationKey(sessionId, paneId);
+    const inFlightHydration = this.#paneHistoryHydrations.get(hydrationKey);
+    if (inFlightHydration) {
+      await inFlightHydration;
+      return;
+    }
+
+    const hydration = this.#hydratePaneHistoryOnce(getPaneHistory, sessionId, paneId);
+    this.#paneHistoryHydrations.set(hydrationKey, hydration);
     try {
-      const history = await transport.getPaneHistory(
+      await hydration;
+    } finally {
+      if (this.#paneHistoryHydrations.get(hydrationKey) === hydration) {
+        this.#paneHistoryHydrations.delete(hydrationKey);
+      }
+    }
+  }
+
+  async #hydratePaneHistoryOnce(
+    getPaneHistory: PaneHistoryLoader,
+    sessionId: SessionId,
+    paneId: PaneId,
+  ): Promise<void> {
+    try {
+      const history = await getPaneHistory(
         sessionId,
         paneId,
         paneHistoryPageRequest(PANE_HISTORY_INITIAL_EVENT_SEQ),
@@ -734,6 +769,7 @@ interface LivePaneSubscription {
 }
 
 type LiveSubscription = LiveTopologySubscription | LivePaneSubscription;
+type PaneHistoryLoader = NonNullable<Awaited<ReturnType<ServiceContext["ensureTransport"]>>["getPaneHistory"]>;
 
 function topologyFromSubscriptionEvent(
   event: Extract<SubscriptionEvent, { kind: "topology_snapshot" }>,
@@ -889,6 +925,10 @@ function paneHistoryPageRequest(fromEventSeq: bigint) {
   };
 }
 
+function paneHistoryHydrationKey(sessionId: SessionId, paneId: PaneId): string {
+  return `${sessionId}\u0000${paneId}`;
+}
+
 function buildRestoredHistoricalPanes(
   saved: SavedSessionRecord,
   attachedSession: NonNullable<WorkspaceSnapshot["attachedSession"]>,
@@ -940,21 +980,27 @@ function buildHydratedHistoricalPane(
 ): WorkspaceHistoricalPaneSnapshot | null {
   const segmentLines = linesFromHistorySegments(history.segments);
   const includeSnapshotFallback = options.includeSnapshotFallback ?? true;
-  const snapshotLines = includeSnapshotFallback && history.latest_screen_snapshot
-    ? linesFromScreenSnapshotJson(history.latest_screen_snapshot.screen_json)
-    : [];
   const gapLines = history.gaps.map((gap) => {
     const eventRange = gap.event_seq_low && gap.event_seq_high
       ? ` events ${gap.event_seq_low}-${gap.event_seq_high}`
       : "";
     return `--- history gap${eventRange}: ${gap.reason} ---`;
   });
+  const hasJournalLines = segmentLines.length > 0 || gapLines.length > 0;
+  const useSnapshotFallback =
+    includeSnapshotFallback
+    && !hasJournalLines
+    && !history.has_more_segments
+    && Boolean(history.latest_screen_snapshot);
+  const snapshotLines = useSnapshotFallback && history.latest_screen_snapshot
+    ? linesFromScreenSnapshotJson(history.latest_screen_snapshot.screen_json)
+    : [];
   const lines = normalizeHistoryLines([
     ...(segmentLines.length > 0 ? segmentLines : snapshotLines),
     ...gapLines,
   ]);
 
-  if (lines.length === 0) {
+  if (lines.length === 0 && !history.has_more_segments) {
     return null;
   }
 
