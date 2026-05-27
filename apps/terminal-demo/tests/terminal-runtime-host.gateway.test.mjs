@@ -710,6 +710,147 @@ test("gateway settles workspace unsubscribe when SDK subscription close hangs", 
   }
 });
 
+test("gateway settles legacy session unsubscribe when runtime dispose hangs", loopbackTestOptions, async () => {
+  const handle = createHangingLegacySessionStateHandle();
+  const runtime = createRuntime({
+    watchSessionState: async () => handle,
+  });
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(runtime),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(runtime),
+  });
+
+  const streamClient = createStreamClient(gateway.sessionStreamUrl);
+  try {
+    await streamClient.connect();
+
+    streamClient.send({
+      type: "stream_subscribe_session_state",
+      subscriptionId: "legacy-sub-hanging-unsubscribe",
+      sessionId: "session-1",
+    });
+
+    const ack = await streamClient.waitForEvent((event) => event.type === "stream_subscription_ack");
+    assert.equal(ack.subscriptionId, "legacy-sub-hanging-unsubscribe");
+
+    streamClient.send({
+      type: "stream_unsubscribe_session_state",
+      subscriptionId: "legacy-sub-hanging-unsubscribe",
+      sessionId: "session-1",
+    });
+
+    const closed = await streamClient.waitForEvent((event) => event.type === "subscription_closed");
+    assert.equal(closed.subscriptionId, "legacy-sub-hanging-unsubscribe");
+    assert.equal(handle.disposeCalls, 1);
+  } finally {
+    await Promise.all([
+      closeSocketIfOpen(streamClient.socket),
+      gateway.dispose(),
+    ]);
+  }
+});
+
+test("gateway closes late legacy session handles after unsubscribe races", loopbackTestOptions, async () => {
+  const handle = createHangingLegacySessionStateHandle();
+  const watchStarted = createDeferred();
+  const releaseHandle = createDeferred();
+  const runtime = createRuntime({
+    watchSessionState: async () => {
+      watchStarted.resolve();
+      await releaseHandle.promise;
+      return handle;
+    },
+  });
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(runtime),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(runtime),
+  });
+
+  const streamClient = createStreamClient(gateway.sessionStreamUrl);
+  try {
+    await streamClient.connect();
+
+    streamClient.send({
+      type: "stream_subscribe_session_state",
+      subscriptionId: "legacy-sub-late",
+      sessionId: "session-1",
+    });
+    await watchStarted.promise;
+
+    streamClient.send({
+      type: "stream_unsubscribe_session_state",
+      subscriptionId: "legacy-sub-late",
+      sessionId: "session-1",
+    });
+    const closed = await streamClient.waitForEvent((event) => event.type === "subscription_closed");
+    assert.equal(closed.subscriptionId, "legacy-sub-late");
+
+    releaseHandle.resolve();
+    await waitForCondition(() => handle.disposeCalls === 1);
+    assert.equal(handle.disposeCalls, 1);
+  } finally {
+    await Promise.all([
+      closeSocketIfOpen(streamClient.socket),
+      gateway.dispose(),
+    ]);
+  }
+});
+
+test("gateway closes late workspace subscriptions after unsubscribe races", loopbackTestOptions, async () => {
+  const subscription = createHangingWorkspaceSubscription("native-sub-late");
+  const openStarted = createDeferred();
+  const releaseSubscription = createDeferred();
+  const sdkClient = {
+    ...createSdkClient(),
+    openSubscription: async () => {
+      openStarted.resolve();
+      await releaseSubscription.promise;
+      return subscription;
+    },
+  };
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(createRuntime()),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(createRuntime()),
+    clientProvider: {
+      getClient: async () => sdkClient,
+    },
+  });
+
+  const streamClient = createStreamClient(gateway.sessionStreamUrl);
+  try {
+    await streamClient.connect();
+
+    streamClient.send({
+      type: "workspace_subscribe",
+      subscriptionId: "workspace-sub-late",
+      sessionId: "session-1",
+      spec: {
+        kind: "session_topology",
+      },
+    });
+    await openStarted.promise;
+
+    streamClient.send({
+      type: "workspace_unsubscribe",
+      subscriptionId: "workspace-sub-late",
+    });
+    const closed = await streamClient.waitForEvent((event) => event.type === "workspace_subscription_closed");
+    assert.equal(closed.subscriptionId, "workspace-sub-late");
+
+    releaseSubscription.resolve();
+    await waitForCondition(() => subscription.closeCalls === 1);
+    assert.equal(subscription.closeCalls, 1);
+  } finally {
+    await Promise.all([
+      closeSocketIfOpen(streamClient.socket),
+      gateway.dispose(),
+    ]);
+  }
+});
+
 test("gateway dispose settles legacy session subscriptions when runtime dispose hangs", loopbackTestOptions, async () => {
   const handle = createHangingLegacySessionStateHandle();
   const runtime = createRuntime({
@@ -991,6 +1132,18 @@ function createHangingLegacySessionStateHandle() {
       this.disposeCalls += 1;
       await new Promise(() => {});
     },
+  };
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((innerResolve) => {
+    resolve = innerResolve;
+  });
+
+  return {
+    promise,
+    resolve,
   };
 }
 

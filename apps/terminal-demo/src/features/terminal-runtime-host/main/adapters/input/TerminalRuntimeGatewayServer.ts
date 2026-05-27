@@ -508,6 +508,9 @@ export class TerminalRuntimeGatewayServer {
     try {
       const handle = await this.#sessionStreamService.watchSessionState(sessionId, {
         onState: (state) => {
+          if (connection.subscriptions.get(subscriptionId) !== record) {
+            return;
+          }
           this.sendStream(connection, {
             type: "session_state",
             subscriptionId,
@@ -516,6 +519,9 @@ export class TerminalRuntimeGatewayServer {
           });
         },
         onError: (error) => {
+          if (connection.subscriptions.get(subscriptionId) !== record) {
+            return;
+          }
           this.sendStream(connection, {
             type: "subscription_error",
             subscriptionId,
@@ -524,6 +530,9 @@ export class TerminalRuntimeGatewayServer {
           });
         },
         onClosed: () => {
+          if (connection.subscriptions.get(subscriptionId) !== record) {
+            return;
+          }
           connection.subscriptions.delete(subscriptionId);
           this.sendStream(connection, {
             type: "subscription_closed",
@@ -534,7 +543,7 @@ export class TerminalRuntimeGatewayServer {
       });
 
       if (connection.subscriptions.get(subscriptionId) !== record) {
-        await handle.dispose();
+        await this.closeLegacySessionStateSubscription(subscriptionId, handle).catch(() => undefined);
         return;
       }
 
@@ -573,7 +582,17 @@ export class TerminalRuntimeGatewayServer {
       return;
     }
 
-    await record.handle.dispose();
+    connection.subscriptions.delete(subscriptionId);
+    try {
+      await this.closeLegacySessionStateSubscription(subscriptionId, record.handle);
+    } catch {
+      // The gateway has already detached the client-visible subscription.
+    }
+    this.sendStream(connection, {
+      type: "subscription_closed",
+      subscriptionId,
+      sessionId,
+    });
   }
 
   private async subscribeWorkspace(
@@ -604,7 +623,7 @@ export class TerminalRuntimeGatewayServer {
       const client = await this.#clientProvider.getClient();
       const subscription = await client.openSubscription(message.sessionId, message.spec);
       if (connection.subscriptions.get(message.subscriptionId) !== record) {
-        await subscription.close();
+        await this.closeWorkspaceSubscription(message.subscriptionId, subscription).catch(() => undefined);
         return;
       }
 
@@ -745,11 +764,7 @@ export class TerminalRuntimeGatewayServer {
   ): Promise<void> | null {
     if (record.kind === "legacy_session_state") {
       return record.handle
-        ? withTimeout(
-            record.handle.dispose(),
-            STREAM_SUBSCRIPTION_CLOSE_TIMEOUT_MS,
-            `Session state subscription ${subscriptionId} dispose timed out`,
-          )
+        ? this.closeLegacySessionStateSubscription(subscriptionId, record.handle)
         : null;
     }
 
@@ -766,6 +781,17 @@ export class TerminalRuntimeGatewayServer {
       subscription.close(),
       STREAM_SUBSCRIPTION_CLOSE_TIMEOUT_MS,
       `Workspace subscription ${subscriptionId} close timed out`,
+    );
+  }
+
+  private closeLegacySessionStateSubscription(
+    subscriptionId: string,
+    handle: NonNullable<LegacyStreamSubscriptionRecord["handle"]>,
+  ): Promise<void> {
+    return withTimeout(
+      handle.dispose(),
+      STREAM_SUBSCRIPTION_CLOSE_TIMEOUT_MS,
+      `Session state subscription ${subscriptionId} dispose timed out`,
     );
   }
 
