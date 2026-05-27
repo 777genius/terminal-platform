@@ -556,6 +556,9 @@ export class TerminalRuntimeGatewayServer {
         return;
       }
     } catch (error) {
+      if (connection.subscriptions.get(subscriptionId) !== record) {
+        return;
+      }
       connection.subscriptions.delete(subscriptionId);
       this.sendStream(connection, {
         type: "stream_subscription_rejected",
@@ -639,6 +642,9 @@ export class TerminalRuntimeGatewayServer {
       }
       record.pump = this.pumpWorkspaceSubscription(connection, message.subscriptionId, record);
     } catch (error) {
+      if (connection.subscriptions.get(message.subscriptionId) !== record) {
+        return;
+      }
       connection.subscriptions.delete(message.subscriptionId);
       this.sendWorkspaceStream(connection, {
         type: "workspace_subscription_rejected",

@@ -851,6 +851,102 @@ test("gateway closes late workspace subscriptions after unsubscribe races", loop
   }
 });
 
+test("gateway suppresses late legacy subscribe rejection after unsubscribe races", loopbackTestOptions, async () => {
+  const watchStarted = createDeferred();
+  const releaseFailure = createDeferred();
+  const runtime = createRuntime({
+    watchSessionState: async () => {
+      watchStarted.resolve();
+      await releaseFailure.promise;
+      throw new Error("late legacy subscribe failure");
+    },
+  });
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(runtime),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(runtime),
+  });
+
+  const streamClient = createStreamClient(gateway.sessionStreamUrl);
+  try {
+    await streamClient.connect();
+
+    streamClient.send({
+      type: "stream_subscribe_session_state",
+      subscriptionId: "legacy-sub-late-failure",
+      sessionId: "session-1",
+    });
+    await watchStarted.promise;
+
+    streamClient.send({
+      type: "stream_unsubscribe_session_state",
+      subscriptionId: "legacy-sub-late-failure",
+      sessionId: "session-1",
+    });
+    const closed = await streamClient.waitForEvent((event) => event.type === "subscription_closed");
+    assert.equal(closed.subscriptionId, "legacy-sub-late-failure");
+
+    releaseFailure.resolve();
+    await waitForNoEvent(streamClient, (event) => event.type === "stream_subscription_rejected");
+  } finally {
+    await Promise.all([
+      closeSocketIfOpen(streamClient.socket),
+      gateway.dispose(),
+    ]);
+  }
+});
+
+test("gateway suppresses late workspace subscribe rejection after unsubscribe races", loopbackTestOptions, async () => {
+  const openStarted = createDeferred();
+  const releaseFailure = createDeferred();
+  const sdkClient = {
+    ...createSdkClient(),
+    openSubscription: async () => {
+      openStarted.resolve();
+      await releaseFailure.promise;
+      throw new Error("late workspace subscribe failure");
+    },
+  };
+  const gateway = await TerminalRuntimeGatewayServer.start({
+    runtimeSlug: "terminal-demo",
+    controlService: new TerminalRuntimeControlService(createRuntime()),
+    sessionStreamService: new TerminalRuntimeSessionStreamService(createRuntime()),
+    clientProvider: {
+      getClient: async () => sdkClient,
+    },
+  });
+
+  const streamClient = createStreamClient(gateway.sessionStreamUrl);
+  try {
+    await streamClient.connect();
+
+    streamClient.send({
+      type: "workspace_subscribe",
+      subscriptionId: "workspace-sub-late-failure",
+      sessionId: "session-1",
+      spec: {
+        kind: "session_topology",
+      },
+    });
+    await openStarted.promise;
+
+    streamClient.send({
+      type: "workspace_unsubscribe",
+      subscriptionId: "workspace-sub-late-failure",
+    });
+    const closed = await streamClient.waitForEvent((event) => event.type === "workspace_subscription_closed");
+    assert.equal(closed.subscriptionId, "workspace-sub-late-failure");
+
+    releaseFailure.resolve();
+    await waitForNoEvent(streamClient, (event) => event.type === "workspace_subscription_rejected");
+  } finally {
+    await Promise.all([
+      closeSocketIfOpen(streamClient.socket),
+      gateway.dispose(),
+    ]);
+  }
+});
+
 test("gateway dispose settles legacy session subscriptions when runtime dispose hangs", loopbackTestOptions, async () => {
   const handle = createHangingLegacySessionStateHandle();
   const runtime = createRuntime({
@@ -1137,14 +1233,24 @@ function createHangingLegacySessionStateHandle() {
 
 function createDeferred() {
   let resolve;
-  const promise = new Promise((innerResolve) => {
+  let reject;
+  const promise = new Promise((innerResolve, innerReject) => {
     resolve = innerResolve;
+    reject = innerReject;
   });
 
   return {
     promise,
     resolve,
+    reject,
   };
+}
+
+async function waitForNoEvent(client, predicate, timeoutMs = 75) {
+  const initialCount = client.events.length;
+  await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+  const newEvents = client.events.slice(initialCount);
+  assert.equal(newEvents.some(predicate), false);
 }
 
 async function waitForCondition(predicate, timeoutMs = 1000) {
