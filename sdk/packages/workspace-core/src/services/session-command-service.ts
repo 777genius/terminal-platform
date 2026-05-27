@@ -242,6 +242,7 @@ export class SessionCommandService {
           return false;
         }
 
+        let pageApplied = false;
         this.#context.updateSnapshot((current) => {
           const currentHistory = current.historicalPanes?.[targetPaneId];
           if (
@@ -253,6 +254,7 @@ export class SessionCommandService {
             return current;
           }
 
+          pageApplied = true;
           return {
             ...current,
             historicalPanes: {
@@ -262,7 +264,7 @@ export class SessionCommandService {
           };
         });
 
-        return true;
+        return pageApplied;
       } catch (error) {
         this.#context.recordDiagnostic({
           code: "pane_history_page_load_failed",
