@@ -301,6 +301,35 @@ test("session stream dispose ignores websocket close failures", async () => {
   }
 });
 
+test("session stream rejects pending subscriptions on malformed websocket messages", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = createOpenMalformedMessageSessionStreamWebSocket();
+  const adapter = new WebSocketTerminalRuntimeSessionStateStream("ws://127.0.0.1/terminal-gateway/stream");
+  const receivedErrors = [];
+
+  try {
+    await assert.rejects(
+      Promise.race([
+        adapter.subscribeSessionState("session-1", {
+          onState: () => {},
+          onError: (error) => {
+            receivedErrors.push(error.message);
+          },
+        }),
+        delay(500).then(() => {
+          throw new Error("session stream subscription did not settle after malformed message");
+        }),
+      ]),
+      /Terminal session stream protocol error/,
+    );
+    assert.equal(receivedErrors.length, 1);
+    assert.match(receivedErrors[0], /Terminal session stream protocol error/);
+  } finally {
+    adapter.dispose();
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
 async function reserveLoopbackPort() {
   const server = createServer();
   server.listen(0, "127.0.0.1");
@@ -553,6 +582,54 @@ function createIgnoringUnsubscribeWebSocket() {
 
     close() {
       this.readyState = IgnoringUnsubscribeWebSocket.CLOSED;
+      this.#emit("close", { type: "close" });
+    }
+
+    #emit(type, event) {
+      for (const listener of this.#listeners.get(type) ?? []) {
+        listener.call(this, event);
+      }
+    }
+  };
+}
+
+function createOpenMalformedMessageSessionStreamWebSocket() {
+  return class OpenMalformedMessageSessionStreamWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    readyState = OpenMalformedMessageSessionStreamWebSocket.CONNECTING;
+    #listeners = new Map();
+
+    constructor() {
+      queueMicrotask(() => {
+        this.readyState = OpenMalformedMessageSessionStreamWebSocket.OPEN;
+        this.#emit("open", { type: "open" });
+      });
+    }
+
+    addEventListener(type, listener) {
+      const bucket = this.#listeners.get(type) ?? new Set();
+      bucket.add(listener);
+      this.#listeners.set(type, bucket);
+    }
+
+    removeEventListener(type, listener) {
+      this.#listeners.get(type)?.delete(listener);
+    }
+
+    send(payload) {
+      const message = JSON.parse(payload);
+      if (message.type === "stream_subscribe_session_state") {
+        queueMicrotask(() => {
+          this.#emit("message", { data: "{not json" });
+        });
+      }
+    }
+
+    close() {
+      this.readyState = OpenMalformedMessageSessionStreamWebSocket.CLOSED;
       this.#emit("close", { type: "close" });
     }
 

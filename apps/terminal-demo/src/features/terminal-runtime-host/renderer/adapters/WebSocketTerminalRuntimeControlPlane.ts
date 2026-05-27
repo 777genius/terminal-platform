@@ -202,7 +202,11 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
       socket.addEventListener("open", onOpen, { once: true });
       socket.addEventListener("error", onError, { once: true });
       socket.addEventListener("message", (event) => {
-        this.handleMessage(event.data.toString());
+        try {
+          this.handleMessage(event.data.toString());
+        } catch (error) {
+          this.handleProtocolError(socket, error);
+        }
       });
       socket.addEventListener("close", () => {
         const isCurrentSocket = this.#socket === socket;
@@ -240,6 +244,18 @@ export class WebSocketTerminalRuntimeControlPlane implements TerminalWorkspaceCo
     }
 
     request.resolve(message.result as TerminalGatewayControlRequestMap[typeof request.method]["response"]);
+  }
+
+  private handleProtocolError(socket: WebSocket, error: unknown): void {
+    if (this.#socket !== socket) {
+      return;
+    }
+
+    this.#socket = null;
+    this.#connectPromise = null;
+    this.#rejectConnect = null;
+    this.rejectAll(new Error(`Terminal control plane protocol error - ${toError(error).message}`));
+    closeWebSocketBestEffort(socket);
   }
 
   private rejectAll(error: Error): void {

@@ -231,7 +231,11 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
       socket.addEventListener("open", onOpen, { once: true });
       socket.addEventListener("error", onError, { once: true });
       socket.addEventListener("message", (event) => {
-        this.handleMessage(event.data.toString());
+        try {
+          this.handleMessage(event.data.toString());
+        } catch (error) {
+          this.handleProtocolError(socket, error);
+        }
       });
       socket.addEventListener("close", () => {
         const isCurrentSocket = this.#socket === socket;
@@ -375,6 +379,32 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
       default:
         assertNever(message);
     }
+  }
+
+  private handleProtocolError(socket: WebSocket, error: unknown): void {
+    if (this.#socket !== socket) {
+      return;
+    }
+
+    this.#socket = null;
+    this.#connectPromise = null;
+    this.#rejectConnect = null;
+    const protocolError = new Error(
+      `Terminal session stream protocol error - ${toError(error).message}`,
+    );
+    for (const record of [...this.#subscriptions.values()]) {
+      this.notifyStatusChange(record, {
+        phase: "error",
+        reconnectAttempts: 0,
+        lastError: protocolError.message,
+      });
+      record.onError?.(protocolError);
+      this.finalizeSubscription(record, {
+        notifyClosed: false,
+        rejectPendingWith: protocolError,
+      });
+    }
+    closeWebSocketBestEffort(socket);
   }
 
   private finalizeSubscription(
