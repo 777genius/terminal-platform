@@ -234,6 +234,7 @@ export class SessionCommandService {
             sourceSessionId: existingHistory.sourceSessionId,
             sourcePaneId: existingHistory.sourcePaneId,
           },
+          allowEmptyPage: true,
           includeSnapshotFallback: false,
         });
 
@@ -914,6 +915,7 @@ interface HydratedHistoricalPaneIdentity {
 
 interface BuildHydratedHistoricalPaneOptions {
   readonly identity?: HydratedHistoricalPaneIdentity;
+  readonly allowEmptyPage?: boolean;
   readonly includeSnapshotFallback?: boolean;
 }
 
@@ -967,6 +969,8 @@ function buildRestoredHistoricalPanes(
       nextEventSeq: null,
       segmentCount: 0,
       loadedPayloadBytes: 0n,
+      streamStartsWithLineBreak: true,
+      streamEndsWithLineBreak: true,
     };
   }
 
@@ -978,7 +982,8 @@ function buildHydratedHistoricalPane(
   loadedAtMs: number,
   options: BuildHydratedHistoricalPaneOptions = {},
 ): WorkspaceHistoricalPaneSnapshot | null {
-  const segmentLines = linesFromHistorySegments(history.segments);
+  const segmentText = linesFromHistorySegments(history.segments);
+  const segmentLines = segmentText.lines;
   const includeSnapshotFallback = options.includeSnapshotFallback ?? true;
   const gapLines = history.gaps.map((gap) => {
     const eventRange = gap.event_seq_low && gap.event_seq_high
@@ -1000,14 +1005,17 @@ function buildHydratedHistoricalPane(
     ...gapLines,
   ]);
 
-  if (lines.length === 0 && !history.has_more_segments) {
+  if (lines.length === 0 && !history.has_more_segments && options.allowEmptyPage !== true) {
     return null;
   }
 
   const latestSegment = history.segments.at(-1);
+  const snapshotCapturedAtMs = useSnapshotFallback
+    ? history.latest_screen_snapshot?.created_at_ms
+    : undefined;
   const capturedAtMs =
     latestSegment?.created_at_ms
-    ?? history.latest_screen_snapshot?.created_at_ms
+    ?? snapshotCapturedAtMs
     ?? BigInt(Math.trunc(loadedAtMs));
   const identity = options.identity ?? {
     sessionId: history.session_id,
@@ -1032,6 +1040,10 @@ function buildHydratedHistoricalPane(
     nextEventSeq: history.next_event_seq,
     segmentCount: history.segments.length,
     loadedPayloadBytes: history.total_payload_bytes,
+    streamStartsWithLineBreak: segmentText.startsWithLineBreak ?? true,
+    streamEndsWithLineBreak: gapLines.length > 0 || useSnapshotFallback
+      ? true
+      : (segmentText.endsWithLineBreak ?? true),
   };
 }
 
@@ -1044,7 +1056,7 @@ function mergeHistoricalPanePage(
     source: nextPage.source,
     replayStrategy: nextPage.replayStrategy,
     restoreGuaranteeLevel: nextPage.restoreGuaranteeLevel,
-    lines: normalizeHistoryLines([...existing.lines, ...nextPage.lines]),
+    lines: mergeHistoricalPaneLines(existing, nextPage),
     capturedAtMs: nextPage.capturedAtMs > existing.capturedAtMs
       ? nextPage.capturedAtMs
       : existing.capturedAtMs,
@@ -1053,17 +1065,56 @@ function mergeHistoricalPanePage(
     nextEventSeq: nextPage.nextEventSeq,
     segmentCount: existing.segmentCount + nextPage.segmentCount,
     loadedPayloadBytes: existing.loadedPayloadBytes + nextPage.loadedPayloadBytes,
+    streamStartsWithLineBreak: existing.streamStartsWithLineBreak ?? true,
+    streamEndsWithLineBreak: nextPage.streamEndsWithLineBreak ?? true,
   };
 }
 
-function linesFromHistorySegments(segments: PaneHistory["segments"]): string[] {
+function mergeHistoricalPaneLines(
+  existing: WorkspaceHistoricalPaneSnapshot,
+  nextPage: WorkspaceHistoricalPaneSnapshot,
+): string[] {
+  if (
+    existing.streamEndsWithLineBreak !== false
+    || existing.lines.length === 0
+    || nextPage.lines.length === 0
+  ) {
+    return normalizeHistoryLines([...existing.lines, ...nextPage.lines]);
+  }
+
+  const existingPrefix = existing.lines.slice(0, -1);
+  const existingLastLine = existing.lines[existing.lines.length - 1] ?? "";
+  const [nextFirstLine = "", ...nextRestLines] = nextPage.lines;
+  if (nextPage.streamStartsWithLineBreak === true) {
+    const nextLines = nextFirstLine === "" ? nextRestLines : nextPage.lines;
+    return normalizeHistoryLines([...existingPrefix, existingLastLine, ...nextLines]);
+  }
+
+  return normalizeHistoryLines([
+    ...existingPrefix,
+    `${existingLastLine}${nextFirstLine}`,
+    ...nextRestLines,
+  ]);
+}
+
+interface HistorySegmentText {
+  readonly lines: string[];
+  readonly startsWithLineBreak?: boolean;
+  readonly endsWithLineBreak?: boolean;
+}
+
+function linesFromHistorySegments(segments: PaneHistory["segments"]): HistorySegmentText {
   if (segments.length === 0) {
-    return [];
+    return { lines: [] };
   }
 
   const bytes = segments.flatMap((segment) => segment.payload);
   const text = sanitizeTerminalHistoryText(new TextDecoder().decode(Uint8Array.from(bytes)));
-  return normalizeHistoryLines(text.split("\n"));
+  return {
+    lines: normalizeHistoryLines(text.split("\n")),
+    startsWithLineBreak: text.startsWith("\n"),
+    endsWithLineBreak: text.endsWith("\n"),
+  };
 }
 
 function linesFromScreenSnapshotJson(screenJson: string): string[] {

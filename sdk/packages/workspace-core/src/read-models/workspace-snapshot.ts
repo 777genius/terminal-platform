@@ -89,6 +89,8 @@ export interface WorkspaceHistoricalPaneSnapshot {
   nextEventSeq: bigint | null;
   segmentCount: number;
   loadedPayloadBytes: bigint;
+  streamStartsWithLineBreak?: boolean;
+  streamEndsWithLineBreak?: boolean;
 }
 
 export interface WorkspaceSnapshot {

@@ -542,6 +542,7 @@ describe("createWorkspaceKernel live session subscriptions", () => {
 
     expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
       lines: [],
+      capturedAtMs: 7_600n,
       hasMoreSegments: true,
       nextEventSeq: 2n,
     });
@@ -555,6 +556,108 @@ describe("createWorkspaceKernel live session subscriptions", () => {
       nextEventSeq: null,
     });
     expect(kernel.getSnapshot().historicalPanes?.[paneId]?.lines).not.toContain("latest snapshot fallback");
+
+    await kernel.dispose();
+  });
+
+  it("keeps pane history paging stable across stream line boundaries", async () => {
+    const sessionId = "history-session-line-boundary";
+    const paneId = "history-pane-line-boundary";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
+    const subscription = new TestWorkspaceSubscription("history-line-boundary-subscription");
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async (_sessionId, _paneId, options) => {
+          if (options?.fromEventSeq === 2n) {
+            return createPaneHistory(sessionId, paneId, " line\r\nnext\r\n", {
+              fromEventSeq: 2n,
+              eventSeqLow: 2n,
+              eventSeqHigh: 2n,
+              hasMoreSegments: false,
+              nextEventSeq: null,
+              segmentId: "segment-2",
+            });
+          }
+
+          return createPaneHistory(sessionId, paneId, "partial", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: true,
+            nextEventSeq: 2n,
+            segmentId: "segment-1",
+          });
+        },
+      } as WorkspaceTransportClient,
+      now: () => 7_700,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["partial line", "next"],
+      hasMoreSegments: false,
+      nextEventSeq: null,
+      segmentCount: 2,
+    });
+
+    await kernel.dispose();
+  });
+
+  it("closes pane history cursor when the final page has no visible lines", async () => {
+    const sessionId = "history-session-empty-final";
+    const paneId = "history-pane-empty-final";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
+    const subscription = new TestWorkspaceSubscription("history-empty-final-subscription");
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async (_sessionId, _paneId, options) => {
+          if (options?.fromEventSeq === 2n) {
+            return createPaneHistory(sessionId, paneId, "\x1B[?25l", {
+              fromEventSeq: 2n,
+              eventSeqLow: 2n,
+              eventSeqHigh: 2n,
+              hasMoreSegments: false,
+              nextEventSeq: null,
+              segmentId: "segment-2",
+            });
+          }
+
+          return createPaneHistory(sessionId, paneId, "first page\r\n", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: true,
+            nextEventSeq: 2n,
+            segmentId: "segment-1",
+          });
+        },
+      } as WorkspaceTransportClient,
+      now: () => 7_800,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["first page"],
+      hasMoreSegments: false,
+      nextEventSeq: null,
+      segmentCount: 2,
+    });
 
     await kernel.dispose();
   });
