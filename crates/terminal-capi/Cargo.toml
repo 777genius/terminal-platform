@@ -21,7 +21,7 @@ terminal-node = { path = "../terminal-node" }
 terminal-protocol = { path = "../terminal-protocol" }
 
 [dev-dependencies]
-cbindgen = "0.29.2"
+cbindgen = "0.29.3"
 terminal-daemon = { path = "../terminal-daemon", default-features = false }
 terminal-daemon-client = { path = "../terminal-daemon-client" }
 terminal-testing = { path = "../terminal-testing", default-features = false }
