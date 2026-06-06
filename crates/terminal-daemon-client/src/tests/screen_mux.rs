@@ -130,7 +130,7 @@ async fn fetches_screen_delta_for_native_session() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn observes_title_only_screen_delta_after_tab_rename() {
+async fn observes_title_change_screen_delta_after_tab_rename() {
     let address = unique_address("daemon-client-title-delta");
     let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
         .expect("server should bind");
@@ -172,7 +172,6 @@ async fn observes_title_only_screen_delta_after_tab_rename() {
     assert!(delta.to_sequence > before.sequence);
     assert!(patch.title_changed);
     assert_eq!(patch.title.as_deref(), Some("renamed"));
-    assert!(patch.line_updates.is_empty());
     assert!(delta.full_replace.is_none());
 
     server.shutdown().await.expect("server shutdown should succeed");

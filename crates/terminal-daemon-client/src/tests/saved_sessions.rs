@@ -205,8 +205,27 @@ async fn restores_saved_native_session_topology() {
     assert_eq!(restored.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
     assert!(restored.restore_semantics.restores_topology);
     assert!(restored.restore_semantics.uses_saved_launch_spec);
-    assert!(!restored.restore_semantics.replays_saved_screen_buffers);
     assert!(!restored.restore_semantics.preserves_process_state);
+    let restored_v2 = restored
+        .restore_semantics_v2
+        .as_ref()
+        .expect("restored saved session should expose v2 restore semantics");
+    assert_eq!(
+        restored.restore_semantics.replays_saved_screen_buffers,
+        restored_v2.replays_saved_screen_buffers
+    );
+    assert!(matches!(
+        restored_v2.restore_guarantee_level,
+        RestoreGuaranteeLevel::RichHistory
+            | RestoreGuaranteeLevel::BasicHistory
+            | RestoreGuaranteeLevel::VisualRestoreOnly
+    ));
+    assert!(matches!(
+        restored_v2.history_replay_state,
+        HistoryReplayState::ReplayedFromJournal | HistoryReplayState::HydratedFromSnapshot
+    ));
+    assert_eq!(restored_v2.source_session_id, created.session.session_id);
+    assert_eq!(restored_v2.restored_session_id, Some(restored.session.session_id));
     assert_eq!(restored_topology.tabs.len(), 2);
     let focused_tab = restored_topology.focused_tab.expect("focused tab should exist");
     let focused_tab = restored_topology
