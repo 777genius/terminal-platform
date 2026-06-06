@@ -12,7 +12,7 @@ rust-version = "1.90"
 alacritty_terminal = "0.26.0"
 blake3 = "1.8.5"
 bytes = "1.11.1"
-diesel = { version = "2.3.8", default-features = false, features = ["sqlite", "returning_clauses_for_sqlite_3_35", "32-column-tables"] }
+diesel = { version = "2.3.10", default-features = false, features = ["sqlite", "returning_clauses_for_sqlite_3_35", "32-column-tables"] }
 diesel_migrations = { version = "2.3.2", default-features = false, features = ["sqlite"] }
 directories = "6.0.0"
 futures-util = { version = "0.3.32", features = ["sink"] }

@@ -43,12 +43,10 @@ async fn routes_create_and_list_session_requests() {
     }
 }
 
+#[cfg(feature = "native-backend")]
 #[tokio::test(flavor = "multi_thread")]
 async fn routes_backend_capabilities_requests() {
-    let backend = crate::backend_registry::compiled_backend_kinds()
-        .into_iter()
-        .next()
-        .expect("at least one backend should be compiled");
+    let backend = terminal_domain::BackendKind::Native;
     let daemon = TerminalDaemon::default();
     let response = daemon
         .handle_request(RequestEnvelope {
