@@ -4,8 +4,10 @@ const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 5000;
-const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 45000 : 5000;
+const DEFAULT_EVENT_TIMEOUT_MS =
+  process.platform === "win32" ? 45000 : process.platform === "darwin" ? 15000 : 5000;
+const DEFAULT_HOST_TIMEOUT_MS =
+  process.platform === "win32" ? 45000 : process.platform === "darwin" ? 15000 : 5000;
 const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 450 : 50;
 const INTERACTIVE_PROBE_INTERVAL = process.platform === "win32" ? 20 : 10;
 const ZELLIJ_COMMAND_TIMEOUT_MS = process.platform === "win32" ? 10000 : 5000;
@@ -1913,10 +1915,15 @@ async function runElectronBridgeRepeatedWatchCyclesSmoke(createClient, sdk) {
     const marker = `electron bridge repeat ${cycle}`;
     const abortController = new AbortController();
     let observedMatchingState = false;
+    let resolveInitialState;
+    const initialStatePromise = new Promise((resolve) => {
+      resolveInitialState = resolve;
+    });
 
     const watchPromise = rendererClient.watchSessionState(created.session_id, {
       signal: abortController.signal,
       onState: async (state) => {
+        resolveInitialState();
         const expectedPaneId = focusedPaneIdFromTopology(state.topology);
         assert.equal(
           expectedPaneId ? state.focusedScreen?.pane_id === expectedPaneId : true,
@@ -1933,6 +1940,11 @@ async function runElectronBridgeRepeatedWatchCyclesSmoke(createClient, sdk) {
       },
     });
 
+    await withTimeout(
+      initialStatePromise,
+      DEFAULT_HOST_TIMEOUT_MS,
+      `Timed out waiting for Electron bridge initial watch state cycle ${cycle}`,
+    );
     await rendererClient.dispatchMuxCommand(created.session_id, {
       kind: "send_input",
       pane_id: paneId,
@@ -2174,8 +2186,12 @@ async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {
 
   for (let cycle = 0; cycle < 4; cycle += 1) {
     const marker = `electron preload repeat ${cycle}`;
+    let resolveInitialState;
     let resolveState;
     let rejectState;
+    const initialStatePromise = new Promise((resolve) => {
+      resolveInitialState = resolve;
+    });
     const statePromise = new Promise((resolve, reject) => {
       resolveState = resolve;
       rejectState = reject;
@@ -2183,6 +2199,7 @@ async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {
     const subscriptionId = await preloadApi.subscribeSessionState(
       created.session_id,
       async (state) => {
+        resolveInitialState();
         const expectedPaneId = focusedPaneIdFromTopology(state.topology);
         assert.equal(
           expectedPaneId ? state.focusedScreen?.pane_id === expectedPaneId : true,
@@ -2201,6 +2218,11 @@ async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {
       },
     );
 
+    await withTimeout(
+      initialStatePromise,
+      DEFAULT_HOST_TIMEOUT_MS,
+      `Timed out waiting for Electron preload initial watch state cycle ${cycle}`,
+    );
     await preloadApi.dispatchMuxCommand(created.session_id, {
       kind: "send_input",
       pane_id: paneId,

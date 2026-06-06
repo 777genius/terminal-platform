@@ -1655,7 +1655,7 @@ dependencies = [
 
 [[package]]
 name = "terminal-node"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "terminal-backend-api",
@@ -1673,7 +1673,7 @@ dependencies = [
 
 [[package]]
 name = "terminal-node-napi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "napi",
  "napi-build",
@@ -1719,7 +1719,7 @@ dependencies = [
 
 [[package]]
 name = "terminal-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "interprocess",
