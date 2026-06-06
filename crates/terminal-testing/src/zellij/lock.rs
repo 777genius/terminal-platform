@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(windows)]
 use std::process::Command;
 
 #[cfg(windows)]

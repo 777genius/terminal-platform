@@ -152,8 +152,8 @@ mod tests {
     fn executor_serializes_jobs_and_supports_transactions() {
         let path = std::env::temp_dir()
             .join(format!("terminal-persistence-executor-{}.sqlite3", Uuid::new_v4()));
-        let executor =
-            PersistenceExecutor::start(&path, TerminalPersistenceV2Config::test()).unwrap();
+        let executor = PersistenceExecutor::start(&path, TerminalPersistenceV2Config::test())
+            .expect("test persistence executor should start");
 
         executor
             .immediate_transaction(|connection| {
@@ -165,16 +165,16 @@ mod tests {
                     .execute(connection)?;
                 Ok(())
             })
-            .unwrap();
+            .expect("executor transaction should create and seed probe table");
 
-        let value = executor.execute(|| Ok(41_i64)).unwrap();
+        let value = executor.execute(|| Ok(41_i64)).expect("executor should return job result");
         let count = executor
             .immediate_transaction(|connection| {
                 let row = sql_query("SELECT COUNT(*) AS count FROM executor_probe")
                     .get_result::<CountRow>(connection)?;
                 Ok(row.count)
             })
-            .unwrap();
+            .expect("executor transaction should read probe row count");
 
         assert_eq!(value, 41);
         assert_eq!(count, 1);
@@ -186,8 +186,8 @@ mod tests {
     fn executor_reuses_worker_connection_for_connection_jobs() {
         let path = std::env::temp_dir()
             .join(format!("terminal-persistence-executor-{}.sqlite3", Uuid::new_v4()));
-        let executor =
-            PersistenceExecutor::start(&path, TerminalPersistenceV2Config::test()).unwrap();
+        let executor = PersistenceExecutor::start(&path, TerminalPersistenceV2Config::test())
+            .expect("test persistence executor should start");
 
         executor
             .execute_with_connection(|connection| {
@@ -197,7 +197,7 @@ mod tests {
                     .execute(connection)?;
                 Ok(())
             })
-            .unwrap();
+            .expect("worker connection should create and seed temp probe table");
 
         let count = executor
             .execute_with_connection(|connection| {
@@ -205,7 +205,7 @@ mod tests {
                     .get_result::<CountRow>(connection)?;
                 Ok(row.count)
             })
-            .unwrap();
+            .expect("worker connection should retain temp probe table");
 
         assert_eq!(count, 1);
         drop(executor);

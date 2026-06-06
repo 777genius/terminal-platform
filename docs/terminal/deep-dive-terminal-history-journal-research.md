@@ -1,6 +1,6 @@
 # Deep Dive - Terminal History, Session Journal, Restore
 
-**Проверено**: 2026-04-29  
+**Проверено**: 2026-04-29
 **Фокус**: как лучшие терминалы сохраняют команды, вывод, scrollback, сессии и процессное состояние
 
 ## Короткий вывод
@@ -20,716 +20,716 @@
 
 После второго раунда ресерча вывод стал жестче:
 
-1. **Нужно строить не "history", а `Terminal Persistence v2`**  
+1. **Нужно строить не "history", а `Terminal Persistence v2`**
    История команд, output, scrollback, session restore, zellij/tmux attach и AI-context - это разные read models поверх одного durable journal. Если смешать их в один JSON/blob, архитектура быстро станет хрупкой.
 
-2. **Command Block - это продуктовая сущность, а не renderer decoration**  
+2. **Command Block - это продуктовая сущность, а не renderer decoration**
    Warp и JetBrains явно идут к block-structured terminal. JetBrains даже exposes `TerminalCommandBlock` в embedded terminal API. Значит command block надо хранить в БД и отдавать через runtime API, а не вычислять на фронте из текста.
 
-3. **Shell integration - обязательный слой качества, но не источник полной истины**  
+3. **Shell integration - обязательный слой качества, но не источник полной истины**
    `OSC 633`/`OSC 133` дают границы команд, cwd и exit code, но markers может напечатать любая программа внутри терминала. Поэтому нужен `trust/integration_quality`, nonce, spoofing tests и fallback режимы.
 
-4. **Полный output-history лучше хранить как segmented journal, а не row-per-line**  
+4. **Полный output-history лучше хранить как segmented journal, а не row-per-line**
    xterm/terminal stream не line-based: есть overwrite, cursor moves, alt-screen, resize, partial UTF-8, progress redraw. Значит durable stream должен быть chunk/segment-based с sequence ranges.
 
-5. **Snapshots нужны для speed, journal нужен для correctness**  
+5. **Snapshots нужны для speed, journal нужен для correctness**
    xterm.js serialize/addon-style snapshot полезен для быстрой hydration, но сам по себе не дает command boundaries, semantic search, raw replay и точную историю output.
 
-6. **Raw input нельзя включать по умолчанию**  
+6. **Raw input нельзя включать по умолчанию**
    `script(1)` и xterm.js security docs подтверждают: terminal input легко содержит passwords/tokens, а web terminal вообще проводит keystrokes через JS. По умолчанию пишем command text из trusted sources, а не все keypress.
 
-7. **SQLite подходит, но только с writer discipline**  
+7. **SQLite подходит, но только с writer discipline**
    SQLite WAL хорош для local-first history, но нужен single writer, batching, checkpoint policy, backup через SQLite API, и контроль WAL growth. Нельзя просто "включить WAL и забыть".
 
-8. **Zellij/tmux - отдельная ветка semantics**  
+8. **Zellij/tmux - отдельная ветка semantics**
    Native restore восстанавливает историю, но не живой процесс. Zellij/tmux могут сохранить живой процесс при attach, но raw outer PTY stream уже не равен одному shell transcript.
 
-9. **Нельзя обещать "никогда не потеряется" без policy**  
+9. **Нельзя обещать "никогда не потеряется" без policy**
    Реально надежная формулировка: сохраняем максимально полно в рамках quota/retention/private policy, показываем degraded state при сбое записи, делаем crash-safe batching и recoverable partial journal.
 
-10. **Windows должен быть first-class path, не afterthought**  
+10. **Windows должен быть first-class path, не afterthought**
     PowerShell/PSReadLine/cmd.exe/ConPTY/OSC 9;9 имеют свои ограничения. Нужно проектировать markers, cwd, history и restore сразу под Windows, иначе история будет "почти работает".
 
 ## Сводка v3 - что добавил третий проход
 
-1. **Audit/session recording системы подтверждают journal-first подход**  
+1. **Audit/session recording системы подтверждают journal-first подход**
    `tlog` и Apache Guacamole пишут terminal I/O как запись с replay, timing и отдельным storage. Это ближе к нашей цели "ничего не терять", чем обычная shell history.
 
-2. **Запись должна быть replayable при другой UI-среде**  
+2. **Запись должна быть replayable при другой UI-среде**
    Guacamole и tlog отделяют запись от playback UI. Значит наш journal должен уметь проигрываться не только в текущем React/xterm view, но и в debug/export/player режиме.
 
-3. **Размер терминала является частью записи**  
+3. **Размер терминала является частью записи**
    tlog playback прямо указывает на важность matching terminal size; asciinema/Guacamole тоже хранят resize/timing. Значит rows/cols/resize - не метаданные, а обязательные events.
 
-4. **Shell history policies надо уважать**  
+4. **Shell history policies надо уважать**
    Bash `HISTCONTROL=ignorespace`, fish private mode, Nushell history isolation, PSReadLine history settings - это user privacy intent. Наша persistence не должна молча обходить эти правила.
 
-5. **Terminal escape sequences - активный контент**  
+5. **Terminal escape sequences - активный контент**
    OSC 8 hyperlinks, OSC 52 clipboard, window/title controls, bracketed paste, alt buffer - это не "текст". Restored replay должен отключать side effects и маркировать restored content.
 
-6. **Recording feedback loop - реальная грабля**  
+6. **Recording feedback loop - реальная грабля**
    Red Hat tlog docs описывают loop, когда просмотр логов генерирует новые логи, которые снова записываются. Для нашего history viewer нельзя писать replay/export обратно в active journal.
 
-7. **Storage должен иметь maintenance API**  
+7. **Storage должен иметь maintenance API**
    Нужны DB backup через SQLite API, integrity diagnostics, WAL checkpoints, compaction/vacuum policy и recovery из частично поврежденных segments.
 
-8. **Достоверность command output должна быть доказуемой sequence ranges**  
+8. **Достоверность command output должна быть доказуемой sequence ranges**
    "Этот output принадлежит этой команде" должно опираться на stream sequence/event boundary, а не на позицию в scrollback.
 
 ## Сводка v4 - что добавил четвертый проход
 
-1. **Есть два разных продукта: recording и restore**  
+1. **Есть два разных продукта: recording и restore**
    Recording должен воспроизводить terminal session как historical artifact. Restore должен вернуть пользователя в рабочий контекст. Эти цели похожи, но не одинаковы: recording допускает player, restore требует live boundary и process semantics.
 
-2. **Emulator state persistence не заменяет transcript**  
+2. **Emulator state persistence не заменяет transcript**
    VTE/xterm.js/WezTerm-style state snapshot сохраняет screen/cursor/modes, но не говорит "какая команда это создала" и не всегда сохраняет raw provenance. Transcript journal нужен отдельно.
 
-3. **Line rewrap ломает naive text history**  
+3. **Line rewrap ломает naive text history**
    GNOME/VTE и terminal emulators могут rewrap старые строки при resize. Если search/index строить по visible wrapped lines, результаты меняются от размера окна. Search index должен строиться из parser-derived logical text chunks, с recorded cols как контекстом.
 
-4. **"Unlimited scrollback" не равен durable history**  
+4. **"Unlimited scrollback" не равен durable history**
    GNOME Terminal разрешает unlimited scrollback, но предупреждает, что большой буфер замедляет resize. Это UI buffer, не надежный DB journal.
 
-5. **GNU screen подтверждает старый паттерн: scrollback/log/hardcopy разные команды**  
+5. **GNU screen подтверждает старый паттерн: scrollback/log/hardcopy разные команды**
    Scrollback, logging и hardcopy решают разные задачи. У нас тоже должны быть разные действия: view history, record journal, export transcript.
 
-6. **Full-text search надо проектировать как derived index**  
+6. **Full-text search надо проектировать как derived index**
    SQLite FTS5 подходит для searchable transcript, но FTS index не должен становиться source of truth. Source of truth - raw segments + events + snapshots.
 
-7. **Encryption at rest - отдельное решение, не бесплатная настройка SQLite**  
+7. **Encryption at rest - отдельное решение, не бесплатная настройка SQLite**
    Обычный SQLite не шифрует БД. SEE/SQLCipher существуют, но добавляют dependency/build/key-management риски. Поэтому redaction/private mode нужны уже сейчас, даже до encryption.
 
-8. **Deletion без compaction не всегда значит "данные физически исчезли"**  
+8. **Deletion без compaction не всегда значит "данные физически исчезли"**
    Для sensitive transcripts нужно отдельно проектировать secure delete expectations, VACUUM/compaction policy и backups. Просто `DELETE FROM` недостаточно для приватности на уровне диска.
 
 ## Сводка v5 - что добавил пятый проход
 
-1. **sudo/sudoreplay подтверждает split между event logs и session recordings**  
+1. **sudo/sudoreplay подтверждает split между event logs и session recordings**
    Sudo отдельно развивает structured logs, sub-command logging и full I/O session recordings. Это ровно наш split: command blocks/searchable events для навигации и raw transcript для replay.
 
-2. **Password redaction нельзя откладывать**  
+2. **Password redaction нельзя откладывать**
    Sudo 1.9.10 добавил hiding passwords in session recordings. Значит даже mature audit systems признают: raw I/O recording без redaction опасен.
 
-3. **Unicode width - часть replay correctness**  
+3. **Unicode width - часть replay correctness**
    CJK, emoji, variation selectors и ambiguous-width characters ломают cursor position и wrapping. В journal/snapshot metadata нужно хранить Unicode/cell-width policy или хотя бы parser/render version.
 
-4. **Terminal output может содержать media, а не только text**  
+4. **Terminal output может содержать media, а не только text**
    iTerm2 inline images, Kitty graphics protocol, Sixel и WezTerm imgcat показывают, что "вывод команды" может быть binary/media protocol. Поэтому output segment нельзя моделировать как plain UTF-8 lines.
 
-5. **Paste is not typing**  
+5. **Paste is not typing**
    Bracketed paste mode отделяет pasted text от typed input. Command capture и raw input policy должны хранить source: typed, pasted, UI submit, programmatic paste.
 
-6. **Replay должен быть mode-aware и side-effect-safe**  
+6. **Replay должен быть mode-aware и side-effect-safe**
    Historical replay не должен менять clipboard, открывать links, скачивать файлы, рисовать images без user action или менять window state.
 
-7. **Нужен tamper-evident option**  
+7. **Нужен tamper-evident option**
    Для обычного developer history хватит checksum на segments. Для audit/compliance режима нужен hash chain или signed segments, чтобы detect-ить изменение transcript.
 
-8. **"Чистый transcript" и "точный transcript" конфликтуют**  
+8. **"Чистый transcript" и "точный transcript" конфликтуют**
    Чистый markdown/plain text удобен пользователю, но теряет control sequences, colors, cursor movement и media. Точный raw replay неудобен для чтения. Надо хранить оба как разные read models.
 
 ## Сводка v6 - что добавил шестой проход
 
-1. **Input protocol тоже должен быть версионирован**  
+1. **Input protocol тоже должен быть версионирован**
    Kitty keyboard protocol, xterm `modifyOtherKeys`, CSI-u и WezTerm key encoding показывают: "какую клавишу нажали" не всегда равно bytes, которые ушли в PTY. Для replay/debug нужно хранить source и encoding policy.
 
-2. **Mouse reporting - terminal input, не UI interaction**  
+2. **Mouse reporting - terminal input, не UI interaction**
    Full-screen apps получают mouse events как escape sequences. История должна отличать user mouse reporting внутри terminal от кликов по нашей UI.
 
-3. **Parser conformance надо тестировать отдельно**  
+3. **Parser conformance надо тестировать отдельно**
    vttest, libtsm и alacritty/vte показывают, что terminal parser - отдельная сложная система. Restore/replay нельзя считать надежным без fixtures и conformance tests.
 
-4. **PowerShell Start-Transcript не заменяет наш journal**  
+4. **PowerShell Start-Transcript не заменяет наш journal**
    Start-Transcript пишет input/output PowerShell session в текстовый файл, но это shell-level transcript, не terminal-level raw replay, не layout/session store и не zellij/native unified history.
 
-5. **Export из terminal UI уже существует, но это не restore**  
+5. **Export из terminal UI уже существует, но это не restore**
    GNOME Terminal умеет save contents. Это полезный UX, но это text export из tab/window, а не durable semantic journal.
 
-6. **Accessibility выигрывает от command blocks**  
+6. **Accessibility выигрывает от command blocks**
    VS Code использует shell integration и accessible terminal commands для навигации между командами. Значит command blocks должны быть доступны screen reader и keyboard navigation, не только визуальные cards.
 
-7. **Нужен terminal capability profile**  
+7. **Нужен terminal capability profile**
    `TERM`, terminfo, keyboard protocol, shell integration, ConPTY/mux mode, Unicode version, graphics support - все это влияет на то, насколько replay/search/blocks точны.
 
-8. **Replay tests должны быть golden-file based**  
+8. **Replay tests должны быть golden-file based**
    Для raw bytes + resize + snapshots нужны golden fixtures: input stream, expected screen, expected command blocks, expected search text.
 
 ## Сводка v7 - что добавил седьмой проход
 
-1. **PTY/ConPTY boundary - это hard boundary правды**  
+1. **PTY/ConPTY boundary - это hard boundary правды**
    Unix PTY и Windows ConPTY дают byte-stream boundary между terminal host и process. То, что выше этого уровня, может быть UI metadata; то, что ниже - shell/app semantics. История должна явно хранить, на каком уровне событие поймано.
 
-2. **termios ECHO/ICANON важнее эвристик пароля**  
+2. **termios ECHO/ICANON важнее эвристик пароля**
    На Unix shells/apps могут выключать ECHO для password input. Если мы видим termios state, это лучший signal для raw input redaction. На Windows/ConPTY такого простого универсального signal может не быть.
 
-3. **pam_tty_audit подтверждает риск keystroke logging**  
+3. **pam_tty_audit подтверждает риск keystroke logging**
    Linux audit может писать TTY keystrokes, но даже системные docs выделяют password logging как отдельную опасную опцию. Это еще раз подтверждает: raw input off by default.
 
-4. **Mosh показывает альтернативу raw byte replay: state synchronization**  
+4. **Mosh показывает альтернативу raw byte replay: state synchronization**
    Mosh не просто пересылает byte stream; он синхронизирует terminal state. Для нашей restore-системы это важный паттерн: journal нужен для истории, а state snapshots нужны для fast convergence.
 
-5. **dtach показывает минимальный detach без screen history**  
+5. **dtach показывает минимальный detach без screen history**
    dtach позволяет reattach process, но не хранит screen contents. Значит live process persistence и visual/history persistence - независимые features.
 
-6. **Eternal Terminal/reconnect tools не решают transcript**  
+6. **Eternal Terminal/reconnect tools не решают transcript**
    Они удерживают remote session при network drop, но не дают полноценную local command/output history model, search, block semantics или redaction.
 
-7. **Нужно хранить capture layer**  
+7. **Нужно хранить capture layer**
    Событие может быть поймано из UI submit, shell marker, PTY bytes, projection delta, mux pane API, audit layer. Без поля `capture_layer` нельзя оценить надежность.
 
-8. **Process persistence надо описывать как matrix**  
+8. **Process persistence надо описывать как matrix**
    `native child process`, `daemon-managed native`, `zellij/tmux attach`, `mosh-like remote`, `dtach-like detach` имеют разные гарантии. Один bool `preserves_process_state` слишком груб для UI.
 
 ## Сводка v8 - что добавил восьмой проход
 
-1. **tmux control mode лучше screen scraping для mux integration**  
+1. **tmux control mode лучше screen scraping для mux integration**
    iTerm2 использует tmux control mode, чтобы показывать tmux panes как native UI. Это важный паттерн: если mux дает structured API/control mode, лучше использовать его, чем парсить внешний raw terminal stream.
 
-2. **Escape passthrough внутри tmux/zellij не гарантирован**  
+2. **Escape passthrough внутри tmux/zellij не гарантирован**
    OSC 7/52/133/633, images, user vars и shell integration markers могут быть swallowed, wrapped, changed or blocked mux-слоем. Поэтому shell integration quality должна быть per pane and per mux.
 
-3. **OSC 7 cwd - это URI, не просто path**  
+3. **OSC 7 cwd - это URI, не просто path**
    WezTerm/iTerm2 используют current working directory tracking. Это может включать host/path, remote context и sensitive directory names. CWD events требуют parsing, redaction and trust.
 
-4. **Zellij structured APIs дают лучший путь для pane output**  
+4. **Zellij structured APIs дают лучший путь для pane output**
    Zellij features include pane output streaming, JSON list-panes/list-tabs/current-tab-info, remote sessions and read-only tokens. Для zellij backend правильнее читать pane-level state/output, чем внешний raw mux stream.
 
-5. **Multi-client sessions ломают простую модель viewport**  
+5. **Multi-client sessions ломают простую модель viewport**
    tmux/zellij/remote sessions могут иметь несколько clients с разным размером, read-only viewers, browser viewers. Надо различать pane content, client viewport и local UI viewport.
 
-6. **Clipboard side effects are per-client, not global history**  
+6. **Clipboard side effects are per-client, not global history**
    OSC 52 через tmux/zellij/remote session может скопировать в clipboard конкретного клиента. Это не "output history" и не должно replay-иться глобально.
 
-7. **Remote/session sharing требует access model**  
+7. **Remote/session sharing требует access model**
    Read-only viewers и pair-programming mode должны иметь отдельную запись: кто видел историю, кто вводил команды, кто мог копировать output.
 
-8. **Mux-level restore может быть лучше native, но хуже semantic**  
+8. **Mux-level restore может быть лучше native, но хуже semantic**
    zellij/tmux могут сохранить live process, но могут скрыть shell markers. Native может дать лучший raw PTY transcript, но хуже process persistence. Это tradeoff, не линейная шкала.
 
 ## Сводка v9 - что добавил девятый проход
 
-1. **Terminal history is event sourcing with projections**  
+1. **Terminal history is event sourcing with projections**
    Azure Event Sourcing pattern и Fowler подтверждают: append-only events - source of truth, snapshots/projections - read models. Это точно совпадает с нашей моделью: raw stream/events - truth, screen/search/blocks - projections.
 
-2. **Проекции должны быть пересобираемыми**  
+2. **Проекции должны быть пересобираемыми**
    Search chunks, command blocks, screen snapshots and AI context views могут стать stale после parser/redaction/schema upgrade. Поэтому каждая проекция должна иметь version and rebuild path.
 
-3. **Tamper-evident audit - не просто checksum**  
+3. **Tamper-evident audit - не просто checksum**
    AWS CloudTrail digest files и Sigstore/Rekor показывают pattern: digest/hash chain plus signed checkpoints/transparency. Для developer mode хватит checksum, для strict/audit - hash chain + signed checkpoint.
 
-4. **ANSI/Unicode output can be hostile log content**  
+4. **ANSI/Unicode output can be hostile log content**
    OWASP injection guidance, CWE control-sequence injection и Unicode UTR36/UTS39 показывают: logs/transcripts are untrusted data. History viewer должен sanitize display, mark bidi/confusables and avoid terminal side effects.
 
-5. **Log lifecycle is a product requirement**  
+5. **Log lifecycle is a product requirement**
    NIST SP 800-92 описывает generation, transmission, storage, analysis and disposal of logs. Значит retention/deletion/backup/integrity are not polish. Это core.
 
-6. **Replay must be deterministic enough to debug**  
+6. **Replay must be deterministic enough to debug**
    Для forensic mode нужно хранить parser version, environment profile, resize stream, event schema version and redaction version. Иначе "replay не совпадает" невозможно объяснить.
 
-7. **Schema evolution is unavoidable**  
+7. **Schema evolution is unavoidable**
    Terminal history will live longer than parser/schema releases. Нужны migrations, event versioning, upcasters and derived view rebuilders.
 
-8. **Viewer safety is separate from recording safety**  
+8. **Viewer safety is separate from recording safety**
    Даже если запись raw output корректна, просмотр этой записи может быть опасен из-за ANSI/OSC/Unicode deception. Viewer должен быть inert/sanitizing by design.
 
 ## Сводка v10 - что добавил десятый проход
 
-1. **REPL/subshells are command domains**  
+1. **REPL/subshells are command domains**
    Python/IPython/Node/psql and other REPLs have their own history, prompts and execution lifecycle. A shell-level command block like `python` or `psql` does not explain inner commands. Нужно моделировать nested command domains.
 
-2. **Application history is not terminal history**  
+2. **Application history is not terminal history**
    IPython stores history in SQLite, Node REPL has persistent history, psql stores history, Python readline can save history. These are useful signals/import sources, but they do not include terminal output, resize, panes, shell integration trust, or replay.
 
-3. **Structured event schema should borrow from OpenTelemetry**  
+3. **Structured event schema should borrow from OpenTelemetry**
    OpenTelemetry logs use timestamps, observed timestamps, event names, attributes, trace/span correlation and semantic conventions. Terminal journal events need similar structure: event_name, attributes, resource/session/pane identity, correlation IDs.
 
-4. **Process creation audit can enrich, not replace, command blocks**  
+4. **Process creation audit can enrich, not replace, command blocks**
    Windows Event 4688 and Sysmon process creation capture process command lines, but miss shell built-ins, aliases, functions and REPL commands. Process audit is optional correlation, not terminal truth.
 
-5. **Large output storage needs BLOB strategy**  
+5. **Large output storage needs BLOB strategy**
    SQLite documents internal vs external BLOB tradeoffs and incremental BLOB I/O. Stream segments should have bounded size; huge media/log artifacts may need external content-addressed blobs later.
 
-6. **Output chunks need content addressing and dedupe option**  
+6. **Output chunks need content addressing and dedupe option**
    Repeated media/images or huge generated logs should not bloat DB blindly. Hash-addressed artifacts with DB metadata are more scalable for cold/large data.
 
-7. **Command identity should be correlation-based**  
+7. **Command identity should be correlation-based**
    A command block should have correlation IDs that connect UI submit, shell markers, process creation, output segments, snapshots, search chunks, and export artifacts.
 
-8. **Nested domain fidelity must be honest**  
+8. **Nested domain fidelity must be honest**
    Shell command blocks can be high-fidelity while inner REPL commands are unknown unless app integration exists. UI should show "inside Python REPL - terminal transcript only" rather than fake command blocks.
 
 ## Сводка v11 - что добавил одиннадцатый проход
 
-1. **SQLite can be corrupted by operational mistakes, not just bugs**  
+1. **SQLite can be corrupted by operational mistakes, not just bugs**
    SQLite docs explicitly list corruption causes: broken filesystem locks, network filesystems, renaming/unlinking DB files while open, backup mistakes, file descriptor reuse, and external writes. History storage must have operational rules, not just schema.
 
-2. **Recovery is a required feature, not disaster folklore**  
+2. **Recovery is a required feature, not disaster folklore**
    SQLite has recovery guidance. Our history DB should support partial recovery: quarantine bad segments, rebuild projections, recover intact sessions, and report what was lost.
 
-3. **Secret redaction must be multi-stage**  
+3. **Secret redaction must be multi-stage**
    OWASP Logging and GitHub secret scanning show both static patterns and policy exclusions. Terminal output is worse than app logs: secrets can appear in commands, output, cwd, env, URLs, screenshots, media and exports.
 
-4. **Redaction findings are data, not only transformations**  
+4. **Redaction findings are data, not only transformations**
    We need records of what was redacted, where, with what rule/profile/version, without storing the secret itself. This makes re-redaction and user deletion explainable.
 
-5. **Backups must be history-aware**  
+5. **Backups must be history-aware**
    WAL, external artifact store, search indexes, snapshots and deletion tombstones mean backup is a transaction across multiple storage surfaces. Simple file copy is not reliable enough.
 
-6. **Storage health should be visible in UI and tests**  
+6. **Storage health should be visible in UI and tests**
    Users need to know when history is no longer guaranteed. Tests need disk-full/DB-locked/corruption/recovery scenarios. Storage health is part of product behavior.
 
-7. **Network/cloud folders are dangerous default locations**  
+7. **Network/cloud folders are dangerous default locations**
    SQLite warns about unreliable locking on network filesystems. Project/workspace history DB should prefer local app data, not OneDrive/Dropbox/SMB/NFS folders unless explicitly configured and tested.
 
-8. **Secret scanning has false positives and false negatives**  
+8. **Secret scanning has false positives and false negatives**
    Redaction cannot be perfect. UI and policy must acknowledge `redacted`, `possibly_sensitive`, `not_scanned`, `scan_failed`, not pretend all history is safe.
 
 ## Сводка v12 - что добавил двенадцатый проход
 
-1. **SQLite PRAGMA choices are product semantics**  
+1. **SQLite PRAGMA choices are product semantics**
    `journal_mode=WAL`, `synchronous=NORMAL/FULL`, `busy_timeout`, `foreign_keys`, `wal_autocheckpoint`, `journal_size_limit` are not tuning trivia. They define durability, lock behavior, checkpoint cost and corruption risk.
 
-2. **Writer transactions should be explicit**  
+2. **Writer transactions should be explicit**
    SQLite `BEGIN DEFERRED/IMMEDIATE/EXCLUSIVE` matters. For a single history writer, `BEGIN IMMEDIATE` can fail early on writer contention instead of failing mid-batch. This makes degraded state easier to reason about.
 
-3. **Durability should be profile-based**  
+3. **Durability should be profile-based**
    Developer mode may choose WAL + `synchronous=NORMAL` for performance with visible best-effort semantics. Strict/audit mode should prefer stronger durability and be honest about latency.
 
-4. **Diesel migrations are deployable, but need discipline**  
+4. **Diesel migrations are deployable, but need discipline**
    `embed_migrations!` lets us ship migrations inside the binary, but docs note proc-macro limitations around rerunning when migration files change. Build/test must explicitly depend on migration files and verify DB schema.
 
-5. **Compression must preserve random access**  
+5. **Compression must preserve random access**
    Zstd is strong for terminal logs, but the standard zstd frame format is not random-access by itself. Segment-level compression or seekable-frame design is safer than compressing one giant stream.
 
-6. **Batch boundaries are data-model boundaries**  
+6. **Batch boundaries are data-model boundaries**
    Compression, checksums, redaction, pruning and replay all operate on segments. Segment size/time thresholds must be stable enough for performance and small enough for recovery.
 
-7. **Foreign keys and cascading deletes need tests**  
+7. **Foreign keys and cascading deletes need tests**
    SQLite needs `PRAGMA foreign_keys=ON` per connection. If we rely on cascades for deleting sessions/history/artifacts, tests must prove it on every connection path.
 
-8. **Maintenance is a runtime service**  
+8. **Maintenance is a runtime service**
    `PRAGMA optimize`, WAL checkpoints, integrity checks, projection rebuilds, artifact GC and retention pruning should be scheduled and observable, not manually run in emergencies.
 
 ## Сводка v13 - что добавил тринадцатый проход
 
-1. **OS storage/key APIs define the safe default**  
+1. **OS storage/key APIs define the safe default**
    Windows DPAPI/Credential Manager, Known Folders and XDG Base Directory spec show: history DB, keys and transient cache should live in different OS-appropriate places. Нельзя класть encrypted DB key рядом с самой DB как plain text.
 
-2. **History writer needs SLI/SLO, not only unit tests**  
+2. **History writer needs SLI/SLO, not only unit tests**
    SRE/OTel metrics guidance applies: writer lag, dropped segments, failed commits, checkpoint latency, WAL size, recovery success and redaction failures must be measurable. Иначе "история надежная" невозможно доказать.
 
-3. **Backpressure exists at every layer**  
+3. **Backpressure exists at every layer**
    PTY output, WebSocket bufferedAmount, browser render queue, SQLite writer queue and compression job all can backlog. Нужно явно хранить queue depth/dropped/degraded state.
 
-4. **Fuzzing is mandatory for terminal parser/replay**  
+4. **Fuzzing is mandatory for terminal parser/replay**
    cargo-fuzz/libFuzzer and proptest are a good Rust fit. Terminal parser takes hostile byte streams by design, so fuzz tests should target parser, journal segment decoder, redaction, replay and export sanitizer.
 
-5. **Property tests should encode invariants**  
+5. **Property tests should encode invariants**
    Examples: append+replay is deterministic, projections rebuild from raw, delete removes raw+derived, redaction never increases secret exposure, sequence ranges remain monotonic.
 
-6. **DPAPI/OS keychain is not equal to encrypted history**  
+6. **DPAPI/OS keychain is not equal to encrypted history**
    DPAPI can protect encryption keys/secrets; SQLCipher or app-level encryption protects DB contents. These are different layers.
 
-7. **Cache/state/data separation matters**  
+7. **Cache/state/data separation matters**
    Durable session history belongs to state/data, derived search cache can be rebuildable, exports belong to user-selected locations, runtime sockets/temp files belong to runtime/cache.
 
-8. **Testing needs chaos scenarios**  
+8. **Testing needs chaos scenarios**
    Disk full, DB locked, crash mid-segment, corrupt artifact, stale projection, bad Unicode, malicious ANSI, WebSocket disconnect, zellij/tmux passthrough failure and Windows ConPTY resize must be tested as first-class scenarios.
 
-9. **Serialize projection is a fast restore path, not the source of truth**  
+9. **Serialize projection is a fast restore path, not the source of truth**
    xterm.js serialize-style buffer export is useful for quick viewport/scrollback hydration after reconnect. Но canonical truth все равно должен быть server-side journal + snapshots, иначе нельзя доказать completeness, redaction and audit integrity.
 
-10. **Backpressure must be end-to-end**  
+10. **Backpressure must be end-to-end**
     Browser WebSocket, gateway queue, Rust channel, DB writer batch and projection cache each need bounded queues and visible health metrics. Если хотя бы один слой "безлимитный", он станет скрытым местом потери истории или memory blowup.
 
 ## Сводка v14 - что добавил четырнадцатый проход
 
-1. **asciicast v3 confirms append-friendly export semantics**  
+1. **asciicast v3 confirms append-friendly export semantics**
    v3 keeps NDJSON-style header + event stream, adds exit events and clearer terminal metadata. Для нас это хороший внешний формат экспорта/импорта, но не внутренняя модель DB: internal journal can be richer.
 
-2. **Event envelope should be standardized**  
+2. **Event envelope should be standardized**
    CloudEvents and W3C Trace Context show a mature shape for event identity/correlation: `id`, `source`, `type`, `time`, schema/version, trace/span-like IDs. Terminal events need similar envelope, not ad-hoc blobs.
 
-3. **SQLite hardening is a separate persistence task**  
+3. **SQLite hardening is a separate persistence task**
    `SQLITE_DBCONFIG_DEFENSIVE`, `TRUSTED_SCHEMA=OFF`, STRICT tables and runtime limits matter because terminal history stores hostile text and potentially imported DB/export files. Durable history must be typed and resource-bounded.
 
-4. **Search/index inputs must be resource-limited**  
+4. **Search/index inputs must be resource-limited**
    SQLite limits docs explicitly recommend lower limits for attacker-influenced data. Terminal search queries, import files and huge output chunks should have caps, otherwise one paste/import can create local DoS.
 
-5. **Windows command identity is not argv identity**  
+5. **Windows command identity is not argv identity**
    PowerShell parsing modes, `$PSNativeCommandArgumentPassing` and `CommandLineToArgvW` show that stored command text, displayed command, rerun command and argv are different things on Windows. Rerun must preserve shell/domain context.
 
-6. **Backup/PITR is not session restore**  
+6. **Backup/PITR is not session restore**
    SQLite Session Extension and Litestream-like WAL replication are useful future patterns for sync/backup/point-in-time restore, but they do not replace terminal command/output journal semantics.
 
-7. **External artifacts need authenticated chunk encryption**  
+7. **External artifacts need authenticated chunk encryption**
    For large artifact files outside DB, libsodium secretstream-style AEAD is a better pattern than unauthenticated encryption: it detects truncation, reorder, modification and supports chunked streams.
 
-8. **Export/import needs schema validation**  
+8. **Export/import needs schema validation**
    JSON Schema 2020-12 and RFC 7464 JSON Text Sequences provide a robust pattern: every exported event stream should declare schema version, validate each event, and ignore/forward unknown compatible fields intentionally.
 
 ## Сводка v15 - что добавил пятнадцатый проход
 
-1. **Secure deletion is not one SQL statement**  
+1. **Secure deletion is not one SQL statement**
    `DELETE` removes logical rows, but sensitive bytes can remain in free pages, WAL, backups, temp files, exports and derived indexes. Нужно проектировать deletion workflow: tombstone, purge, rebuild derived layers, checkpoint, compaction and backup retention.
 
-2. **Temporary files are part of the threat model**  
+2. **Temporary files are part of the threat model**
    SQLite temp files, export bundles, decoded images and debug archives can hold terminal secrets. Temp/cache paths need the same OS storage policy, quotas and cleanup as the main DB.
 
-3. **Key material needs lifecycle, not just storage**  
+3. **Key material needs lifecycle, not just storage**
    `keyring`, `secrecy` and `zeroize` show the shape: keys/tokens should live in OS stores, secret access should be explicit, debug output should redact, and memory cleanup should be best-effort with documented limits.
 
-4. **Accessibility must model terminal history as a log, not a bitmap**  
+4. **Accessibility must model terminal history as a log, not a bitmap**
    WCAG status messages and ARIA live regions imply that history restore/degraded state/search results/output changes must be programmatically announced. Command blocks give an accessible timeline; canvas-only terminal output does not.
 
-5. **Keyboard escape from terminal focus is product-critical**  
+5. **Keyboard escape from terminal focus is product-critical**
    Web terminal panes can trap focus because the terminal wants all keys. WCAG no-keyboard-trap guidance means we need documented keyboard exits, focus rings and command/history navigation outside raw terminal mode.
 
-6. **Terminal media and file-transfer protocols are active artifacts**  
+6. **Terminal media and file-transfer protocols are active artifacts**
    iTerm2 OSC 1337 file transfer/images, SIXEL and Kitty graphics can carry large or sensitive binary payloads. They need size caps, quarantine, lazy decode, safe preview and redaction/export policy.
 
-7. **Retention policy should be explainable to users**  
+7. **Retention policy should be explainable to users**
    ICO/NIST privacy guidance reinforces: retention periods must be justified and reviewable. For terminal history this means per-session policy, private mode, bookmarked exceptions, backup retention and deletion audit.
 
-8. **Metrics should be actionable, not decorative**  
+8. **Metrics should be actionable, not decorative**
    Prometheus histogram guidance is useful for writer latency, replay latency, checkpoint duration and redaction/export duration. Buckets must answer product questions: "is history being durably saved fast enough?"
 
 ## Сводка v16 - что добавил шестнадцатый проход
 
-1. **Search needs a migration path, not one fixed engine**  
+1. **Search needs a migration path, not one fixed engine**
    SQLite FTS5 is the right local-first baseline, especially with external/contentless-delete patterns and trigram search. Но для very large histories Rust-native Tantivy can become a future cold/global search projection. Search index must stay derived either way.
 
-2. **Background work should be transactional**  
+2. **Background work should be transactional**
    Projection rebuilds, redaction scans, artifact GC, export preparation, sync checkpoints and compaction should be durable jobs/outbox rows committed with the DB state that requires them. In-memory `tokio::spawn` is not enough for history reliability.
 
-3. **CRDTs are for collaborative metadata, not raw terminal truth**  
+3. **CRDTs are for collaborative metadata, not raw terminal truth**
    Automerge/Yjs are useful patterns for concurrent bookmarks, annotations, layout notes or shared command docs. Raw terminal output should remain append-only event journal; CRDT delete/undo semantics do not map cleanly to privacy deletion and forensic transcript.
 
-4. **Time model needs wall time and monotonic time**  
+4. **Time model needs wall time and monotonic time**
    W3C High Resolution Time and Rust `Instant` docs show why durations should use monotonic clocks, while user-visible timestamps need wall-clock time. Journal events need both or replay/debug timing becomes unreliable under clock skew.
 
-5. **AI/RAG context is another export surface**  
+5. **AI/RAG context is another export surface**
    OWASP LLM Top 10 highlights prompt injection and sensitive disclosure. Terminal history attached to AI must be redacted, provenance-preserving, trust-scored, bounded and treated as untrusted data, not blindly pasted context.
 
-6. **DB file identity should be explicit**  
+6. **DB file identity should be explicit**
    SQLite `application_id` and `user_version` are small but useful file-format guardrails. History DB should identify itself, schema version and compatibility before migrations/import/recovery touch user data.
 
-7. **Job queues have library options, but core semantics should be ours**  
+7. **Job queues have library options, but core semantics should be ours**
    `apalis-sqlite` shows a current Rust SQLite-backed job queue with heartbeat/orphan re-enqueueing. We can borrow the pattern, but the first version should keep persistence jobs in our own Diesel schema to avoid coupling history correctness to an RC dependency.
 
-8. **AI-ready command history should cite exact ranges**  
+8. **AI-ready command history should cite exact ranges**
    If AI receives command/output, it should get session/pane/block IDs, stream sequence ranges, redaction state and trust level. Otherwise answers become impossible to audit and prompt-injection boundaries blur.
 
 ## Сводка v17 - что добавил семнадцатый проход
 
-1. **Windows process lifecycle needs Job Objects and console-control semantics**  
+1. **Windows process lifecycle needs Job Objects and console-control semantics**
    Windows does not behave like Unix process groups. Job Objects, `AssignProcessToJobObject`, `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `GenerateConsoleCtrlEvent` and ConPTY close semantics must be first-class if native Windows sessions should stop/restart reliably.
 
-2. **Backup consistency has levels**  
+2. **Backup consistency has levels**
    SQLite Online Backup API, snapshot isolation, sqlite3 snapshot API and Windows VSS all solve different consistency scopes. App-level history backup should prefer SQLite backup/export APIs; VSS is OS-level snapshot help, not semantic session restore.
 
-3. **File watchers are hints, not integrity proof**  
+3. **File watchers are hints, not integrity proof**
    `notify`, ReadDirectoryChangesW and inotify can detect changes to artifact directories, but watchers can drop/duplicate/coalesce events. Integrity still requires DB manifest, checksums and periodic scan.
 
-4. **Content addressing is useful for artifacts, but privacy deletion becomes harder**  
+4. **Content addressing is useful for artifacts, but privacy deletion becomes harder**
    IPFS/CID and BLAKE3 patterns show how immutable content-addressed blobs can make artifact integrity and dedupe strong. But if secret-containing blobs are content-addressed, deletion/GC/backup retention must be designed carefully.
 
-5. **Process checkpointing is not the baseline product**  
+5. **Process checkpointing is not the baseline product**
    CRIU proves real process checkpoint/restore is possible in some Linux contexts, but it is privileged/platform-specific and not a Windows/native-terminal baseline. Our honest baseline remains: restore history/context, not arbitrary live process memory.
 
-6. **Modern terminals are moving toward durable blocks and session protection**  
+6. **Modern terminals are moving toward durable blocks and session protection**
    Wave Durable Sessions explicitly preserves terminal history across reconnects and ties it to terminal blocks. WindTerm/iTerm2/Termius show users expect session restore, but mobile/background/sync limits force honest semantics.
 
-7. **OTel semantic events help avoid naming chaos**  
+7. **OTel semantic events help avoid naming chaos**
    OpenTelemetry event semantic convention guidance says event names and attributes must be documented. Terminal events should have stable names like `terminal.output.segment`, `command.started`, `history.redaction.applied`, not random per-feature strings.
 
-8. **AI terminal environments are adversarial**  
+8. **AI terminal environments are adversarial**
    Recent terminal-agent benchmark/reward-hacking work reinforces the same rule: terminal output/history passed to AI must be treated as untrusted, provenance-tagged content. The history layer should not become an invisible prompt-injection amplifier.
 
 ## Сводка v18 - что добавил восемнадцатый проход
 
-1. **WebSocket is transport, not delivery guarantee**  
+1. **WebSocket is transport, not delivery guarantee**
    RFC 6455 gives frames, ping/pong and close behavior, but missed terminal updates after reconnect need application-level sequence numbers, offsets, acknowledgements and replay. Socket.IO docs explicitly say extra delivery guarantees must be implemented at app level.
 
-2. **Client restore needs server-side replay window**  
+2. **Client restore needs server-side replay window**
    Connection-state recovery patterns store session ID, last processed offset and missed packets for a bounded duration. Terminal stream clients need the same: per pane stream seq, last client ack, replay from DB/window, and degraded state if gap cannot be filled.
 
-3. **Offline buffers can create reconnect storms**  
+3. **Offline buffers can create reconnect storms**
    Socket.IO offline behavior warns about buffered client events creating a spike on reconnect. Terminal UI should rate-limit queued input/actions after reconnect and never replay stale user input blindly.
 
-4. **Remote/SSH/WSL are separate execution domains**  
+4. **Remote/SSH/WSL are separate execution domains**
    VS Code Remote SSH, WezTerm SSH domains, OpenSSH ControlMaster and WSL docs show: local Windows path, WSL path, remote path, ssh-mux domain and shell integration quality are different. History must store execution domain and path translation policy.
 
-5. **WSL path/interop policy affects command provenance**  
+5. **WSL path/interop policy affects command provenance**
    WSL can run Windows `.exe`, translate env vars via `WSLENV`, append Windows PATH and work across Linux/Windows filesystems with different performance/case rules. A command block must know whether it was native Windows, WSL Linux, Win32-from-WSL or WSL-from-Win32.
 
-6. **Feature flags are required for persistence rollout**  
+6. **Feature flags are required for persistence rollout**
    Durable history changes are high-risk. OpenFeature/Fowler/LaunchDarkly/Unleash patterns suggest rollout flags, ops kill switches, migration flags and stale-flag cleanup. Persistence v2 should be progressively enabled by backend/profile/session, not flipped globally.
 
-7. **Network chaos tests should be explicit**  
+7. **Network chaos tests should be explicit**
    Toxiproxy and `tc netem` provide repeatable latency, reset, timeout, loss and bandwidth-collapse scenarios. Reconnect/history tests need these, not only happy-path Playwright.
 
-8. **Remote context privacy is bigger than cwd**  
+8. **Remote context privacy is bigger than cwd**
    Remote host, user, SSH config alias, forwarded ports, agent forwarding, proxy settings, WSL distro name and path mappings can be sensitive. They should be redacted/classified like command/output, especially in exports and AI context.
 
 ## Сводка v19 - что добавил девятнадцатый проход
 
-1. **Event payload format must be evolvable by design**  
+1. **Event payload format must be evolvable by design**
    Protobuf, FlatBuffers, CBOR and MessagePack all show the same lesson: binary formats are fine only if schema/version/unknown-field/deprecated-field rules are explicit. For terminal history, JSON is easiest for early debug, but long-term event payloads need codec registry and upcasters.
 
-2. **SQLite performance must be tested as schema contract**  
+2. **SQLite performance must be tested as schema contract**
    Partial indexes, covering indexes, `EXPLAIN QUERY PLAN`, `ANALYZE` and `PRAGMA optimize` are not optional tuning. Large history UX depends on query-plan baselines for "latest blocks", "search context", "session restore", "delete/prune" and "artifact GC".
 
-3. **Crash reports and telemetry can leak terminal secrets**  
+3. **Crash reports and telemetry can leak terminal secrets**
    OpenTelemetry sensitive-data docs, Sentry scrubbing hooks, Crashpad and Windows Error Reporting privacy docs all point to the same risk: diagnostics may contain command text, paths, tokens and memory. Crash/telemetry export needs its own redaction gate.
 
-4. **Legal hold changes deletion semantics**  
+4. **Legal hold changes deletion semantics**
    Microsoft Purview eDiscovery holds and SEC electronic recordkeeping guidance show that "delete/prune" cannot always win. Enterprise/audit mode needs legal hold/retention override states, separate from normal user deletion.
 
-5. **Quota and disk pressure are product behavior**  
+5. **Quota and disk pressure are product behavior**
    Browser storage quotas, OPFS quota behavior and Windows Storage Sense show storage can disappear or fail under pressure. History must have preflight, quota samples, soft/hard limits, backpressure and clear user warnings before data loss.
 
-6. **Telemetry context propagation is privacy-sensitive**  
+6. **Telemetry context propagation is privacy-sensitive**
    OTel Baggage can propagate arbitrary key/value context and warns that sensitive baggage may leak to unintended resources. Terminal session IDs, cwd, remote host and user identifiers must not be propagated blindly as tracing baggage.
 
-7. **Schema evolution requires old fixture corpus**  
+7. **Schema evolution requires old fixture corpus**
    Every event/schema/payload codec change needs old DB/export fixtures and upcaster tests. Otherwise future releases will silently lose history, break search or misinterpret old command blocks.
 
-8. **Enterprise mode must separate audit integrity from privacy deletion**  
+8. **Enterprise mode must separate audit integrity from privacy deletion**
    Developer mode optimizes for local privacy and cleanup. Audit/legal mode may require hold, immutable/audit-trail retention and reproducible records. The product must not pretend one policy satisfies both.
 
 ## Сводка v20 - что добавил двадцатый проход
 
-1. **Browser tab lifecycle can break live delivery assumptions**  
+1. **Browser tab lifecycle can break live delivery assumptions**
    Page Lifecycle/Visibility docs warn that hidden/frozen/discarded tabs and unreliable unload events make "send final state on close" unsafe. Browser terminal client state must be resumable from server DB, not dependent on `beforeunload`.
 
-2. **Multi-tab coordination needs explicit ownership**  
+2. **Multi-tab coordination needs explicit ownership**
    BroadcastChannel and Web Locks give browser-side coordination primitives, but they are advisory and origin-scoped. A web terminal should track active viewer/input owner per session and prevent two tabs from accidentally sending conflicting input.
 
-3. **Clipboard and OSC52 are side-effect channels**  
+3. **Clipboard and OSC52 are side-effect channels**
    Clipboard API requires secure context/permissions/user activation; OSC52 can write local clipboard from remote output. Historical replay must never trigger clipboard writes, and live OSC52 should be policy/consent-gated.
 
-4. **Container terminals are separate domains**  
+4. **Container terminals are separate domains**
    Docker `exec`, `attach`, `logs`, logging drivers and Kubernetes `exec`/TTY semantics differ. Container logs are not the same as interactive TTY transcript, and `docker attach` can send input to the main process. History must distinguish container exec/attach/logs.
 
-5. **Windows encoding/codepage is part of replay correctness**  
+5. **Windows encoding/codepage is part of replay correctness**
    Windows console code pages, PowerShell encoding differences and UTF-8/UTF-16 behavior can create mojibake in commands/output. Journal metadata needs encoding/codepage/profile data for Windows native/cmd/PowerShell sessions.
 
-6. **Sleep/resume is a durability event**  
+6. **Sleep/resume is a durability event**
    Windows `WM_POWERBROADCAST`, `SetThreadExecutionState` and systemd inhibitors show suspend/shutdown can interrupt writers and transports. History writer should flush/checkpoint on power events where possible and mark resume gaps/reconnect state.
 
-7. **Frontend storage locks are not persistence locks**  
+7. **Frontend storage locks are not persistence locks**
    Web Locks can coordinate tabs, but canonical history lock/writer ownership remains server/runtime-side. Browser locks are useful for UI leader election, not DB correctness.
 
-8. **Container/remote clipboard and file side effects need the same policy as terminal media**  
+8. **Container/remote clipboard and file side effects need the same policy as terminal media**
    Docker/Kubernetes/SSH sessions can bridge local/remote/container boundaries. Copy, paste, file transfer, hyperlinks and terminal media all need domain-aware side-effect controls.
 
 ## Сводка v21 - что добавил двадцать первый проход
 
-1. **Local gateway is a high-risk API surface**  
+1. **Local gateway is a high-risk API surface**
    A localhost WebSocket/HTTP gateway that can write to a terminal is effectively a local command-control API. It needs loopback binding, per-launch tokens, Origin validation, message authorization, rate limits and audit logs. "It is only localhost" is not a security model.
 
-2. **WebSocket handshake needs CSWSH defenses**  
+2. **WebSocket handshake needs CSWSH defenses**
    OWASP WebSocket guidance is direct: validate `Origin` during handshake, authenticate/authorize messages, validate payloads and log security violations. Terminal gateway should reject unknown origins and never rely on cookies alone.
 
-3. **Private Network Access changes local web assumptions**  
+3. **Private Network Access changes local web assumptions**
    Chrome PNA/local-network preflights show browsers are actively tightening public-to-local/private access. Our local gateway should support explicit allowed origins and PNA preflight behavior where HTTP endpoints exist, while still requiring tokens.
 
-4. **DNS rebinding and Host validation matter for local tools**  
+4. **DNS rebinding and Host validation matter for local tools**
    DNS rebinding can make an attacker-controlled origin point at `127.0.0.1`. Mitigations: bind to loopback, reject unexpected `Host`/`Origin`, require unguessable local token, avoid wildcard CORS, and do not expose unauthenticated command APIs.
 
-5. **Named pipes are not automatically safe**  
+5. **Named pipes are not automatically safe**
    Windows named pipes need explicit security descriptors/access rights. If we move local control from TCP to named pipes, we still need ACLs, client identity, impersonation policy and auditability.
 
-6. **Archive import/export is a path traversal surface**  
+6. **Archive import/export is a path traversal surface**
    Terminal debug/export bundles may contain files, artifacts and manifests. OWASP/Python zipfile warnings confirm archive extraction must normalize paths, reject absolute/parent traversal, size-limit entries and quarantine before import.
 
-7. **HTML transcript/export viewer needs sandbox and CSP**  
+7. **HTML transcript/export viewer needs sandbox and CSP**
    Terminal output can include hostile HTML-like text, links and escape-rendered content. Any HTML viewer/export must be inert by default: CSP, sandboxed iframe, no inline script, no `object/embed`, no local file access, no service-worker cache surprises.
 
-8. **Desktop wrappers have their own webview security requirements**  
+8. **Desktop wrappers have their own webview security requirements**
    Electron/Tauri docs emphasize navigation allowlists, CSP, disabled dangerous APIs and least privilege. If terminal-platform later ships desktop shell/webview, gateway tokens and webview security must be designed together, not as an afterthought.
 
 ## Сводка v22 - что добавил двадцать второй проход
 
-1. **External artifacts need real crash-safe writes**  
+1. **External artifacts need real crash-safe writes**
    Atomic rename is not enough by itself. For external artifacts/manifests, safe write means same-directory temp file, write all bytes, `fsync` file, atomic replace/rename, then `fsync` directory where supported. On Windows, open-file replacement and sharing semantics need explicit tests.
 
-2. **File locks are coordination hints, not a data model**  
+2. **File locks are coordination hints, not a data model**
    Windows `LockFileEx`, Unix `flock`/`fcntl` and Rust wrappers help prevent concurrent writers, but locks can be advisory, handle-scoped, released on process death, or behave differently on network filesystems. The DB/job state remains the source of truth.
 
-3. **Redaction rules can become a denial-of-service vector**  
+3. **Redaction rules can become a denial-of-service vector**
    OWASP ReDoS and Rust regex docs show why secret scanning/redaction should prefer linear-time engines, exact multi-pattern matching and bounded input. A single bad regex over huge terminal output can freeze history/export.
 
-4. **Redaction needs rule lifecycle and performance budgets**  
+4. **Redaction needs rule lifecycle and performance budgets**
    Rules need IDs, versions, test fixtures, match counts, runtime metrics and rollback. Secret scanning is not just a list of regexes in code.
 
-5. **Share/export authorization needs policy engine boundaries**  
+5. **Share/export authorization needs policy engine boundaries**
    OWASP Authorization, NIST ABAC, OPA and Cedar point to the same architecture: deny-by-default, server-side checks, policies over subject/object/action/environment, and tests. History share/export/rerun/delete should not be scattered `if` statements.
 
-6. **Capability tokens need attenuation and revocation**  
+6. **Capability tokens need attenuation and revocation**
    Biscuit/Macaroons/OAuth Token Exchange patterns show scoped delegated access: time bounds, caveats, audience/resource, purpose and revocation records. Sharing a session should create a narrow grant, not expose the whole history DB.
 
-7. **Policy decisions should be audited with inputs**  
+7. **Policy decisions should be audited with inputs**
    When export/delete/rerun/share is allowed or denied, store which policy version, subject, resource, action and environment attributes were evaluated. Otherwise support and audit cannot explain why sensitive history left the machine.
 
-8. **Multi-user saved sessions require object-level authorization**  
+8. **Multi-user saved sessions require object-level authorization**
    Session, pane, command block, artifact, export bundle and AI context are different resources. Permissions must be checked per object and action, not only "can open workspace".
 
 ## Сводка v23 - что добавил двадцать третий проход
 
-1. **Windows path string is not a stable artifact identity**  
+1. **Windows path string is not a stable artifact identity**
    Microsoft docs around file IDs, final paths, reparse points and file streams show that `C:\path\file` is only a name, not proof that the same object stayed inside our store. For critical artifacts we need canonical/final path, root policy, volume serial and file ID checks.
 
-2. **Artifact store must be hostile-path safe by design**  
+2. **Artifact store must be hostile-path safe by design**
    Windows reserved names, long paths, alternate data streams, trailing spaces/dots and `\\?\` namespaces can break naive export/import/storage. Export filenames must be generated/sanitized, not derived directly from command text or user output.
 
-3. **Reparse points and symlinks are a Windows sandbox escape surface**  
+3. **Reparse points and symlinks are a Windows sandbox escape surface**
    Junctions, mount points, symlinks and other reparse points can redirect operations outside the intended directory. Path validation before open is not enough; critical writes should verify after opening the handle.
 
-4. **CreateFile sharing modes are part of reliability**  
+4. **CreateFile sharing modes are part of reliability**
    Open handles can block replace/delete/rename on Windows depending on access and share mode. History artifact writes need tests for readers, antivirus/indexers, parallel export and stale process handles.
 
-5. **Filesystem watchers and USN are hints, not correctness**  
+5. **Filesystem watchers and USN are hints, not correctness**
    ReadDirectoryChanges, notify, inotify and USN change journal help detect changes, but they can miss, overflow or only say that a change happened. Source of truth remains DB manifest + verifier scan.
 
-6. **Case sensitivity is not uniform on Windows anymore**  
+6. **Case sensitivity is not uniform on Windows anymore**
    WSL and per-directory case sensitivity mean `foo` and `FOO` can collide in one place and differ in another. Artifact IDs must be normalized/generated, and display names must not become storage keys.
 
-7. **Rust path handling must keep OS strings opaque**  
+7. **Rust path handling must keep OS strings opaque**
    `PathBuf`/`OsStr` should be used for operational paths. Converting paths through UTF-8 `String` is acceptable only for display/logging with loss/escape markers, not for canonical storage identity.
 
-8. **Windows path safety needs its own test matrix**  
+8. **Windows path safety needs its own test matrix**
    Long path, reserved name, ADS, reparse point, case sensitivity, open handle sharing, antivirus-like reader and cross-volume replace should be explicit regression fixtures.
 
 ## Сводка v24 - что добавил двадцать четвертый проход
 
-1. **Exactly-once is not a transport feature, it is a product contract**  
+1. **Exactly-once is not a transport feature, it is a product contract**
    Kafka, Stripe and AWS idempotency patterns all point to the same answer: retries are normal, duplicates are normal, reconnect is normal. Reliable terminal history needs event IDs, per-stream sequence, idempotency keys, deduplication and replay windows.
 
-2. **Transactional outbox is the right boundary between journal and workers**  
+2. **Transactional outbox is the right boundary between journal and workers**
    Projection rebuilds, search indexing, export, sync and AI-context packaging should be committed as durable outbox jobs in the same DB transaction as state changes. Otherwise we get history row exists, but search/export/sync silently missed it.
 
-3. **Snapshot is a manifest over event/artifact lineage, not a copy of reality**  
+3. **Snapshot is a manifest over event/artifact lineage, not a copy of reality**
    Delta Lake, Iceberg and Hudi reinforce the pattern: snapshots are metadata pointing at immutable data files/log ranges. Terminal restore snapshots should record base seq, high-water seq, artifact refs, schema/projection versions and parent lineage.
 
-4. **Object storage is not a filesystem**  
+4. **Object storage is not a filesystem**
    S3/GCS/Azure object stores have versions, ETags, lifecycle policies, retention/legal hold and different overwrite/delete semantics. If terminal history sync later uses object storage, manifests must be immutable and version-aware.
 
-5. **Backup quality is proven only by restore drills**  
+5. **Backup quality is proven only by restore drills**
    restic, Kopia and Borg patterns emphasize content-addressed chunks, manifests/indexes, verification and pruning. A terminal history backup is not "done" until a temp restore can rebuild journal, snapshots, search and redaction state.
 
-6. **Sync conflicts must be visible branches, not silent merges**  
+6. **Sync conflicts must be visible branches, not silent merges**
    Syncthing-style conflict files and file sync tools show that conflicts are a UX feature. Terminal byte streams from two writers must not be merged as text. Divergent histories should become branch/conflict records with user-visible resolution.
 
-7. **CRDT is useful for metadata, not raw terminal transcript**  
+7. **CRDT is useful for metadata, not raw terminal transcript**
    Collaborative notes/layout/favorites can use CRDT ideas later. Raw PTY/mux streams are ordered side-effect logs; merging them like editable text creates false history.
 
-8. **Retention/deletion must understand backup and sync lineage**  
+8. **Retention/deletion must understand backup and sync lineage**
    Deleting local DB rows is not enough if chunks, object versions, exports, backups and remote manifests still reference the same transcript data. Tombstones and reachability analysis are part of privacy.
 
 ## Сводка v25 - что добавил двадцать пятый проход
 
-1. **Searchable history needs a log-storage architecture, not one FTS table**  
+1. **Searchable history needs a log-storage architecture, not one FTS table**
    Loki, ClickHouse, Elasticsearch/OpenSearch, Quickwit and OpenObserve all split ingestion, chunk/segment storage, metadata indexes, query planning and lifecycle. Terminal history should do the same: canonical journal first, searchable projections second.
 
-2. **Low-cardinality labels are the only safe indexed labels**  
+2. **Low-cardinality labels are the only safe indexed labels**
    Loki docs repeatedly warn that labels should describe source with low cardinality. For terminal history, safe labels are `backend_kind`, `execution_domain`, `shell_kind`, `exit_status_class`, `trust_level`, `workspace_id`. Unsafe labels are full command text, cwd, hostname, token, PID and every git branch.
 
-3. **Chunk catalog is the heart of scalable search**  
+3. **Chunk catalog is the heart of scalable search**
    Each terminal chunk should have min/max seq, min/max time, pane/session refs, byte ranges, checksum, compression, redaction profile, token/bloom summaries and artifact refs. Query should first choose chunks, then scan/index them.
 
-4. **Hot/warm/cold tiers fit terminal history better than one store**  
+4. **Hot/warm/cold tiers fit terminal history better than one store**
    Hot recent sessions need fast local SQLite/FTS/projection. Warm history can use compressed chunks and FTS/Tantivy. Cold history can be object-store/searchable snapshot style with slower explicit UX and query budgets.
 
-5. **Bloom/token/minmax indexes are prefilters, not answers**  
+5. **Bloom/token/minmax indexes are prefilters, not answers**
    ClickHouse and Parquet show the pattern: skipping indexes reduce reads only when query/selectivity fits. Terminal search must verify matches against real text/projection after a prefilter says "maybe".
 
-6. **Full-text index lifecycle needs merge/optimize/repair jobs**  
+6. **Full-text index lifecycle needs merge/optimize/repair jobs**
    Lucene/Tantivy/SQLite FTS5 all have segment/merge/optimize behavior. Search index health must be observable, rebuildable and versioned by tokenizer/redaction/parser profile.
 
-7. **Search authorization and redaction must happen before result display/export**  
+7. **Search authorization and redaction must happen before result display/export**
    Search indexes can duplicate sensitive text. Every search path must know whether it uses raw, redacted, contentless or derived token indexes and must re-check policy before showing snippets.
 
-8. **Query budget is a product feature**  
+8. **Query budget is a product feature**
    Long cold-history searches need timeout, scanned bytes/chunks, partial result state and "continue search" UX. Without budgets, one broad search can freeze local history or hammer object storage.
 
 ## Сводка v26 - что добавил двадцать шестой проход
 
-1. **Terminal output is indirect prompt-injection input**  
+1. **Terminal output is indirect prompt-injection input**
    OWASP, Microsoft and OpenAI all describe indirect prompt injection as hostile instructions embedded in data the agent later reads. Terminal output is exactly that: untrusted data produced by arbitrary programs, remote hosts, build logs, tests, web pages, package managers and attackers.
 
-2. **AI context must be structured, not pasted transcript text**  
+2. **AI context must be structured, not pasted transcript text**
    Command, output, exit code, cwd, trust level, redaction state and provenance ranges must be separate fields. Raw transcript pasted into a prompt loses the boundary between user intent and hostile terminal data.
 
-3. **The model should not be the security boundary**  
+3. **The model should not be the security boundary**
    Microsoft agent safety guidance and OWASP agent guidance point to the same pattern: least privilege, tool scoping, human approval, output validation and runtime monitoring. The LLM can propose, but deterministic policy must approve actions.
 
-4. **Rerun/share/delete/export from AI needs action gates**  
+4. **Rerun/share/delete/export from AI needs action gates**
    An injected line in terminal output must not be able to cause command rerun, file write, history export, share link creation or deletion. Every AI-originated action needs resource scope, policy check, user intent evidence and audit.
 
-5. **Prompt-injection detection is a risk signal, not a proof of safety**  
+5. **Prompt-injection detection is a risk signal, not a proof of safety**
    Prompt shields, classifiers, Giskard, garak and PyRIT help find and test attacks, but no filter fully solves prompt injection. Detection should downgrade trust, require confirmation or strip context, not declare content safe forever.
 
-6. **Context budgets are privacy/security controls**  
+6. **Context budgets are privacy/security controls**
    The safest AI context is minimal: only selected command blocks, redacted snippets, explicit provenance and no raw secrets. Token budget, byte budget, chunk count and sensitive findings should be visible before sending context.
 
-7. **AI red-team fixtures should be part of terminal persistence tests**  
+7. **AI red-team fixtures should be part of terminal persistence tests**
    The history layer needs fixtures where command output contains prompt injection, hidden Unicode, ANSI hyperlinks, encoded instructions, fake approval text and malicious shell suggestions. Tests should assert that action gates still block.
 
-8. **MCP/tool ecosystems add supply-chain risk**  
+8. **MCP/tool ecosystems add supply-chain risk**
    Microsoft MCP guidance highlights indirect injection and tool-change risk. Terminal history exposed through MCP/resources/tools must version schemas, pin tool permissions, audit prompts and detect tool capability drift.
 
 ## Сводка v27 - что добавил двадцать седьмой проход
 
-1. **Надежность нужно доказывать исполняемыми инвариантами**  
+1. **Надежность нужно доказывать исполняемыми инвариантами**
    SQLite, FoundationDB, TigerBeetle and Jepsen show the same pattern: critical storage systems are not validated by happy-path tests. They define invariants, inject faults, replay seeds and check resulting histories.
 
-2. **Deterministic simulation is the highest-leverage test layer**  
+2. **Deterministic simulation is the highest-leverage test layer**
    FoundationDB and TigerBeetle-style simulation suggests a path for Terminal Persistence: simulate PTY/mux output, browser reconnect, writer batching, DB errors, filesystem faults, clock jumps and power loss under one seed.
 
-3. **Fault injection belongs at every persistence boundary**  
+3. **Fault injection belongs at every persistence boundary**
    SQLite tests OOM, I/O errors and crash/power-loss cases; Chaos Mesh and Linux fault injection cover network and filesystem faults. Our writer should inject failures around `write`, `flush`, `rename`, DB commit, checkpoint, outbox claim and browser ack.
 
-4. **Formal/model checking is realistic for the small protocols**  
+4. **Formal/model checking is realistic for the small protocols**
    We do not need to model an entire terminal emulator in TLA+. But seq/ack/replay, idempotency keys, single-writer locks, outbox/inbox, snapshot lineage and deletion/tombstones are small enough for TLA+/Apalache/Stateright-style checking.
 
-5. **Concurrency testing must target the Rust async edges**  
+5. **Concurrency testing must target the Rust async edges**
    Loom/Shuttle-style schedule exploration is appropriate for the writer queue, outbox worker claim/retry, lock manager, delivery ack state and shutdown/flush races. Normal stress tests rarely find those deterministically.
 
-6. **Chaos experiments need steady-state hypotheses**  
+6. **Chaos experiments need steady-state hypotheses**
    Randomly breaking the app is weak. Each chaos run should define expected user-visible behavior: no committed journal corruption, restore indicates gap, outbox retries, no duplicate command submit, no raw data leak, recovery finishes within budget.
 
-7. **Every failure needs a replay artifact**  
+7. **Every failure needs a replay artifact**
    Failed reliability tests should store seed, schedule, fault plan, DB copy/export bundle, event trace, runtime versions and screenshot/log references. Otherwise "rare bug" remains rare.
 
-8. **Release readiness should include a persistence checklist**  
+8. **Release readiness should include a persistence checklist**
    SQLite-style release checklists are a practical pattern. Terminal persistence changes should require passing crash, fault, migration, restore, redaction, Windows path, search, AI-context and backup drill gates before release.
 
 ## Сводка v28 - что добавил двадцать восьмой проход
 
-1. **Encryption-at-rest не заменяет redaction/private mode**  
+1. **Encryption-at-rest не заменяет redaction/private mode**
    OWASP and NIST guidance is clear: encryption reduces damage after storage theft, but it does not protect data while the app is unlocked, during export, in AI context, screenshots, logs or compromised runtime. Redaction and policy remain required.
 
-2. **Нужна envelope encryption hierarchy, а не один пароль от БД**  
+2. **Нужна envelope encryption hierarchy, а не один пароль от БД**
    Best pattern: root wrapping key in OS key store or passphrase-derived key, KEKs for scopes, DEKs per database/artifact stream/search shard/export. Rotate KEK by rewrapping DEKs, not by rewriting all transcript chunks.
 
-3. **SQLCipher protects SQLite, not external artifacts by magic**  
+3. **SQLCipher protects SQLite, not external artifacts by magic**
    SQLCipher/SEE can encrypt DB pages. But compressed stream chunks, media artifacts, search shards, backups and export bundles outside SQLite need separate AEAD/secretstream encryption and authenticated manifests.
 
-4. **Associated data is part of integrity**  
+4. **Associated data is part of integrity**
    Encrypted chunks should authenticate metadata: session, pane, artifact ID, seq range, codec, schema version, redaction profile and key version. Otherwise a valid ciphertext can be replayed in the wrong context.
 
-5. **Key rotation/rekey is a crash-sensitive workflow**  
+5. **Key rotation/rekey is a crash-sensitive workflow**
    `PRAGMA rekey`, KEK rotation, DEK rewrap and export key rotation need job states, verification and rollback/quarantine. A crash during rekey must never leave "maybe encrypted, maybe lost" state.
 
-6. **Cryptographic erase is powerful only if keys are granular**  
+6. **Cryptographic erase is powerful only if keys are granular**
    NIST 800-88 supports cryptographic erase as a sanitization approach, but it only works if the target data is encrypted and the relevant key can be destroyed. One global key makes selective deletion impossible.
 
-7. **OS key stores have different guarantees and failure modes**  
+7. **OS key stores have different guarantees and failure modes**
    Windows DPAPI user vs machine scope, macOS Keychain and Linux Secret Service differ in UI prompts, headless support, roaming, backups and multi-user behavior. Terminal-platform needs a capability profile and fallback policy.
 
-8. **Recovery UX is a security architecture decision**  
+8. **Recovery UX is a security architecture decision**
    If local-only key is lost, history is unrecoverable. If recovery keys exist, they become sensitive secrets. Product must choose between local-only privacy, recovery phrase, OS keychain sync and enterprise escrow per profile.
 
 ## Источники и что забираем
@@ -2386,19 +2386,19 @@ Search should start simple, but not block future scale.
 
 Top 3 architecture options:
 
-1. SQLite derived chunks + optional FTS5.  
-   🎯 10   🛡️ 9   🧠 6  
-   Объем: примерно 500-900 строк.  
+1. SQLite derived chunks + optional FTS5.
+   🎯 10   🛡️ 9   🧠 6
+   Объем: примерно 500-900 строк.
    Best baseline: same DB, transactional rebuilds, easy delete/retention, enough for local history.
 
-2. Tantivy derived index for large/cold/global history.  
-   🎯 8   🛡️ 8   🧠 8  
-   Объем: примерно 900-1600 строк.  
+2. Tantivy derived index for large/cold/global history.
+   🎯 8   🛡️ 8   🧠 8
+   Объем: примерно 900-1600 строк.
    Strong Rust search engine, but index lifecycle, schema migrations and redaction rebuilds become separate responsibilities.
 
-3. External search service.  
-   🎯 4   🛡️ 5   🧠 9  
-   Объем: примерно 1500-3000 строк.  
+3. External search service.
+   🎯 4   🛡️ 5   🧠 9
+   Объем: примерно 1500-3000 строк.
    Too much operational surface for local-first terminal history unless product later becomes multi-user/server-side.
 
 Recommendation:
@@ -2846,19 +2846,19 @@ Durable terminal events can start as JSON, but the schema must assume future cha
 
 Top 3 payload strategies:
 
-1. JSON payloads with schema registry.  
-   🎯 9   🛡️ 8   🧠 5  
-   Объем: примерно 400-800 строк.  
+1. JSON payloads with schema registry.
+   🎯 9   🛡️ 8   🧠 5
+   Объем: примерно 400-800 строк.
    Best initial choice for debugability and migrations. Larger on disk, but compression handles much of it.
 
-2. CBOR/MessagePack payloads with explicit schema IDs.  
-   🎯 7   🛡️ 8   🧠 7  
-   Объем: примерно 700-1200 строк.  
+2. CBOR/MessagePack payloads with explicit schema IDs.
+   🎯 7   🛡️ 8   🧠 7
+   Объем: примерно 700-1200 строк.
    Smaller payloads, but debugging and schema enforcement need more tooling.
 
-3. Protobuf/FlatBuffers for stable event families.  
-   🎯 7   🛡️ 9   🧠 8  
-   Объем: примерно 1000-1800 строк.  
+3. Protobuf/FlatBuffers for stable event families.
+   🎯 7   🛡️ 9   🧠 8
+   Объем: примерно 1000-1800 строк.
    Strong evolution story if discipline is high, but early feature churn makes it easy to overfit.
 
 Recommendation:
@@ -3304,16 +3304,16 @@ background verifier checks DB manifest vs filesystem
 
 Top 3 options:
 
-1. **Keep all artifacts inside SQLite BLOBs** - 🎯 7   🛡️ 8   🧠 5  
-   Объем: примерно 600-1200 строк.  
+1. **Keep all artifacts inside SQLite BLOBs** - 🎯 7   🛡️ 8   🧠 5
+   Объем: примерно 600-1200 строк.
    Хорошо для простоты, backup consistency and transactionality. Плохо для очень больших media/chunks, streaming and incremental cold storage.
 
-2. **External artifacts with temp+fsync+atomic replace+manifest** - 🎯 9   🛡️ 9   🧠 7  
-   Объем: примерно 1200-2400 строк.  
+2. **External artifacts with temp+fsync+atomic replace+manifest** - 🎯 9   🛡️ 9   🧠 7
+   Объем: примерно 1200-2400 строк.
    Лучший базовый вариант: SQLite хранит truth/manifest, файловая система хранит тяжелые blobs. Нужно отдельно тестировать Windows replace/share semantics.
 
-3. **Content-addressed external artifacts with verifier** - 🎯 8   🛡️ 10   🧠 9  
-   Объем: примерно 2200-4200 строк.  
+3. **Content-addressed external artifacts with verifier** - 🎯 8   🛡️ 10   🧠 9
+   Объем: примерно 2200-4200 строк.
    Самый сильный вариант для масштаба: artifact path derives from hash, manifest immutable, background GC/verifier. Сложнее deletion/retention/legal hold.
 
 Рекомендация: начинать с варианта 2, но сразу проектировать manifest так, чтобы позже перейти к content-addressed storage.
@@ -3372,16 +3372,16 @@ Rules:
 
 Top 3 redaction strategies:
 
-1. **Regex-only redaction with Rust `regex`** - 🎯 7   🛡️ 7   🧠 4  
-   Объем: примерно 500-1000 строк.  
+1. **Regex-only redaction with Rust `regex`** - 🎯 7   🛡️ 7   🧠 4
+   Объем: примерно 500-1000 строк.
    Быстро начать, но слабее для provider-specific validation and exact multi-pattern scale.
 
-2. **Layered scanner: exact patterns + linear regex + validators** - 🎯 9   🛡️ 9   🧠 7  
-   Объем: примерно 1400-2800 строк.  
+2. **Layered scanner: exact patterns + linear regex + validators** - 🎯 9   🛡️ 9   🧠 7
+   Объем: примерно 1400-2800 строк.
    Лучший baseline: fast prefixes, safe regex, provider validators, rule metrics.
 
-3. **Pluggable scanning engine with hot/cold profiles** - 🎯 8   🛡️ 10   🧠 9  
-   Объем: примерно 2600-5200 строк.  
+3. **Pluggable scanning engine with hot/cold profiles** - 🎯 8   🛡️ 10   🧠 9
+   Объем: примерно 2600-5200 строк.
    Максимально масштабируемо, но для первой версии слишком много surface area.
 
 Рекомендация: вариант 2. Он достаточно мощный для терминала и не превращает redaction в отдельную платформу раньше времени.
@@ -3411,16 +3411,16 @@ Policy input should include:
 
 Top 3 policy approaches:
 
-1. **Typed Rust policy functions only** - 🎯 8   🛡️ 8   🧠 5  
-   Объем: примерно 700-1500 строк.  
+1. **Typed Rust policy functions only** - 🎯 8   🛡️ 8   🧠 5
+   Объем: примерно 700-1500 строк.
    Простая первая версия, хорошо тестируется, но policy spread risk grows over time.
 
-2. **Central policy service API with typed Rust rules now** - 🎯 9   🛡️ 9   🧠 7  
-   Объем: примерно 1400-2600 строк.  
+2. **Central policy service API with typed Rust rules now** - 🎯 9   🛡️ 9   🧠 7
+   Объем: примерно 1400-2600 строк.
    Лучший старт: одна authorization boundary, audit decisions, later Cedar/OPA-compatible model.
 
-3. **Embed full policy engine immediately** - 🎯 6   🛡️ 9   🧠 9  
-   Объем: примерно 3000-6000 строк.  
+3. **Embed full policy engine immediately** - 🎯 6   🛡️ 9   🧠 9
+   Объем: примерно 3000-6000 строк.
    Powerful for enterprise, but high integration complexity before product semantics settle.
 
 Рекомендация: вариант 2. Сделать свой typed policy boundary сейчас, но модель subject/object/action/environment держать совместимой с ABAC/Cedar/OPA patterns.
@@ -3473,16 +3473,16 @@ The path string is only a user-facing name. A safe storage layer should separate
 
 Top 3 approaches:
 
-1. **String path validation only** - 🎯 5   🛡️ 4   🧠 3  
-   Объем: примерно 300-700 строк.  
+1. **String path validation only** - 🎯 5   🛡️ 4   🧠 3
+   Объем: примерно 300-700 строк.
    Simple, but too fragile for Windows: reserved names, ADS, symlink/junction race, long paths and case sensitivity create edge cases.
 
-2. **Canonical root guard + generated artifact names** - 🎯 9   🛡️ 8   🧠 6  
-   Объем: примерно 900-1800 строк.  
+2. **Canonical root guard + generated artifact names** - 🎯 9   🛡️ 8   🧠 6
+   Объем: примерно 900-1800 строк.
    Good baseline: never use command/output text as filename, resolve root, reject traversal/reserved names/ADS/reparse points by policy, store normalized display name separately.
 
-3. **Handle/file-id verified writes for critical artifacts** - 🎯 8   🛡️ 10   🧠 8  
-   Объем: примерно 1600-3200 строк.  
+3. **Handle/file-id verified writes for critical artifacts** - 🎯 8   🛡️ 10   🧠 8
+   Объем: примерно 1600-3200 строк.
    Strongest for reliability: open file, inspect final path/file ID/volume, verify it remains under expected store, then commit manifest. More platform-specific code.
 
 Рекомендация: вариант 2 for all artifacts, вариант 3 for manifests, snapshots, export bundles and writer-owned chunks.
@@ -3588,16 +3588,16 @@ Each path has different failure modes. The architecture should not claim "exactl
 
 Top 3 approaches:
 
-1. **Trust WebSocket order and keep only UI state** - 🎯 3   🛡️ 3   🧠 3  
-   Объем: примерно 200-500 строк.  
+1. **Trust WebSocket order and keep only UI state** - 🎯 3   🛡️ 3   🧠 3
+   Объем: примерно 200-500 строк.
    Works in demos, fails on reconnect, tab reload, server restart and duplicate submit.
 
-2. **Per-pane seq/ack/replay + idempotent UI actions** - 🎯 9   🛡️ 8   🧠 7  
-   Объем: примерно 1200-2600 строк.  
+2. **Per-pane seq/ack/replay + idempotent UI actions** - 🎯 9   🛡️ 8   🧠 7
+   Объем: примерно 1200-2600 строк.
    Strong baseline: browser can ask for missed seq ranges and user actions can be retried safely.
 
-3. **Full event bus with producer transactions and consumer offsets** - 🎯 7   🛡️ 9   🧠 9  
-   Объем: примерно 3000-7000 строк.  
+3. **Full event bus with producer transactions and consumer offsets** - 🎯 7   🛡️ 9   🧠 9
+   Объем: примерно 3000-7000 строк.
    Powerful for distributed deployments, but too heavy before local persistence semantics settle.
 
 Рекомендация: вариант 2 now, with schema shaped so variant 3 can be introduced later if terminal-platform becomes multi-node.
@@ -3654,16 +3654,16 @@ Manifest should answer:
 
 Top 3 snapshot styles:
 
-1. **Latest screen snapshot only** - 🎯 4   🛡️ 4   🧠 3  
-   Объем: примерно 300-700 строк.  
+1. **Latest screen snapshot only** - 🎯 4   🛡️ 4   🧠 3
+   Объем: примерно 300-700 строк.
    Fast but weak: cannot explain history, cannot rebuild correctly, loses lineage.
 
-2. **Periodic snapshot manifests over journal ranges** - 🎯 9   🛡️ 9   🧠 7  
-   Объем: примерно 1400-2800 строк.  
+2. **Periodic snapshot manifests over journal ranges** - 🎯 9   🛡️ 9   🧠 7
+   Объем: примерно 1400-2800 строк.
    Best baseline: fast restore and full replay correctness.
 
-3. **Table-format style manifest tree with compaction and branches** - 🎯 8   🛡️ 10   🧠 9  
-   Объем: примерно 3000-6500 строк.  
+3. **Table-format style manifest tree with compaction and branches** - 🎯 8   🛡️ 10   🧠 9
+   Объем: примерно 3000-6500 строк.
    Strong for sync/cold storage/branching, but should evolve from option 2.
 
 Рекомендация: option 2, but include parent/high-water fields from day one.
@@ -3773,16 +3773,16 @@ canonical journal / stream segments
 
 Top 3 approaches:
 
-1. **One SQLite FTS table for everything** - 🎯 6   🛡️ 6   🧠 4  
-   Объем: примерно 500-1200 строк.  
+1. **One SQLite FTS table for everything** - 🎯 6   🛡️ 6   🧠 4
+   Объем: примерно 500-1200 строк.
    Good first prototype, but sensitive duplication, rebuild pain and large-history performance issues grow fast.
 
-2. **Chunk catalog + hot FTS + rebuildable warm shards** - 🎯 9   🛡️ 9   🧠 7  
-   Объем: примерно 1800-3600 строк.  
+2. **Chunk catalog + hot FTS + rebuildable warm shards** - 🎯 9   🛡️ 9   🧠 7
+   Объем: примерно 1800-3600 строк.
    Best baseline: canonical chunks remain truth, search projections can be rebuilt, query planner can skip chunks.
 
-3. **Object-store search engine style cold tier** - 🎯 8   🛡️ 10   🧠 9  
-   Объем: примерно 3500-8000 строк.  
+3. **Object-store search engine style cold tier** - 🎯 8   🛡️ 10   🧠 9
+   Объем: примерно 3500-8000 строк.
    Powerful for enterprise/long retention, but only after option 2 proves the data model.
 
 Рекомендация: вариант 2 now, schema-compatible with option 3 later.
@@ -3952,16 +3952,16 @@ execute suggested commands automatically
 
 Top 3 approaches:
 
-1. **System prompt says "ignore malicious output"** - 🎯 4   🛡️ 3   🧠 3  
-   Объем: примерно 100-300 строк.  
+1. **System prompt says "ignore malicious output"** - 🎯 4   🛡️ 3   🧠 3
+   Объем: примерно 100-300 строк.
    Better than nothing, but not an architecture. Prompt text cannot be the only boundary.
 
-2. **Structured context + deterministic tool/action policy** - 🎯 9   🛡️ 9   🧠 7  
-   Объем: примерно 1400-3000 строк.  
+2. **Structured context + deterministic tool/action policy** - 🎯 9   🛡️ 9   🧠 7
+   Объем: примерно 1400-3000 строк.
    Best baseline: context is typed, output is untrusted, tool scope is explicit, risky actions require approval.
 
-3. **Isolated agent sandbox + continuous red-team evals** - 🎯 8   🛡️ 10   🧠 9  
-   Объем: примерно 3200-7000 строк.  
+3. **Isolated agent sandbox + continuous red-team evals** - 🎯 8   🛡️ 10   🧠 9
+   Объем: примерно 3200-7000 строк.
    Strongest for agentic workflows, but should build on option 2.
 
 Рекомендация: option 2 now, with red-team fixture format from option 3.
@@ -4143,16 +4143,16 @@ minimal reproduction if available
 
 Top 3 implementation options:
 
-1. **Ad-hoc integration fault tests only** - 🎯 5   🛡️ 5   🧠 5  
-   Объем: примерно 700-1600 строк.  
+1. **Ad-hoc integration fault tests only** - 🎯 5   🛡️ 5   🧠 5
+   Объем: примерно 700-1600 строк.
    Useful but not enough: failures are hard to reproduce and coverage is narrow.
 
-2. **Seeded deterministic simulator for persistence protocols** - 🎯 9   🛡️ 9   🧠 8  
-   Объем: примерно 2400-5200 строк.  
+2. **Seeded deterministic simulator for persistence protocols** - 🎯 9   🛡️ 9   🧠 8
+   Объем: примерно 2400-5200 строк.
    Best baseline: replayable bugs, clear invariant checks, good fit for writer/outbox/reconnect/storage.
 
-3. **Full distributed/system simulator with virtual filesystem and browser model** - 🎯 8   🛡️ 10   🧠 10  
-   Объем: примерно 6000-14000 строк.  
+3. **Full distributed/system simulator with virtual filesystem and browser model** - 🎯 8   🛡️ 10   🧠 10
+   Объем: примерно 6000-14000 строк.
    Powerful long-term, but too heavy before the first protocol simulator is working.
 
 Рекомендация: option 2, with a small virtual filesystem and deterministic network/clock first.
@@ -4244,16 +4244,16 @@ Encryption protects storage theft and backup leakage. It does not protect:
 
 Top 3 approaches:
 
-1. **SQLCipher-only DB encryption** - 🎯 7   🛡️ 6   🧠 5  
-   Объем: примерно 900-1800 строк.  
+1. **SQLCipher-only DB encryption** - 🎯 7   🛡️ 6   🧠 5
+   Объем: примерно 900-1800 строк.
    Good first layer for SQLite pages, but insufficient for external artifacts, exports, search shards and selective cryptographic erase.
 
-2. **Envelope encryption for DB key, artifacts, search and exports** - 🎯 9   🛡️ 9   🧠 8  
-   Объем: примерно 2600-5600 строк.  
+2. **Envelope encryption for DB key, artifacts, search and exports** - 🎯 9   🛡️ 9   🧠 8
+   Объем: примерно 2600-5600 строк.
    Best baseline: SQLCipher for DB, per-artifact/per-stream DEKs, OS-wrapped KEKs, authenticated manifests and key lifecycle tables.
 
-3. **Full multi-device E2EE with recipient keys and recovery governance** - 🎯 7   🛡️ 10   🧠 10  
-   Объем: примерно 7000-16000 строк.  
+3. **Full multi-device E2EE with recipient keys and recovery governance** - 🎯 7   🛡️ 10   🧠 10
+   Объем: примерно 7000-16000 строк.
    Strong for sync/collaboration, but too much before local key hierarchy and restore drills are stable.
 
 Рекомендация: вариант 2. It gives strong local protection and prepares for option 3.
@@ -12465,7 +12465,7 @@ For export bundles:
 
 ### Milestone 0 - Architecture invariants
 
-Оценка: 🎯 10   🛡️ 10   🧠 5  
+Оценка: 🎯 10   🛡️ 10   🧠 5
 Объем: примерно 400-800 строк docs/tests
 
 - Зафиксировать restore semantics:
@@ -12490,16 +12490,16 @@ For export bundles:
 
 Варианты:
 
-1. По размеру: 32-64 KB.  
-   🎯 9   🛡️ 9   🧠 4  
+1. По размеру: 32-64 KB.
+   🎯 9   🛡️ 9   🧠 4
    Самый простой и надежный batching для SQLite.
 
-2. По времени: 50-100 ms.  
-   🎯 8   🛡️ 8   🧠 5  
+2. По времени: 50-100 ms.
+   🎯 8   🛡️ 8   🧠 5
    Хорошо для crash recovery и live UI, но может дать много маленьких segments при low-volume output.
 
-3. Гибрид: flush по первому наступившему size/time/command-boundary.  
-   🎯 10   🛡️ 10   🧠 6  
+3. Гибрид: flush по первому наступившему size/time/command-boundary.
+   🎯 10   🛡️ 10   🧠 6
    Лучший вариант.
 
 Рекомендация: гибрид.
@@ -12508,16 +12508,16 @@ For export bundles:
 
 Варианты:
 
-1. От `pre_exec` до `command_finish`.  
-   🎯 9   🛡️ 8   🧠 5  
+1. От `pre_exec` до `command_finish`.
+   🎯 9   🛡️ 8   🧠 5
    Хорошо при shell integration.
 
-2. От UI submit до следующего prompt.  
-   🎯 7   🛡️ 6   🧠 6  
+2. От UI submit до следующего prompt.
+   🎯 7   🛡️ 6   🧠 6
    Работает для command dock, но ломается на interactive/TUI.
 
-3. Sequence range + confidence/trust.  
-   🎯 10   🛡️ 9   🧠 7  
+3. Sequence range + confidence/trust.
+   🎯 10   🛡️ 9   🧠 7
    Лучший вариант: разные источники дают разную точность.
 
 Рекомендация: sequence range + confidence.
@@ -12526,23 +12526,23 @@ For export bundles:
 
 Варианты:
 
-1. Только raw journal, поиск строить replay-on-demand.  
-   🎯 5   🛡️ 8   🧠 5  
+1. Только raw journal, поиск строить replay-on-demand.
+   🎯 5   🛡️ 8   🧠 5
    Просто в БД, но медленно.
 
-2. Derived `terminal_search_index` с text chunks.  
-   🎯 9   🛡️ 8   🧠 7  
+2. Derived `terminal_search_index` с text chunks.
+   🎯 9   🛡️ 8   🧠 7
    Быстрый поиск, но нужна invalidation/versioning.
 
-3. FTS5 virtual table.  
-   🎯 8   🛡️ 8   🧠 8  
+3. FTS5 virtual table.
+   🎯 8   🛡️ 8   🧠 8
    Мощно, но надо проверить SQLite bundled feature/build.
 
 Рекомендация: начать с derived chunks, FTS5 позже после проверки bundled SQLite.
 
 ### Milestone 1 - Diesel persistence skeleton
 
-Оценка: 🎯 9   🛡️ 9   🧠 7  
+Оценка: 🎯 9   🛡️ 9   🧠 7
 Объем: примерно 1200-2000 строк
 
 - Add `diesel` + `diesel_migrations`.
@@ -12559,7 +12559,7 @@ For export bundles:
 
 ### Milestone 2 - Native journal writer
 
-Оценка: 🎯 8   🛡️ 9   🧠 8  
+Оценка: 🎯 8   🛡️ 9   🧠 8
 Объем: примерно 1500-2500 строк
 
 - Capture PTY output segments.
@@ -12571,7 +12571,7 @@ For export bundles:
 
 ### Milestone 3 - Shell integration
 
-Оценка: 🎯 8   🛡️ 9   🧠 9  
+Оценка: 🎯 8   🛡️ 9   🧠 9
 Объем: примерно 1800-3200 строк
 
 - Parse `OSC 133`.
@@ -12584,7 +12584,7 @@ For export bundles:
 
 ### Milestone 4 - Restore UX
 
-Оценка: 🎯 9   🛡️ 9   🧠 8  
+Оценка: 🎯 9   🛡️ 9   🧠 8
 Объем: примерно 1500-2800 строк
 
 - Hydrate from snapshots.
@@ -12595,7 +12595,7 @@ For export bundles:
 
 ### Milestone 5 - Zellij path
 
-Оценка: 🎯 7   🛡️ 8   🧠 9  
+Оценка: 🎯 7   🛡️ 8   🧠 9
 Объем: примерно 1500-3000 строк
 
 - Persist pane surface deltas/snapshots.
@@ -12605,7 +12605,7 @@ For export bundles:
 
 ### Milestone 6 - Hardening, export/import and recovery
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: примерно 1800-3200 строк
 
 - Add event envelope and schema registry.
@@ -12617,7 +12617,7 @@ For export bundles:
 
 ### Milestone 7 - Privacy, accessibility and artifact lifecycle
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: примерно 1600-3000 строк
 
 - Add temp artifact registry and cleanup job.
@@ -12629,7 +12629,7 @@ For export bundles:
 
 ### Milestone 8 - Durable jobs, scalable search and AI context
 
-Оценка: 🎯 9   🛡️ 9   🧠 8  
+Оценка: 🎯 9   🛡️ 9   🧠 8
 Объем: примерно 1800-3400 строк
 
 - Add `terminal_background_jobs`.
@@ -12641,7 +12641,7 @@ For export bundles:
 
 ### Milestone 9 - Windows lifecycle, artifact integrity and backup consistency
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: примерно 1800-3200 строк
 
 - Add Windows process lifecycle events.
@@ -12653,7 +12653,7 @@ For export bundles:
 
 ### Milestone 10 - Transport recovery, WSL/SSH domains and rollout controls
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: примерно 1800-3300 строк
 
 - Add client delivery state and ack/replay protocol.
@@ -12665,7 +12665,7 @@ For export bundles:
 
 ### Milestone 11 - Schema evolution, query performance and governance
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: примерно 1800-3400 строк
 
 - Add payload codec registry and upcaster tests.
@@ -12677,7 +12677,7 @@ For export bundles:
 
 ### Milestone 12 - Browser lifecycle, side effects and container domains
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: примерно 1800-3300 строк
 
 - Add browser client ownership state.
@@ -12689,7 +12689,7 @@ For export bundles:
 
 ### Milestone 13 - Local gateway, import safety and viewer sandboxing
 
-Оценка: 🎯 10   🛡️ 10   🧠 8  
+Оценка: 🎯 10   🛡️ 10   🧠 8
 Объем: примерно 1800-3200 строк
 
 - Add gateway token scope/expiry model.
@@ -12702,7 +12702,7 @@ For export bundles:
 
 ### Milestone 14 - Atomic artifacts, safe redaction and authorization policy
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: примерно 1800-3400 строк
 
 - Add artifact write transaction ledger.
@@ -12717,7 +12717,7 @@ For export bundles:
 
 ### Milestone 15 - Windows artifact path safety and identity verification
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: примерно 1800-3600 строк
 
 - Add generated storage keys separated from display names.
@@ -12731,7 +12731,7 @@ For export bundles:
 
 ### Milestone 16 - Delivery semantics, outbox and backup restore drills
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: примерно 2200-4400 строк
 
 - Add per-pane delivery offsets and browser ack/replay tests.
@@ -12745,7 +12745,7 @@ For export bundles:
 
 ### Milestone 17 - Scalable search, chunk catalog and hot/warm/cold lifecycle
 
-Оценка: 🎯 9   🛡️ 9   🧠 8  
+Оценка: 🎯 9   🛡️ 9   🧠 8
 Объем: примерно 2200-4600 строк
 
 - Add chunk catalog over stream segments.
@@ -12759,7 +12759,7 @@ For export bundles:
 
 ### Milestone 18 - AI context safety and prompt-injection resistant terminal agents
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: примерно 2200-4800 строк
 
 - Add structured AI context package model.
@@ -12773,7 +12773,7 @@ For export bundles:
 
 ### Milestone 19 - Reliability proof, deterministic simulation and release gates
 
-Оценка: 🎯 9   🛡️ 10   🧠 9  
+Оценка: 🎯 9   🛡️ 10   🧠 9
 Объем: примерно 2600-5600 строк
 
 - Add executable persistence invariant registry.
@@ -12787,7 +12787,7 @@ For export bundles:
 
 ### Milestone 20 - Encryption, key lifecycle and cryptographic erase
 
-Оценка: 🎯 9   🛡️ 10   🧠 9  
+Оценка: 🎯 9   🛡️ 10   🧠 9
 Объем: примерно 2800-6200 строк
 
 - Add key hierarchy and wrapped key metadata.

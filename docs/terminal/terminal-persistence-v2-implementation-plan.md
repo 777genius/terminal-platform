@@ -1,8 +1,8 @@
 # Terminal Persistence v2 - Implementation Plan
 
-**Статус**: implementation blueprint  
-**Дата**: 2026-04-29  
-**Решение**: делать `Terminal Persistence v2` через Diesel ORM, journal-first, local-first, Windows-first  
+**Статус**: implementation blueprint
+**Дата**: 2026-04-29
+**Решение**: делать `Terminal Persistence v2` через Diesel ORM, journal-first, local-first, Windows-first
 **Связанный ресерч**: [deep-dive-terminal-history-journal-research.md](./deep-dive-terminal-history-journal-research.md)
 
 ## Короткий вывод
@@ -34,232 +34,232 @@ PTY / ConPTY / zellij / tmux
 
 Самые важные исправления:
 
-1. **Diesel executor теперь описан compile-realistic closure-based API**  
+1. **Diesel executor теперь описан compile-realistic closure-based API**
    Старый пример с trait object и associated `Output` был слишком псевдокодным. Реализация должна отправлять в worker boxed closure, а typed `oneshot` остается внутри `execute<T>`.
 
-2. **Добавлен `terminal_topology_snapshots`**  
+2. **Добавлен `terminal_topology_snapshots`**
    Без отдельного topology/layout snapshot нельзя надежно восстановить tabs/splits/focus. Одних `terminal_panes` недостаточно, потому layout tree and split ratios являются snapshot state.
 
-3. **`terminal_journal_events` получил non-null event scope**  
+3. **`terminal_journal_events` получил non-null event scope**
    Nullable `pane_id` в unique constraint на SQLite опасен: `NULL` ломает ожидания уникальности. Теперь event scope задается через `event_scope_kind` + `event_scope_id`.
 
-4. **Добавлен `terminal_delivery_offsets` в базовую schema**  
+4. **Добавлен `terminal_delivery_offsets` в базовую schema**
    Reconnect/ack/replay был в итерациях, но отсутствовал в initial schema. Это исправлено, потому доставка в браузер и durable journal должны проектироваться вместе.
 
-5. **Outbox claim уточнен под SQLite**  
+5. **Outbox claim уточнен под SQLite**
    На первом этапе один worker достаточно надежен. Если workers станут параллельными, claim должен идти через `immediate_transaction` and conditional update, not optimistic prose.
 
-6. **Backpressure policy стал явным**  
+6. **Backpressure policy стал явным**
    PTY reader нельзя блокировать на DB. Если queue переполнена, система должна перейти в degraded state and persist/emit gap marker when possible.
 
-7. **Dependency section обновлен под текущие проверенные версии**  
+7. **Dependency section обновлен под текущие проверенные версии**
    `cargo search/info` на 2026-04-29 показывает `diesel 2.3.8`, `diesel_migrations 2.3.2`, `libsqlite3-sys 0.37.0`, `blake3 1.8.5`.
 
-8. **Уточнена bundled SQLite стратегия**  
+8. **Уточнена bundled SQLite стратегия**
    У Diesel нет отдельной публичной feature `sqlite-bundled`. Для Windows стабильности оставляем единый `libsqlite3-sys` с `bundled` через workspace dependency и проверяем дерево через `cargo tree -e features -i libsqlite3-sys@0.37.0`.
 
-9. **Добавлен `terminal_stream_cursors`**  
+9. **Добавлен `terminal_stream_cursors`**
    `terminal_panes.last_event_seq` остается read-model полем, но не должен быть единственным allocator state. После restart writer должен атомарно продолжать event sequence allocation без коллизий.
 
-10. **Добавлен `terminal_history_gaps`**  
+10. **Добавлен `terminal_history_gaps`**
    Gap markers не должны жить только как свободный JSON в journal. Нужна отдельная компактная таблица для UI, diagnostics, restore drill and support reports.
 
-11. **Добавлен `terminal_restore_drills`**  
+11. **Добавлен `terminal_restore_drills`**
    Restore drill должен оставлять durable audit trail. Иначе нельзя уверенно отвечать, какие сессии реально восстановимы после обновления/краша.
 
-12. **Checksum policy стал явным**  
+12. **Checksum policy стал явным**
    Все stream/snapshot/topology payloads получают `checksum_algorithm` + `checksum`. Baseline: `blake3` over stored bytes; для будущего encryption это будет storage checksum, not plaintext leakage.
 
-13. **Добавлены durability profiles**  
+13. **Добавлены durability profiles**
    Для требования "история не должна теряться" production default должен быть `reliable_history`: writer connection uses `synchronous = FULL`, bounded batching and command-boundary barriers. `NORMAL` остается performance profile, not reliability default.
 
-14. **Добавлены retention/maintenance правила**  
+14. **Добавлены retention/maintenance правила**
    У "полной истории" должен быть explicit policy: по умолчанию не удалять raw history silently, но иметь quotas, user-visible pressure, WAL checkpoints, `PRAGMA optimize`, incremental vacuum and deletion audit.
 
-15. **Search/FTS5 отложен в derived redacted index**  
+15. **Search/FTS5 отложен в derived redacted index**
    FTS не должен индексировать raw terminal stream. V1 search работает по command blocks and small redacted snippets; FTS5 добавляется later as rebuildable derived index.
 
-16. **zellij/tmux стали backend adapters with guarantee matrix**  
+16. **zellij/tmux стали backend adapters with guarantee matrix**
    Для mux нельзя обещать ту же точность, что у native PTY, если нет shell integration. План теперь требует per-backend capture strategy, exact capability detection and visible restore guarantee.
 
-17. **Migration safety усилена**  
+17. **Migration safety усилена**
    Startup migration теперь описана как guarded flow: app id check, embedded migrations, identity row, migration audit, no silent destructive rollback.
 
-18. **Добавлен global commit sequence**  
+18. **Добавлен global commit sequence**
    Per-pane sequence недостаточно для multi-pane restore. Теперь session-level atomic commits фиксируются в `terminal_commit_log`, а `terminal_session_cursors` выделяет `commit_seq`.
 
-19. **Topology snapshot получил high-water vector**  
+19. **Topology snapshot получил high-water vector**
    Один `high_water_event_seq` не описывает состояние нескольких panes. Topology/session snapshots должны хранить `pane_high_water_json` and `high_water_commit_seq`.
 
-20. **Capture ingestion стал retry-safe**  
+20. **Capture ingestion стал retry-safe**
    Добавлен `terminal_capture_receipts`, чтобы повтор доставки capture event/batch после reconnect/crash не создавал дубли.
 
-21. **Command history отделена от command blocks**  
+21. **Command history отделена от command blocks**
    `terminal_command_blocks` описывает lifecycle команды, а `terminal_command_history_entries` обслуживает command dock/autocomplete/rerun history per session/pane/global policy.
 
-22. **Replay sandbox стал явным**  
+22. **Replay sandbox стал явным**
    Restore/replay не должен выполнять terminal side effects. OSC52 clipboard, title changes, hyperlinks, shell integration and prompt-injection-like output are inert data during historical replay.
 
-23. **Compression policy уточнена**  
+23. **Compression policy уточнена**
    V1 остается raw SQLite BLOB. Zstd допускается как later codec for cold/large segments with explicit `uncompressed_byte_len`, `stored_byte_len`, codec metadata and checksum over stored bytes.
 
-24. **Canonical FK policy исправлена**  
+24. **Canonical FK policy исправлена**
    `terminal_commit_log` теперь append-only anchor. Canonical history rows must not cascade-delete through session, pane or commit refs; those refs use `ON DELETE RESTRICT` / default no-action semantics.
 
-25. **ID policy стала явной**  
+25. **ID policy стала явной**
    Для DB rows используем app-generated UUIDv7 strings through `uuid 1.23.1` with `v7` feature. Это дает ordered-ish IDs without relying on SQLite rowid as domain identity.
 
-26. **Command history privacy усилена**  
+26. **Command history privacy усилена**
    Command dock/autocomplete больше не хранит только raw `command_text`. Добавлены display/redacted text fields, sensitivity classification and rerun policy.
 
-27. **Browser/client identity вынесена в таблицу**  
+27. **Browser/client identity вынесена в таблицу**
    `terminal_delivery_offsets.client_id` должен ссылаться на durable `terminal_clients`, чтобы reconnect/ack state не был случайной строкой из браузера.
 
-28. **Export/delete workflows стали auditable**  
+28. **Export/delete workflows стали auditable**
    Добавлены export/delete request tables. Экспорт, удаление, crypto erase and retention pruning не должны быть hidden side effects without audit trail.
 
-29. **Single-writer guarantee поднята до process level**  
+29. **Single-writer guarantee поднята до process level**
    Добавлен `terminal_writer_generations`: writer identity, lease/heartbeat and stale-writer recovery. Один mpsc worker внутри процесса не защищает от второго app process.
 
-30. **Outbox lease модель усилена**  
+30. **Outbox lease модель усилена**
    Outbox claim теперь должен иметь `claimed_until_ms`, `lease_token`, dedupe key and stale claim recovery, иначе worker crash can leave jobs stuck.
 
-31. **Clock drift/jump audit добавлен**  
+31. **Clock drift/jump audit добавлен**
    Terminal history mixes wall-clock and monotonic ordering. Добавлен `terminal_clock_anchors`, чтобы диагностировать system time jumps and restore ordering issues.
 
-32. **Versioned JSON payload contract добавлен**  
+32. **Versioned JSON payload contract добавлен**
    Все `payload_json` больше не "просто JSON". Добавлены `terminal_payload_schemas`, schema ids, schema semver and payload validation rules через typed Rust structs + schemars-generated schemas.
 
-33. **Alternate screen/TUI политика стала явной**  
+33. **Alternate screen/TUI политика стала явной**
    Terminal output is not only line scrollback. Добавлен режим normal/alternate buffer, frame coalescing for TUI apps and restore rules for vim/top/zellij-like screens.
 
-34. **Outbox nullable dedupe исправлен**  
+34. **Outbox nullable dedupe исправлен**
    Inline `UNIQUE(dedupe_key)` заменен на partial unique index `WHERE dedupe_key IS NOT NULL`, чтобы намерение было точным и переносимым в тестах.
 
-35. **Integrity check workflow добавлен**  
+35. **Integrity check workflow добавлен**
    Restore drills проверяют восстановимость сессий, но нужна еще проверка самой БД: `PRAGMA quick_check`, `foreign_key_check`, invariant SQL and projection drift checks. Добавлен durable `terminal_integrity_checks`.
 
-36. **Support bundle workflow добавлен**  
+36. **Support bundle workflow добавлен**
    Диагностика должна быть redacted and auditable. Добавлен `terminal_support_bundles`, чтобы support reports не превращались в случайный raw transcript export.
 
-37. **Parser/projection upgrade policy добавлена**  
+37. **Parser/projection upgrade policy добавлена**
    `parser_version` теперь не просто строка. План фиксирует invalidation/rebuild rules for snapshots/search/command projections after parser upgrades.
 
-38. **Command hash privacy уточнена**  
+38. **Command hash privacy уточнена**
    Хэш команды может быть dictionary-attack vector. Command dedupe/search hashes should be keyed/local where possible and never exported as raw stable fingerprint by default.
 
-39. **Live backup policy добавлена**  
+39. **Live backup policy добавлена**
    При WAL нельзя считать обычную копию `.db` полноценным backup. План теперь требует SQLite Online Backup API / `VACUUM INTO` path, durable backup records, manifest, checksum and post-backup integrity check.
 
-40. **Storage pressure стал first-class режимом**  
+40. **Storage pressure стал first-class режимом**
    `SQLITE_FULL`, большой WAL, нехватка temp space and quota pressure не должны выглядеть как обычный `Query` error. Добавлены storage-pressure events, degraded writer mode, UI diagnostics and explicit no-silent-delete rule.
 
-41. **Schema constraints policy добавлена**  
+41. **Schema constraints policy добавлена**
    Текстовые `status/kind/policy` поля больше не остаются free-form по умолчанию. Stable domains get Rust enums + DB `CHECK`; extension domains stay text but must be validated and documented.
 
-42. **SQLite runtime gate усилен**  
+42. **SQLite runtime gate усилен**
    Для packaged Windows build план требует bundled SQLite through `libsqlite3-sys 0.37.0`, which docs.rs currently maps to SQLite `3.51.3`. Это важно из-за официально описанного WAL-reset bug in older SQLite lines.
 
-43. **Raw-vs-rendered capture semantics добавлена**  
+43. **Raw-vs-rendered capture semantics добавлена**
    Native ConPTY дает raw VT stream, а zellij/tmux часто дают rendered viewport/scrollback. План теперь запрещает replay-ить rendered surface как raw terminal bytes and requires explicit `capture_semantics`.
 
-44. **Backend capability evidence стала durable**  
+44. **Backend capability evidence стала durable**
    Restore guarantee больше не вычисляется по имени backend. Добавлен durable capability report, где фиксируются version, probe result, capture strategy and confidence.
 
-45. **Data health/quarantine workflow добавлен**  
+45. **Data health/quarantine workflow добавлен**
    Если checksum/snapshot/parser/projection ломается, restore не должен либо падать целиком, либо молча пропускать данные. Добавлен durable health record with quarantine/degraded actions.
 
-46. **Command trust model стал источниковым, а не текстовым**  
+46. **Command trust model стал источниковым, а не текстовым**
    Высокое доверие дают UI submit, direct pane launch and verified shell markers. Rendered mux output and heuristic parsing cannot create rerunnable command blocks without confirmation.
 
-47. **Migration rollout переведен в expand/contract policy**  
+47. **Migration rollout переведен в expand/contract policy**
    Опасные destructive migrations должны идти отдельной cleanup-фазой после dual-read/dual-write verification, backup and restore drills.
 
-48. **Restore guarantee taxonomy добавлена**  
+48. **Restore guarantee taxonomy добавлена**
    `Rich history`, `Basic history`, `Visual restore only` and `History degraded` теперь имеют строгие условия, а не являются маркетинговыми словами.
 
-49. **Performance/storage budgets добавлены**  
+49. **Performance/storage budgets добавлены**
    Writer batching, queue depth, restore time, WAL size and DB growth получили target budgets and failure actions.
 
-50. **Privacy data classification добавлена**  
+50. **Privacy data classification добавлена**
    Raw output, command text, cwd, user-agent hashes, support bundles and AI context теперь имеют явные data classes and default handling.
 
-51. **Encryption/key management стал конкретнее**  
+51. **Encryption/key management стал конкретнее**
    Добавлен Windows-first key hierarchy plan: DB key protected by OS credential store/DPAPI capability, later SQLCipher/envelope decision, `zeroize`/`secrecy` for key material handling.
 
-52. **Feature gates and rollout controls добавлены**  
+52. **Feature gates and rollout controls добавлены**
    v2 persistence, mux capture, compression, raw export and encryption должны включаться через explicit gates with rollback behavior.
 
-53. **Read-path/WAL starvation policy добавлена**  
+53. **Read-path/WAL starvation policy добавлена**
    Restore/search/support reads теперь не могут держать долгую read transaction без бюджета. План требует paged reads, progressive restore and no `await` while holding SQLite statements/transactions.
 
-54. **MVP cutline зафиксирован**  
+54. **MVP cutline зафиксирован**
    Чтобы scope не расползся, план теперь разделяет production MVP, reliability gate and later advanced tracks. Encryption, compression and mux structured capture остаются gated tracks.
 
-55. **Windows mux support boundary уточнен**  
+55. **Windows mux support boundary уточнен**
    Zellij has official Windows binary, but still needs capability probing. Tmux on Windows is WSL/MSYS2-specific unless a separately probed native-compatible mux is integrated.
 
-56. **Sequence domains разведены явно**  
+56. **Sequence domains разведены явно**
    `event_seq`, `byte_seq`, `commit_seq` and `frame_seq` больше не смешиваются под общим `seq`. Это критично для точного restore, command output ranges, gap markers, search documents and replay after snapshot.
 
-57. **Range boundary rules зафиксированы**  
+57. **Range boundary rules зафиксированы**
    `event_seq` ranges inclusive, `byte` ranges half-open `[low, high)`, optional ranges must be either fully `NULL` or fully filled. Это снижает off-by-one баги в replay, export and command output extraction.
 
-58. **Canonical FK policy ужесточена**  
+58. **Canonical FK policy ужесточена**
    Canonical history tables не должны каскадно удаляться от `terminal_sessions`/`terminal_panes`. Direct delete parent rows must fail closed; deletion/pruning goes through request + tombstone + chunked service flow.
 
-59. **Protocol semantics rollout привязан к evidence**  
+59. **Protocol semantics rollout привязан к evidence**
    Текущий `SavedSessionRestoreSemantics.replays_saved_screen_buffers = false` остается до v2 hydrate/replay/drill evidence. API v2 должен добавить machine-readable guarantee fields without breaking old clients.
 
-60. **Mux capture перепроверен по свежим docs и понижен до evidence, not truth**  
+60. **Mux capture перепроверен по свежим docs и понижен до evidence, not truth**
    Zellij `subscribe` streams rendered pane updates, `dump-screen` dumps scrollback, tmux `capture-pane` is also snapshot/scrollback evidence. Это полезно для hydration/reconciliation, но не равно raw VT stream и не должно получать `Rich history` без отдельного raw/structured proof.
 
-61. **Restore read path переведен в two-phase UX**  
+61. **Restore read path переведен в two-phase UX**
    Большие истории нельзя грузить одним буфером. Restore должен сначала показать nearest snapshot/topology, потом догружать historical pages по курсорам, закрывая SQLite cursor before async/browser streaming.
 
-62. **Live boundary стал product invariant**  
+62. **Live boundary стал product invariant**
    После native restore новый процесс не является старым процессом. UI должен явно отделять restored historical region от new live output and prompt, иначе пользователь поверит, что process state survived.
 
-63. **Command confidence gates стали строже**  
+63. **Command confidence gates стали строже**
    UI submit and verified shell markers create high-trust command blocks. Raw typed input, rendered mux output and heuristic prompt parsing can create only low/medium-confidence records and cannot be auto-rerun without confirmation.
 
-64. **Backup/WAL wording ужесточен**  
+64. **Backup/WAL wording ужесточен**
    В production API не должно быть helper, который копирует только `.db`. MVP backup path is `VACUUM INTO` with manifest and post-backup `quick_check`; Online Backup API остается later adapter if incremental backup is required.
 
-65. **Capability reports стали versioned and expiring**  
+65. **Capability reports стали versioned and expiring**
    Backend guarantee нельзя кэшировать навсегда. Zellij/tmux/native capability rows expire after backend version change, binary path change, config change or probe failure.
 
-66. **Low-confidence areas теперь имеют отдельные acceptance tests**  
+66. **Low-confidence areas теперь имеют отдельные acceptance tests**
    Zellij/tmux fidelity, alternate screen/TUI restore, command source trust, large restore paging, WAL backup and storage pressure each get explicit test bullets. Это снижает риск, что сложные зоны останутся только архитектурным текстом.
 
-67. **Table-class ownership должен быть проверяемым**  
+67. **Table-class ownership должен быть проверяемым**
    Canonical, derived, audit, ephemeral and external-artifact tables должны иметь явные FK/delete rules. План теперь требует не только общий принцип, а matrix and tests, чтобы `CASCADE` случайно не попал в canonical history.
 
-68. **Добавлена трассировка требований к реализации**  
+68. **Добавлена трассировка требований к реализации**
    Ключевые требования теперь должны проверяться не общими словами, а через matrix: requirement -> schema/API section -> iteration -> acceptance test. Это защищает от ситуации, когда БД сделана, но protocol/UI не показывают историю.
 
-69. **Protocol transition привязан к текущему коду**  
+69. **Protocol transition привязан к текущему коду**
    В репозитории `SavedSessionRestoreSemantics` сейчас boolean-only, а `protocol_mapping.rs` ставит `replays_saved_screen_buffers = false`. План фиксирует, что v2 semantics добавляются рядом с legacy bools and must stay backward-compatible.
 
-70. **Legacy snapshot pruning отделен от v2 retention**  
+70. **Legacy snapshot pruning отделен от v2 retention**
    Текущий v1 умеет `prune_saved_sessions` через прямой delete snapshot rows. Для v2 это недопустимо как модель для canonical history: pruning becomes audited retention workflow, not count-based delete.
 
-71. **Backend capability gap стал явной work item**  
+71. **Backend capability gap стал явной work item**
    `BackendCapabilities.raw_output_stream` уже есть в API, но native path must not set/claim it until durable capture writer is wired. План теперь требует separate capability proof before any `RichHistory` label.
 
-72. **Browser/localStorage история исключена из core semantics**  
+72. **Browser/localStorage история исключена из core semantics**
    Command dock может кешироваться в UI, но authoritative command history belongs to DB rows. После restart app/browser command history must come from `terminal_command_history_entries`, not localStorage.
 
-73. **Release gates стали fail-closed**  
+73. **Release gates стали fail-closed**
    Если migration, SQLite runtime gate, restore drill, backup smoke or capability probe fails, feature gate must disable authoritative v2 reads instead of exposing overpromised history.
 
-74. **Diesel table-width risk закрыт явно**  
+74. **Diesel table-width risk закрыт явно**
    `cargo info diesel` на 2026-04-29 подтверждает `32-column-tables`, `64-column-tables` and `128-column-tables`. Текущий planned max table width is `27` columns, so `32-column-tables` is enough now, but CI must count table columns and fail before Diesel macro limits surprise implementation.
 
-75. **Schema generation workflow добавлен как gate**  
+75. **Schema generation workflow добавлен как gate**
    `schema.rs` не должен редактироваться руками без проверки. План теперь требует `diesel print-schema`/checked generated schema, `diesel.toml` and CI diff, чтобы migrations and Rust models did not drift.
 
-76. **Core vs derived table rollout разделен четче**  
+76. **Core vs derived table rollout разделен четче**
    Не все `CREATE TABLE` blocks должны попасть в PR 1. Core journal/session tables идут first; search documents, AI/context, compression/encryption extensions remain derived/gated tracks unless MVP acceptance explicitly needs them.
 
 ## Риск-регистр по слабым местам
@@ -348,22 +348,22 @@ Ship smaller guarantees first, but every guarantee must be represented in schema
 
 Эти решения были самыми рискованными после повторного чтения плана и внешних docs. Ниже финальная позиция, которую надо считать архитектурной нормой.
 
-1. **Command capture без shell integration** - выбранный путь: source-confidence model, not text parsing. 🎯 8   🛡️ 9   🧠 8. Примерно `900-1800` строк.  
+1. **Command capture без shell integration** - выбранный путь: source-confidence model, not text parsing. 🎯 8   🛡️ 9   🧠 8. Примерно `900-1800` строк.
    Почему так: UI submit надежен, verified shell markers надежны, но raw terminal text and rendered mux output cannot prove where a command starts/ends. Поэтому low-trust commands can be displayed/searchable, but not auto-rerunnable.
 
-2. **Zellij on Windows** - выбранный путь: advanced adapter after native MVP, capability-probed per install/session. 🎯 8   🛡️ 9   🧠 9. Примерно `1400-3200` строк.  
+2. **Zellij on Windows** - выбранный путь: advanced adapter after native MVP, capability-probed per install/session. 🎯 8   🛡️ 9   🧠 9. Примерно `1400-3200` строк.
    Почему так: Zellij can provide rendered pane streams/scrollback and control actions, but those are not automatically raw VT evidence. It is valuable, but it must not delay native ConPTY durable-history MVP.
 
-3. **Alternate screen/TUI restore** - выбранный путь: raw stream + derived frame/snapshot model with explicit fidelity label. 🎯 7   🛡️ 9   🧠 9. Примерно `1800-4200` строк.  
+3. **Alternate screen/TUI restore** - выбранный путь: raw stream + derived frame/snapshot model with explicit fidelity label. 🎯 7   🛡️ 9   🧠 9. Примерно `1800-4200` строк.
    Почему так: Vim/top/zellij-like apps are screen-state workloads, not line-log workloads. Exact replay is possible only when raw stream and parser version are trustworthy; rendered snapshots get `VisualRestoreOnly` or `BasicHistory`.
 
-4. **Large restore/search path** - выбранный путь: snapshot-first, paged history reads, no long read transaction. 🎯 9   🛡️ 9   🧠 7. Примерно `800-1800` строк.  
+4. **Large restore/search path** - выбранный путь: snapshot-first, paged history reads, no long read transaction. 🎯 9   🛡️ 9   🧠 7. Примерно `800-1800` строк.
    Почему так: SQLite WAL works well with many readers, but long readers can interfere with checkpointing and memory. The UI should hydrate quickly and progressively load the rest.
 
-5. **Backup under WAL** - выбранный путь: no raw file copy API; `VACUUM INTO` MVP, Online Backup API later if required. 🎯 10   🛡️ 10   🧠 6. Примерно `500-1200` строк.  
+5. **Backup under WAL** - выбранный путь: no raw file copy API; `VACUUM INTO` MVP, Online Backup API later if required. 🎯 10   🛡️ 10   🧠 6. Примерно `500-1200` строк.
    Почему так: history durability is meaningless if backup/restore loses WAL-contained transactions. Every backup must have a manifest and post-backup verification.
 
-6. **Delete/retention semantics** - выбранный путь: audited request/tombstone service, not parent cascade. 🎯 10   🛡️ 10   🧠 7. Примерно `900-2200` строк.  
+6. **Delete/retention semantics** - выбранный путь: audited request/tombstone service, not parent cascade. 🎯 10   🛡️ 10   🧠 7. Примерно `900-2200` строк.
    Почему так: "history never silently disappears" conflicts with convenient cascades. Canonical rows must fail closed; cleanup is a service workflow with evidence.
 
 ## Requirement traceability matrix
@@ -392,134 +392,134 @@ Rule:
 
 ### Storage для raw output
 
-1. **SQLite BLOB stream segments first** - выбранный вариант. 🎯 9   🛡️ 8   🧠 6. Примерно `1200-2600` строк.  
+1. **SQLite BLOB stream segments first** - выбранный вариант. 🎯 9   🛡️ 8   🧠 6. Примерно `1200-2600` строк.
    Лучший fit для Windows-first v1: меньше path hazards, проще transaction atomicity, проще restore drill.
 
-2. **External artifact store immediately**. 🎯 6   🛡️ 7   🧠 9. Примерно `3500-7000` строк.  
+2. **External artifact store immediately**. 🎯 6   🛡️ 7   🧠 9. Примерно `3500-7000` строк.
    Нужен позже для больших artifacts, но слишком рано тянет path safety, orphan cleanup, fsync and crash recovery.
 
-3. **Only screen snapshots, no raw journal**. 🎯 3   🛡️ 4   🧠 4. Примерно `800-1500` строк.  
+3. **Only screen snapshots, no raw journal**. 🎯 3   🛡️ 4   🧠 4. Примерно `800-1500` строк.
    Дешевле, но не дает полной истории, command ranges, replay, search and trustworthy restore.
 
 ### Diesel execution model
 
-1. **Single named persistence worker + sync Diesel** - выбранный вариант. 🎯 10   🛡️ 10   🧠 7. Примерно `900-2200` строк.  
+1. **Single named persistence worker + sync Diesel** - выбранный вариант. 🎯 10   🛡️ 10   🧠 7. Примерно `900-2200` строк.
    Самый предсказуемый вариант для SQLite writes and Windows app runtime.
 
-2. **Connection pool for reads/writes сразу**. 🎯 7   🛡️ 7   🧠 8. Примерно `1600-3200` строк.  
+2. **Connection pool for reads/writes сразу**. 🎯 7   🛡️ 7   🧠 8. Примерно `1600-3200` строк.
    Можно добавить позже для read scaling, но early write concurrency усложняет locks and correctness.
 
-3. **Async ORM layer around SQLite**. 🎯 5   🛡️ 6   🧠 8. Примерно `1800-3600` строк.  
+3. **Async ORM layer around SQLite**. 🎯 5   🛡️ 6   🧠 8. Примерно `1800-3600` строк.
    Не дает реального выигрыша для local SQLite write path и повышает риск cancellation/transaction bugs.
 
 ### Durability profile
 
-1. **`reliable_history` default for v2 writer** - выбранный вариант. 🎯 8   🛡️ 10   🧠 8. Примерно `500-1200` строк.  
+1. **`reliable_history` default for v2 writer** - выбранный вариант. 🎯 8   🛡️ 10   🧠 8. Примерно `500-1200` строк.
    Writer connection uses WAL + `synchronous = FULL`, command-boundary barriers, restore drills and visible lag metrics. Это лучше соответствует требованию, что история максимально не должна теряться.
 
-2. **Balanced default + strict opt-in**. 🎯 9   🛡️ 8   🧠 6. Примерно `300-800` строк.  
+2. **Balanced default + strict opt-in**. 🎯 9   🛡️ 8   🧠 6. Примерно `300-800` строк.
    Лучше по latency, но хуже по продуктовой гарантии. Можно оставить как explicit performance profile later.
 
-3. **Always `synchronous = NORMAL`**. 🎯 6   🛡️ 6   🧠 4. Примерно `100-300` строк.  
+3. **Always `synchronous = NORMAL`**. 🎯 6   🛡️ 6   🧠 4. Примерно `100-300` строк.
    Проще, но не соответствует цели надежного terminal history.
 
 ### Search index
 
-1. **Relational search v1, FTS5 later over redacted documents** - выбранный вариант. 🎯 9   🛡️ 9   🧠 7. Примерно `900-2200` строк.  
+1. **Relational search v1, FTS5 later over redacted documents** - выбранный вариант. 🎯 9   🛡️ 9   🧠 7. Примерно `900-2200` строк.
    Не индексируем raw stream, избегаем FTS consistency/security traps, оставляем rebuildable derived index.
 
-2. **FTS5 immediately over raw transcript**. 🎯 4   🛡️ 5   🧠 7. Примерно `1200-2600` строк.  
+2. **FTS5 immediately over raw transcript**. 🎯 4   🛡️ 5   🧠 7. Примерно `1200-2600` строк.
    Быстро даст поиск, но высок риск утечки secret output and stale index issues.
 
-3. **No persisted search model**. 🎯 5   🛡️ 6   🧠 2. Примерно `100-300` строк.  
+3. **No persisted search model**. 🎯 5   🛡️ 6   🧠 2. Примерно `100-300` строк.
    Слишком ограниченно для command dock, AI context and support diagnostics.
 
 ### Session consistency model
 
-1. **Per-pane `event_seq` + session commit log** - выбранный вариант. 🎯 9   🛡️ 10   🧠 8. Примерно `900-2200` строк.  
+1. **Per-pane `event_seq` + session commit log** - выбранный вариант. 🎯 9   🛡️ 10   🧠 8. Примерно `900-2200` строк.
    Дает атомарную точку восстановления всей сессии: topology, panes, segments, gaps and snapshots are tied to one commit order.
 
-2. **Only per-pane sequence**. 🎯 6   🛡️ 6   🧠 5. Примерно `300-900` строк.  
+2. **Only per-pane sequence**. 🎯 6   🛡️ 6   🧠 5. Примерно `300-900` строк.
    Проще, но multi-pane snapshot can mix states from different moments.
 
-3. **Only global sequence**. 🎯 7   🛡️ 7   🧠 7. Примерно `700-1600` строк.  
+3. **Only global sequence**. 🎯 7   🛡️ 7   🧠 7. Примерно `700-1600` строк.
    Удобно для total ordering, но хуже для per-pane replay, range queries and reconnect.
 
 ### Segment compression
 
-1. **Raw hot segments, optional zstd cold/large segments later** - выбранный вариант. 🎯 8   🛡️ 8   🧠 7. Примерно `600-1600` строк.  
+1. **Raw hot segments, optional zstd cold/large segments later** - выбранный вариант. 🎯 8   🛡️ 8   🧠 7. Примерно `600-1600` строк.
    Сначала простая надежность и restore drills, потом compression without changing canonical model.
 
-2. **Zstd immediately for every segment**. 🎯 6   🛡️ 7   🧠 7. Примерно `900-2200` строк.  
+2. **Zstd immediately for every segment**. 🎯 6   🛡️ 7   🧠 7. Примерно `900-2200` строк.
    Уменьшит DB size, но усложнит writer hot path, drills and corruption diagnostics.
 
-3. **Never compress**. 🎯 7   🛡️ 8   🧠 2. Примерно `0-200` строк.  
+3. **Never compress**. 🎯 7   🛡️ 8   🧠 2. Примерно `0-200` строк.
    Надежно и просто, но плохо для долгих terminal histories and storage pressure.
 
 ### Delete semantics
 
-1. **Audited tombstone/delete request flow** - выбранный вариант. 🎯 9   🛡️ 10   🧠 8. Примерно `900-2200` строк.  
+1. **Audited tombstone/delete request flow** - выбранный вариант. 🎯 9   🛡️ 10   🧠 8. Примерно `900-2200` строк.
    User delete, retention pruning and crypto erase become explicit operations with status, scope and visible consequences.
 
-2. **Direct SQL cascade delete from session**. 🎯 4   🛡️ 4   🧠 3. Примерно `200-600` строк.  
+2. **Direct SQL cascade delete from session**. 🎯 4   🛡️ 4   🧠 3. Примерно `200-600` строк.
    Быстро, но слишком легко потерять canonical history and diagnostics without explanation.
 
-3. **Never delete, only hide**. 🎯 6   🛡️ 7   🧠 4. Примерно `300-900` строк.  
+3. **Never delete, only hide**. 🎯 6   🛡️ 7   🧠 4. Примерно `300-900` строк.
    Хорошо для forensic history, но плохо для privacy, private mode and user expectations.
 
 ### Writer ownership
 
-1. **DB-backed writer lease + process-local worker** - выбранный вариант. 🎯 8   🛡️ 9   🧠 8. Примерно `900-1800` строк.  
+1. **DB-backed writer lease + process-local worker** - выбранный вариант. 🎯 8   🛡️ 9   🧠 8. Примерно `900-1800` строк.
    Защищает от двух процессов приложения, stale worker recovery and Windows restart edge cases.
 
-2. **Only process-local single worker**. 🎯 6   🛡️ 6   🧠 5. Примерно `300-800` строк.  
+2. **Only process-local single worker**. 🎯 6   🛡️ 6   🧠 5. Примерно `300-800` строк.
    Работает в happy path, но не защищает общий DB file от второго runtime.
 
-3. **OS file lock only**. 🎯 7   🛡️ 7   🧠 6. Примерно `500-1200` строк.  
+3. **OS file lock only**. 🎯 7   🛡️ 7   🧠 6. Примерно `500-1200` строк.
    Нужен как дополнительный guard later, но DB lease лучше диагностируется and tests easier.
 
 ### Terminal screen model
 
-1. **Persist raw stream + derived normal/alternate screen models** - выбранный вариант. 🎯 8   🛡️ 9   🧠 9. Примерно `1800-4200` строк.  
+1. **Persist raw stream + derived normal/alternate screen models** - выбранный вариант. 🎯 8   🛡️ 9   🧠 9. Примерно `1800-4200` строк.
    Raw stream remains canonical, but restore/UI can distinguish scrollback, alternate screen and coalesced TUI frames.
 
-2. **Persist only raw bytes and let UI infer everything**. 🎯 6   🛡️ 7   🧠 5. Примерно `700-1600` строк.  
+2. **Persist only raw bytes and let UI infer everything**. 🎯 6   🛡️ 7   🧠 5. Примерно `700-1600` строк.
    Simpler write path, but restore fidelity and diagnostics for TUI apps become fragile.
 
-3. **Persist only screen snapshots for TUI apps**. 🎯 5   🛡️ 6   🧠 5. Примерно `900-1800` строк.  
+3. **Persist only screen snapshots for TUI apps**. 🎯 5   🛡️ 6   🧠 5. Примерно `900-1800` строк.
    Good for final visual state, weak for history/search/drill and command output ranges.
 
 ### JSON schema evolution
 
-1. **Typed Rust payloads + schema registry + fixture validation** - выбранный вариант. 🎯 9   🛡️ 9   🧠 7. Примерно `700-1600` строк.  
+1. **Typed Rust payloads + schema registry + fixture validation** - выбранный вариант. 🎯 9   🛡️ 9   🧠 7. Примерно `700-1600` строк.
    Keeps JSON flexible but prevents unversioned payload drift.
 
-2. **Ad hoc `serde_json::Value` everywhere**. 🎯 4   🛡️ 4   🧠 3. Примерно `100-300` строк.  
+2. **Ad hoc `serde_json::Value` everywhere**. 🎯 4   🛡️ 4   🧠 3. Примерно `100-300` строк.
    Fast initially, but migrations and old DB compatibility degrade quickly.
 
-3. **Fully normalized tables for every event payload**. 🎯 6   🛡️ 8   🧠 10. Примерно `3000-7000` строк.  
+3. **Fully normalized tables for every event payload**. 🎯 6   🛡️ 8   🧠 10. Примерно `3000-7000` строк.
    Strong SQL shape, but too heavy for v1 event diversity.
 
 ### Integrity checks
 
-1. **Scheduled durable integrity checks** - выбранный вариант. 🎯 9   🛡️ 10   🧠 7. Примерно `700-1800` строк.  
+1. **Scheduled durable integrity checks** - выбранный вариант. 🎯 9   🛡️ 10   🧠 7. Примерно `700-1800` строк.
    Combines SQLite checks, invariant SQL, projection drift checks and restore drill sampling.
 
-2. **Only run tests in CI**. 🎯 5   🛡️ 5   🧠 3. Примерно `200-600` строк.  
+2. **Only run tests in CI**. 🎯 5   🛡️ 5   🧠 3. Примерно `200-600` строк.
    CI catches new bugs, but not user DB corruption, interrupted migrations or disk issues.
 
-3. **Only rely on SQLite constraints**. 🎯 6   🛡️ 6   🧠 3. Примерно `100-300` строк.  
+3. **Only rely on SQLite constraints**. 🎯 6   🛡️ 6   🧠 3. Примерно `100-300` строк.
    Constraints help, but cannot prove projections, restore fidelity or redaction state.
 
 ### Support diagnostics
 
-1. **Redacted support bundle request flow** - выбранный вариант. 🎯 8   🛡️ 9   🧠 7. Примерно `700-1600` строк.  
+1. **Redacted support bundle request flow** - выбранный вариант. 🎯 8   🛡️ 9   🧠 7. Примерно `700-1600` строк.
    Makes diagnostics useful while keeping raw transcript and secrets out by default.
 
-2. **Manual log file collection**. 🎯 4   🛡️ 4   🧠 2. Примерно `100-300` строк.  
+2. **Manual log file collection**. 🎯 4   🛡️ 4   🧠 2. Примерно `100-300` строк.
    Easy, but high privacy risk and inconsistent evidence.
 
-3. **Always include full DB copy**. 🎯 2   🛡️ 3   🧠 2. Примерно `100-300` строк.  
+3. **Always include full DB copy**. 🎯 2   🛡️ 3   🧠 2. Примерно `100-300` строк.
    Useful for debugging but unacceptable as default because it can contain secrets and raw output.
 
 ## Зафиксированные решения
@@ -528,7 +528,7 @@ Rule:
 
 Выбор: **Diesel ORM, sync API, SQLite backend**.
 
-Оценка: 🎯 10   🛡️ 9   🧠 7  
+Оценка: 🎯 10   🛡️ 9   🧠 7
 Объем инфраструктуры: примерно `700-1600` строк.
 
 Почему:
@@ -576,7 +576,7 @@ Rule:
 
 Выбор: **single writer + dedicated blocking persistence executor**.
 
-Оценка: 🎯 10   🛡️ 10   🧠 7  
+Оценка: 🎯 10   🛡️ 10   🧠 7
 Объем: примерно `900-2200` строк.
 
 Правило:
@@ -590,7 +590,7 @@ Rule:
 
 Выбор: **SQLite BLOB stream segments first, schema with future artifact refs**.
 
-Оценка: 🎯 9   🛡️ 8   🧠 6  
+Оценка: 🎯 9   🛡️ 8   🧠 6
 Объем: примерно `1200-2600` строк.
 
 Почему:
@@ -634,7 +634,7 @@ preserves_process_state = false
 
 Выбор: **badges derive from evidence, not hope**.
 
-Оценка: 🎯 10   🛡️ 10   🧠 5  
+Оценка: 🎯 10   🛡️ 10   🧠 5
 Объем: примерно `400-900` строк.
 
 Guarantee levels:
@@ -686,13 +686,13 @@ Rules:
 
 Concrete encryption decision:
 
-1. **SQLCipher-style DB encryption with OS-protected DB key** - target later. 🎯 8   🛡️ 9   🧠 9. Примерно `2500-6000` строк.  
+1. **SQLCipher-style DB encryption with OS-protected DB key** - target later. 🎯 8   🛡️ 9   🧠 9. Примерно `2500-6000` строк.
    Лучший fit для local-first SQLite: protects broad DB contents, simpler mental model for users, but requires careful migration and startup key handling.
 
-2. **Application-level envelope encryption per payload**. 🎯 7   🛡️ 8   🧠 9. Примерно `3500-8000` строк.  
+2. **Application-level envelope encryption per payload**. 🎯 7   🛡️ 8   🧠 9. Примерно `3500-8000` строк.
    Полезно для future external artifacts/selective crypto, но усложняет query/search/projection rebuild.
 
-3. **Only OS-protect a few secrets, DB stays plaintext**. 🎯 5   🛡️ 5   🧠 4. Примерно `600-1400` строк.  
+3. **Only OS-protect a few secrets, DB stays plaintext**. 🎯 5   🛡️ 5   🧠 4. Примерно `600-1400` строк.
    Easier, but does not satisfy sensitive terminal history expectations.
 
 Windows-first key stance:
@@ -724,7 +724,7 @@ Encryption rollout rule:
 
 Выбор: **restore drill + invariant checks + fault injection skeleton сразу**.
 
-Оценка: 🎯 9   🛡️ 9   🧠 8  
+Оценка: 🎯 9   🛡️ 9   🧠 8
 Объем: примерно `1800-4200` строк тестов/инфраструктуры.
 
 Минимум первой версии:
@@ -1787,13 +1787,13 @@ SQLite is permissive by default. For persistence v2, the schema should be defens
 
 Chosen policy: 🎯 9   🛡️ 9   🧠 6
 
-1. **Stable internal domains use Rust enums + SQL `CHECK`**.  
+1. **Stable internal domains use Rust enums + SQL `CHECK`**.
    Examples: `status`, `private_mode`, `gap_kind`, `backup_kind`, `durability_profile`, bounded command lifecycle states.
 
-2. **Extension/product domains remain `TEXT`, but validation moves into typed Rust constructors**.  
+2. **Extension/product domains remain `TEXT`, but validation moves into typed Rust constructors**.
    Examples: future backend-specific `event_type`, mux capability names, payload schema ids and unknown extension event names.
 
-3. **Consider `STRICT` tables only after runtime SQLite gate is enforced**.  
+3. **Consider `STRICT` tables only after runtime SQLite gate is enforced**.
    `STRICT` is useful for new canonical tables, but it requires SQLite `3.37.0+`; packaged v2 should already exceed that through bundled SQLite. Do not retrofit `STRICT` into legacy tables until migration/recovery tooling is ready.
 
 Example constraints:
@@ -4565,7 +4565,7 @@ Before retention/delete is enabled:
 
 ### Iteration 0 - Architecture and dependency foundation
 
-Оценка: 🎯 10   🛡️ 9   🧠 5  
+Оценка: 🎯 10   🛡️ 9   🧠 5
 Объем: `500-1200` строк.
 
 Tasks:
@@ -4596,7 +4596,7 @@ Done when:
 
 ### Iteration 1 - Core Diesel schema and dual store boundary
 
-Оценка: 🎯 9   🛡️ 9   🧠 7  
+Оценка: 🎯 9   🛡️ 9   🧠 7
 Объем: `1500-3000` строк.
 
 Tasks:
@@ -4675,7 +4675,7 @@ Done when:
 
 ### Iteration 2 - Capture events and journal writer skeleton
 
-Оценка: 🎯 9   🛡️ 9   🧠 8  
+Оценка: 🎯 9   🛡️ 9   🧠 8
 Объем: `1800-3600` строк.
 
 Tasks:
@@ -4718,7 +4718,7 @@ Done when:
 
 ### Iteration 3 - Command blocks
 
-Оценка: 🎯 9   🛡️ 8   🧠 8  
+Оценка: 🎯 9   🛡️ 8   🧠 8
 Объем: `1800-3600` строк.
 
 Tasks:
@@ -4748,7 +4748,7 @@ Done when:
 
 ### Iteration 4 - Snapshot write and restore visible history
 
-Оценка: 🎯 10   🛡️ 9   🧠 8  
+Оценка: 🎯 10   🛡️ 9   🧠 8
 Объем: `2200-4200` строк.
 
 Tasks:
@@ -4784,7 +4784,7 @@ Done when:
 
 ### Iteration 5 - Idempotency and reconnect delivery state
 
-Оценка: 🎯 9   🛡️ 9   🧠 8  
+Оценка: 🎯 9   🛡️ 9   🧠 8
 Объем: `1600-3200` строк.
 
 Tasks:
@@ -4811,7 +4811,7 @@ Done when:
 
 ### Iteration 6 - Outbox and derived workers
 
-Оценка: 🎯 9   🛡️ 9   🧠 8  
+Оценка: 🎯 9   🛡️ 9   🧠 8
 Объем: `1600-3400` строк.
 
 Tasks:
@@ -4861,7 +4861,7 @@ Done when:
 
 ### Iteration 7 - Redaction, private mode and export safety
 
-Оценка: 🎯 9   🛡️ 9   🧠 8  
+Оценка: 🎯 9   🛡️ 9   🧠 8
 Объем: `2200-4600` строк.
 
 Tasks:
@@ -4890,7 +4890,7 @@ Done when:
 
 ### Iteration 8 - Windows hardening
 
-Оценка: 🎯 9   🛡️ 10   🧠 8  
+Оценка: 🎯 9   🛡️ 10   🧠 8
 Объем: `1800-3600` строк.
 
 Tasks:
@@ -4911,7 +4911,7 @@ Done when:
 
 ### Iteration 9 - Zellij/tmux backend integration
 
-Оценка: 🎯 8   🛡️ 8   🧠 8  
+Оценка: 🎯 8   🛡️ 8   🧠 8
 Объем: `2200-5200` строк.
 
 Tasks:
@@ -4948,7 +4948,7 @@ Done when:
 
 ### Iteration 10 - Reliability proof skeleton
 
-Оценка: 🎯 9   🛡️ 10   🧠 9  
+Оценка: 🎯 9   🛡️ 10   🧠 9
 Объем: `2600-5600` строк.
 
 Tasks:
@@ -4983,7 +4983,7 @@ Done when:
 
 ### Iteration 11 - Encryption foundation
 
-Оценка: 🎯 8   🛡️ 10   🧠 9  
+Оценка: 🎯 8   🛡️ 10   🧠 9
 Объем: `2800-6200` строк.
 
 Tasks:

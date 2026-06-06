@@ -8,9 +8,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use command::{run_zellij, wait_for_zellij_session};
 #[cfg(unix)]
-use command::{run_zellij_with_timeout, zellij_create_timeout};
+use command::{is_headless_zellij_spawn_error, run_zellij_with_timeout, zellij_create_timeout};
+use command::{run_zellij, wait_for_zellij_session};
 pub use lock::ZellijTestLock;
 #[cfg(windows)]
 use windows::{WindowsZellijPtyGuard, spawn_windows_zellij_pty};

@@ -89,7 +89,7 @@ pub(super) fn zellij_create_timeout() -> Duration {
 }
 
 #[cfg(unix)]
-fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
+pub(super) fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
     stderr.contains("could not get terminal attribute")
         || stderr.contains("could not enable raw mode")
         || stderr.contains("No such device or address")

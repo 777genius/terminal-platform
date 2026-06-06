@@ -374,7 +374,7 @@ impl TmuxServerGuard {
 
 #[cfg(unix)]
 impl Drop for TmuxServerGuard {
-    pub(super) fn drop(&mut self) {
+    fn drop(&mut self) {
         let _ = run_tmux(&self.socket_name, &["kill-server"]);
     }
 }

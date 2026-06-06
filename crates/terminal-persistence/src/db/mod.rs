@@ -23,8 +23,10 @@ mod tests {
     #[test]
     fn diesel_table_column_budget_stays_bounded() {
         let tables = diesel_schema_tables_with_column_counts();
-        let (table_name, column_count) =
-            tables.iter().max_by_key(|(_, column_count)| *column_count).unwrap();
+        let (table_name, column_count) = tables
+            .iter()
+            .max_by_key(|(_, column_count)| *column_count)
+            .expect("diesel schema should contain generated table declarations");
 
         assert!(
             *column_count <= MAX_DIESEL_TABLE_COLUMNS,
