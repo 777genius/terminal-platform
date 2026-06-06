@@ -103,6 +103,23 @@ export function toTerminalSavedSessionSummary(
       replays_saved_screen_buffers: session.restore_semantics.replays_saved_screen_buffers,
       preserves_process_state: session.restore_semantics.preserves_process_state,
     },
+    restore_semantics_v2: session.restore_semantics_v2
+      ? {
+          restores_topology: session.restore_semantics_v2.restores_topology,
+          restores_focus_state: session.restore_semantics_v2.restores_focus_state,
+          restores_tab_titles: session.restore_semantics_v2.restores_tab_titles,
+          uses_saved_launch_spec: session.restore_semantics_v2.uses_saved_launch_spec,
+          replays_saved_screen_buffers: session.restore_semantics_v2.replays_saved_screen_buffers,
+          preserves_process_state: session.restore_semantics_v2.preserves_process_state,
+          restore_guarantee_level: session.restore_semantics_v2.restore_guarantee_level,
+          history_replay_state: session.restore_semantics_v2.history_replay_state,
+          source_session_id: session.restore_semantics_v2.source_session_id,
+          restored_session_id: session.restore_semantics_v2.restored_session_id,
+          latest_restore_drill_status: session.restore_semantics_v2.latest_restore_drill_status,
+          has_known_gaps: session.restore_semantics_v2.has_known_gaps,
+          evidence_refs: [...session.restore_semantics_v2.evidence_refs],
+        }
+      : null,
   };
 
   return {
@@ -243,12 +260,14 @@ export function toSdkMuxCommand(
         kind: command.kind,
         pane_id: command.pane_id,
         data: command.data,
+        ...(command.client_event_id ? { client_event_id: command.client_event_id } : {}),
       };
     case "send_paste":
       return {
         kind: command.kind,
         pane_id: command.pane_id,
         data: command.data,
+        ...(command.client_event_id ? { client_event_id: command.client_event_id } : {}),
       };
     case "detach":
       return {

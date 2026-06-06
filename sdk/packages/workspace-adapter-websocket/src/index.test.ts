@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 
-import { WebSocketServer, type WebSocket } from "ws";
+import { WebSocket as NodeWebSocket, WebSocketServer, type WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createMemoryWorkspaceTransport } from "@terminal-platform/workspace-adapter-memory";
@@ -36,6 +36,7 @@ describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
     const transport = createWorkspaceWebSocketTransport({
       controlUrl: gateway.controlUrl,
       streamUrl: gateway.streamUrl,
+      webSocketFactory: createNodeWebSocket,
     });
     cleanups.push(() => transport.close());
 
@@ -60,6 +61,61 @@ describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
     expect(delta.to_sequence).toBe(screen.sequence);
   });
 
+  it("retries transient control plane connection failures", async () => {
+    const fixture = createMemoryWorkspaceTransport();
+    const gateway = await startWorkspaceGateway(fixture);
+    cleanups.push(() => gateway.dispose());
+
+    let attempts = 0;
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: gateway.controlUrl,
+      streamUrl: gateway.streamUrl,
+      webSocketFactory: (url, protocols) => {
+        attempts += 1;
+        if (attempts <= 2) {
+          return createFailingWebSocket();
+        }
+
+        return createNodeWebSocket(url, protocols);
+      },
+    });
+    cleanups.push(() => transport.close());
+
+    await expect(transport.listSessions()).resolves.toHaveLength(1);
+    expect(attempts).toBe(3);
+  });
+
+  it("preserves storage pressure gateway errors for workspace diagnostics", async () => {
+    const storagePressureError = new Error("simulated storage pressure") as Error & { code: string };
+    storagePressureError.code = "storage_pressure";
+    const fixture = {
+      ...createMemoryWorkspaceTransport(),
+      dispatchMuxCommand: async () => {
+        throw storagePressureError;
+      },
+    } as WorkspaceTransportClient;
+    const gateway = await startWorkspaceGateway(fixture);
+    cleanups.push(() => gateway.dispose());
+
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: gateway.controlUrl,
+      streamUrl: gateway.streamUrl,
+      webSocketFactory: createNodeWebSocket,
+    });
+    cleanups.push(() => transport.close());
+
+    const session = (await transport.listSessions())[0]!;
+    await expect(transport.dispatchMuxCommand(session.session_id, {
+      kind: "send_input",
+      pane_id: "pane-1",
+      data: "echo should-fail\r",
+    })).rejects.toMatchObject({
+      code: "storage_pressure",
+      message: "simulated storage pressure",
+      recoverable: true,
+    });
+  });
+
   it("streams subscription events over the websocket stream plane", async () => {
     const fixture = createMemoryWorkspaceTransport();
     const gateway = await startWorkspaceGateway(fixture);
@@ -68,6 +124,7 @@ describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
     const transport = createWorkspaceWebSocketTransport({
       controlUrl: gateway.controlUrl,
       streamUrl: gateway.streamUrl,
+      webSocketFactory: createNodeWebSocket,
     });
     cleanups.push(() => transport.close());
 
@@ -83,6 +140,114 @@ describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
     expect(firstEvent?.kind).toBe("screen_delta");
 
     await subscription.close();
+  });
+});
+
+describe("workspace websocket adapter failure handling", () => {
+  it("rejects control requests when websocket send throws synchronously", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createOpenThenThrowingSendWebSocket,
+    });
+
+    await expect(transport.listSessions()).rejects.toThrow("simulated websocket send failure");
+    await transport.close();
+  });
+
+  it("settles pending control retry waits when the transport closes", async () => {
+    let attempts = 0;
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: () => {
+        attempts += 1;
+        return createFailingWebSocket();
+      },
+    });
+    const pending = transport.listSessions();
+
+    await sleep(20);
+    expect(attempts).toBeGreaterThan(0);
+    await transport.close();
+
+    await expect(withTimeout(pending, 500)).rejects.toThrow("Failed to connect to workspace control plane");
+  });
+
+  it("does not hang when websocket close never emits a close event", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createOpenNeverClosingWebSocket,
+    });
+    const pending = transport.listSessions();
+    void pending.catch(() => undefined);
+
+    await sleep(20);
+    await expect(withTimeout(transport.close(), 750)).resolves.toBeUndefined();
+    await expect(pending).rejects.toThrow("workspace websocket transport closed");
+  });
+
+  it("rejects in-flight connection attempts when the transport closes", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createConnectingCloseableWebSocket,
+    });
+    const pending = transport.listSessions();
+    const rejected = expect(pending).rejects.toThrow("workspace websocket transport closed");
+
+    await sleep(0);
+    await transport.close();
+    await withTimeout(rejected, 500);
+  });
+
+  it("rejects in-flight control connection attempts when websocket close event is lost", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createConnectingNeverClosingWebSocket,
+    });
+    const pending = transport.listSessions();
+    const rejected = expect(pending).rejects.toThrow("workspace websocket transport closed");
+
+    await sleep(0);
+    await transport.close();
+    await withTimeout(rejected, 500);
+  });
+
+  it("rejects in-flight stream connection attempts when websocket close event is lost", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createConnectingNeverClosingWebSocket,
+    });
+    const pending = transport.openSubscription("session-1", {
+      kind: "session_topology",
+    });
+    const rejected = expect(pending).rejects.toThrow("workspace websocket transport closed");
+
+    await sleep(0);
+    await transport.close();
+    await withTimeout(rejected, 500);
+  });
+
+  it("settles subscription close when the unsubscribe acknowledgement is lost", async () => {
+    const transport = createWorkspaceWebSocketTransport({
+      controlUrl: "ws://127.0.0.1/terminal-gateway/control",
+      streamUrl: "ws://127.0.0.1/terminal-gateway/stream",
+      webSocketFactory: createOpenIgnoringWorkspaceUnsubscribeWebSocket,
+    });
+
+    try {
+      const subscription = await transport.openSubscription("session-1", {
+        kind: "session_topology",
+      });
+
+      await expect(withTimeout(subscription.close(), 750)).resolves.toBeUndefined();
+    } finally {
+      await transport.close();
+    }
   });
 });
 
@@ -194,10 +359,17 @@ async function handleControlMessage(
       ok: false,
       error: {
         message: error instanceof Error ? error.message : String(error),
+        ...readErrorCode(error),
       },
     };
     socket.send(encodeWorkspaceWebSocketPayload(response));
   }
+}
+
+function readErrorCode(error: unknown): { code?: string } {
+  return error instanceof Error && "code" in error && typeof error.code === "string"
+    ? { code: error.code }
+    : {};
 }
 
 async function dispatchControl(
@@ -221,6 +393,21 @@ async function dispatchControl(
       return transport.importSession(message.payload.route, message.payload.title ?? null);
     case "workspace_saved_session":
       return transport.getSavedSession(message.payload.sessionId);
+    case "workspace_command_history":
+      return transport.listCommandHistory?.(message.payload.sessionId ?? null, message.payload.limit ?? null) ?? [];
+    case "workspace_pane_history":
+      if (!transport.getPaneHistory) {
+        throw new Error("pane history is not supported by this transport");
+      }
+      return transport.getPaneHistory(
+        message.payload.sessionId,
+        message.payload.paneId,
+        {
+          fromEventSeq: message.payload.fromEventSeq ?? null,
+          maxSegments: message.payload.maxSegments ?? null,
+          maxBytes: message.payload.maxBytes ?? null,
+        },
+      );
     case "workspace_prune_saved_sessions":
       return transport.pruneSavedSessions(message.payload.keepLatest);
     case "workspace_restore_saved_session":
@@ -347,4 +534,222 @@ async function probeLoopbackTcp(): Promise<boolean> {
 
 function assertNever(value: never): never {
   throw new Error(`Unsupported message: ${JSON.stringify(value)}`);
+}
+
+function createNodeWebSocket(url: string, protocols?: string[]): globalThis.WebSocket {
+  return new NodeWebSocket(url, protocols) as unknown as globalThis.WebSocket;
+}
+
+function createFailingWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 3,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    close() {
+      emit("close");
+    },
+  } as unknown as globalThis.WebSocket;
+
+  const emit = (type: string) => {
+    for (const listener of listeners.get(type) ?? []) {
+      listener.call(socket, { type } as Event);
+    }
+  };
+
+  queueMicrotask(() => {
+    emit("error");
+  });
+
+  return socket;
+}
+
+function createOpenThenThrowingSendWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 0,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    send() {
+      throw new Error("simulated websocket send failure");
+    },
+    close() {
+      socket.readyState = 3;
+      emit("close");
+    },
+  } as unknown as globalThis.WebSocket & { readyState: number };
+
+  const emit = (type: string) => {
+    for (const listener of listeners.get(type) ?? []) {
+      listener.call(socket, { type } as Event);
+    }
+  };
+
+  queueMicrotask(() => {
+    socket.readyState = 1;
+    emit("open");
+  });
+
+  return socket;
+}
+
+function createOpenNeverClosingWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 0,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    send() {},
+    close() {
+      socket.readyState = 2;
+    },
+  } as unknown as globalThis.WebSocket & { readyState: number };
+
+  const emit = (type: string) => {
+    for (const listener of listeners.get(type) ?? []) {
+      listener.call(socket, { type } as Event);
+    }
+  };
+
+  queueMicrotask(() => {
+    socket.readyState = 1;
+    emit("open");
+  });
+
+  return socket;
+}
+
+function createConnectingCloseableWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 0,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    send() {},
+    close() {
+      socket.readyState = 3;
+      emit("close");
+    },
+  } as unknown as globalThis.WebSocket & { readyState: number };
+
+  const emit = (type: string) => {
+    for (const listener of listeners.get(type) ?? []) {
+      listener.call(socket, { type } as Event);
+    }
+  };
+
+  return socket;
+}
+
+function createConnectingNeverClosingWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 0,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    send() {},
+    close() {
+      socket.readyState = 2;
+    },
+  } as unknown as globalThis.WebSocket & { readyState: number };
+
+  return socket;
+}
+
+function createOpenIgnoringWorkspaceUnsubscribeWebSocket(): globalThis.WebSocket {
+  const listeners = new Map<string, Set<EventListener>>();
+  const socket = {
+    readyState: 0,
+    addEventListener(type: string, listener: EventListener) {
+      const bucket = listeners.get(type) ?? new Set<EventListener>();
+      bucket.add(listener);
+      listeners.set(type, bucket);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    send(payload: string) {
+      const message = decodeWorkspaceWebSocketPayload<WorkspaceGatewayStreamClientMessage>(payload);
+      if (message.type === "workspace_subscribe") {
+        queueMicrotask(() => {
+          emit("message", {
+            data: encodeWorkspaceWebSocketPayload({
+              type: "workspace_subscription_ack",
+              subscriptionId: message.subscriptionId,
+              meta: {
+                subscription_id: `memory-subscription-${message.subscriptionId}`,
+              },
+            } satisfies WorkspaceGatewayStreamServerMessage),
+          });
+        });
+      }
+    },
+    close() {
+      socket.readyState = 3;
+      emit("close");
+    },
+  } as unknown as globalThis.WebSocket & { readyState: number };
+
+  const emit = (type: string, event: Partial<Event> = {}) => {
+    for (const listener of listeners.get(type) ?? []) {
+      listener.call(socket, { type, ...event } as Event);
+    }
+  };
+
+  queueMicrotask(() => {
+    socket.readyState = 1;
+    emit("open");
+  });
+
+  return socket;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

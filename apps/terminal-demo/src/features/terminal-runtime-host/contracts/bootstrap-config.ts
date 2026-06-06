@@ -1,5 +1,6 @@
 export interface TerminalRuntimeBootstrapConfig {
   controlPlaneUrl: string;
+  demoDefaultWorkingDirectory?: string;
   demoDefaultShellProgram?: string;
   sessionStreamUrl: string;
   runtimeSlug: string;
@@ -20,7 +21,36 @@ export function buildTerminalRuntimeBrowserUrl(
   } else {
     url.searchParams.delete("demoDefaultShellProgram");
   }
+  if (config.demoDefaultWorkingDirectory) {
+    url.searchParams.set("demoDefaultWorkingDirectory", config.demoDefaultWorkingDirectory);
+  } else {
+    url.searchParams.delete("demoDefaultWorkingDirectory");
+  }
   return url.toString();
+}
+
+export function sameTerminalRuntimeBootstrapConfig(
+  left: TerminalRuntimeBootstrapConfig | null,
+  right: TerminalRuntimeBootstrapConfig | null,
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+
+  return (
+    left.controlPlaneUrl === right.controlPlaneUrl
+    && left.sessionStreamUrl === right.sessionStreamUrl
+    && left.runtimeSlug === right.runtimeSlug
+    && left.demoDefaultShellProgram === right.demoDefaultShellProgram
+    && left.demoDefaultWorkingDirectory === right.demoDefaultWorkingDirectory
+  );
+}
+
+export function selectLatestTerminalRuntimeBootstrapConfig(input: {
+  browserConfig: TerminalRuntimeBootstrapConfig | null;
+  queryConfig: TerminalRuntimeBootstrapConfig | null;
+}): TerminalRuntimeBootstrapConfig | null {
+  return input.browserConfig ?? input.queryConfig;
 }
 
 export function deriveTerminalRuntimeSessionStreamUrl(controlPlaneUrl: string): string {

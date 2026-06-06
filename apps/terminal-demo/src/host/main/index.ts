@@ -1,18 +1,31 @@
 import { app, BrowserWindow } from "electron";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
 import {
   DEFAULT_TERMINAL_RUNTIME_SLUG,
+  resolveDemoDefaultWorkingDirectory,
   resolveDemoDefaultShellProgram,
   startTerminalRuntimeHost,
   type TerminalRuntimeHostHandle,
 } from "@features/terminal-runtime-host/main";
 import { createMainWindow } from "./createMainWindow.js";
 
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const appRoot = path.resolve(moduleDir, "../../..");
+const repoRoot = path.resolve(appRoot, "../..");
 const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
 const sessionStorePath = process.env.TERMINAL_DEMO_SESSION_STORE_PATH ?? null;
 const demoAutoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION === "1";
-const demoDefaultShellProgram = resolveDemoDefaultShellProgram();
+const demoDefaultShellProgram = resolveDemoDefaultShellProgram({
+  validateWindowsPaths: true,
+});
+const demoDefaultWorkingDirectory = resolveDemoDefaultWorkingDirectory({
+  cwd: repoRoot,
+  validateExists: true,
+});
 let hostHandle: TerminalRuntimeHostHandle | null = null;
+let disposingRuntime = false;
 
 async function bootstrap(): Promise<void> {
   await app.whenReady();
@@ -24,12 +37,14 @@ async function bootstrap(): Promise<void> {
       ? {
           title: "SDK Workspace",
           program: demoDefaultShellProgram,
+          cwd: demoDefaultWorkingDirectory,
         }
       : null,
     sessionStorePath,
   });
   const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,
+    ...(demoDefaultWorkingDirectory ? { demoDefaultWorkingDirectory } : {}),
     demoDefaultShellProgram,
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,
@@ -41,6 +56,7 @@ async function bootstrap(): Promise<void> {
     if (app.isReady() && BrowserWindow.getAllWindows().length === 0 && hostHandle) {
       await createMainWindow({
         controlPlaneUrl: hostHandle.controlPlaneUrl,
+        ...(demoDefaultWorkingDirectory ? { demoDefaultWorkingDirectory } : {}),
         demoDefaultShellProgram,
         sessionStreamUrl: hostHandle.sessionStreamUrl,
         runtimeSlug: hostHandle.runtimeSlug,
@@ -55,8 +71,23 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
-  void hostHandle?.dispose();
+app.on("before-quit", (event) => {
+  if (!hostHandle || disposingRuntime) {
+    return;
+  }
+
+  event.preventDefault();
+  disposingRuntime = true;
+  const handle = hostHandle;
+  hostHandle = null;
+
+  void handle.dispose()
+    .catch((error) => {
+      console.error(error);
+    })
+    .finally(() => {
+      app.exit(0);
+    });
 });
 
 void bootstrap().catch((error) => {

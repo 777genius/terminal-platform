@@ -1,12 +1,14 @@
 import type {
   BackendCapabilitiesInfo,
   BackendKind,
+  CommandHistoryEntry,
   CreateSessionRequest,
   DeleteSavedSessionResult,
   DiscoveredSession,
   Handshake,
   MuxCommand,
   MuxCommandResult,
+  PaneHistory,
   PaneId,
   PruneSavedSessionsResult,
   RestoredSession,
@@ -33,6 +35,8 @@ export type WorkspaceGatewayControlMethod =
   | "workspace_create_session"
   | "workspace_import_session"
   | "workspace_saved_session"
+  | "workspace_command_history"
+  | "workspace_pane_history"
   | "workspace_prune_saved_sessions"
   | "workspace_restore_saved_session"
   | "workspace_delete_saved_session"
@@ -80,6 +84,23 @@ export interface WorkspaceGatewayControlRequestMap {
   workspace_saved_session: {
     payload: { sessionId: SessionId };
     response: SavedSessionRecord;
+  };
+  workspace_command_history: {
+    payload: {
+      sessionId?: SessionId | null;
+      limit?: number | null;
+    };
+    response: CommandHistoryEntry[];
+  };
+  workspace_pane_history: {
+    payload: {
+      sessionId: SessionId;
+      paneId: PaneId;
+      fromEventSeq?: number | bigint | null;
+      maxSegments?: number | null;
+      maxBytes?: number | null;
+    };
+    response: PaneHistory;
   };
   workspace_prune_saved_sessions: {
     payload: { keepLatest: number };

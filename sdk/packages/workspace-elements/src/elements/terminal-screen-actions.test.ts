@@ -50,6 +50,53 @@ describe("terminal screen actions", () => {
     expect(actions.map((action) => action.placement)).toEqual(["panel", "panel", "panel"]);
   });
 
+  it("exposes load-more history only when persisted history has a cursor", () => {
+    const actions = resolveTerminalScreenActions({
+      canCopyVisibleOutput: true,
+      canLoadMoreHistory: true,
+      placement: "terminal",
+    });
+
+    expect(actions.map((action) => action.id)).toEqual([
+      TERMINAL_SCREEN_ACTION_IDS.followOutput,
+      TERMINAL_SCREEN_ACTION_IDS.loadMoreHistory,
+      TERMINAL_SCREEN_ACTION_IDS.scrollLatest,
+      TERMINAL_SCREEN_ACTION_IDS.copyVisible,
+    ]);
+    expect(actions[1]).toMatchObject({
+      ariaLabel: "Load more restored terminal history",
+      disabled: false,
+      label: "\u2191",
+      labelMode: "glyph",
+      testId: "tp-screen-load-more-history",
+      title: "Load more restored terminal history",
+      tone: "secondary",
+    });
+  });
+
+  it("keeps load-more history state explicit while loading or failed", () => {
+    expect(resolveTerminalScreenActions({
+      canLoadMoreHistory: true,
+      historyLoadState: "loading",
+      placement: "panel",
+    })[1]).toMatchObject({
+      ariaLabel: "Loading more restored terminal history",
+      disabled: true,
+      label: "Loading",
+    });
+
+    expect(resolveTerminalScreenActions({
+      canLoadMoreHistory: true,
+      historyLoadState: "failed",
+      placement: "panel",
+    })[1]).toMatchObject({
+      ariaLabel: "Load more restored terminal history failed",
+      disabled: false,
+      label: "Load failed",
+      tone: "danger",
+    });
+  });
+
   it("models paused follow state without disabling manual scroll", () => {
     const actions = resolveTerminalScreenActions({
       canCopyVisibleOutput: true,

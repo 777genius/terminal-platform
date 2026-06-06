@@ -2,12 +2,14 @@ import type {
   AttachedSession,
   BackendCapabilitiesInfo,
   BackendKind,
+  CommandHistoryEntry,
   CreateSessionRequest,
   DeleteSavedSessionResult,
   DiscoveredSession,
   Handshake,
   MuxCommand,
   MuxCommandResult,
+  PaneHistory,
   PaneId,
   PruneSavedSessionsResult,
   RestoredSession,
@@ -24,7 +26,8 @@ import type {
   TopologySnapshot,
 } from "@terminal-platform/runtime-types";
 import type { WorkspaceSubscription, WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
-import { WorkspaceError } from "@terminal-platform/workspace-contracts";
+import type { WorkspacePaneHistoryRequestOptions } from "@terminal-platform/workspace-contracts";
+import { WorkspaceError, type WorkspaceErrorCode } from "@terminal-platform/workspace-contracts";
 
 import { decodeWorkspaceWebSocketPayload, encodeWorkspaceWebSocketPayload } from "./json-codec.js";
 import type {
@@ -37,6 +40,10 @@ import type {
 
 const INITIAL_CONNECT_MAX_ATTEMPTS = 6;
 const RECONNECT_BACKOFF_MS = [100, 200, 400, 800, 1_600, 2_000] as const;
+const WEB_SOCKET_CONNECTING = 0;
+const WEB_SOCKET_OPEN = 1;
+const WEB_SOCKET_CLOSE_TIMEOUT_MS = 250;
+const SUBSCRIPTION_CLOSE_TIMEOUT_MS = 250;
 
 export interface CreateWorkspaceWebSocketTransportOptions {
   controlUrl: string;
@@ -74,6 +81,11 @@ interface SubscriptionRecord {
   closed: Deferred<void>;
 }
 
+interface RetryWaiter {
+  timer: ReturnType<typeof setTimeout>;
+  resolve(): void;
+}
+
 export function createWorkspaceWebSocketTransport(
   options: CreateWorkspaceWebSocketTransportOptions,
 ): WorkspaceTransportClient {
@@ -102,10 +114,12 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
   #closed = false;
   #controlSocket: WebSocket | null = null;
   #controlConnectPromise: Promise<WebSocket> | null = null;
+  #controlConnectReject: ((error: Error) => void) | null = null;
   #streamSocket: WebSocket | null = null;
   #streamConnectPromise: Promise<WebSocket> | null = null;
+  #streamConnectReject: ((error: Error) => void) | null = null;
   #streamReconnectLoopPromise: Promise<void> | null = null;
-  #streamReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly #retryWaiters = new Set<RetryWaiter>();
   readonly #pendingControlRequests = new Map<
     string,
     PendingControlRequest<keyof WorkspaceGatewayControlRequestMap>
@@ -153,6 +167,30 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
 
   async getSavedSession(sessionId: SessionId): Promise<SavedSessionRecord> {
     return this.request("workspace_saved_session", { sessionId });
+  }
+
+  async listCommandHistory(
+    sessionId?: SessionId | null,
+    limit?: number | null,
+  ): Promise<CommandHistoryEntry[]> {
+    return this.request("workspace_command_history", {
+      sessionId: sessionId ?? null,
+      limit: limit ?? null,
+    });
+  }
+
+  async getPaneHistory(
+    sessionId: SessionId,
+    paneId: PaneId,
+    options: WorkspacePaneHistoryRequestOptions = {},
+  ): Promise<PaneHistory> {
+    return this.request("workspace_pane_history", {
+      sessionId,
+      paneId,
+      fromEventSeq: options.fromEventSeq ?? null,
+      maxSegments: options.maxSegments ?? null,
+      maxBytes: options.maxBytes ?? null,
+    });
   }
 
   async deleteSavedSession(sessionId: SessionId): Promise<DeleteSavedSessionResult> {
@@ -211,6 +249,8 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
       waiters: [],
       closed: createDeferred<void>(),
     };
+    // close() can reject the ack before stream connect reaches the ack await.
+    void record.ack.promise.catch(() => undefined);
     this.#subscriptions.set(requestedId, record);
 
     try {
@@ -239,9 +279,11 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     }
 
     this.#closed = true;
-    this.clearStreamReconnectTimer();
+    this.clearRetryWaiters();
     this.#streamReconnectLoopPromise = null;
     this.rejectAllControlRequests(new Error("workspace websocket transport closed"));
+    this.#controlConnectReject?.(new Error("workspace websocket transport closed"));
+    this.#streamConnectReject?.(new Error("workspace websocket transport closed"));
 
     const closeOperations = [
       closeSocket(this.#controlSocket),
@@ -249,8 +291,10 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     ];
     this.#controlSocket = null;
     this.#controlConnectPromise = null;
+    this.#controlConnectReject = null;
     this.#streamSocket = null;
     this.#streamConnectPromise = null;
+    this.#streamConnectReject = null;
 
     for (const record of this.#subscriptions.values()) {
       this.finalizeSubscription(record, {
@@ -267,7 +311,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     payload: WorkspaceGatewayControlRequestMap[RecordKey]["payload"],
   ): Promise<WorkspaceGatewayControlRequestMap[RecordKey]["response"]> {
     this.assertOpen();
-    const socket = await this.ensureControlConnected();
+    const socket = await this.ensureControlConnectedWithRetry(INITIAL_CONNECT_MAX_ATTEMPTS);
     const requestId = createSubscriptionId();
 
     return await new Promise<WorkspaceGatewayControlRequestMap[RecordKey]["response"]>((resolve, reject) => {
@@ -284,30 +328,75 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         payload,
       } as WorkspaceGatewayControlClientMessage;
 
-      socket.send(encodeWorkspaceWebSocketPayload(envelope));
+      try {
+        socket.send(encodeWorkspaceWebSocketPayload(envelope));
+      } catch (error) {
+        this.#pendingControlRequests.delete(requestId);
+        reject(toError(error));
+      }
     });
   }
 
+  private async ensureControlConnectedWithRetry(maxAttempts: number): Promise<WebSocket> {
+    let attempt = 0;
+    let lastError: Error | null = null;
+
+    while (!this.#closed && attempt < maxAttempts) {
+      try {
+        return await this.ensureControlConnected();
+      } catch (error) {
+        lastError = toError(error);
+        attempt += 1;
+        if (attempt >= maxAttempts) {
+          break;
+        }
+        await this.waitBeforeRetry(attempt);
+      }
+    }
+
+    throw lastError ?? new Error("Failed to connect to workspace control plane");
+  }
+
   private async ensureControlConnected(): Promise<WebSocket> {
-    if (this.#controlSocket?.readyState === WebSocket.OPEN) {
+    if (this.#controlSocket?.readyState === WEB_SOCKET_OPEN) {
       return this.#controlSocket;
     }
 
     this.#controlConnectPromise ??= new Promise<WebSocket>((resolve, reject) => {
       const socket = this.#webSocketFactory(this.#controlUrl, this.#protocols);
+      this.#controlSocket = socket;
+      this.#controlConnectReject = reject;
       const cleanup = () => {
         socket.removeEventListener("open", onOpen);
         socket.removeEventListener("error", onError);
       };
       const onOpen = () => {
+        const isCurrentSocket = this.#controlSocket === socket;
         cleanup();
+        if (this.#closed || !isCurrentSocket) {
+          if (isCurrentSocket) {
+            this.#controlSocket = null;
+            this.#controlConnectPromise = null;
+            this.#controlConnectReject = null;
+          }
+          void closeSocket(socket);
+          reject(new Error("workspace websocket transport closed"));
+          return;
+        }
+
         this.#controlSocket = socket;
         this.#controlConnectPromise = null;
+        this.#controlConnectReject = null;
         resolve(socket);
       };
       const onError = () => {
+        const isCurrentSocket = this.#controlSocket === socket;
         cleanup();
-        this.#controlConnectPromise = null;
+        if (isCurrentSocket) {
+          this.#controlSocket = null;
+          this.#controlConnectPromise = null;
+          this.#controlConnectReject = null;
+        }
         reject(new Error("Failed to connect to workspace control plane"));
       };
 
@@ -317,9 +406,16 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         this.handleControlMessage(event.data.toString());
       });
       socket.addEventListener("close", () => {
-        if (this.#controlSocket === socket) {
+        const isCurrentSocket = this.#controlSocket === socket;
+        cleanup();
+        if (isCurrentSocket) {
           this.#controlSocket = null;
+          this.#controlConnectPromise = null;
+          this.#controlConnectReject = null;
         }
+        reject(new Error(this.#closed
+          ? "workspace websocket transport closed"
+          : "Workspace control plane connection closed"));
         this.rejectAllControlRequests(new Error("Workspace control plane connection closed"));
       });
     });
@@ -375,25 +471,45 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
   }
 
   private async ensureStreamConnected(): Promise<WebSocket> {
-    if (this.#streamSocket?.readyState === WebSocket.OPEN) {
+    if (this.#streamSocket?.readyState === WEB_SOCKET_OPEN) {
       return this.#streamSocket;
     }
 
     this.#streamConnectPromise ??= new Promise<WebSocket>((resolve, reject) => {
       const socket = this.#webSocketFactory(this.#streamUrl, this.#protocols);
+      this.#streamSocket = socket;
+      this.#streamConnectReject = reject;
       const cleanup = () => {
         socket.removeEventListener("open", onOpen);
         socket.removeEventListener("error", onError);
       };
       const onOpen = () => {
+        const isCurrentSocket = this.#streamSocket === socket;
         cleanup();
+        if (this.#closed || !isCurrentSocket) {
+          if (isCurrentSocket) {
+            this.#streamSocket = null;
+            this.#streamConnectPromise = null;
+            this.#streamConnectReject = null;
+          }
+          void closeSocket(socket);
+          reject(new Error("workspace websocket transport closed"));
+          return;
+        }
+
         this.#streamSocket = socket;
         this.#streamConnectPromise = null;
+        this.#streamConnectReject = null;
         resolve(socket);
       };
       const onError = () => {
+        const isCurrentSocket = this.#streamSocket === socket;
         cleanup();
-        this.#streamConnectPromise = null;
+        if (isCurrentSocket) {
+          this.#streamSocket = null;
+          this.#streamConnectPromise = null;
+          this.#streamConnectReject = null;
+        }
         reject(new Error("Failed to connect to workspace stream plane"));
       };
 
@@ -403,7 +519,15 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         this.handleStreamMessage(event.data.toString());
       });
       socket.addEventListener("close", () => {
+        const isCurrentSocket = this.#streamSocket === socket;
+        cleanup();
         this.handleStreamSocketClosed(socket);
+        if (isCurrentSocket) {
+          this.#streamConnectReject = null;
+        }
+        reject(new Error(this.#closed
+          ? "workspace websocket transport closed"
+          : "Workspace stream plane connection closed"));
       });
     });
 
@@ -521,12 +645,22 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     }
 
     const socket = this.#streamSocket;
-    if (socket?.readyState === WebSocket.OPEN) {
-      this.sendStream(socket, {
-        type: "workspace_unsubscribe",
-        subscriptionId,
-      });
-      await record.closed.promise;
+    if (socket?.readyState === WEB_SOCKET_OPEN) {
+      try {
+        this.sendStream(socket, {
+          type: "workspace_unsubscribe",
+          subscriptionId,
+        });
+        await withTimeout(
+          record.closed.promise,
+          SUBSCRIPTION_CLOSE_TIMEOUT_MS,
+          `Workspace subscription ${subscriptionId} close acknowledgement timed out`,
+        );
+      } catch {
+        this.finalizeSubscription(record, {
+          notifyWaitersWithNull: true,
+        });
+      }
       return;
     }
 
@@ -572,19 +706,23 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     const backoffMs = RECONNECT_BACKOFF_MS[Math.min(attempt - 1, RECONNECT_BACKOFF_MS.length - 1)];
 
     await new Promise<void>((resolve) => {
-      this.clearStreamReconnectTimer();
-      this.#streamReconnectTimer = setTimeout(() => {
-        this.#streamReconnectTimer = null;
-        resolve();
-      }, backoffMs);
+      const waiter: RetryWaiter = {
+        timer: setTimeout(() => {
+          this.#retryWaiters.delete(waiter);
+          resolve();
+        }, backoffMs),
+        resolve,
+      };
+      this.#retryWaiters.add(waiter);
     });
   }
 
-  private clearStreamReconnectTimer(): void {
-    if (this.#streamReconnectTimer) {
-      clearTimeout(this.#streamReconnectTimer);
-      this.#streamReconnectTimer = null;
+  private clearRetryWaiters(): void {
+    for (const waiter of this.#retryWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve();
     }
+    this.#retryWaiters.clear();
   }
 
   private sendStream(socket: WebSocket, message: WorkspaceGatewayStreamClientMessage): void {
@@ -680,16 +818,45 @@ function createDeferred<T>(): Deferred<T> {
   };
 }
 
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
 function toGatewayError(error: { message: string; code?: string }): WorkspaceError {
   return new WorkspaceError({
-    code: "transport_failed",
+    code: normalizeGatewayErrorCode(error.code),
     message: error.message,
     recoverable: true,
   });
+}
+
+function normalizeGatewayErrorCode(code: string | undefined): WorkspaceErrorCode {
+  switch (code) {
+    case "storage_pressure":
+      return code;
+    default:
+      return "transport_failed";
+  }
 }
 
 function unsupportedCreateBackend(backend: BackendKind): WorkspaceError {
@@ -705,16 +872,34 @@ async function closeSocket(socket: WebSocket | null): Promise<void> {
     return;
   }
 
-  if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+  if (socket.readyState === WEB_SOCKET_OPEN || socket.readyState === WEB_SOCKET_CONNECTING) {
     await new Promise<void>((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+        }
+        socket.removeEventListener("close", finish);
+        resolve();
+      };
+
       socket.addEventListener(
         "close",
-        () => {
-          resolve();
-        },
+        finish,
         { once: true },
       );
-      socket.close(1000, "Disposed");
+      timer = setTimeout(finish, WEB_SOCKET_CLOSE_TIMEOUT_MS);
+      try {
+        socket.close(1000, "Disposed");
+      } catch {
+        finish();
+      }
     });
   }
 }

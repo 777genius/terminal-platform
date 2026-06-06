@@ -90,6 +90,7 @@ export function createStaticWorkspaceKernel(snapshot: WorkspaceSnapshot): Worksp
     }),
     dispatchMuxCommand: async (sessionId: SessionId, command: MuxCommand) =>
       dispatchStaticMuxCommand(currentSnapshot, updateSnapshot, runtimeState, sessionId, command),
+    loadMorePaneHistory: async () => false,
     openSubscription: async () => {
       throw new Error("not implemented in static kernel");
     },
@@ -1072,6 +1073,7 @@ function createStaticSavedSessionSummary(snapshot: WorkspaceSnapshot): SavedSess
       replays_saved_screen_buffers: false,
       preserves_process_state: false,
     },
+    restore_semantics_v2: null,
   };
 }
 

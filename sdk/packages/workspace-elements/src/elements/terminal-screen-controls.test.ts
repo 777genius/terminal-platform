@@ -72,6 +72,77 @@ describe("terminal screen controls", () => {
     expect(controls.canUseDirectInput).toBe(false);
     expect(controls.canUseDirectPaste).toBe(false);
   });
+
+  it("exposes restored pane history only for the active live session", () => {
+    const controls = resolveTerminalScreenControlState(createWorkspaceSnapshot({
+      historicalPanes: {
+        "pane-1": {
+          sessionId: "session-1",
+          paneId: "pane-1",
+          sourceSessionId: "saved-session-1",
+          sourcePaneId: "saved-pane-1",
+          source: "saved_session_restore",
+          replayStrategy: "rendered_snapshot",
+          restoreGuaranteeLevel: "visual_snapshot_only",
+          lines: ["saved output"],
+          capturedAtMs: 1000n,
+          hasGaps: false,
+          hasMoreSegments: false,
+          fromEventSeq: 1n,
+          nextEventSeq: null,
+          segmentCount: 0,
+          loadedPayloadBytes: 0n,
+        },
+        "pane-2": {
+          sessionId: "other-session",
+          paneId: "pane-2",
+          sourceSessionId: "saved-session-2",
+          sourcePaneId: "saved-pane-2",
+          source: "saved_session_restore",
+          replayStrategy: "rendered_snapshot",
+          restoreGuaranteeLevel: "visual_snapshot_only",
+          lines: ["stale output"],
+          capturedAtMs: 1000n,
+          hasGaps: false,
+          hasMoreSegments: false,
+          fromEventSeq: 1n,
+          nextEventSeq: null,
+          segmentCount: 0,
+          loadedPayloadBytes: 0n,
+        },
+      },
+    }));
+
+    expect(controls.history?.lines).toEqual(["saved output"]);
+    expect(controls.canCopyVisibleOutput).toBe(true);
+    expect(controls.canLoadMoreHistory).toBe(false);
+  });
+
+  it("exposes load-more history only for active partial v2 history with a cursor", () => {
+    const controls = resolveTerminalScreenControlState(createWorkspaceSnapshot({
+      historicalPanes: {
+        "pane-1": {
+          sessionId: "session-1",
+          paneId: "pane-1",
+          sourceSessionId: "session-1",
+          sourcePaneId: "pane-1",
+          source: "v2_pane_history",
+          replayStrategy: "raw_vt_stream",
+          restoreGuaranteeLevel: "basic_history",
+          lines: ["old output"],
+          capturedAtMs: 1000n,
+          hasGaps: false,
+          hasMoreSegments: true,
+          fromEventSeq: 1n,
+          nextEventSeq: 2n,
+          segmentCount: 1,
+          loadedPayloadBytes: 128n,
+        },
+      },
+    }));
+
+    expect(controls.canLoadMoreHistory).toBe(true);
+  });
 });
 
 function createWorkspaceSnapshot(overrides: Partial<WorkspaceSnapshot> = {}): WorkspaceSnapshot {

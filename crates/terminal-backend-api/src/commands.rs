@@ -25,12 +25,16 @@ pub struct NewTabSpec {
 pub struct SendInputSpec {
     pub pane_id: PaneId,
     pub data: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_event_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SendPasteSpec {
     pub pane_id: PaneId,
     pub data: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_event_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

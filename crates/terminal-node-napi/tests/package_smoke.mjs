@@ -23,8 +23,23 @@ function createClient(sdk) {
 async function main() {
   const entrypoint = path.join(process.env.TERMINAL_NODE_PACKAGE, "index.mjs");
   const sdk = await import(pathToFileURL(entrypoint).href);
-  await runSmoke(() => createClient(sdk), sdk);
-  await runPackageWatchSmoke(() => createClient(sdk), sdk);
+  const clients = new Set();
+  const createTrackedClient = () => {
+    const client = createClient(sdk);
+    clients.add(client);
+    return client;
+  };
+
+  try {
+    await runSmoke(createTrackedClient, sdk);
+    await runPackageWatchSmoke(createTrackedClient, sdk);
+  } finally {
+    await Promise.allSettled(
+      Array.from(clients, (client) =>
+        typeof client.close === "function" ? client.close() : Promise.resolve(),
+      ),
+    );
+  }
 }
 
 main().catch((error) => {

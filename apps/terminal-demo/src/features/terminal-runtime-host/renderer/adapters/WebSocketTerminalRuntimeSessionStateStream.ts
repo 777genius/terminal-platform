@@ -11,6 +11,7 @@ import type {
 
 const INITIAL_CONNECT_MAX_ATTEMPTS = 6;
 const RECONNECT_BACKOFF_MS = [100, 200, 400, 800, 1_600, 2_000] as const;
+const SUBSCRIPTION_CLOSE_TIMEOUT_MS = 250;
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -35,9 +36,11 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
   readonly #url: string;
   #socket: WebSocket | null = null;
   #connectPromise: Promise<WebSocket> | null = null;
+  #rejectConnect: ((error: Error) => void) | null = null;
   #disposed = false;
   #reconnectLoopPromise: Promise<void> | null = null;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  #resolveReconnectWait: (() => void) | null = null;
   readonly #subscriptions = new Map<string, SessionStateSubscriptionRecord>();
 
   constructor(url: string) {
@@ -70,6 +73,7 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
       subscribed: createDeferred<void>(),
       closed: createDeferred<void>(),
     };
+    void record.subscribed.promise.catch(() => undefined);
     this.#subscriptions.set(subscriptionId, record);
 
     try {
@@ -106,9 +110,14 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
     this.#disposed = true;
     this.clearReconnectTimer();
     this.#reconnectLoopPromise = null;
+    this.#rejectConnect?.(new Error("Terminal session stream is disposed"));
+    this.#rejectConnect = null;
 
-    if (this.#socket && this.#socket.readyState === WebSocket.OPEN) {
-      this.#socket.close(1000, "Disposed");
+    if (
+      this.#socket
+      && (this.#socket.readyState === WebSocket.CONNECTING || this.#socket.readyState === WebSocket.OPEN)
+    ) {
+      closeWebSocketBestEffort(this.#socket);
     }
 
     this.#socket = null;
@@ -129,12 +138,23 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
     }
 
     if (this.#socket?.readyState === WebSocket.OPEN) {
-      this.send(this.#socket, {
-        type: "stream_unsubscribe_session_state",
-        subscriptionId,
-        sessionId: record.sessionId,
-      });
-      await record.closed.promise;
+      try {
+        this.send(this.#socket, {
+          type: "stream_unsubscribe_session_state",
+          subscriptionId,
+          sessionId: record.sessionId,
+        });
+        await withTimeout(
+          record.closed.promise,
+          SUBSCRIPTION_CLOSE_TIMEOUT_MS,
+          `Session stream subscription ${subscriptionId} close acknowledgement timed out`,
+        );
+      } catch (error) {
+        this.finalizeSubscription(record, {
+          notifyClosed: false,
+          rejectPendingWith: toError(error),
+        });
+      }
       return;
     }
 
@@ -165,35 +185,68 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
   }
 
   private async ensureConnected(): Promise<WebSocket> {
+    if (this.#disposed) {
+      throw new Error("Terminal session stream is disposed");
+    }
+
     if (this.#socket?.readyState === WebSocket.OPEN) {
       return this.#socket;
     }
 
     this.#connectPromise ??= new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(this.#url);
+      this.#socket = socket;
+      this.#rejectConnect = reject;
       const cleanup = () => {
         socket.removeEventListener("open", onOpen);
         socket.removeEventListener("error", onError);
       };
       const onOpen = () => {
         cleanup();
+        if (this.#disposed) {
+          this.#socket = null;
+          this.#connectPromise = null;
+          this.#rejectConnect = null;
+          closeWebSocketBestEffort(socket);
+          reject(new Error("Terminal session stream is disposed"));
+          return;
+        }
+
         this.#socket = socket;
         this.#connectPromise = null;
+        this.#rejectConnect = null;
         resolve(socket);
       };
       const onError = () => {
+        const isCurrentSocket = this.#socket === socket;
         cleanup();
-        this.#connectPromise = null;
+        if (isCurrentSocket) {
+          this.#socket = null;
+          this.#connectPromise = null;
+          this.#rejectConnect = null;
+        }
         reject(new Error("Failed to connect to terminal session stream"));
       };
 
       socket.addEventListener("open", onOpen, { once: true });
       socket.addEventListener("error", onError, { once: true });
       socket.addEventListener("message", (event) => {
-        this.handleMessage(event.data.toString());
+        try {
+          this.handleMessage(event.data.toString());
+        } catch (error) {
+          this.handleProtocolError(socket, error);
+        }
       });
       socket.addEventListener("close", () => {
+        const isCurrentSocket = this.#socket === socket;
+        cleanup();
         this.handleSocketClosed(socket);
+        if (isCurrentSocket) {
+          this.#rejectConnect = null;
+        }
+        reject(new Error(this.#disposed
+          ? "Terminal session stream is disposed"
+          : "Terminal session stream connection closed"));
       });
     });
 
@@ -328,6 +381,32 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
     }
   }
 
+  private handleProtocolError(socket: WebSocket, error: unknown): void {
+    if (this.#socket !== socket) {
+      return;
+    }
+
+    this.#socket = null;
+    this.#connectPromise = null;
+    this.#rejectConnect = null;
+    const protocolError = new Error(
+      `Terminal session stream protocol error - ${toError(error).message}`,
+    );
+    for (const record of [...this.#subscriptions.values()]) {
+      this.notifyStatusChange(record, {
+        phase: "error",
+        reconnectAttempts: 0,
+        lastError: protocolError.message,
+      });
+      record.onError?.(protocolError);
+      this.finalizeSubscription(record, {
+        notifyClosed: false,
+        rejectPendingWith: protocolError,
+      });
+    }
+    closeWebSocketBestEffort(socket);
+  }
+
   private finalizeSubscription(
     record: SessionStateSubscriptionRecord,
     options: {
@@ -360,8 +439,10 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
 
     await new Promise<void>((resolve) => {
       this.clearReconnectTimer();
+      this.#resolveReconnectWait = resolve;
       this.#reconnectTimer = setTimeout(() => {
         this.#reconnectTimer = null;
+        this.#resolveReconnectWait = null;
         resolve();
       }, backoffMs);
     });
@@ -372,6 +453,8 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
       clearTimeout(this.#reconnectTimer);
       this.#reconnectTimer = null;
     }
+    this.#resolveReconnectWait?.();
+    this.#resolveReconnectWait = null;
   }
 
   private send(socket: WebSocket, message: TerminalGatewayStreamClientMessage): void {
@@ -383,6 +466,14 @@ export class WebSocketTerminalRuntimeSessionStateStream implements TerminalWorks
     health: TerminalWorkspaceSessionStreamHealth,
   ): void {
     record.onStatusChange?.(health);
+  }
+}
+
+function closeWebSocketBestEffort(socket: WebSocket): void {
+  try {
+    socket.close(1000, "Disposed");
+  } catch {
+    // Dispose must remain best-effort because browser teardown can leave sockets unusable.
   }
 }
 
@@ -399,6 +490,26 @@ function createDeferred<T>(): Deferred<T> {
     resolve,
     reject,
   };
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function toError(error: unknown): Error {

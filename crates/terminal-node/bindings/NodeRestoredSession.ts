@@ -2,6 +2,7 @@
 import type { NodeSavedSessionCompatibility } from "./NodeSavedSessionCompatibility.js";
 import type { NodeSavedSessionManifest } from "./NodeSavedSessionManifest.js";
 import type { NodeSavedSessionRestoreSemantics } from "./NodeSavedSessionRestoreSemantics.js";
+import type { NodeSavedSessionRestoreSemanticsV2 } from "./NodeSavedSessionRestoreSemanticsV2.js";
 import type { NodeSessionSummary } from "./NodeSessionSummary.js";
 
-export type NodeRestoredSession = { saved_session_id: string, manifest: NodeSavedSessionManifest, compatibility: NodeSavedSessionCompatibility, session: NodeSessionSummary, restore_semantics: NodeSavedSessionRestoreSemantics, };
+export type NodeRestoredSession = { saved_session_id: string, manifest: NodeSavedSessionManifest, compatibility: NodeSavedSessionCompatibility, session: NodeSessionSummary, restore_semantics: NodeSavedSessionRestoreSemantics, restore_semantics_v2: NodeSavedSessionRestoreSemanticsV2 | null, };

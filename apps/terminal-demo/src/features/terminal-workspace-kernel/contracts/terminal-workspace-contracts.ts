@@ -24,6 +24,10 @@ export type TerminalDegradedReasonCode =
   | "saved_session_restore_unavailable"
   | "saved_session_process_state_not_preserved"
   | "saved_session_screen_buffers_not_replayed"
+  | "saved_session_history_degraded"
+  | "saved_session_history_gaps"
+  | "saved_session_visual_restore_only"
+  | "saved_session_restore_drill_not_passed"
   | "foreign_import_semantics"
   | "action_tab_create_unsupported"
   | "action_pane_split_unsupported"
@@ -81,6 +85,30 @@ export interface TerminalSavedSessionRestoreSemantics {
   preserves_process_state: boolean;
 }
 
+export type TerminalRestoreGuaranteeLevel =
+  | "rich_history"
+  | "basic_history"
+  | "visual_restore_only"
+  | "history_degraded";
+
+export type TerminalHistoryReplayState =
+  | "not_available"
+  | "snapshot_only"
+  | "hydrated_from_snapshot"
+  | "replayed_from_journal"
+  | "partially_replayed_with_gaps";
+
+export interface TerminalSavedSessionRestoreSemanticsV2
+  extends TerminalSavedSessionRestoreSemantics {
+  restore_guarantee_level: TerminalRestoreGuaranteeLevel;
+  history_replay_state: TerminalHistoryReplayState;
+  source_session_id: string;
+  restored_session_id: string | null;
+  latest_restore_drill_status: string | null;
+  has_known_gaps: boolean;
+  evidence_refs: string[];
+}
+
 export interface TerminalSavedSessionSummary {
   session_id: string;
   origin: TerminalSessionOrigin;
@@ -92,6 +120,7 @@ export interface TerminalSavedSessionSummary {
   tab_count: number;
   pane_count: number;
   restore_semantics: TerminalSavedSessionRestoreSemantics;
+  restore_semantics_v2: TerminalSavedSessionRestoreSemanticsV2 | null;
   degradedSemantics: TerminalDegradedReason[];
 }
 
@@ -325,11 +354,13 @@ export type TerminalMuxCommand =
       kind: "send_input";
       pane_id: string;
       data: string;
+      client_event_id?: string;
     }
   | {
       kind: "send_paste";
       pane_id: string;
       data: string;
+      client_event_id?: string;
     }
   | {
       kind: "detach";

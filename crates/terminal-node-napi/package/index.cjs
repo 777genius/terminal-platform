@@ -460,6 +460,7 @@ const electronInvokeMethodNames = new Set([
   "attachSession",
   "backendCapabilities",
   "bindingVersion",
+  "commandHistory",
   "createNativeSession",
   "deleteSavedSession",
   "discoverSessions",
@@ -471,6 +472,7 @@ const electronInvokeMethodNames = new Set([
   "pruneSavedSessions",
   "restoreSavedSession",
   "savedSession",
+  "paneHistory",
   "screenDelta",
   "screenSnapshot",
   "sessionHealthSnapshot",
@@ -568,10 +570,22 @@ async function invokeElectronClientMethod(client, method, args) {
 class TerminalNodeSubscription {
   #inner;
   #closed;
+  #onClose;
 
-  constructor(inner) {
+  constructor(inner, onClose = null) {
     this.#inner = inner;
     this.#closed = false;
+    this.#onClose = onClose;
+  }
+
+  #markClosed() {
+    if (this.#closed) {
+      return false;
+    }
+
+    this.#closed = true;
+    this.#onClose?.(this);
+    return true;
   }
 
   get subscriptionId() {
@@ -581,17 +595,16 @@ class TerminalNodeSubscription {
   async nextEvent() {
     const event = await this.#inner.nextEvent();
     if (event == null) {
-      this.#closed = true;
+      this.#markClosed();
     }
     return event;
   }
 
   async close() {
-    if (this.#closed) {
+    if (!this.#markClosed()) {
       return;
     }
 
-    this.#closed = true;
     await this.#inner.close();
   }
 
@@ -644,9 +657,21 @@ class TerminalNodeSubscription {
 
 class TerminalNodeClient {
   #inner;
+  #closed;
+  #subscriptions;
 
   constructor(inner) {
     this.#inner = inner;
+    this.#closed = false;
+    this.#subscriptions = new Set();
+  }
+
+  #trackSubscription(inner) {
+    const subscription = new TerminalNodeSubscription(inner, (closed) => {
+      this.#subscriptions.delete(closed);
+    });
+    this.#subscriptions.add(subscription);
+    return subscription;
   }
 
   static fromRuntimeSlug(slug, options = {}) {
@@ -670,6 +695,21 @@ class TerminalNodeClient {
 
   get address() {
     return this.#inner.address;
+  }
+
+  async close() {
+    if (this.#closed) {
+      return;
+    }
+
+    this.#closed = true;
+    const subscriptions = Array.from(this.#subscriptions);
+    this.#subscriptions.clear();
+    await Promise.allSettled(subscriptions.map((subscription) => subscription.close()));
+
+    if (typeof this.#inner.close === "function") {
+      await this.#inner.close();
+    }
   }
 
   bindingVersion() {
@@ -740,13 +780,33 @@ class TerminalNodeClient {
     return this.#inner.screenDelta(sessionId, paneId, fromSequence);
   }
 
+  paneHistory(
+    sessionId,
+    paneId,
+    fromEventSeq = null,
+    maxSegments = null,
+    maxBytes = null,
+  ) {
+    return this.#inner.paneHistory(
+      sessionId,
+      paneId,
+      fromEventSeq,
+      maxSegments,
+      maxBytes,
+    );
+  }
+
+  commandHistory(sessionId = null, limit = null) {
+    return this.#inner.commandHistory(sessionId, limit);
+  }
+
   dispatchMuxCommand(sessionId, command) {
     return this.#inner.dispatchMuxCommand(sessionId, command);
   }
 
   async openSubscription(sessionId, spec) {
     const subscription = await this.#inner.openSubscription(sessionId, spec);
-    return new TerminalNodeSubscription(subscription);
+    return this.#trackSubscription(subscription);
   }
 
   subscribeTopology(sessionId) {
@@ -1019,6 +1079,27 @@ class ElectronTerminalNodeClient {
     return this.#invoke("screenDelta", sessionId, paneId, fromSequence);
   }
 
+  paneHistory(
+    sessionId,
+    paneId,
+    fromEventSeq = null,
+    maxSegments = null,
+    maxBytes = null,
+  ) {
+    return this.#invoke(
+      "paneHistory",
+      sessionId,
+      paneId,
+      fromEventSeq,
+      maxSegments,
+      maxBytes,
+    );
+  }
+
+  commandHistory(sessionId = null, limit = null) {
+    return this.#invoke("commandHistory", sessionId, limit);
+  }
+
   dispatchMuxCommand(sessionId, command) {
     return this.#invoke("dispatchMuxCommand", sessionId, command);
   }
@@ -1199,6 +1280,26 @@ function createElectronPreloadApi(options = {}) {
 
     screenDelta(sessionId, paneId, fromSequence) {
       return client.screenDelta(sessionId, paneId, fromSequence);
+    },
+
+    paneHistory(
+      sessionId,
+      paneId,
+      fromEventSeq = null,
+      maxSegments = null,
+      maxBytes = null,
+    ) {
+      return client.paneHistory(
+        sessionId,
+        paneId,
+        fromEventSeq,
+        maxSegments,
+        maxBytes,
+      );
+    },
+
+    commandHistory(sessionId = null, limit = null) {
+      return client.commandHistory(sessionId, limit);
     },
 
     dispatchMuxCommand(sessionId, command) {

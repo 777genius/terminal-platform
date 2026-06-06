@@ -6,10 +6,15 @@ import { createInitialWorkspaceSnapshot, type WorkspaceSnapshot } from "@termina
 import {
   TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT,
   TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
+  formatTerminalCommandSubmitInput,
   resolveTerminalCommandDockControlState,
 } from "./terminal-command-dock-controls.js";
 
 describe("terminal command dock controls", () => {
+  it("formats submitted command drafts with carriage return for pty enter semantics", () => {
+    expect(formatTerminalCommandSubmitInput("git status")).toBe("git status\r");
+  });
+
   it("resolves command lane controls from focused workspace state", () => {
     const snapshot = createWorkspaceSnapshot({
       drafts: {

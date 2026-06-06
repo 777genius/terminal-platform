@@ -1,30 +1,50 @@
 import process from "node:process";
-import fs from "node:fs/promises";
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
-import {
-  buildTerminalRuntimeBrowserUrl,
-  TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH,
-} from "@features/terminal-runtime-host/contracts";
+import { buildTerminalRuntimeBrowserUrl } from "@features/terminal-runtime-host/contracts";
 import {
   DEFAULT_TERMINAL_RUNTIME_SLUG,
+  resolveDemoDefaultWorkingDirectory,
   resolveDemoDefaultShellProgram,
   startTerminalRuntimeHost,
   type TerminalRuntimeHostHandle,
+  type TerminalRuntimeGatewayFaultInjectionPort,
 } from "@features/terminal-runtime-host/main";
+import { clearBrowserBootstrapConfig, writeBrowserBootstrapConfig } from "./browser-bootstrap-config.js";
 
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const appRoot = path.resolve(moduleDir, "../../..");
+const repoRoot = path.resolve(appRoot, "../..");
 const runtimeSlug = process.env.TERMINAL_DEMO_RUNTIME_SLUG ?? DEFAULT_TERMINAL_RUNTIME_SLUG;
 const rendererUrl = process.env.TERMINAL_DEMO_RENDERER_URL ?? "http://127.0.0.1:5173";
 const bootstrapScope = process.env.TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE ?? "public-and-dist";
 const sessionStorePath = process.env.TERMINAL_DEMO_SESSION_STORE_PATH ?? null;
 const demoAutoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION === "1";
-const demoDefaultShellProgram = resolveDemoDefaultShellProgram();
+const failNextWorkspacePaneHistory = process.env.TERMINAL_DEMO_FAIL_NEXT_WORKSPACE_PANE_HISTORY === "1";
+const workspacePaneHistoryFaultMarkerPath =
+  process.env.TERMINAL_DEMO_FAIL_WORKSPACE_PANE_HISTORY_MARKER_PATH ?? null;
+const workspaceDispatchStoragePressureMarkerPath =
+  process.env.TERMINAL_DEMO_FAIL_WORKSPACE_DISPATCH_STORAGE_PRESSURE_MARKER_PATH ?? null;
+const demoDefaultShellProgram = resolveDemoDefaultShellProgram({
+  validateWindowsPaths: true,
+});
+const demoDefaultWorkingDirectory = resolveDemoDefaultWorkingDirectory({
+  cwd: repoRoot,
+  validateExists: true,
+});
 
 let hostHandle: TerminalRuntimeHostHandle | null = null;
+let bootstrapConfig: TerminalRuntimeBootstrapConfig | null = null;
 let shuttingDown = false;
 
 async function bootstrap(): Promise<void> {
+  await clearBrowserBootstrapConfig({
+    appRoot,
+    scope: bootstrapScope,
+  });
+
   hostHandle = await startTerminalRuntimeHost({
     runtimeSlug,
     forceRestartReadyDaemon: true,
@@ -32,24 +52,93 @@ async function bootstrap(): Promise<void> {
       ? {
           title: "SDK Workspace",
           program: demoDefaultShellProgram,
+          cwd: demoDefaultWorkingDirectory,
         }
       : null,
     sessionStorePath,
+    gatewayFaultInjection: createGatewayFaultInjection({
+      failNextWorkspacePaneHistory,
+      workspacePaneHistoryFaultMarkerPath,
+      workspaceDispatchStoragePressureMarkerPath,
+    }),
   });
 
   const config: TerminalRuntimeBootstrapConfig = {
     controlPlaneUrl: hostHandle.controlPlaneUrl,
+    ...(demoDefaultWorkingDirectory ? { demoDefaultWorkingDirectory } : {}),
     demoDefaultShellProgram,
     sessionStreamUrl: hostHandle.sessionStreamUrl,
     runtimeSlug: hostHandle.runtimeSlug,
   };
-  await writeBrowserBootstrapConfig(config);
+  bootstrapConfig = config;
+  await writeBrowserBootstrapConfig({
+    appRoot,
+    config,
+    scope: bootstrapScope,
+  });
   const browserUrl = buildTerminalRuntimeBrowserUrl(rendererUrl, config);
 
   console.log(`[terminal-demo-browser] runtime ${config.runtimeSlug}`);
+  console.log(`[terminal-demo-browser] cwd ${demoDefaultWorkingDirectory ?? "(default)"}`);
   console.log(`[terminal-demo-browser] control ${config.controlPlaneUrl}`);
   console.log(`[terminal-demo-browser] stream ${config.sessionStreamUrl}`);
   console.log(`TERMINAL_DEMO_BROWSER_URL=${browserUrl}`);
+}
+
+function createGatewayFaultInjection(options: {
+  failNextWorkspacePaneHistory: boolean;
+  workspacePaneHistoryFaultMarkerPath: string | null;
+  workspaceDispatchStoragePressureMarkerPath: string | null;
+}): TerminalRuntimeGatewayFaultInjectionPort | null {
+  let shouldFailWorkspacePaneHistory = options.failNextWorkspacePaneHistory;
+  if (
+    !shouldFailWorkspacePaneHistory
+    && !options.workspacePaneHistoryFaultMarkerPath
+    && !options.workspaceDispatchStoragePressureMarkerPath
+  ) {
+    return null;
+  }
+
+  return {
+    beforeWorkspacePaneHistory() {
+      if (shouldFailWorkspacePaneHistory) {
+        shouldFailWorkspacePaneHistory = false;
+        throw new Error("Simulated workspace pane history failure for degraded persistence smoke");
+      }
+
+      if (!options.workspacePaneHistoryFaultMarkerPath) {
+        return;
+      }
+
+      if (!fs.existsSync(options.workspacePaneHistoryFaultMarkerPath)) {
+        return;
+      }
+
+      fs.rmSync(options.workspacePaneHistoryFaultMarkerPath, { force: true });
+      throw new Error("Simulated workspace pane history failure for degraded persistence smoke");
+    },
+    beforeWorkspaceDispatchMuxCommand() {
+      if (!options.workspaceDispatchStoragePressureMarkerPath) {
+        return;
+      }
+
+      if (!fs.existsSync(options.workspaceDispatchStoragePressureMarkerPath)) {
+        return;
+      }
+
+      fs.rmSync(options.workspaceDispatchStoragePressureMarkerPath, { force: true });
+      throw createGatewayError(
+        "storage_pressure",
+        "Simulated terminal persistence storage pressure for degraded persistence smoke",
+      );
+    },
+  };
+}
+
+function createGatewayError(code: string, message: string): Error & { code: string } {
+  const error = new Error(message) as Error & { code: string };
+  error.code = code;
+  return error;
 }
 
 async function shutdown(exitCode = 0): Promise<void> {
@@ -61,6 +150,12 @@ async function shutdown(exitCode = 0): Promise<void> {
   await Promise.allSettled([
     hostHandle?.dispose() ?? Promise.resolve(),
   ]);
+  await clearBrowserBootstrapConfig({
+    appRoot,
+    expectedConfig: bootstrapConfig,
+    scope: bootstrapScope,
+  }).catch(() => undefined);
+  bootstrapConfig = null;
   process.exit(exitCode);
 }
 
@@ -86,31 +181,3 @@ void bootstrap().catch((error) => {
   console.error(error);
   void shutdown(1);
 });
-
-async function writeBrowserBootstrapConfig(config: TerminalRuntimeBootstrapConfig): Promise<void> {
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  const appRoot = path.resolve(moduleDir, "../../..");
-  const relativeTarget = TERMINAL_RUNTIME_BROWSER_BOOTSTRAP_PATH.replace(/^\/+/, "");
-  const targets = resolveBootstrapTargets(appRoot, relativeTarget);
-  const payload = `${JSON.stringify(config, null, 2)}\n`;
-
-  await Promise.all(targets.map(async (targetPath) => {
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.writeFile(targetPath, payload, "utf8");
-  }));
-}
-
-function resolveBootstrapTargets(appRoot: string, relativeTarget: string): string[] {
-  if (bootstrapScope === "dist-only") {
-    return [path.join(appRoot, "dist", "renderer", relativeTarget)];
-  }
-
-  if (bootstrapScope === "public-only") {
-    return [path.join(appRoot, "public", relativeTarget)];
-  }
-
-  return [
-    path.join(appRoot, "public", relativeTarget),
-    path.join(appRoot, "dist", "renderer", relativeTarget),
-  ];
-}

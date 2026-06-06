@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import type {
+  WorkspaceGatewayStreamClientMessage,
+  WorkspaceGatewayStreamServerMessage,
+} from "@terminal-platform/workspace-adapter-websocket/protocol";
+import type {
   TerminalBackendKind,
   TerminalCreateNativeSessionInput,
   TerminalDiscoveredSession,
@@ -27,11 +31,34 @@ import {
 } from "../../../core/application/index.js";
 import type { TerminalPlatformClientProvider } from "../../infrastructure/TerminalPlatformClientProvider.js";
 
+export interface TerminalRuntimeGatewayWorkspacePaneHistoryRequest {
+  readonly sessionId: string;
+  readonly paneId: string;
+  readonly fromEventSeq: number | null;
+  readonly maxSegments: number | null;
+  readonly maxBytes: number | null;
+}
+
+export interface TerminalRuntimeGatewayWorkspaceDispatchRequest {
+  readonly sessionId: string;
+  readonly command: unknown;
+}
+
+export interface TerminalRuntimeGatewayFaultInjectionPort {
+  beforeWorkspacePaneHistory?(
+    request: TerminalRuntimeGatewayWorkspacePaneHistoryRequest,
+  ): Promise<void> | void;
+  beforeWorkspaceDispatchMuxCommand?(
+    request: TerminalRuntimeGatewayWorkspaceDispatchRequest,
+  ): Promise<void> | void;
+}
+
 interface TerminalRuntimeGatewayServerOptions {
   runtimeSlug: string;
   controlService: TerminalRuntimeControlService;
   sessionStreamService: TerminalRuntimeSessionStreamService;
   clientProvider: TerminalPlatformClientProvider;
+  faultInjection?: TerminalRuntimeGatewayFaultInjectionPort | null;
 }
 
 interface ControlConnectionRecord {
@@ -45,7 +72,14 @@ interface LegacyStreamSubscriptionRecord {
   handle: Awaited<ReturnType<TerminalRuntimeSessionStreamService["watchSessionState"]>> | null;
 }
 
-type StreamSubscriptionRecord = LegacyStreamSubscriptionRecord;
+interface WorkspaceStreamSubscriptionRecord {
+  kind: "workspace";
+  sessionId: string;
+  subscription: Awaited<ReturnType<TerminalPlatformClient["openSubscription"]>> | null;
+  pump: Promise<void> | null;
+}
+
+type StreamSubscriptionRecord = LegacyStreamSubscriptionRecord | WorkspaceStreamSubscriptionRecord;
 
 interface StreamConnectionRecord {
   socket: WebSocket;
@@ -81,6 +115,7 @@ type TerminalPlatformCreateSessionRequest = Parameters<TerminalPlatformClient["c
 type TerminalPlatformSessionRoute = Parameters<TerminalPlatformClient["importSession"]>[0];
 type TerminalPlatformMuxCommand = Parameters<TerminalPlatformClient["dispatchMuxCommand"]>[1];
 
+const STREAM_SUBSCRIPTION_CLOSE_TIMEOUT_MS = 250;
 const TERMINAL_BACKEND_KINDS = new Set<TerminalBackendKind>(["native", "tmux", "zellij"]);
 const TERMINAL_MUX_COMMAND_KINDS = new Set<TerminalMuxCommand["kind"]>([
   "split_pane",
@@ -105,6 +140,7 @@ export class TerminalRuntimeGatewayServer {
   readonly #controlService: TerminalRuntimeControlService;
   readonly #sessionStreamService: TerminalRuntimeSessionStreamService;
   readonly #clientProvider: TerminalPlatformClientProvider;
+  readonly #faultInjection: TerminalRuntimeGatewayFaultInjectionPort | null;
   readonly #server: WebSocketServer;
   readonly #controlConnections = new Set<ControlConnectionRecord>();
   readonly #streamConnections = new Set<StreamConnectionRecord>();
@@ -114,6 +150,7 @@ export class TerminalRuntimeGatewayServer {
     this.#controlService = options.controlService;
     this.#sessionStreamService = options.sessionStreamService;
     this.#clientProvider = options.clientProvider;
+    this.#faultInjection = options.faultInjection ?? null;
     this.#server = new WebSocketServer({
       host: "127.0.0.1",
       port: 0,
@@ -248,7 +285,7 @@ export class TerminalRuntimeGatewayServer {
     connection: StreamConnectionRecord,
     payload: string,
   ): Promise<void> {
-    let message: TerminalGatewayStreamClientMessage;
+    let message: TerminalGatewayStreamClientMessage | WorkspaceGatewayStreamClientMessage;
 
     try {
       message = parseStreamClientMessage(payload);
@@ -263,6 +300,12 @@ export class TerminalRuntimeGatewayServer {
         return;
       case "stream_unsubscribe_session_state":
         await this.unsubscribeSessionState(connection, message.subscriptionId, message.sessionId);
+        return;
+      case "workspace_subscribe":
+        await this.subscribeWorkspace(connection, message);
+        return;
+      case "workspace_unsubscribe":
+        await this.unsubscribeWorkspace(connection, message.subscriptionId);
         return;
     }
   }
@@ -360,6 +403,31 @@ export class TerminalRuntimeGatewayServer {
         const client = await this.#clientProvider.getClient();
         return client.savedSession(readStringPayload(payload, "sessionId"));
       }
+      case "workspace_command_history": {
+        const client = await this.#clientProvider.getClient();
+        return client.commandHistory(
+          readOptionalStringPayload(payload, "sessionId") ?? null,
+          readOptionalNumberPayload(payload, "limit") ?? null,
+        );
+      }
+      case "workspace_pane_history": {
+        const client = await this.#clientProvider.getClient();
+        const request = {
+          sessionId: readStringPayload(payload, "sessionId"),
+          paneId: readStringPayload(payload, "paneId"),
+          fromEventSeq: readOptionalNumberPayload(payload, "fromEventSeq") ?? null,
+          maxSegments: readOptionalNumberPayload(payload, "maxSegments") ?? null,
+          maxBytes: readOptionalNumberPayload(payload, "maxBytes") ?? null,
+        };
+        await this.#faultInjection?.beforeWorkspacePaneHistory?.(request);
+        return client.paneHistory(
+          request.sessionId,
+          request.paneId,
+          request.fromEventSeq,
+          request.maxSegments,
+          request.maxBytes,
+        );
+      }
       case "workspace_prune_saved_sessions": {
         const client = await this.#clientProvider.getClient();
         return client.pruneSavedSessions(readNumberPayload(payload, "keepLatest"));
@@ -397,9 +465,14 @@ export class TerminalRuntimeGatewayServer {
       }
       case "workspace_dispatch_mux_command": {
         const client = await this.#clientProvider.getClient();
+        const request = {
+          sessionId: readStringPayload(payload, "sessionId"),
+          command: readObjectPayload<TerminalPlatformMuxCommand>(payload, "command"),
+        };
+        await this.#faultInjection?.beforeWorkspaceDispatchMuxCommand?.(request);
         return client.dispatchMuxCommand(
-          readStringPayload(payload, "sessionId"),
-          readObjectPayload<TerminalPlatformMuxCommand>(payload, "command"),
+          request.sessionId,
+          request.command,
         );
       }
       default:
@@ -413,7 +486,7 @@ export class TerminalRuntimeGatewayServer {
     sessionId: string,
   ): Promise<void> {
     if (connection.subscriptions.has(subscriptionId)) {
-      this.sendStream(connection.socket, {
+      this.sendStream(connection, {
         type: "stream_subscription_rejected",
         subscriptionId,
         sessionId,
@@ -435,7 +508,10 @@ export class TerminalRuntimeGatewayServer {
     try {
       const handle = await this.#sessionStreamService.watchSessionState(sessionId, {
         onState: (state) => {
-          this.sendStream(connection.socket, {
+          if (connection.subscriptions.get(subscriptionId) !== record) {
+            return;
+          }
+          this.sendStream(connection, {
             type: "session_state",
             subscriptionId,
             sessionId,
@@ -443,7 +519,10 @@ export class TerminalRuntimeGatewayServer {
           });
         },
         onError: (error) => {
-          this.sendStream(connection.socket, {
+          if (connection.subscriptions.get(subscriptionId) !== record) {
+            return;
+          }
+          this.sendStream(connection, {
             type: "subscription_error",
             subscriptionId,
             sessionId,
@@ -451,8 +530,11 @@ export class TerminalRuntimeGatewayServer {
           });
         },
         onClosed: () => {
+          if (connection.subscriptions.get(subscriptionId) !== record) {
+            return;
+          }
           connection.subscriptions.delete(subscriptionId);
-          this.sendStream(connection.socket, {
+          this.sendStream(connection, {
             type: "subscription_closed",
             subscriptionId,
             sessionId,
@@ -461,19 +543,24 @@ export class TerminalRuntimeGatewayServer {
       });
 
       if (connection.subscriptions.get(subscriptionId) !== record) {
-        await handle.dispose();
+        await this.closeLegacySessionStateSubscription(subscriptionId, handle).catch(() => undefined);
         return;
       }
 
       record.handle = handle;
-      this.sendStream(connection.socket, {
+      if (!this.sendStream(connection, {
         type: "stream_subscription_ack",
         subscriptionId,
         sessionId,
-      });
+      })) {
+        return;
+      }
     } catch (error) {
+      if (connection.subscriptions.get(subscriptionId) !== record) {
+        return;
+      }
       connection.subscriptions.delete(subscriptionId);
-      this.sendStream(connection.socket, {
+      this.sendStream(connection, {
         type: "stream_subscription_rejected",
         subscriptionId,
         sessionId,
@@ -488,9 +575,9 @@ export class TerminalRuntimeGatewayServer {
     sessionId: string,
   ): Promise<void> {
     const record = connection.subscriptions.get(subscriptionId);
-    if (!record || !record.handle) {
+    if (!record || record.kind !== "legacy_session_state" || !record.handle) {
       connection.subscriptions.delete(subscriptionId);
-      this.sendStream(connection.socket, {
+      this.sendStream(connection, {
         type: "subscription_closed",
         subscriptionId,
         sessionId,
@@ -498,7 +585,142 @@ export class TerminalRuntimeGatewayServer {
       return;
     }
 
-    await record.handle.dispose();
+    connection.subscriptions.delete(subscriptionId);
+    try {
+      await this.closeLegacySessionStateSubscription(subscriptionId, record.handle);
+    } catch {
+      // The gateway has already detached the client-visible subscription.
+    }
+    this.sendStream(connection, {
+      type: "subscription_closed",
+      subscriptionId,
+      sessionId,
+    });
+  }
+
+  private async subscribeWorkspace(
+    connection: StreamConnectionRecord,
+    message: Extract<WorkspaceGatewayStreamClientMessage, { type: "workspace_subscribe" }>,
+  ): Promise<void> {
+    if (connection.subscriptions.has(message.subscriptionId)) {
+      this.sendWorkspaceStream(connection, {
+        type: "workspace_subscription_rejected",
+        subscriptionId: message.subscriptionId,
+        error: {
+          message: `Subscription ${message.subscriptionId} already exists`,
+          code: "duplicate_subscription",
+        },
+      });
+      return;
+    }
+
+    const record: WorkspaceStreamSubscriptionRecord = {
+      kind: "workspace",
+      sessionId: message.sessionId,
+      subscription: null,
+      pump: null,
+    };
+    connection.subscriptions.set(message.subscriptionId, record);
+
+    try {
+      const client = await this.#clientProvider.getClient();
+      const subscription = await client.openSubscription(message.sessionId, message.spec);
+      if (connection.subscriptions.get(message.subscriptionId) !== record) {
+        await this.closeWorkspaceSubscription(message.subscriptionId, subscription).catch(() => undefined);
+        return;
+      }
+
+      record.subscription = subscription;
+      if (!this.sendWorkspaceStream(connection, {
+        type: "workspace_subscription_ack",
+        subscriptionId: message.subscriptionId,
+        meta: {
+          subscription_id: subscription.subscriptionId,
+        },
+      })) {
+        return;
+      }
+      record.pump = this.pumpWorkspaceSubscription(connection, message.subscriptionId, record);
+    } catch (error) {
+      if (connection.subscriptions.get(message.subscriptionId) !== record) {
+        return;
+      }
+      connection.subscriptions.delete(message.subscriptionId);
+      this.sendWorkspaceStream(connection, {
+        type: "workspace_subscription_rejected",
+        subscriptionId: message.subscriptionId,
+        error: serializeError(error),
+      });
+    }
+  }
+
+  private async unsubscribeWorkspace(
+    connection: StreamConnectionRecord,
+    subscriptionId: string,
+  ): Promise<void> {
+    const record = connection.subscriptions.get(subscriptionId);
+    if (!record || record.kind !== "workspace") {
+      connection.subscriptions.delete(subscriptionId);
+      this.sendWorkspaceStream(connection, {
+        type: "workspace_subscription_closed",
+        subscriptionId,
+      });
+      return;
+    }
+
+    connection.subscriptions.delete(subscriptionId);
+    if (record.subscription) {
+      try {
+        await this.closeWorkspaceSubscription(subscriptionId, record.subscription);
+      } catch {
+        // The gateway has already detached the client-visible subscription.
+      }
+    }
+    this.sendWorkspaceStream(connection, {
+      type: "workspace_subscription_closed",
+      subscriptionId,
+    });
+  }
+
+  private async pumpWorkspaceSubscription(
+    connection: StreamConnectionRecord,
+    subscriptionId: string,
+    record: WorkspaceStreamSubscriptionRecord,
+  ): Promise<void> {
+    try {
+      while (connection.subscriptions.get(subscriptionId) === record && record.subscription) {
+        const event = await record.subscription.nextEvent();
+        if (!event) {
+          break;
+        }
+
+        if (connection.subscriptions.get(subscriptionId) !== record) {
+          break;
+        }
+
+        this.sendWorkspaceStream(connection, {
+          type: "workspace_subscription_event",
+          subscriptionId,
+          event,
+        });
+      }
+    } catch (error) {
+      if (connection.subscriptions.get(subscriptionId) === record) {
+        this.sendWorkspaceStream(connection, {
+          type: "workspace_subscription_error",
+          subscriptionId,
+          error: serializeError(error),
+        });
+      }
+    } finally {
+      if (connection.subscriptions.get(subscriptionId) === record) {
+        connection.subscriptions.delete(subscriptionId);
+        this.sendWorkspaceStream(connection, {
+          type: "workspace_subscription_closed",
+          subscriptionId,
+        });
+      }
+    }
   }
 
   private registerImportHandle(
@@ -535,30 +757,98 @@ export class TerminalRuntimeGatewayServer {
   }
 
   private async disposeStreamConnection(connection: StreamConnectionRecord): Promise<void> {
-    const stops = [...connection.subscriptions.values()]
-      .map((record) => record.handle?.dispose() ?? null)
+    const stops = [...connection.subscriptions.entries()]
+      .map(([subscriptionId, record]) => this.disposeStreamSubscription(subscriptionId, record))
       .filter(Boolean);
     connection.subscriptions.clear();
     await Promise.allSettled(stops);
   }
 
-  private sendControl(socket: WebSocket, message: GatewayControlResponseMessage): void {
-    this.send(socket, message);
+  private disposeStreamSubscription(
+    subscriptionId: string,
+    record: StreamSubscriptionRecord,
+  ): Promise<void> | null {
+    if (record.kind === "legacy_session_state") {
+      return record.handle
+        ? this.closeLegacySessionStateSubscription(subscriptionId, record.handle)
+        : null;
+    }
+
+    return record.subscription
+      ? this.closeWorkspaceSubscription(subscriptionId, record.subscription)
+      : null;
   }
 
-  private sendStream(socket: WebSocket, message: TerminalGatewayStreamServerMessage): void {
-    this.send(socket, message);
+  private closeWorkspaceSubscription(
+    subscriptionId: string,
+    subscription: NonNullable<WorkspaceStreamSubscriptionRecord["subscription"]>,
+  ): Promise<void> {
+    return withTimeout(
+      subscription.close(),
+      STREAM_SUBSCRIPTION_CLOSE_TIMEOUT_MS,
+      `Workspace subscription ${subscriptionId} close timed out`,
+    );
+  }
+
+  private closeLegacySessionStateSubscription(
+    subscriptionId: string,
+    handle: NonNullable<LegacyStreamSubscriptionRecord["handle"]>,
+  ): Promise<void> {
+    return withTimeout(
+      handle.dispose(),
+      STREAM_SUBSCRIPTION_CLOSE_TIMEOUT_MS,
+      `Session state subscription ${subscriptionId} dispose timed out`,
+    );
+  }
+
+  private sendControl(socket: WebSocket, message: GatewayControlResponseMessage): boolean {
+    return this.send(socket, message);
+  }
+
+  private sendStream(
+    connection: StreamConnectionRecord,
+    message: TerminalGatewayStreamServerMessage,
+  ): boolean {
+    return this.sendStreamConnection(connection, message);
+  }
+
+  private sendWorkspaceStream(
+    connection: StreamConnectionRecord,
+    message: WorkspaceGatewayStreamServerMessage,
+  ): boolean {
+    return this.sendStreamConnection(connection, message);
+  }
+
+  private sendStreamConnection(
+    connection: StreamConnectionRecord,
+    message: TerminalGatewayStreamServerMessage | WorkspaceGatewayStreamServerMessage,
+  ): boolean {
+    const sent = this.send(connection.socket, message);
+    if (!sent) {
+      this.#streamConnections.delete(connection);
+      void this.disposeStreamConnection(connection);
+    }
+
+    return sent;
   }
 
   private send(
     socket: WebSocket,
-    message: GatewayControlResponseMessage | TerminalGatewayStreamServerMessage,
-  ): void {
+    message: GatewayControlResponseMessage
+      | TerminalGatewayStreamServerMessage
+      | WorkspaceGatewayStreamServerMessage,
+  ): boolean {
     if (socket.readyState !== WebSocket.OPEN) {
-      return;
+      return false;
     }
 
-    socket.send(encodeGatewayPayload(message));
+    try {
+      socket.send(encodeGatewayPayload(message));
+      return true;
+    } catch {
+      closeFailedGatewaySocket(socket);
+      return false;
+    }
   }
 
   private sendSuccessResponse(
@@ -574,6 +864,18 @@ export class TerminalRuntimeGatewayServer {
       ok: true,
       result,
     });
+  }
+}
+
+function closeFailedGatewaySocket(socket: WebSocket): void {
+  try {
+    socket.close(1011, "Gateway send failed");
+  } catch {
+    try {
+      socket.terminate();
+    } catch {
+      // The socket is already unusable. There is no reliable recovery path here.
+    }
   }
 }
 
@@ -612,7 +914,9 @@ function parseControlClientMessage(payload: string): GatewayControlRequestMessag
   };
 }
 
-function parseStreamClientMessage(payload: string): TerminalGatewayStreamClientMessage {
+function parseStreamClientMessage(
+  payload: string,
+): TerminalGatewayStreamClientMessage | WorkspaceGatewayStreamClientMessage {
   const parsed = decodeGatewayPayload(payload);
   if (!isGatewayPayloadRecord(parsed)) {
     throw new Error("Gateway stream message must be an object");
@@ -626,22 +930,49 @@ function parseStreamClientMessage(payload: string): TerminalGatewayStreamClientM
     throw new Error("Gateway stream subscriptionId must be a non-empty string");
   }
 
-  if (typeof parsed.sessionId !== "string" || parsed.sessionId.length === 0) {
-    throw new Error("Gateway stream message requires a non-empty sessionId");
-  }
-
   if (
-    parsed.type !== "stream_subscribe_session_state"
-    && parsed.type !== "stream_unsubscribe_session_state"
+    parsed.type === "stream_subscribe_session_state"
+    || parsed.type === "stream_unsubscribe_session_state"
   ) {
-    throw new Error("Unsupported gateway stream message");
+    if (typeof parsed.sessionId !== "string" || parsed.sessionId.length === 0) {
+      throw new Error("Gateway stream message requires a non-empty sessionId");
+    }
+
+    return {
+      type: parsed.type,
+      subscriptionId: parsed.subscriptionId,
+      sessionId: parsed.sessionId,
+    };
   }
 
-  return {
-    type: parsed.type,
-    subscriptionId: parsed.subscriptionId,
-    sessionId: parsed.sessionId,
-  };
+  if (parsed.type === "workspace_subscribe") {
+    if (typeof parsed.sessionId !== "string" || parsed.sessionId.length === 0) {
+      throw new Error("Workspace stream subscribe requires a non-empty sessionId");
+    }
+
+    if (!isGatewayPayloadRecord(parsed.spec)) {
+      throw new Error("Workspace stream subscribe requires a subscription spec");
+    }
+
+    return {
+      type: "workspace_subscribe",
+      subscriptionId: parsed.subscriptionId,
+      sessionId: parsed.sessionId,
+      spec: parsed.spec as Extract<
+        WorkspaceGatewayStreamClientMessage,
+        { type: "workspace_subscribe" }
+      >["spec"],
+    };
+  }
+
+  if (parsed.type === "workspace_unsubscribe") {
+    return {
+      type: "workspace_unsubscribe",
+      subscriptionId: parsed.subscriptionId,
+    };
+  }
+
+  throw new Error("Unsupported gateway stream message");
 }
 
 function serializeError(error: unknown): TerminalGatewayErrorEnvelope {
@@ -663,6 +994,26 @@ function serializeError(error: unknown): TerminalGatewayErrorEnvelope {
   return {
     message: typeof error === "string" ? error : "Unknown gateway error",
   };
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function asGatewayPayload(value: unknown): GatewayPayloadRecord {
@@ -731,6 +1082,14 @@ function readNumberPayload(payload: GatewayPayloadRecord, key: string): number {
   }
 
   return parsed;
+}
+
+function readOptionalNumberPayload(payload: GatewayPayloadRecord, key: string): number | undefined {
+  if (payload[key] == null) {
+    return undefined;
+  }
+
+  return readNumberPayload(payload, key);
 }
 
 function readIntegerPayload(payload: GatewayPayloadRecord, key: string): number {
@@ -855,13 +1214,24 @@ function readMuxCommandPayload(payload: GatewayPayloadRecord): TerminalMuxComman
         tab_id: readStringPayload(command, "tab_id"),
         title: readStringPayload(command, "title"),
       };
-    case "send_input":
-    case "send_paste":
+    case "send_input": {
+      const clientEventId = readOptionalStringPayload(command, "client_event_id");
       return {
         kind,
         pane_id: readStringPayload(command, "pane_id"),
         data: readStringPayload(command, "data"),
+        ...(clientEventId ? { client_event_id: clientEventId } : {}),
       };
+    }
+    case "send_paste": {
+      const clientEventId = readOptionalStringPayload(command, "client_event_id");
+      return {
+        kind,
+        pane_id: readStringPayload(command, "pane_id"),
+        data: readStringPayload(command, "data"),
+        ...(clientEventId ? { client_event_id: clientEventId } : {}),
+      };
+    }
     case "detach":
     case "save_session":
       return { kind };

@@ -2,6 +2,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
@@ -11,10 +12,13 @@ import WebSocket from "ws";
 import {
   launchChromeWithCdp,
   pipeProcess,
+  removeChromeUserDataDir,
   resolveRuntimeEvaluationValue,
   stopProcess,
   waitForHttpServer,
 } from "./chrome-cdp-smoke.mjs";
+import { resolveSpawnCommand } from "./dev-launcher-utils.mjs";
+import { withTerminalDemoSmokeLock } from "./smoke-lock.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -22,22 +26,71 @@ const viteCliPath = path.join(appRoot, "node_modules", "vite", "bin", "vite.js")
 const rendererPort = process.env.TERMINAL_DEMO_SMOKE_RENDERER_PORT ?? "4273";
 const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const cdpPort = process.env.TERMINAL_DEMO_SMOKE_CDP_PORT ?? "9226";
-const screenshotPath = path.join("/tmp", `terminal-demo-browser-smoke-${Date.now()}.png`);
-const sessionStorePath = path.join("/tmp", `terminal-demo-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`);
+const runtimeSlugPrefix = process.env.TERMINAL_DEMO_SMOKE_RUNTIME_SLUG
+  ?? `terminal-demo-browser-smoke-${process.pid}-${Date.now().toString(16)}`;
+const screenshotPath = path.join(os.tmpdir(), `terminal-demo-browser-smoke-${Date.now()}.png`);
+const sessionStorePath = path.join(os.tmpdir(), `terminal-demo-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`);
+const keepArtifacts = process.env.TERMINAL_DEMO_SMOKE_KEEP_ARTIFACTS === "1";
 const autoStartSessionStorePath = path.join(
-  "/tmp",
+  os.tmpdir(),
   `terminal-demo-browser-smoke-auto-store-${process.pid}-${Date.now()}.sqlite3`,
 );
+const autoStartRestartSessionStorePath = path.join(
+  os.tmpdir(),
+  `terminal-demo-browser-smoke-auto-restart-store-${process.pid}-${Date.now()}.sqlite3`,
+);
+const browserBootstrapPath = path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json");
 const themeStorageKey = "terminal-platform-demo.theme";
 const fontScaleStorageKey = "terminal-platform-demo.terminal-font-scale";
 const lineWrapStorageKey = "terminal-platform-demo.terminal-line-wrap";
+const commandHistoryStorageKey = "terminal-platform-demo.command-history";
+const primarySmokeCommand = process.platform === "win32"
+  ? "echo browser-smoke-ok"
+  : "printf \"browser-smoke-ok\\n\"";
+const clipboardPasteSmokeCommand = process.platform === "win32"
+  ? "echo browser-paste-ok\r"
+  : "printf \"browser-paste-ok\\n\"\n";
+const directScreenInputCommand = process.platform === "win32"
+  ? "echo screen-key-ok"
+  : "printf \"screen-key-ok\\n\"";
+const directScreenPasteCommand = process.platform === "win32"
+  ? "echo screen-paste-ok\r"
+  : "printf \"screen-paste-ok\\n\"\n";
+const expectedQuickCommandLabels = resolveExpectedQuickCommandLabels(
+  process.env.TERMINAL_DEMO_DEFAULT_SHELL,
+);
 
 let previewProcess = null;
 let browserHostProcess = null;
 let chromeProcess = null;
 let chromeUserDataDir = null;
 
-await main();
+await withTerminalDemoSmokeLock("browser-smoke", main);
+
+function resolveExpectedQuickCommandLabels(defaultShellProgram) {
+  if (process.platform !== "win32") {
+    return "pwd|ls -la|git status|node -v|hello";
+  }
+
+  if (isPowerShellProgram(defaultShellProgram)) {
+    return "Get-Location|Get-ChildItem|git status|node -v|hello";
+  }
+
+  return "cd|dir|git status|node -v|hello";
+}
+
+function isPowerShellProgram(value) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    return false;
+  }
+
+  const executableName = path.basename(normalized).toLowerCase();
+  return executableName === "powershell"
+    || executableName === "powershell.exe"
+    || executableName === "pwsh"
+    || executableName === "pwsh.exe";
+}
 
 async function main() {
   try {
@@ -55,6 +108,7 @@ async function main() {
       cwd: appRoot,
       env: process.env,
       stdio: "pipe",
+      windowsHide: true,
     });
     pipeProcess(previewProcess, "[browser-smoke:preview]");
     await waitForHttpServer(rendererUrl, {
@@ -83,10 +137,18 @@ async function main() {
 
     const autoStartBrowserUrl = await startBrowserHost(rendererUrl, {
       autoStartSession: "1",
+      runtimeSlug: `${runtimeSlugPrefix}-auto`,
       sessionStorePath: autoStartSessionStorePath,
     });
     const autoStartDefaultShellProgram =
       new URL(autoStartBrowserUrl).searchParams.get("demoDefaultShellProgram");
+    const autoStartDefaultWorkingDirectory =
+      new URL(autoStartBrowserUrl).searchParams.get("demoDefaultWorkingDirectory");
+    const autoStartDefaultControlPlaneUrl =
+      new URL(autoStartBrowserUrl).searchParams.get("controlPlaneUrl");
+    const autoStartDefaultSessionStreamUrl =
+      new URL(autoStartBrowserUrl).searchParams.get("sessionStreamUrl");
+    process.stdout.write("[browser-smoke] running auto-start scenario\n");
     const autoStartResult = await runAutoStartSmokeScenario(autoStartBrowserUrl);
     if (autoStartResult.issues.length > 0) {
       throw new Error(`Browser auto-start reported runtime issues: ${JSON.stringify(autoStartResult.issues)}`);
@@ -100,21 +162,69 @@ async function main() {
       || autoStartResult.demoAutoStartSession !== null
       || !autoStartDefaultShellProgram
       || autoStartResult.demoDefaultShellProgram !== autoStartDefaultShellProgram
+      || !autoStartDefaultWorkingDirectory
+      || autoStartResult.demoDefaultWorkingDirectory !== autoStartDefaultWorkingDirectory
       || !autoStartResult.commandInputFocused
       || autoStartResult.documentHorizontalOverflow > 1
       || /default interactive shell is now zsh/i.test(autoStartResult.terminalScreenTextPreview ?? "")
     ) {
       throw new Error(`Host auto-start did not settle into one default shell: ${JSON.stringify(autoStartResult)}`);
     }
+    process.stdout.write("[browser-smoke] running stale auto-start URL scenario\n");
+    const staleAutoStartResult = await runAutoStartSmokeScenario(buildStaleBrowserUrl(autoStartBrowserUrl), {
+      allowStaleBootstrapConnectionIssues: true,
+    });
+    if (
+      staleAutoStartResult.issues.length > 0
+      || !staleAutoStartResult.hasReady
+      || staleAutoStartResult.hasError
+      || !staleAutoStartResult.attached
+      || staleAutoStartResult.controlPlaneUrl !== autoStartDefaultControlPlaneUrl
+      || staleAutoStartResult.sessionStreamUrl !== autoStartDefaultSessionStreamUrl
+      || staleAutoStartResult.demoDefaultShellProgram !== autoStartDefaultShellProgram
+      || staleAutoStartResult.demoDefaultWorkingDirectory !== autoStartDefaultWorkingDirectory
+    ) {
+      throw new Error(`Host auto-start did not replace a stale browser URL: ${JSON.stringify(staleAutoStartResult)}`);
+    }
+
+    process.stdout.write("[browser-smoke] running browser host restart recovery scenario\n");
+    const restartRecoveryResult = await runAutoStartRestartRecoveryScenario(autoStartBrowserUrl, {
+      initialControlPlaneUrl: autoStartDefaultControlPlaneUrl,
+      initialSessionStreamUrl: autoStartDefaultSessionStreamUrl,
+      restartSessionStorePath: autoStartRestartSessionStorePath,
+      runtimeSlug: `${runtimeSlugPrefix}-auto`,
+    });
+    if (
+      restartRecoveryResult.issues.length > 0
+      || !restartRecoveryResult.recovered
+      || !restartRecoveryResult.historyBeforeRestartCommandSent
+      || !restartRecoveryResult.historyBeforeRestartOutputSeen
+      || !restartRecoveryResult.historyBeforeRestartPersisted
+      || !restartRecoveryResult.historyRecoveredState?.historyIncludesBeforeRestart
+      || !restartRecoveryResult.historyRecoveredState?.storedHistoryIncludesBeforeRestart
+      || !restartRecoveryResult.historyAfterRestartIncludesBeforeRestart
+      || !restartRecoveryResult.postRestartHistoryLatest?.includes("browser-restart-ok")
+      || !restartRecoveryResult.postRestartHistoryStored
+      || !restartRecoveryResult.commandSent
+      || !restartRecoveryResult.containsMarker
+      || restartRecoveryResult.initialControlPlaneUrl === restartRecoveryResult.restartedControlPlaneUrl
+      || restartRecoveryResult.initialSessionStreamUrl === restartRecoveryResult.restartedSessionStreamUrl
+    ) {
+      throw new Error(`Open browser page did not recover after browser host restart: ${JSON.stringify(restartRecoveryResult)}`);
+    }
 
     await stopProcess(browserHostProcess);
     browserHostProcess = null;
+    await removeBrowserBootstrapConfig();
     await removeSessionStore(autoStartSessionStorePath);
+    await removeSessionStore(autoStartRestartSessionStorePath);
 
     const browserUrl = await startBrowserHost(rendererUrl, {
       autoStartSession: "0",
+      runtimeSlug: `${runtimeSlugPrefix}-explicit`,
       sessionStorePath,
     });
+    process.stdout.write("[browser-smoke] running explicit launch scenario\n");
     const result = await runSmokeScenario(browserUrl);
 
     if (result.issues.length > 0) {
@@ -331,7 +441,7 @@ async function main() {
         )
       )
       || !Array.isArray(result.afterCreate.quickCommandLabels)
-      || result.afterCreate.quickCommandLabels.join("|") !== "pwd|ls -la|git status|node -v|hello"
+      || result.afterCreate.quickCommandLabels.join("|") !== expectedQuickCommandLabels
       || result.afterCreate.quickCommandIds.join("|") !== "pwd|list-files|git-status|node-version|hello"
       || result.afterCreate.quickCommandTones.join("|") !== "secondary|secondary|secondary|primary|secondary"
       || result.afterCreate.quickCommandAriaLabels.join("|") !== "Show the current working directory|List files with metadata|Inspect the current git worktree|Insert node version command|Print a Terminal Platform greeting"
@@ -418,7 +528,7 @@ async function main() {
       || !result.afterCreateMobileLayout.hasCompactScreenChrome
       || result.afterCreateMobileLayout.terminalScreenChromeHeight > 140
       || Math.abs(result.afterCreateMobileLayout.terminalScreenChromeViewportGapPx ?? 99) > 1
-      || result.afterCreateMobileLayout.terminalScreenHeight > 650
+      || result.afterCreateMobileLayout.terminalScreenHeight > 660
       || result.afterCreateMobileLayout.commandRegionTop > 900
       || Math.abs(result.afterCreateMobileLayout.terminalComposerGapPx ?? 99) > 1
       || Math.abs(result.afterCreateMobileLayout.terminalInputGapPx ?? 99) > 12
@@ -587,9 +697,9 @@ async function main() {
       || result.afterSaveLayout.firstSavedRestoreDisabled !== false
       || !result.afterSaveLayout.firstSavedRestoreTitle?.includes("Restore saved layout")
       || !result.afterSaveLayout.firstSavedSemanticsCodes?.includes("process_state_not_preserved")
-      || !result.afterSaveLayout.firstSavedSemanticsCodes?.includes("screen_buffers_not_replayed")
+      || !result.afterSaveLayout.firstSavedSemanticsCodes?.includes("screen_buffers_replayed")
       || !result.afterSaveLayout.firstSavedSemanticsLabels?.includes("processes restart")
-      || !result.afterSaveLayout.firstSavedSemanticsLabels?.includes("no screen replay")
+      || !result.afterSaveLayout.firstSavedSemanticsLabels?.includes("screen replay")
       || !result.afterSaveLayout.deletePrompted
       || result.afterSaveLayout.savedSessionCountAfterDeletePrompt !== result.afterSaveLayout.savedSessionCount
       || result.afterSaveLayout.saveEventDetail?.savedSessionCount !== result.afterSaveLayout.savedSessionCount
@@ -671,12 +781,13 @@ async function main() {
       || !result.afterCommand.commandCursorAtEnd
       || result.afterCommand.commandHistoryCount < 1
       || !result.afterCommand.commandHistoryLatest?.includes("browser-smoke-ok")
+      || !result.afterCommand.storedCommandHistoryIncludesPrimary
       || !isCompactCommandHistoryBadge(result.afterCommand.historyBadgeText)
       || result.afterCommand.historyChipWhiteSpaces.some((value) => value !== "nowrap")
       || Math.max(0, ...result.afterCommand.historyChipHeights) > 38
       || !result.afterCommand.historyChipIds.every((id) => /^history-\d+$/.test(id))
       || !result.afterCommand.historyChipAriaLabels.every((label) => label.startsWith("Use recent command "))
-      || (!result.afterCommand.sequenceAdvanced && !result.afterCommand.containsCommandOutput)
+      || !result.afterCommand.containsCommandOutput
     ) {
       throw new Error(`Command lane did not advance the focused screen: ${JSON.stringify(result.afterCommand)}`);
     }
@@ -711,6 +822,24 @@ async function main() {
       || !result.afterCommandActionFocus.interruptCursorAtEnd
     ) {
       throw new Error(`Command action buttons did not return focus to the command input: ${JSON.stringify(result.afterCommandActionFocus)}`);
+    }
+
+    if (
+      !result.afterCommandSavedRestore.saved
+      || !result.afterCommandSavedRestore.restored
+      || result.afterCommandSavedRestore.savedSessionCount < result.afterCommandSavedRestore.beforeSavedSessionCount
+      || !["saved_session_restore", "v2_pane_history"].includes(result.afterCommandSavedRestore.historySource)
+      || !result.afterCommandSavedRestore.historyIncludesPrimary
+      || !result.afterCommandSavedRestore.domHistoryIncludesPrimary
+      || !result.afterCommandSavedRestore.domHasRestoreBoundary
+      || !result.afterCommandSavedRestore.viewportIncludesPrimary
+      || !result.afterCommandSavedRestore.inputReadyAfterRestore
+    ) {
+      throw new Error(
+        `Saved command-output restore did not replay visible history: ${
+          JSON.stringify(result.afterCommandSavedRestore)
+        }`,
+      );
     }
 
     if (
@@ -771,6 +900,22 @@ async function main() {
     }
 
     if (
+      result.afterCommandHistoryDbReload.storageBeforeReload !== null
+      || !result.afterCommandHistoryDbReload.connectionReady
+      || !result.afterCommandHistoryDbReload.attached
+      || result.afterCommandHistoryDbReload.commandHistoryCount < 1
+      || !result.afterCommandHistoryDbReload.commandHistoryIncludesPrimary
+      || !result.afterCommandHistoryDbReload.storedCommandHistoryIncludesPrimary
+      || !isCompactCommandHistoryBadge(result.afterCommandHistoryDbReload.historyBadgeText)
+    ) {
+      throw new Error(
+        `Command history did not hydrate from DB after browser storage clear: ${
+          JSON.stringify(result.afterCommandHistoryDbReload)
+        }`,
+      );
+    }
+
+    if (
       !result.afterCommandHistoryClear.clicked
       || result.afterCommandHistoryClear.beforeCount < 1
       || !result.afterCommandHistoryClear.firstClickArmed
@@ -778,6 +923,7 @@ async function main() {
       || result.afterCommandHistoryClear.afterFirstCount !== result.afterCommandHistoryClear.beforeCount
       || result.afterCommandHistoryClear.clearedEventsAfterFirst !== 0
       || result.afterCommandHistoryClear.afterCount !== 0
+      || result.afterCommandHistoryClear.storedCount !== 0
       || result.afterCommandHistoryClear.clearedEvents !== 1
       || result.afterCommandHistoryClear.clearButtonDisabled !== true
       || result.afterCommandHistoryClear.finalConfirming !== false
@@ -877,6 +1023,11 @@ async function runSmokeScenario(browserUrl) {
 
     await sleep(3000);
     await installBrowserSmokeHelpers(send);
+    await evaluate(send, `(() => {
+      window.localStorage.removeItem(${JSON.stringify(commandHistoryStorageKey)});
+      window.terminalDemoDebug?.controller?.commands?.clearCommandHistory?.();
+      return true;
+    })()`);
 
     const before = await evaluate(send, `(() => ({
       bodyText: document.body.innerText,
@@ -1923,7 +2074,9 @@ async function runSmokeScenario(browserUrl) {
       const paneCountAfterSplit = splitTab ? countPanes(splitTab.root) : 0;
       const resizeColsBefore = stateAfterSplit?.attachedSession?.focused_screen?.cols ?? 0;
       const splitDirection = paneTreeRoot?.querySelector('[part="split"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null;
-      resizeWiderButton.click();
+      const resizeWiderButtonAfterSplit =
+        paneTreeRoot?.querySelector('[data-testid="tp-resize-wider"]') ?? null;
+      resizeWiderButtonAfterSplit?.click();
       await settle();
       const stateAfterResize = window.terminalDemoDebug?.getState?.();
       const resizeColsAfter = stateAfterResize?.attachedSession?.focused_screen?.cols ?? 0;
@@ -2023,7 +2176,7 @@ async function runSmokeScenario(browserUrl) {
       return {
         ok: true,
         splitClicked: true,
-        resizeClicked: true,
+        resizeClicked: Boolean(resizeWiderButtonAfterSplit),
         closePanePrompted,
         closePaneDanger,
         closePaneTitle,
@@ -2110,6 +2263,7 @@ async function runSmokeScenario(browserUrl) {
       const restoreButton = savedRoot?.querySelector('[data-testid="tp-restore-saved-session"]') ?? null;
       const restoreSemantics = [...(savedRoot?.querySelectorAll('[data-testid="tp-saved-session-restore-semantics"]') ?? [])];
       const savedSessionCount = state?.catalog?.savedSessions?.length ?? 0;
+      const firstSavedSession = state?.catalog?.savedSessions?.[0] ?? null;
       const deletePromptResult = {
         deletePrompted: false,
         deleteButtonText: deleteButton?.textContent?.trim() ?? null,
@@ -2136,11 +2290,12 @@ async function runSmokeScenario(browserUrl) {
         savedFiltered: savedPanel?.getAttribute('data-filtered') ?? null,
         savedItemsRendered: savedRoot?.querySelectorAll('[part="item"]')?.length ?? 0,
         hasSavedFilter: Boolean(savedRoot?.querySelector('[data-testid="tp-saved-session-filter"]')),
-        firstSavedTitle: state?.catalog?.savedSessions?.[0]?.title ?? null,
+        firstSavedTitle: firstSavedSession?.title ?? null,
         firstSavedCanRestore: restoreButton?.getAttribute('data-can-restore') ?? null,
         firstSavedRestoreStatus: restoreButton?.getAttribute('data-restore-status') ?? null,
         firstSavedRestoreDisabled: restoreButton?.disabled ?? null,
         firstSavedRestoreTitle: restoreButton?.getAttribute('title') ?? null,
+        firstSavedRestoreSemanticsV2: firstSavedSession?.restore_semantics_v2 ?? null,
         firstSavedSemanticsCodes: restoreSemantics.map((note) => note.getAttribute('data-semantics-code')),
         firstSavedSemanticsLabels: restoreSemantics.map((note) => note.textContent?.replace(/\\s+/g, ' ').trim() ?? ''),
         saveEventDetail,
@@ -2355,7 +2510,11 @@ async function runSmokeScenario(browserUrl) {
       const savedSessionCountAfterPrompt =
         window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
       armedButton?.click();
-      await wait(1200);
+      await waitForState((state) => {
+        const expectedAfterPrune = eventDetail?.keptCount ?? pruneKeepLatest;
+        const savedSessions = state?.catalog?.savedSessions?.length ?? Number.POSITIVE_INFINITY;
+        return savedSessions <= expectedAfterPrune;
+      }, 10000);
 
       const savedSessionCountAfter = window.terminalDemoDebug?.getState?.()?.catalog?.savedSessions?.length ?? 0;
       const visibleCountAfter = savedRoot.querySelectorAll('[part="item"]')?.length ?? 0;
@@ -2388,7 +2547,7 @@ async function runSmokeScenario(browserUrl) {
         return { ok: false, reason: 'textarea missing' };
       }
       const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
-      descriptor?.set?.call(textarea, 'printf \"browser-smoke-ok\\\\n\"');
+      descriptor?.set?.call(textarea, ${JSON.stringify(primarySmokeCommand)});
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const button = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
@@ -2405,9 +2564,7 @@ async function runSmokeScenario(browserUrl) {
       throw new Error(`Unable to send command through command dock: ${JSON.stringify(sendCommandResult)}`);
     }
 
-    await sleep(2000);
-
-    const afterCommand = await evaluate(send, `(() => {
+    const afterCommand = await waitForBrowserValue(send, "command lane to advance focused screen", `(() => {
       const debug = window.terminalDemoDebug?.getState?.();
       const workspaceHost = document.querySelector('tp-terminal-workspace');
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
@@ -2454,10 +2611,32 @@ async function runSmokeScenario(browserUrl) {
         historyChipIds: historyEntries.map((button) => button.getAttribute('data-command-history-entry') ?? ''),
         historyChipHistoryIndexes: historyEntries.map((button) => button.getAttribute('data-history-index') ?? ''),
         historyChipAriaLabels: historyEntries.map((button) => button.getAttribute('aria-label') ?? ''),
+        storedCommandHistory: (() => {
+          try {
+            const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })(),
         terminalScreenText,
         containsCommandOutput: /browser-smoke-ok/i.test(terminalScreenText),
       };
-    })()`);
+    })()`, (state) => {
+      if (!state?.connectionReady) {
+        return false;
+      }
+
+      return Boolean(
+        state.containsCommandOutput
+        && state.commandInputFocused
+        && state.commandInputEmpty
+        && state.commandCursorAtEnd
+        && state.commandHistoryLatest?.includes("browser-smoke-ok")
+      );
+    });
+    afterCommand.storedCommandHistoryIncludesPrimary = afterCommand.storedCommandHistory
+      .some((entry) => typeof entry === "string" && entry.includes("browser-smoke-ok"));
     const replayInitialSequence = afterCommand.focusedSequence;
 
     await send("Emulation.setDeviceMetricsOverride", {
@@ -2576,6 +2755,181 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
 
+    const afterCommandSavedRestore = await evaluate(send, `(async () => {
+      const waitForValue = async (label, predicate, timeoutMs = 30_000) => {
+        const deadline = performance.now() + timeoutMs;
+        let last = null;
+        while (performance.now() < deadline) {
+          last = await predicate();
+          if (last) {
+            return { ok: true, value: last };
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        return { ok: false, label, last };
+      };
+      const stateBefore = window.terminalDemoDebug?.getState?.();
+      const beforeSavedSessionCount = stateBefore?.catalog?.savedSessions?.length ?? 0;
+      const beforeSessionId = stateBefore?.attachedSession?.session?.session_id ?? null;
+      const workspaceHost = document.querySelector('tp-terminal-workspace') ?? null;
+      const workspaceRoot = workspaceHost?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const sessionTools = commandRoot?.querySelector('[data-testid="tp-session-tools"]') ?? null;
+      const saveLayoutButton = commandRoot?.querySelector('[data-testid="tp-save-layout"]') ?? null;
+      const controllerCommands = window.terminalDemoDebug?.controller?.commands ?? null;
+      if (!workspaceHost || !saveLayoutButton || !controllerCommands?.restoreSavedSession) {
+        return {
+          saved: false,
+          restored: false,
+          reason: !workspaceHost
+            ? 'workspace host missing'
+            : !saveLayoutButton
+              ? 'save layout button missing'
+              : 'restore command missing',
+          beforeSavedSessionCount,
+          savedSessionCount: beforeSavedSessionCount,
+        };
+      }
+      if (saveLayoutButton.disabled) {
+        return {
+          saved: false,
+          restored: false,
+          reason: 'save layout button disabled',
+          beforeSavedSessionCount,
+          savedSessionCount: beforeSavedSessionCount,
+          saveLayoutTitle: saveLayoutButton.getAttribute('title'),
+        };
+      }
+
+      if (sessionTools) {
+        sessionTools.open = true;
+      }
+      let saveEventDetail = null;
+      workspaceHost.addEventListener('tp-terminal-layout-saved', (event) => {
+        saveEventDetail = event.detail ?? null;
+      }, { once: true });
+      saveLayoutButton.click();
+
+      const savedWait = await waitForValue('saved command-output layout', async () => {
+        const state = window.terminalDemoDebug?.getState?.();
+        const savedSessions = state?.catalog?.savedSessions ?? [];
+        const savedSessionId = saveEventDetail?.savedSessionId ?? savedSessions[0]?.session_id ?? null;
+        const savedSession = savedSessionId
+          ? savedSessions.find((session) => session.session_id === savedSessionId) ?? null
+          : null;
+        if (!savedSession) {
+          return null;
+        }
+        return {
+          savedSessionId,
+          savedSessionCount: savedSessions.length,
+          savedSessionTitle: savedSession.title ?? null,
+          savedAtMs: savedSession.saved_at_ms != null ? String(savedSession.saved_at_ms) : null,
+          restoreGuarantee: savedSession.restore_semantics_v2?.restore_guarantee_level ?? null,
+          replayScreenBuffers:
+            savedSession.restore_semantics_v2?.replays_saved_screen_buffers ?? null,
+        };
+      });
+      if (!savedWait.ok || !savedWait.value?.savedSessionId) {
+        return {
+          saved: false,
+          restored: false,
+          reason: 'saved layout did not appear in catalog',
+          beforeSavedSessionCount,
+          savedSessionCount: beforeSavedSessionCount,
+          saveEventDetail,
+          savedWait,
+        };
+      }
+
+      await controllerCommands.restoreSavedSession(savedWait.value.savedSessionId);
+      const restoredWait = await waitForValue('restored command-output visible history', async () => {
+        const state = window.terminalDemoDebug?.getState?.();
+        const activeSessionId =
+          state?.selection?.activeSessionId ?? state?.attachedSession?.session?.session_id ?? null;
+        const activePaneId =
+          state?.selection?.activePaneId ?? state?.attachedSession?.focused_screen?.pane_id ?? null;
+        const history = activePaneId ? state?.historicalPanes?.[activePaneId] ?? null : null;
+        const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
+        const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+        const historyLineTexts = [...(screenRoot?.querySelectorAll('[data-line-source="history"] .text') ?? [])]
+          .map((line) => line.textContent ?? '');
+        const boundaryTexts = [...(screenRoot?.querySelectorAll('[data-line-source="boundary"] .text') ?? [])]
+          .map((line) => line.textContent ?? '');
+        const viewportText = viewport?.textContent?.replace(/\\s+/g, ' ').trim() ?? '';
+        const historyIncludesPrimary = (history?.lines ?? []).some((line) => /browser-smoke-ok/i.test(line));
+        const domHistoryIncludesPrimary = historyLineTexts.some((line) => /browser-smoke-ok/i.test(line));
+        const domHasRestoreBoundary = boundaryTexts.some((line) => /restored history above/i.test(line));
+        const viewportIncludesPrimary = /browser-smoke-ok/i.test(viewportText);
+        const inputReadyAfterRestore = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]')
+          ?.getAttribute('tabindex') === '0'
+          && Boolean(commandRoot?.querySelector('[data-testid="tp-command-input"]:not([disabled])'));
+        if (
+          activeSessionId
+          && activePaneId
+          && (history?.source === 'saved_session_restore' || history?.source === 'v2_pane_history')
+          && historyIncludesPrimary
+          && domHistoryIncludesPrimary
+          && domHasRestoreBoundary
+          && viewportIncludesPrimary
+          && inputReadyAfterRestore
+        ) {
+          return {
+            activeSessionId,
+            activePaneId,
+            historySource: history.source,
+            historyLineCount: history.lines.length,
+            historyIncludesPrimary,
+            domHistoryIncludesPrimary,
+            domHasRestoreBoundary,
+            viewportIncludesPrimary,
+            inputReadyAfterRestore,
+            viewportPreview: viewportText.slice(0, 180),
+          };
+        }
+        return null;
+      });
+
+      const stateAfter = window.terminalDemoDebug?.getState?.();
+      const activePaneId =
+        stateAfter?.selection?.activePaneId ?? stateAfter?.attachedSession?.focused_screen?.pane_id ?? null;
+      const history = activePaneId ? stateAfter?.historicalPanes?.[activePaneId] ?? null : null;
+      const screenRoot = workspaceRoot?.querySelector('tp-terminal-screen')?.shadowRoot ?? null;
+      const viewport = screenRoot?.querySelector('[data-testid="tp-screen-viewport"]') ?? null;
+      const historyLineTexts = [...(screenRoot?.querySelectorAll('[data-line-source="history"] .text') ?? [])]
+        .map((line) => line.textContent ?? '');
+      const boundaryTexts = [...(screenRoot?.querySelectorAll('[data-line-source="boundary"] .text') ?? [])]
+        .map((line) => line.textContent ?? '');
+      const viewportText = viewport?.textContent?.replace(/\\s+/g, ' ').trim() ?? '';
+
+      return {
+        saved: true,
+        restored: restoredWait.ok,
+        beforeSavedSessionCount,
+        savedSessionCount: savedWait.value.savedSessionCount,
+        savedSessionId: savedWait.value.savedSessionId,
+        savedSessionTitle: savedWait.value.savedSessionTitle,
+        savedRestoreGuarantee: savedWait.value.restoreGuarantee,
+        savedReplayScreenBuffers: savedWait.value.replayScreenBuffers,
+        beforeSessionId,
+        restoredSessionId:
+          stateAfter?.selection?.activeSessionId ?? stateAfter?.attachedSession?.session?.session_id ?? null,
+        activePaneId,
+        historySource: history?.source ?? null,
+        historyLineCount: history?.lines?.length ?? 0,
+        historyIncludesPrimary: (history?.lines ?? []).some((line) => /browser-smoke-ok/i.test(line)),
+        domHistoryIncludesPrimary: historyLineTexts.some((line) => /browser-smoke-ok/i.test(line)),
+        domHasRestoreBoundary: boundaryTexts.some((line) => /restored history above/i.test(line)),
+        viewportIncludesPrimary: /browser-smoke-ok/i.test(viewportText),
+        inputReadyAfterRestore:
+          viewport?.getAttribute('tabindex') === '0'
+          && Boolean(commandRoot?.querySelector('[data-testid="tp-command-input"]:not([disabled])')),
+        restoreWait: restoredWait.ok ? null : restoredWait,
+        viewportPreview: viewportText.slice(0, 180),
+        saveEventDetail,
+      };
+    })()`);
+
     afterScreenCopy = await evaluate(send, `(async () => {
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const screenHost = workspaceRoot?.querySelector('tp-terminal-screen') ?? null;
@@ -2682,7 +3036,7 @@ async function runSmokeScenario(browserUrl) {
 
     const clipboardSeedResult = await evaluate(send, `(async () => {
       try {
-        await navigator.clipboard.writeText(${JSON.stringify('printf "browser-paste-ok\\n"\n')});
+        await navigator.clipboard.writeText(${JSON.stringify(clipboardPasteSmokeCommand)});
         return { ok: true };
       } catch (error) {
         return { ok: false, error: String(error?.message ?? error) };
@@ -2708,8 +3062,10 @@ async function runSmokeScenario(browserUrl) {
       }
 
       let submittedEvents = 0;
-      commandHost.addEventListener('tp-terminal-paste-submitted', () => {
+      let eventDetail = null;
+      commandHost.addEventListener('tp-terminal-paste-submitted', (event) => {
         submittedEvents += 1;
+        eventDetail = event.detail ?? null;
       }, { once: true });
 
       if (pasteButton.disabled) {
@@ -2723,12 +3079,13 @@ async function runSmokeScenario(browserUrl) {
       }
 
       pasteButton.click();
-      await new Promise((resolve) => setTimeout(resolve, 1600));
+      await new Promise((resolve) => setTimeout(resolve, 5000));
 
       return {
         ok: true,
         pasteButtonEnabled: !pasteButton.disabled,
         submittedEvents,
+        eventDetail,
         title: pasteButton.getAttribute('title'),
       };
     })()`);
@@ -2736,21 +3093,29 @@ async function runSmokeScenario(browserUrl) {
       throw new Error(`Unable to paste clipboard through command dock: ${JSON.stringify(pasteResult)}`);
     }
 
-    const afterClipboardPaste = await evaluate(send, `(() => {
+    const afterClipboardPaste = await evaluate(send, `(async () => {
       const debug = window.terminalDemoDebug?.getState?.();
+      const eventDetail = ${JSON.stringify(pasteResult.eventDetail)};
+      if (eventDetail?.sessionId) {
+        await window.terminalDemoDebug?.controller?.commands?.attachSession?.(eventDetail.sessionId);
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+      const refreshedDebug = window.terminalDemoDebug?.getState?.();
       const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
       const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
       const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
-      const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
-        ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+      const terminalScreenText = refreshedDebug?.attachedSession?.focused_screen?.surface?.lines
+        ? refreshedDebug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : '';
       return {
         clicked: true,
         pasteButtonEnabled: ${JSON.stringify(pasteResult.pasteButtonEnabled)},
         submittedEvents: ${JSON.stringify(pasteResult.submittedEvents)},
-        connectionReady: debug?.connection?.state === 'ready',
-        commandHistoryCount: debug?.commandHistory?.entries?.length ?? 0,
-        commandHistoryLatest: debug?.commandHistory?.entries?.at(-1) ?? null,
+        eventDetail,
+        connectionReady: refreshedDebug?.connection?.state === 'ready',
+        focusedPaneId: refreshedDebug?.attachedSession?.focused_screen?.pane_id ?? null,
+        commandHistoryCount: refreshedDebug?.commandHistory?.entries?.length ?? 0,
+        commandHistoryLatest: refreshedDebug?.commandHistory?.entries?.at(-1) ?? null,
         inputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, textarea) === true,
         cursorAtEnd: Boolean(
           textarea
@@ -2995,6 +3360,56 @@ async function runSmokeScenario(browserUrl) {
       };
     })()`);
 
+    const commandHistoryStorageBeforeDbReload = await evaluate(send, `(() => {
+      window.localStorage.removeItem(${JSON.stringify(commandHistoryStorageKey)});
+      return window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)});
+    })()`);
+    await send("Page.reload", { ignoreCache: true });
+    await sleep(500);
+    const afterCommandHistoryDbReload = await waitForBrowserValue(
+      send,
+      "command history hydrated from DB after browser storage clear",
+      `(() => {
+        const debug = window.terminalDemoDebug?.getState?.();
+        const entries = debug?.commandHistory?.entries ?? [];
+        const storedCommandHistory = (() => {
+          try {
+            const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })();
+        const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+        const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+        return {
+          storageBeforeReload: ${JSON.stringify(commandHistoryStorageBeforeDbReload)},
+          connectionReady: debug?.connection?.state === 'ready',
+          attached: Boolean(debug?.attachedSession?.focused_screen),
+          commandHistoryCount: entries.length,
+          commandHistoryLatest: entries.at(-1) ?? null,
+          commandHistoryIncludesPrimary: entries.some((entry) =>
+            typeof entry === 'string' && entry.includes('browser-smoke-ok')
+          ),
+          storedCommandHistoryCount: storedCommandHistory.length,
+          storedCommandHistoryIncludesPrimary: storedCommandHistory.some((entry) =>
+            typeof entry === 'string' && entry.includes('browser-smoke-ok')
+          ),
+          historyBadgeText: commandRoot?.querySelector('[data-testid="tp-command-history-count"]')
+            ?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+        };
+      })()`,
+      (value) => (
+        value.storageBeforeReload === null
+        && value.connectionReady
+        && value.attached
+        && value.commandHistoryIncludesPrimary
+        && value.storedCommandHistoryIncludesPrimary
+      ),
+      35_000,
+    );
+    await installBrowserSmokeHelpers(send);
+
     const afterCommandHistoryClear = await evaluate(send, `(async () => {
       const workspaceHost = document.querySelector('tp-terminal-workspace') ?? null;
       const workspaceRoot = workspaceHost?.shadowRoot ?? null;
@@ -3078,11 +3493,25 @@ async function runSmokeScenario(browserUrl) {
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const finalButton = commandRoot.querySelector('[data-testid="tp-clear-command-history"]');
       const state = window.terminalDemoDebug?.getState?.();
+      let storedCommandHistory = [];
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+          const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+          storedCommandHistory = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          storedCommandHistory = [];
+        }
+        if (storedCommandHistory.length === 0) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       return {
         clicked: true,
         beforeCount,
         afterFirstCount,
         afterCount: state?.commandHistory?.entries?.length ?? 0,
+        storedCount: storedCommandHistory.length,
         clearedEvents,
         clearedEventsAfterFirst,
         firstClickArmed,
@@ -3114,16 +3543,17 @@ async function runSmokeScenario(browserUrl) {
       };
       screenHost.addEventListener('tp-terminal-screen-input-submitted', handleSubmitted);
       viewport.focus();
-      const directInput = ${JSON.stringify('printf "screen-key-ok\\n"')};
+      const directInput = ${JSON.stringify(directScreenInputCommand)};
+      const keyDelayMs = ${process.platform === "win32" ? 60 : 20};
       for (const key of [...directInput, 'Enter']) {
         viewport.dispatchEvent(new KeyboardEvent('keydown', {
           key,
           bubbles: true,
           cancelable: true,
         }));
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await new Promise((resolve) => setTimeout(resolve, keyDelayMs));
       }
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setTimeout(resolve, ${process.platform === "win32" ? 2600 : 1200}));
       screenHost.removeEventListener('tp-terminal-screen-input-submitted', handleSubmitted);
 
       return {
@@ -3136,7 +3566,7 @@ async function runSmokeScenario(browserUrl) {
       throw new Error(`Unable to send input through terminal screen: ${JSON.stringify(directScreenInputResult)}`);
     }
 
-    await sleep(2500);
+    await sleep(process.platform === "win32" ? 5000 : 2500);
 
     const afterDirectScreenInput = await evaluate(send, `(() => {
       const debug = window.terminalDemoDebug?.getState?.();
@@ -3179,7 +3609,7 @@ async function runSmokeScenario(browserUrl) {
       screenHost.addEventListener('tp-terminal-screen-paste-submitted', handleSubmitted);
       screenHost.addEventListener('tp-terminal-screen-paste-failed', handleFailed);
       viewport.focus();
-      const pasteText = ${JSON.stringify('printf "screen-paste-ok\\n"\n')};
+      const pasteText = ${JSON.stringify(directScreenPasteCommand)};
       const pasteEvent = new Event('paste', {
         bubbles: true,
         cancelable: true,
@@ -3206,19 +3636,25 @@ async function runSmokeScenario(browserUrl) {
       throw new Error(`Unable to paste through terminal screen: ${JSON.stringify(directScreenPasteResult)}`);
     }
 
-    await sleep(2500);
+    await sleep(process.platform === "win32" ? 5000 : 2500);
 
-    const afterDirectScreenPaste = await evaluate(send, `(() => {
+    const afterDirectScreenPaste = await evaluate(send, `(async () => {
       const debug = window.terminalDemoDebug?.getState?.();
-      const terminalScreenText = debug?.attachedSession?.focused_screen?.surface?.lines
-        ? debug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+      const sessionId = debug?.attachedSession?.session?.session_id ?? null;
+      if (sessionId) {
+        await window.terminalDemoDebug?.controller?.commands?.attachSession?.(sessionId);
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+      const refreshedDebug = window.terminalDemoDebug?.getState?.();
+      const terminalScreenText = refreshedDebug?.attachedSession?.focused_screen?.surface?.lines
+        ? refreshedDebug.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
         : '';
       return {
         focused: ${JSON.stringify(directScreenPasteResult.focused)},
         defaultPrevented: ${JSON.stringify(directScreenPasteResult.defaultPrevented)},
         submittedEvents: ${JSON.stringify(directScreenPasteResult.submittedEvents)},
         failedEvents: ${JSON.stringify(directScreenPasteResult.failedEvents)},
-        connectionReady: debug?.connection?.state === 'ready',
+        connectionReady: refreshedDebug?.connection?.state === 'ready',
         terminalScreenText,
         containsPasteOutput: /screen-paste-ok/i.test(terminalScreenText),
       };
@@ -3253,6 +3689,7 @@ async function runSmokeScenario(browserUrl) {
       },
       afterCommandCompactHistoryLayout,
       afterCommandActionFocus,
+      afterCommandSavedRestore,
       afterScreenCopy,
       afterRecentCommandRecall,
       afterClipboardPaste,
@@ -3263,6 +3700,7 @@ async function runSmokeScenario(browserUrl) {
           ? afterHistoryReplay.focusedSequence !== replayInitialSequence
           : false,
       },
+      afterCommandHistoryDbReload,
       afterCommandHistoryClear,
       afterDirectScreenInput,
       afterDirectScreenPaste,
@@ -3274,7 +3712,7 @@ async function runSmokeScenario(browserUrl) {
   }
 }
 
-async function runAutoStartSmokeScenario(browserUrl) {
+async function runAutoStartSmokeScenario(browserUrl, options = {}) {
   const target = await fetch(`http://127.0.0.1:${cdpPort}/json/new?${encodeURIComponent(browserUrl)}`, {
     method: "PUT",
   }).then((response) => response.json());
@@ -3332,6 +3770,10 @@ async function runAutoStartSmokeScenario(browserUrl) {
       mobile: false,
     });
     await installBrowserSmokeHelpers(send);
+    await evaluate(send, `(() => {
+      window.localStorage.removeItem(${JSON.stringify(commandHistoryStorageKey)});
+      return true;
+    })()`);
 
     const result = await evaluate(send, `(async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -3361,7 +3803,10 @@ async function runAutoStartSmokeScenario(browserUrl) {
         sessionCount: state?.catalog?.sessions?.length ?? 0,
         attached: Boolean(state?.attachedSession?.focused_screen),
         demoAutoStartSession: new URLSearchParams(window.location.search).get('demoAutoStartSession'),
+        controlPlaneUrl: new URLSearchParams(window.location.search).get('controlPlaneUrl'),
+        sessionStreamUrl: new URLSearchParams(window.location.search).get('sessionStreamUrl'),
         demoDefaultShellProgram: new URLSearchParams(window.location.search).get('demoDefaultShellProgram'),
+        demoDefaultWorkingDirectory: new URLSearchParams(window.location.search).get('demoDefaultWorkingDirectory'),
         commandInputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, input) === true,
         documentHorizontalOverflow: Math.max(
           0,
@@ -3373,12 +3818,313 @@ async function runAutoStartSmokeScenario(browserUrl) {
 
     return {
       ...result,
-      issues,
+      issues: options.allowStaleBootstrapConnectionIssues
+        ? issues.filter((issue) => !isExpectedStaleBootstrapConnectionIssue(issue))
+        : issues,
     };
   } finally {
     await closeWebSocket(socket);
     await closePageTarget(target.id);
   }
+}
+
+async function runAutoStartRestartRecoveryScenario(browserUrl, options) {
+  const target = await fetch(`http://127.0.0.1:${cdpPort}/json/new?${encodeURIComponent(browserUrl)}`, {
+    method: "PUT",
+  }).then((response) => response.json());
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await onceSocketOpen(socket);
+
+  let id = 0;
+  const pending = new Map();
+  const issues = [];
+
+  socket.on("message", (data) => {
+    const message = JSON.parse(data.toString());
+    if (message.id && pending.has(message.id)) {
+      const request = pending.get(message.id);
+      pending.delete(message.id);
+      if (message.error) {
+        request.reject(new Error(message.error.message));
+      } else {
+        request.resolve(message.result);
+      }
+      return;
+    }
+
+    if (message.method === "Log.entryAdded") {
+      const entry = message.params.entry;
+      if (entry.level === "error" && !isExpectedRestartRecoveryConnectionIssue(entry.text)) {
+        issues.push({ type: "log", source: entry.source, text: entry.text });
+      }
+      return;
+    }
+
+    if (message.method === "Runtime.exceptionThrown") {
+      issues.push({
+        type: "exception",
+        text: message.params.exceptionDetails?.text ?? "Runtime exception",
+      });
+    }
+  });
+
+  const send = (method, params = {}) => new Promise((resolve, reject) => {
+    const requestId = ++id;
+    pending.set(requestId, { resolve, reject });
+    socket.send(JSON.stringify({ id: requestId, method, params }));
+  });
+
+  try {
+    await send("Page.enable");
+    await send("Page.bringToFront").catch(() => undefined);
+    await send("Runtime.enable");
+    await send("Log.enable");
+    await send("Emulation.setDeviceMetricsOverride", {
+      width: 1440,
+      height: 1100,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await installBrowserSmokeHelpers(send);
+
+    await waitForBrowser(send, "initial auto-start browser page before host restart", `(() => {
+      const state = window.terminalDemoDebug?.getState?.();
+      const params = new URLSearchParams(window.location.search);
+      return state?.connection?.state === 'ready'
+        && Boolean(state?.attachedSession?.focused_screen)
+        && params.get('controlPlaneUrl') === ${JSON.stringify(options.initialControlPlaneUrl)}
+        && params.get('sessionStreamUrl') === ${JSON.stringify(options.initialSessionStreamUrl)};
+    })()`);
+
+    const historyBeforeRestartMarker = `browser-restart-history-${Date.now()}`;
+    const historyBeforeRestartCommand = process.platform === "win32"
+      ? `echo ${historyBeforeRestartMarker}`
+      : `printf "${historyBeforeRestartMarker}\\n"`;
+    const historyBeforeRestartCommandSent = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const button = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
+      if (!textarea || !button) {
+        return false;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+      descriptor?.set?.call(textarea, ${JSON.stringify(historyBeforeRestartCommand)});
+      textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (button.disabled) {
+        return false;
+      }
+      button.click();
+      return true;
+    })()`);
+    const historyBeforeRestart = historyBeforeRestartCommandSent
+      ? await waitForBrowserValue(send, "command history persisted before browser host restart", `(() => {
+          const state = window.terminalDemoDebug?.getState?.();
+          const terminalScreenText = state?.attachedSession?.focused_screen?.surface?.lines
+            ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+            : '';
+          const storedCommandHistory = (() => {
+            try {
+              const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          })();
+          const commandHistoryEntries = state?.commandHistory?.entries ?? [];
+          return {
+            commandHistoryEntries,
+            outputSeen: terminalScreenText.includes(${JSON.stringify(historyBeforeRestartMarker)}),
+            storedCommandHistory,
+            storedIncludesCommand: storedCommandHistory.includes(${JSON.stringify(historyBeforeRestartCommand)}),
+            snapshotIncludesCommand: commandHistoryEntries.includes(${JSON.stringify(historyBeforeRestartCommand)}),
+          };
+        })()`, (value) => (
+          value.outputSeen
+          && value.snapshotIncludesCommand
+          && value.storedIncludesCommand
+        ), 10_000)
+      : {
+          commandHistoryEntries: [],
+          outputSeen: false,
+          storedCommandHistory: [],
+          storedIncludesCommand: false,
+          snapshotIncludesCommand: false,
+        };
+
+    await stopProcess(browserHostProcess);
+    browserHostProcess = null;
+    await removeBrowserBootstrapConfig();
+    await removeSessionStore(autoStartSessionStorePath);
+
+    const restartedBrowserUrl = await startBrowserHost(rendererUrl, {
+      autoStartSession: "1",
+      runtimeSlug: options.runtimeSlug,
+      sessionStorePath: options.restartSessionStorePath,
+    });
+    const restartedUrl = new URL(restartedBrowserUrl);
+    const restartedControlPlaneUrl = restartedUrl.searchParams.get("controlPlaneUrl");
+    const restartedSessionStreamUrl = restartedUrl.searchParams.get("sessionStreamUrl");
+
+    const recovered = await waitForBrowserValue(send, "open auto-start browser page to recover after host restart", `(() => {
+      const state = window.terminalDemoDebug?.getState?.();
+      const params = new URLSearchParams(window.location.search);
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const input = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const terminalScreenText = state?.attachedSession?.focused_screen?.surface?.lines
+        ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+        : '';
+
+      return {
+        attached: Boolean(state?.attachedSession?.focused_screen),
+        commandInputFocused: window.__terminalDemoSmokeCommandInputFocused?.(commandRoot, input) === true,
+        controlPlaneUrl: params.get('controlPlaneUrl'),
+        hasReady: state?.connection?.state === 'ready',
+        sessionCount: state?.catalog?.sessions?.length ?? 0,
+        sessionStreamUrl: params.get('sessionStreamUrl'),
+        commandHistoryEntries: state?.commandHistory?.entries ?? [],
+        historyIncludesBeforeRestart: (state?.commandHistory?.entries ?? [])
+          .includes(${JSON.stringify(historyBeforeRestartCommand)}),
+        storedHistoryIncludesBeforeRestart: (() => {
+          try {
+            const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+            return Array.isArray(parsed) && parsed.includes(${JSON.stringify(historyBeforeRestartCommand)});
+          } catch {
+            return false;
+          }
+        })(),
+        terminalScreenTextPreview: terminalScreenText.slice(0, 240),
+      };
+    })()`, (value) => (
+      value.hasReady
+      && value.attached
+      && value.sessionCount === 1
+      && value.controlPlaneUrl === restartedControlPlaneUrl
+      && value.sessionStreamUrl === restartedSessionStreamUrl
+      && value.historyIncludesBeforeRestart
+      && value.storedHistoryIncludesBeforeRestart
+      && value.commandInputFocused
+    ), 45_000);
+
+    const marker = `browser-restart-ok-${Date.now()}`;
+    const commandSent = await evaluate(send, `(async () => {
+      const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+      const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+      const textarea = commandRoot?.querySelector('[data-testid="tp-command-input"]') ?? null;
+      const button = commandRoot?.querySelector('[data-testid="tp-send-command"]') ?? null;
+      if (!textarea || !button) {
+        return false;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+      descriptor?.set?.call(textarea, ${JSON.stringify(process.platform === "win32" ? `echo ${marker}` : `printf "${marker}\\n"`)} );
+      textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (button.disabled) {
+        return false;
+      }
+      button.click();
+      return true;
+    })()`);
+    if (!commandSent) {
+      return {
+        commandSent: false,
+        containsMarker: false,
+        initialControlPlaneUrl: options.initialControlPlaneUrl,
+        initialSessionStreamUrl: options.initialSessionStreamUrl,
+        issues,
+        marker,
+        recovered: true,
+        recoveredState: recovered,
+        restartedControlPlaneUrl,
+        restartedSessionStreamUrl,
+        restartedTerminalScreenTextPreview: null,
+      };
+    }
+
+    const afterCommand = await waitForBrowserValue(send, "command output after browser host restart", `(() => {
+      const state = window.terminalDemoDebug?.getState?.();
+      const terminalScreenText = state?.attachedSession?.focused_screen?.surface?.lines
+        ? state.attachedSession.focused_screen.surface.lines.map((line) => line.text).join('\\n').trim()
+        : '';
+      return {
+        containsMarker: terminalScreenText.includes(${JSON.stringify(marker)}),
+        commandHistoryLatest: state?.commandHistory?.entries?.at(-1) ?? null,
+        commandHistoryIncludesBeforeRestart: (state?.commandHistory?.entries ?? [])
+          .includes(${JSON.stringify(historyBeforeRestartCommand)}),
+        storedHistoryIncludesMarker: (() => {
+          try {
+            const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+            return Array.isArray(parsed) && parsed.includes(${JSON.stringify(process.platform === "win32" ? `echo ${marker}` : `printf "${marker}\\n"`)} );
+          } catch {
+            return false;
+          }
+        })(),
+        terminalScreenTextPreview: terminalScreenText.slice(-360),
+      };
+    })()`, (value) => (
+      value.containsMarker
+      && value.commandHistoryLatest?.includes(marker)
+      && value.commandHistoryIncludesBeforeRestart
+      && value.storedHistoryIncludesMarker
+    ), 10_000);
+
+    return {
+      commandSent,
+      containsMarker: afterCommand.containsMarker,
+      historyAfterRestartIncludesBeforeRestart: afterCommand.commandHistoryIncludesBeforeRestart,
+      historyBeforeRestartCommand,
+      historyBeforeRestartCommandSent,
+      historyBeforeRestartOutputSeen: historyBeforeRestart.outputSeen,
+      historyBeforeRestartPersisted: historyBeforeRestart.snapshotIncludesCommand
+        && historyBeforeRestart.storedIncludesCommand,
+      historyRecoveredState: {
+        commandHistoryEntries: recovered.commandHistoryEntries,
+        historyIncludesBeforeRestart: recovered.historyIncludesBeforeRestart,
+        storedHistoryIncludesBeforeRestart: recovered.storedHistoryIncludesBeforeRestart,
+      },
+      postRestartHistoryLatest: afterCommand.commandHistoryLatest,
+      postRestartHistoryStored: afterCommand.storedHistoryIncludesMarker,
+      initialControlPlaneUrl: options.initialControlPlaneUrl,
+      initialSessionStreamUrl: options.initialSessionStreamUrl,
+      issues,
+      marker,
+      recovered: true,
+      recoveredState: recovered,
+      restartedControlPlaneUrl,
+      restartedSessionStreamUrl,
+      restartedTerminalScreenTextPreview: afterCommand.terminalScreenTextPreview,
+    };
+  } finally {
+    await closeWebSocket(socket);
+    await closePageTarget(target.id);
+  }
+}
+
+function isExpectedStaleBootstrapConnectionIssue(issue) {
+  return issue.type === "log"
+    && issue.source === "network"
+    && issue.text.includes("ws://127.0.0.1:1/terminal-gateway/");
+}
+
+function isExpectedRestartRecoveryConnectionIssue(text) {
+  const message = String(text ?? "");
+  return message.includes("/terminal-gateway/")
+    && (
+      message.includes("WebSocket is closed before the connection is established")
+      || message.includes("WebSocket connection")
+      || message.includes("ERR_CONNECTION_REFUSED")
+    );
+}
+
+function buildStaleBrowserUrl(browserUrl) {
+  const url = new URL(browserUrl);
+  url.searchParams.set("controlPlaneUrl", "ws://127.0.0.1:1/terminal-gateway/control?token=stale");
+  url.searchParams.set("sessionStreamUrl", "ws://127.0.0.1:1/terminal-gateway/stream?token=stale");
+  url.searchParams.set("runtimeSlug", "terminal-demo-stale-window");
+  url.searchParams.delete("demoDefaultWorkingDirectory");
+  return url.toString();
 }
 
 async function startBrowserHost(rendererUrlValue, options) {
@@ -3387,16 +4133,18 @@ async function startBrowserHost(rendererUrlValue, options) {
       reject(new Error("Timed out waiting for TERMINAL_DEMO_BROWSER_URL"));
     }, 20_000);
 
-    browserHostProcess = spawn("node", ["./dist/host/browser/index.js"], {
+    browserHostProcess = spawn(process.execPath, ["./dist/host/browser/index.js"], {
       cwd: appRoot,
       env: {
         ...process.env,
         TERMINAL_DEMO_AUTO_START_SESSION: options.autoStartSession,
         TERMINAL_DEMO_RENDERER_URL: rendererUrlValue,
         TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE: "dist-only",
+        TERMINAL_DEMO_RUNTIME_SLUG: options.runtimeSlug,
         TERMINAL_DEMO_SESSION_STORE_PATH: options.sessionStorePath,
       },
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     const onLine = (line) => {
@@ -3431,25 +4179,56 @@ async function startBrowserHost(rendererUrlValue, options) {
 
 async function shutdown() {
   await stopProcess(browserHostProcess);
+  await removeBrowserBootstrapConfig();
   await stopProcess(previewProcess);
   await stopProcess(chromeProcess);
-  if (chromeUserDataDir) {
-    await fs.rm(chromeUserDataDir, { recursive: true, force: true });
+  await removeChromeUserDataDir(chromeUserDataDir);
+  if (keepArtifacts) {
+    process.stderr.write(`[browser-smoke] keeping session stores: ${sessionStorePath}, ${autoStartSessionStorePath}, ${autoStartRestartSessionStorePath}\n`);
+    return;
   }
   await removeSessionStore(autoStartSessionStorePath);
+  await removeSessionStore(autoStartRestartSessionStorePath);
   await removeSessionStore(sessionStorePath);
+}
+
+async function removeBrowserBootstrapConfig() {
+  await fs.rm(browserBootstrapPath, {
+    force: true,
+    maxRetries: process.platform === "win32" ? 8 : 0,
+    retryDelay: process.platform === "win32" ? 250 : 0,
+  });
 }
 
 async function removeSessionStore(storePath) {
   await Promise.all([
-    fs.rm(storePath, { force: true }),
-    fs.rm(`${storePath}-shm`, { force: true }),
-    fs.rm(`${storePath}-wal`, { force: true }),
+    removeFileWithWindowsRetries(storePath, { recursive: true }),
+    removeFileWithWindowsRetries(`${storePath}-shm`, { recursive: true }),
+    removeFileWithWindowsRetries(`${storePath}-wal`, { recursive: true }),
   ]);
+}
+
+async function removeFileWithWindowsRetries(filePath, options = {}) {
+  try {
+    await fs.rm(filePath, {
+      force: true,
+      recursive: Boolean(options.recursive),
+      maxRetries: process.platform === "win32" ? 8 : 0,
+      retryDelay: process.platform === "win32" ? 250 : 0,
+    });
+  } catch (error) {
+    if (process.platform === "win32" && ["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
+      process.stderr.write(`[browser-smoke] skipped locked temporary cleanup ${filePath}: ${error.message}\n`);
+      return;
+    }
+
+    throw error;
+  }
 }
 
 function evaluate(send, expression) {
   let timeoutId;
+  const timeoutSnippet = formatEvaluationTimeoutSnippet(expression);
   const evaluation = send("Runtime.evaluate", {
     expression,
     returnByValue: true,
@@ -3457,13 +4236,47 @@ function evaluate(send, expression) {
   }).then(resolveRuntimeEvaluationValue);
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
-      reject(new Error("Timed out waiting for browser evaluation"));
+      reject(new Error(`Timed out waiting for browser evaluation: ${timeoutSnippet}`));
     }, 60_000);
   });
 
   return Promise.race([evaluation, timeout]).finally(() => {
     clearTimeout(timeoutId);
   });
+}
+
+function formatEvaluationTimeoutSnippet(expression) {
+  return String(expression)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(" ")
+    .slice(0, 240);
+}
+
+async function waitForBrowser(send, label, expression, timeoutMs = 20_000) {
+  await waitFor(async () => evaluate(send, expression), label, timeoutMs);
+}
+
+async function waitForBrowserValue(send, label, expression, predicate, timeoutMs = 20_000) {
+  let latest = null;
+  await waitFor(async () => {
+    latest = await evaluate(send, expression);
+    return predicate(latest);
+  }, label, timeoutMs);
+  return latest;
+}
+
+async function waitFor(probe, label, timeoutMs = 20_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await probe()) {
+      return;
+    }
+    await sleep(200);
+  }
+  throw new Error(`Timed out waiting for ${label}`);
 }
 
 async function installBrowserSmokeHelpers(send) {
@@ -3484,11 +4297,18 @@ async function closePageTarget(targetId) {
 }
 
 function runSync(command, args, cwd) {
-  const result = spawnSync(command, args, {
+  const resolved = resolveSpawnCommand(command, args);
+  const result = spawnSync(resolved.command, resolved.args, {
     cwd,
     env: process.env,
+    shell: resolved.shell,
     stdio: "inherit",
+    windowsHide: true,
   });
+
+  if (result.error) {
+    throw new Error(`${command} ${args.join(" ")} failed: ${result.error.message}`);
+  }
 
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);

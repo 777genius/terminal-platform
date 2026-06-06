@@ -2,12 +2,14 @@ import type {
   AttachedSession,
   BackendCapabilitiesInfo,
   BackendKind,
+  CommandHistoryEntry,
   CreateSessionRequest,
   DeleteSavedSessionResult,
   DiscoveredSession,
   Handshake,
   MuxCommand,
   MuxCommandResult,
+  PaneHistory,
   PaneId,
   PruneSavedSessionsResult,
   RestoredSession,
@@ -24,6 +26,7 @@ import type {
   TopologySnapshot,
 } from "@terminal-platform/runtime-types";
 import type { WorkspaceSubscription, WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
+import type { WorkspacePaneHistoryRequestOptions } from "@terminal-platform/workspace-contracts";
 
 export interface WorkspacePreloadSubscriptionBridge {
   meta(): SubscriptionMeta;
@@ -40,6 +43,12 @@ export interface WorkspacePreloadBridge {
   createSession(backend: BackendKind, request: CreateSessionRequest): Promise<SessionSummary>;
   importSession(route: SessionRoute, title?: string | null): Promise<SessionSummary>;
   getSavedSession(sessionId: SessionId): Promise<SavedSessionRecord>;
+  listCommandHistory?(sessionId?: SessionId | null, limit?: number | null): Promise<CommandHistoryEntry[]>;
+  getPaneHistory?(
+    sessionId: SessionId,
+    paneId: PaneId,
+    options?: WorkspacePaneHistoryRequestOptions,
+  ): Promise<PaneHistory>;
   deleteSavedSession(sessionId: SessionId): Promise<DeleteSavedSessionResult>;
   pruneSavedSessions(keepLatest: number): Promise<PruneSavedSessionsResult>;
   restoreSavedSession(sessionId: SessionId): Promise<RestoredSession>;
@@ -99,6 +108,25 @@ class WorkspacePreloadTransport implements WorkspaceTransportClient {
 
   getSavedSession(sessionId: SessionId): Promise<SavedSessionRecord> {
     return this.#bridge.getSavedSession(sessionId);
+  }
+
+  listCommandHistory(
+    sessionId?: SessionId | null,
+    limit?: number | null,
+  ): Promise<CommandHistoryEntry[]> {
+    return this.#bridge.listCommandHistory?.(sessionId ?? null, limit ?? null) ?? Promise.resolve([]);
+  }
+
+  getPaneHistory(
+    sessionId: SessionId,
+    paneId: PaneId,
+    options: WorkspacePaneHistoryRequestOptions = {},
+  ): Promise<PaneHistory> {
+    if (!this.#bridge.getPaneHistory) {
+      return Promise.reject(new Error("workspace preload bridge does not support pane history"));
+    }
+
+    return this.#bridge.getPaneHistory(sessionId, paneId, options);
   }
 
   deleteSavedSession(sessionId: SessionId): Promise<DeleteSavedSessionResult> {

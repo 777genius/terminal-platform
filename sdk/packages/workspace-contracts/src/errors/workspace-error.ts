@@ -1,6 +1,7 @@
 export type WorkspaceErrorCode =
   | "bootstrap_failed"
   | "transport_failed"
+  | "storage_pressure"
   | "protocol_error"
   | "session_not_found"
   | "pane_not_found"

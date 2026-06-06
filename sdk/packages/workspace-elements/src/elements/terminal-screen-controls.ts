@@ -3,12 +3,15 @@ import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 import { resolveWorkspaceCapability, type TerminalWorkspaceCapabilityStatus } from "./terminal-workspace-capabilities.js";
 
 type FocusedScreen = NonNullable<WorkspaceSnapshot["attachedSession"]>["focused_screen"];
+type HistoricalPane = NonNullable<WorkspaceSnapshot["historicalPanes"]>[string];
 
 export interface TerminalScreenControlState {
   activeSessionId: string | null;
   activePaneId: string | null;
   screen: FocusedScreen | null;
+  history: HistoricalPane | null;
   canCopyVisibleOutput: boolean;
+  canLoadMoreHistory: boolean;
   canUseDirectInput: boolean;
   canUseDirectPaste: boolean;
   inputCapabilityStatus: TerminalWorkspaceCapabilityStatus;
@@ -19,6 +22,10 @@ export function resolveTerminalScreenControlState(snapshot: WorkspaceSnapshot): 
   const screen = snapshot.attachedSession?.focused_screen ?? null;
   const activeSessionId = snapshot.selection.activeSessionId ?? snapshot.attachedSession?.session.session_id ?? null;
   const activePaneId = snapshot.selection.activePaneId ?? screen?.pane_id ?? null;
+  const history = activeSessionId && activePaneId
+    ? snapshot.historicalPanes?.[activePaneId] ?? null
+    : null;
+  const currentHistory = history?.sessionId === activeSessionId ? history : null;
   const inputCapability = resolveWorkspaceCapability(snapshot, "pane_input_write", {
     missingBackend: false,
     pendingCapabilities: true,
@@ -33,7 +40,9 @@ export function resolveTerminalScreenControlState(snapshot: WorkspaceSnapshot): 
     activeSessionId,
     activePaneId,
     screen,
-    canCopyVisibleOutput: Boolean(screen),
+    history: currentHistory,
+    canCopyVisibleOutput: Boolean(screen || currentHistory),
+    canLoadMoreHistory: Boolean(currentHistory?.hasMoreSegments && currentHistory.nextEventSeq),
     canUseDirectInput: Boolean(hasInputTarget && inputCapability.enabled),
     canUseDirectPaste: Boolean(hasInputTarget && pasteCapability.enabled),
     inputCapabilityStatus: inputCapability.status,

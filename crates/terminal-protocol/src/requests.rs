@@ -55,6 +55,21 @@ pub struct GetScreenDeltaRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetPaneHistoryRequest {
+    pub session_id: SessionId,
+    pub pane_id: PaneId,
+    pub from_event_seq: Option<i64>,
+    pub max_segments: Option<i64>,
+    pub max_bytes: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListCommandHistoryRequest {
+    pub session_id: Option<SessionId>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchMuxCommandRequest {
     pub session_id: SessionId,
     pub command: MuxCommand,
@@ -98,6 +113,8 @@ pub enum RequestPayload {
     GetSessionHealthSnapshot(GetSessionHealthSnapshotRequest),
     GetScreenSnapshot(GetScreenSnapshotRequest),
     GetScreenDelta(GetScreenDeltaRequest),
+    GetPaneHistory(GetPaneHistoryRequest),
+    ListCommandHistory(ListCommandHistoryRequest),
     DispatchMuxCommand(DispatchMuxCommandRequest),
     OpenSubscription(OpenSubscriptionRequest),
 }

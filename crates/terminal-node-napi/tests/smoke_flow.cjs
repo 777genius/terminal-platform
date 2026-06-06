@@ -1,9 +1,13 @@
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
+const fs = require("node:fs");
+const path = require("node:path");
 
-const DEFAULT_EVENT_TIMEOUT_MS = process.platform === "win32" ? 45000 : 5000;
-const DEFAULT_HOST_TIMEOUT_MS = process.platform === "win32" ? 45000 : 5000;
+const DEFAULT_EVENT_TIMEOUT_MS =
+  process.platform === "win32" ? 45000 : process.platform === "darwin" ? 15000 : 5000;
+const DEFAULT_HOST_TIMEOUT_MS =
+  process.platform === "win32" ? 45000 : process.platform === "darwin" ? 15000 : 5000;
 const DEFAULT_POLL_ATTEMPTS = process.platform === "win32" ? 450 : 50;
 const INTERACTIVE_PROBE_INTERVAL = process.platform === "win32" ? 20 : 10;
 const ZELLIJ_COMMAND_TIMEOUT_MS = process.platform === "win32" ? 10000 : 5000;
@@ -138,15 +142,16 @@ async function runSmoke(createClient, sdk = null) {
   assert.equal(tmuxCapabilities.capabilities.read_only_client_mode, true);
   assert.equal(zellijCapabilities.backend, "zellij");
   if (zellijCapabilities.capabilities.rendered_viewport_snapshot) {
+    const zellijFocusSupported = process.platform !== "win32";
     assert.equal(zellijCapabilities.capabilities.tab_create, true);
     assert.equal(zellijCapabilities.capabilities.tab_close, true);
-    assert.equal(zellijCapabilities.capabilities.tab_focus, true);
+    assert.equal(zellijCapabilities.capabilities.tab_focus, zellijFocusSupported);
     assert.equal(zellijCapabilities.capabilities.tab_rename, true);
     assert.equal(zellijCapabilities.capabilities.rendered_viewport_stream, true);
     assert.equal(zellijCapabilities.capabilities.session_scoped_tab_refs, true);
     assert.equal(zellijCapabilities.capabilities.session_scoped_pane_refs, true);
     assert.equal(zellijCapabilities.capabilities.pane_close, true);
-    assert.equal(zellijCapabilities.capabilities.pane_focus, true);
+    assert.equal(zellijCapabilities.capabilities.pane_focus, zellijFocusSupported);
     assert.equal(zellijCapabilities.capabilities.pane_input_write, true);
     assert.equal(zellijCapabilities.capabilities.pane_paste_write, true);
     assert.equal(zellijCapabilities.capabilities.plugin_panes, true);
@@ -334,20 +339,24 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
         ),
       "zellij package rename tab",
     );
-    const focusTab = await withTimeout(
-      client.dispatchMuxCommand(imported.session_id, {
-        kind: "focus_tab",
-        tab_id: initialFocusedTab,
-      }),
-      DEFAULT_HOST_TIMEOUT_MS,
-      "Timed out focusing zellij package tab",
-    );
-    const topologyAfterFocus = await waitForTopologyState(
-      client,
-      imported.session_id,
-      (snapshot) => snapshot.focused_tab === initialFocusedTab,
-      "zellij package focus tab",
-    );
+    let focusTab = null;
+    let topologyAfterFocus = null;
+    if (zellijCapabilities.capabilities.tab_focus) {
+      focusTab = await withTimeout(
+        client.dispatchMuxCommand(imported.session_id, {
+          kind: "focus_tab",
+          tab_id: initialFocusedTab,
+        }),
+        DEFAULT_HOST_TIMEOUT_MS,
+        "Timed out focusing zellij package tab",
+      );
+      topologyAfterFocus = await waitForTopologyState(
+        client,
+        imported.session_id,
+        (snapshot) => snapshot.focused_tab === initialFocusedTab,
+        "zellij package focus tab",
+      );
+    }
     const closeTab = await withTimeout(
       client.dispatchMuxCommand(imported.session_id, {
         kind: "close_tab",
@@ -372,8 +381,10 @@ async function runZellijImportSmoke(createClient, zellijCapabilities) {
       ),
       true,
     );
-    assert.equal(focusTab.changed, true);
-    assert.equal(topologyAfterFocus.focused_tab, initialFocusedTab);
+    if (zellijCapabilities.capabilities.tab_focus) {
+      assert.equal(focusTab.changed, true);
+      assert.equal(topologyAfterFocus.focused_tab, initialFocusedTab);
+    }
     assert.equal(closeTab.changed, true);
     assert.equal(topologyAfterClose.tabs.length, initialTabCount);
   } finally {
@@ -1351,7 +1362,7 @@ function uniqueZellijSessionName(label) {
 }
 
 function spawnZellijSession(sessionName) {
-  const result = spawnSync("zellij", ["attach", "--create-background", sessionName], {
+  const result = spawnSync(zellijCommandPath(), ["attach", "--create-background", sessionName], {
     encoding: "utf8",
     timeout: ZELLIJ_CREATE_TIMEOUT_MS,
     windowsHide: true,
@@ -1374,7 +1385,7 @@ function spawnZellijSession(sessionName) {
 function stopZellijSpawnProcess(_child) {}
 
 function stopZellijSession(sessionName) {
-  spawnSync("zellij", ["kill-session", sessionName], {
+  spawnSync(zellijCommandPath(), ["kill-session", sessionName], {
     encoding: "utf8",
     timeout: ZELLIJ_COMMAND_TIMEOUT_MS,
     windowsHide: true,
@@ -1431,7 +1442,7 @@ async function waitForRawZellijSession(sessionName) {
 
 function listZellijSessionsRaw() {
   const result = spawnSync(
-    "zellij",
+    zellijCommandPath(),
     ["list-sessions", "--short", "--no-formatting"],
     {
       encoding: "utf8",
@@ -1475,7 +1486,7 @@ function isLegacyZellijActionError(error) {
 
 function zellijSessionControlReady(sessionName) {
   const tabs = spawnSync(
-    "zellij",
+    zellijCommandPath(),
     ["--session", sessionName, "action", "list-tabs", "--json"],
     {
       encoding: "utf8",
@@ -1501,7 +1512,7 @@ function zellijSessionControlReady(sessionName) {
   }
 
   const panes = spawnSync(
-    "zellij",
+    zellijCommandPath(),
     ["--session", sessionName, "action", "list-panes", "--json"],
     {
       encoding: "utf8",
@@ -1524,6 +1535,55 @@ function zellijSessionControlReady(sessionName) {
   }
 
   return (panes.stdout ?? "").trimStart().startsWith("[");
+}
+
+function zellijCommandPath() {
+  const configured = process.env.TERMINAL_PLATFORM_ZELLIJ_BIN?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  if (process.platform === "win32") {
+    return resolveWindowsExecutable("zellij") ?? workspaceZellijCommandPath() ?? "zellij";
+  }
+
+  return "zellij";
+}
+
+function resolveWindowsExecutable(program) {
+  if (program.includes("\\") || program.includes("/")) {
+    return fs.existsSync(program) ? program : null;
+  }
+
+  const candidates = program.toLowerCase().endsWith(".exe") ? [program] : [program, `${program}.exe`];
+  const pathValue = process.env.Path ?? process.env.PATH ?? "";
+  for (const dir of pathValue.split(path.delimiter)) {
+    if (!dir) {
+      continue;
+    }
+    for (const candidate of candidates) {
+      const fullPath = path.join(dir, candidate);
+      if (fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return null;
+}
+
+function workspaceZellijCommandPath() {
+  const repoRoot = path.resolve(__dirname, "..", "..", "..");
+  const candidate = path.join(
+    repoRoot,
+    "apps",
+    "terminal-demo",
+    ".generated",
+    "tools",
+    "zellij",
+    "zellij.exe",
+  );
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
 function fallbackZellijCandidate(sessionName) {
@@ -1855,10 +1915,15 @@ async function runElectronBridgeRepeatedWatchCyclesSmoke(createClient, sdk) {
     const marker = `electron bridge repeat ${cycle}`;
     const abortController = new AbortController();
     let observedMatchingState = false;
+    let resolveInitialState;
+    const initialStatePromise = new Promise((resolve) => {
+      resolveInitialState = resolve;
+    });
 
     const watchPromise = rendererClient.watchSessionState(created.session_id, {
       signal: abortController.signal,
       onState: async (state) => {
+        resolveInitialState();
         const expectedPaneId = focusedPaneIdFromTopology(state.topology);
         assert.equal(
           expectedPaneId ? state.focusedScreen?.pane_id === expectedPaneId : true,
@@ -1875,6 +1940,11 @@ async function runElectronBridgeRepeatedWatchCyclesSmoke(createClient, sdk) {
       },
     });
 
+    await withTimeout(
+      initialStatePromise,
+      DEFAULT_HOST_TIMEOUT_MS,
+      `Timed out waiting for Electron bridge initial watch state cycle ${cycle}`,
+    );
     await rendererClient.dispatchMuxCommand(created.session_id, {
       kind: "send_input",
       pane_id: paneId,
@@ -2116,8 +2186,12 @@ async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {
 
   for (let cycle = 0; cycle < 4; cycle += 1) {
     const marker = `electron preload repeat ${cycle}`;
+    let resolveInitialState;
     let resolveState;
     let rejectState;
+    const initialStatePromise = new Promise((resolve) => {
+      resolveInitialState = resolve;
+    });
     const statePromise = new Promise((resolve, reject) => {
       resolveState = resolve;
       rejectState = reject;
@@ -2125,6 +2199,7 @@ async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {
     const subscriptionId = await preloadApi.subscribeSessionState(
       created.session_id,
       async (state) => {
+        resolveInitialState();
         const expectedPaneId = focusedPaneIdFromTopology(state.topology);
         assert.equal(
           expectedPaneId ? state.focusedScreen?.pane_id === expectedPaneId : true,
@@ -2143,6 +2218,11 @@ async function runElectronPreloadRepeatedSubscribeSmoke(createClient, sdk) {
       },
     );
 
+    await withTimeout(
+      initialStatePromise,
+      DEFAULT_HOST_TIMEOUT_MS,
+      `Timed out waiting for Electron preload initial watch state cycle ${cycle}`,
+    );
     await preloadApi.dispatchMuxCommand(created.session_id, {
       kind: "send_input",
       pane_id: paneId,

@@ -22,14 +22,27 @@ runSync("npm", ["run", "build:host"], appRoot);
 const vite = spawnViteDevServer(appRoot, rendererPort);
 
 let electron = null;
-const shutdown = () => {
-  stopProcess(electron);
-  stopProcess(vite);
+let shuttingDown = false;
+let shutdownPromise = null;
+const shutdown = async (exitCode = 0) => {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  await Promise.allSettled([
+    stopProcess(electron),
+    stopProcess(vite),
+  ]);
+  process.exit(exitCode);
 };
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-process.on("exit", shutdown);
+const requestShutdown = (exitCode = 0) => {
+  shutdownPromise ??= shutdown(exitCode);
+};
+
+process.on("SIGINT", () => requestShutdown(0));
+process.on("SIGTERM", () => requestShutdown(0));
 
 await waitForServer(rendererUrl, {
   child: vite,
@@ -39,12 +52,11 @@ await waitForServer(rendererUrl, {
 electron = spawnElectronPreview(appRoot, rendererUrl);
 
 electron.on("exit", (code) => {
-  shutdown();
-  process.exit(code ?? 0);
+  requestShutdown(code ?? 0);
 });
 
 vite.on("exit", (code) => {
-  if (code && code !== 0) {
-    process.exit(code);
+  if (!shuttingDown && code && code !== 0) {
+    requestShutdown(code);
   }
 });

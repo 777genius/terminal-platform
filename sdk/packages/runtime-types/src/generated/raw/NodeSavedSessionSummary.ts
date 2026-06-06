@@ -2,6 +2,7 @@
 import type { NodeSavedSessionCompatibility } from "./NodeSavedSessionCompatibility.js";
 import type { NodeSavedSessionManifest } from "./NodeSavedSessionManifest.js";
 import type { NodeSavedSessionRestoreSemantics } from "./NodeSavedSessionRestoreSemantics.js";
+import type { NodeSavedSessionRestoreSemanticsV2 } from "./NodeSavedSessionRestoreSemanticsV2.js";
 import type { NodeSessionRoute } from "./NodeSessionRoute.js";
 
-export type NodeSavedSessionSummary = { session_id: string, route: NodeSessionRoute, title: string | null, saved_at_ms: bigint, manifest: NodeSavedSessionManifest, compatibility: NodeSavedSessionCompatibility, has_launch: boolean, tab_count: number, pane_count: number, restore_semantics: NodeSavedSessionRestoreSemantics, };
+export type NodeSavedSessionSummary = { session_id: string, route: NodeSessionRoute, title: string | null, saved_at_ms: bigint, manifest: NodeSavedSessionManifest, compatibility: NodeSavedSessionCompatibility, has_launch: boolean, tab_count: number, pane_count: number, restore_semantics: NodeSavedSessionRestoreSemantics, restore_semantics_v2: NodeSavedSessionRestoreSemanticsV2 | null, };

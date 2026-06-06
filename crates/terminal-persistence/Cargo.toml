@@ -5,6 +5,9 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
+blake3 = { workspace = true }
+diesel = { workspace = true }
+diesel_migrations = { workspace = true }
 directories = { workspace = true }
 rusqlite = { workspace = true }
 rusqlite_migration = { workspace = true }

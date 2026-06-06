@@ -14,6 +14,16 @@
 
 #include "terminal-platform-capi.h"
 
+#if defined(_WIN32)
+#define NATIVE_SESSION_REQUEST(title, ready)                                                    \
+  "{\"title\":\"" title "\",\"launch\":{\"program\":\"cmd.exe\",\"args\":[\"/D\",\"/Q\","   \
+  "\"/K\",\"echo " ready "\"]}}"
+#else
+#define NATIVE_SESSION_REQUEST(title, ready)                                                    \
+  "{\"title\":\"" title "\",\"launch\":{\"program\":\"/bin/sh\",\"args\":[\"-lc\","        \
+  "\"printf '" ready "\\\\n'; exec cat\"]}}"
+#endif
+
 static void sleep_millis(long milliseconds) {
 #if defined(_WIN32)
   Sleep((DWORD)milliseconds);
@@ -362,9 +372,7 @@ int main(int argc, char **argv) {
     if (!expect_string_ok(
             "create_native_session",
             terminal_capi_client_create_native_session_json(
-                client,
-                "{\"title\":\"c-consumer\",\"launch\":{\"program\":\"/bin/sh\",\"args\":[\"-lc\","
-                "\"printf 'ready\\\\n'; exec cat\"]}}"),
+                client, NATIVE_SESSION_REQUEST("c-consumer", "ready")),
             &json)) {
       goto cleanup;
     }
@@ -578,9 +586,7 @@ int main(int argc, char **argv) {
       if (!expect_string_ok(
               "create_native_session_after_restart",
               terminal_capi_client_create_native_session_json(
-                  client,
-                  "{\"title\":\"c-consumer-restart\",\"launch\":{\"program\":\"/bin/sh\","
-                  "\"args\":[\"-lc\",\"printf 'restart-ready\\\\n'; exec cat\"]}}"),
+                  client, NATIVE_SESSION_REQUEST("c-consumer-restart", "restart-ready")),
               &json)) {
         goto cleanup;
       }

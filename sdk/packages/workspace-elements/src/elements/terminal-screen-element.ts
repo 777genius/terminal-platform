@@ -40,6 +40,7 @@ import {
   TERMINAL_SCREEN_ACTION_IDS,
   type TerminalScreenActionId,
   type TerminalScreenCopyState,
+  type TerminalScreenHistoryLoadState,
 } from "./terminal-screen-actions.js";
 import {
   TERMINAL_SCREEN_EVENTS,
@@ -52,8 +53,18 @@ import {
 } from "./terminal-screen-events.js";
 
 type TerminalScreenPlacement = "panel" | "terminal";
+export type VisibleOutputLineSource = "history" | "boundary" | "live";
+
+export interface VisibleOutputLine {
+  text: string;
+  source: VisibleOutputLineSource;
+}
 
 const TERMINAL_SCREEN_SEARCH_COUNT_ID = "tp-screen-search-count";
+const RESTORED_HISTORY_BOUNDARY_TEXT = "--- restored history above; live process below ---";
+const RESTORED_HISTORY_PARTIAL_TEXT =
+  "--- restored history is partial; more persisted output is available ---";
+const HISTORY_AUTO_LOAD_TOP_THRESHOLD_PX = 24;
 
 export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -64,6 +75,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     activeSearchMatchIndex: { state: true },
     copyState: { state: true },
     directInputActivity: { state: true },
+    historyLoadState: { state: true },
   };
 
   static styles = [
@@ -401,6 +413,21 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         min-height: 1.35rem;
       }
 
+      .line[data-line-source="history"] {
+        color: color-mix(in srgb, var(--tp-terminal-color-text) 82%, var(--tp-terminal-color-text-muted));
+      }
+
+      .line[data-line-source="boundary"] {
+        margin: 0.45rem 0;
+        color: color-mix(in srgb, var(--tp-terminal-color-accent) 72%, var(--tp-terminal-color-text));
+        font-size: 0.82em;
+        text-transform: uppercase;
+      }
+
+      .line[data-line-source="boundary"] .gutter {
+        color: transparent;
+      }
+
       .gutter {
         border-right: 1px solid color-mix(in srgb, var(--tp-color-border) 42%, transparent);
         color: color-mix(in srgb, var(--tp-color-text-muted) 48%, transparent);
@@ -599,10 +626,12 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   protected declare activeSearchMatchIndex: number | null;
   protected declare copyState: TerminalScreenCopyState;
   protected declare directInputActivity: TerminalScreenInputActivity;
+  protected declare historyLoadState: TerminalScreenHistoryLoadState;
 
   #autoScrolling = false;
   #copyStateResetTimer: ReturnType<typeof setTimeout> | null = null;
   #directInputActivityResetTimer: ReturnType<typeof setTimeout> | null = null;
+  #historyLoadStateResetTimer: ReturnType<typeof setTimeout> | null = null;
   #directInputQueue = Promise.resolve();
   #directInputBuffer: TerminalDirectInputBuffer;
 
@@ -614,6 +643,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     this.activeSearchMatchIndex = null;
     this.copyState = "idle";
     this.directInputActivity = "idle";
+    this.historyLoadState = "idle";
     this.#directInputBuffer = new TerminalDirectInputBuffer({
       flush: (input) => this.queueDirectInput(input),
     });
@@ -622,6 +652,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   override disconnectedCallback(): void {
     this.clearCopyStateResetTimer();
     this.clearDirectInputActivityResetTimer();
+    this.clearHistoryLoadStateResetTimer();
     this.#directInputBuffer.dispose();
     super.disconnectedCallback();
   }
@@ -656,7 +687,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     const controls = resolveTerminalScreenControlState(this.snapshot);
     const screen = controls.screen;
     const inputStatus = resolveTerminalScreenInputStatus(controls, this.directInputActivity);
-    const searchResult = this.createSearchResult();
+    const outputLines = createVisibleOutputLines(controls.history, screen);
+    const searchResult = this.createSearchResult(undefined, outputLines.map((line) => line.text));
     const terminalDisplay = this.snapshot.terminalDisplay;
     const isTerminalPlacement = this.placement === "terminal";
     const chrome = screen
@@ -685,8 +717,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           ? html`
               ${chrome
                 ? isTerminalPlacement
-                  ? this.renderCompactChrome(chrome, inputStatus, searchResult, controls.canCopyVisibleOutput)
-                  : this.renderFullChrome(chrome, inputStatus, searchResult, controls.canCopyVisibleOutput)
+                  ? this.renderCompactChrome(chrome, inputStatus, searchResult, controls)
+                  : this.renderFullChrome(chrome, inputStatus, searchResult, controls)
                 : nothing}
               <div
                 class="viewport"
@@ -703,7 +735,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                 @paste=${(event: ClipboardEvent) => this.handleViewportPaste(event)}
                 @scroll=${(event: Event) => this.handleViewportScroll(event)}
               >
-                ${searchResult.lines.map((line) => renderLine(line.lineIndex + 1, line.segments))}
+                ${searchResult.lines.map((line) => renderLine(
+                  line.lineIndex + 1,
+                  line.segments,
+                  outputLines[line.lineIndex]?.source ?? "live",
+                ))}
               </div>
             `
           : html`<div class="empty-state" part="empty">No active screen yet. Start or attach a session to see output here.</div>`}
@@ -715,7 +751,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     chrome: TerminalScreenChromeState,
     inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
     searchResult: TerminalOutputSearchResult,
-    canCopyVisibleOutput: boolean,
+    controls: ReturnType<typeof resolveTerminalScreenControlState>,
   ): TemplateResult {
     return html`
       <div class="screen-header">
@@ -724,7 +760,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           <div class="panel-title">${chrome.title}</div>
           <div class="panel-copy">Focused pane output.</div>
         </div>
-        ${this.renderScreenActions(canCopyVisibleOutput)}
+        ${this.renderScreenActions(controls)}
       </div>
       ${this.renderScreenMeta(chrome, inputStatus)}
       <div class="screen-tools" part="screen-tools">
@@ -738,7 +774,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     chrome: TerminalScreenChromeState,
     inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
     searchResult: TerminalOutputSearchResult,
-    canCopyVisibleOutput: boolean,
+    controls: ReturnType<typeof resolveTerminalScreenControlState>,
   ): TemplateResult {
     return html`
       <div
@@ -755,7 +791,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         <div class="screen-chrome__tools">
           ${this.renderSearch(searchResult)}
           ${searchResult.query ? this.renderSearchActions(searchResult) : nothing}
-          ${this.renderScreenActions(canCopyVisibleOutput)}
+          ${this.renderScreenActions(controls)}
         </div>
       </div>
     `;
@@ -786,11 +822,15 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     return html`<span data-meta-id=${item.id} title=${item.title ?? item.label}>${item.label}</span>`;
   }
 
-  private renderScreenActions(canCopyVisibleOutput: boolean): TemplateResult {
+  private renderScreenActions(
+    controls: ReturnType<typeof resolveTerminalScreenControlState>,
+  ): TemplateResult {
     const actions = resolveTerminalScreenActions({
-      canCopyVisibleOutput,
+      canCopyVisibleOutput: controls.canCopyVisibleOutput,
+      canLoadMoreHistory: controls.canLoadMoreHistory,
       copyState: this.copyState,
       followOutput: this.followOutput,
+      historyLoadState: this.historyLoadState,
       placement: this.placement,
     });
 
@@ -822,12 +862,48 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       case TERMINAL_SCREEN_ACTION_IDS.followOutput:
         this.toggleFollowOutput();
         return;
+      case TERMINAL_SCREEN_ACTION_IDS.loadMoreHistory:
+        void this.loadMoreHistory({ preserveScrollAnchor: true });
+        return;
       case TERMINAL_SCREEN_ACTION_IDS.scrollLatest:
         this.scrollLatest();
         return;
       case TERMINAL_SCREEN_ACTION_IDS.copyVisible:
         void this.copyVisibleOutput();
         return;
+    }
+  }
+
+  private async loadMoreHistory(
+    options: { preserveScrollAnchor?: boolean; viewport?: HTMLElement } = {},
+  ): Promise<void> {
+    if (this.historyLoadState === "loading") {
+      return;
+    }
+
+    const controls = resolveTerminalScreenControlState(this.snapshot);
+    if (!this.kernel || !controls.activePaneId || !controls.canLoadMoreHistory) {
+      return;
+    }
+
+    this.followOutput = false;
+    this.setHistoryLoadState("loading");
+    const anchor = options.preserveScrollAnchor
+      ? captureHistoryScrollAnchor(
+          options.viewport
+            ?? this.shadowRoot?.querySelector<HTMLElement>('[data-testid="tp-screen-viewport"]')
+            ?? null,
+        )
+      : null;
+    try {
+      const loaded = await this.kernel.commands.loadMorePaneHistory(controls.activePaneId);
+      if (loaded && anchor) {
+        await this.updateComplete;
+        restoreHistoryScrollAnchor(anchor);
+      }
+      this.setHistoryLoadState(loaded ? "idle" : "failed");
+    } catch {
+      this.setHistoryLoadState("failed");
     }
   }
 
@@ -975,7 +1051,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
-    const output = serializeTerminalOutputLines(screen.surface.lines.map((line) => line.text));
+    const outputLines = createVisibleOutputLines(controls.history, screen);
+    const output = serializeTerminalOutputLines(outputLines.map((line) => line.text));
     try {
       await writeClipboardText(output);
       this.setCopyState("copied");
@@ -983,7 +1060,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         new CustomEvent<TerminalScreenCopiedDetail>(TERMINAL_SCREEN_EVENTS.copied, {
           bubbles: true,
           composed: true,
-          detail: { paneId: screen.pane_id, lineCount: screen.surface.lines.length },
+          detail: { paneId: screen.pane_id, lineCount: outputLines.length },
         }),
       );
     } catch (error) {
@@ -1011,6 +1088,24 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     if (this.#copyStateResetTimer) {
       clearTimeout(this.#copyStateResetTimer);
       this.#copyStateResetTimer = null;
+    }
+  }
+
+  private setHistoryLoadState(historyLoadState: TerminalScreenHistoryLoadState): void {
+    this.historyLoadState = historyLoadState;
+    this.clearHistoryLoadStateResetTimer();
+    if (historyLoadState === "failed") {
+      this.#historyLoadStateResetTimer = setTimeout(() => {
+        this.historyLoadState = "idle";
+        this.#historyLoadStateResetTimer = null;
+      }, 2800);
+    }
+  }
+
+  private clearHistoryLoadStateResetTimer(): void {
+    if (this.#historyLoadStateResetTimer) {
+      clearTimeout(this.#historyLoadStateResetTimer);
+      this.#historyLoadStateResetTimer = null;
     }
   }
 
@@ -1063,10 +1158,17 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     });
   }
 
-  private createSearchResult(searchQuery = this.searchQuery): TerminalOutputSearchResult {
-    const screen = this.snapshot.attachedSession?.focused_screen;
+  private createSearchResult(
+    searchQuery = this.searchQuery,
+    lines?: readonly string[],
+  ): TerminalOutputSearchResult {
+    const fallbackControls = resolveTerminalScreenControlState(this.snapshot);
+    const fallbackLines = createVisibleOutputLines(
+      fallbackControls.history,
+      fallbackControls.screen,
+    ).map((line) => line.text);
     return createTerminalOutputSearchResult(
-      screen ? screen.surface.lines.map((line) => line.text) : [],
+      lines ?? fallbackLines,
       searchQuery,
       { activeMatchIndex: this.activeSearchMatchIndex },
     );
@@ -1085,6 +1187,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     const viewport = event.currentTarget as HTMLElement;
     if (!isViewportAtBottom(viewport)) {
       this.followOutput = false;
+    }
+
+    if (shouldAutoLoadMoreHistoryFromViewport(
+      viewport,
+      resolveTerminalScreenControlState(this.snapshot).canLoadMoreHistory,
+      this.historyLoadState,
+    )) {
+      void this.loadMoreHistory({ preserveScrollAnchor: true, viewport });
     }
   }
 
@@ -1151,6 +1261,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         kind: "send_input",
         pane_id: controls.activePaneId,
         data: input,
+        client_event_id: createTerminalClientEventId("screen-input"),
       });
       if (shouldRefreshAfterTerminalDirectInput(input)) {
         await this.kernel?.commands.attachSession(controls.activeSessionId);
@@ -1196,6 +1307,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         kind: "send_paste",
         pane_id: controls.activePaneId,
         data,
+        client_event_id: createTerminalClientEventId("screen-paste"),
       });
       await this.kernel?.commands.attachSession(controls.activeSessionId);
       if (this.directInputActivity !== "idle") {
@@ -1268,13 +1380,48 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 function renderLine(
   index: number,
   segments: readonly TerminalOutputSearchSegment[],
+  source: VisibleOutputLineSource = "live",
 ): TemplateResult {
   return html`
-    <div class="line" part="screen-line">
+    <div class="line" part="screen-line" data-line-source=${source}>
       <span class="gutter" part="line-number" aria-hidden="true">${index}</span>
       <span class="text" part="line-text">${renderHighlightedSegments(segments)}</span>
     </div>
   `;
+}
+
+export function createVisibleOutputLines(
+  history: ReturnType<typeof resolveTerminalScreenControlState>["history"],
+  screen: ReturnType<typeof resolveTerminalScreenControlState>["screen"],
+): VisibleOutputLine[] {
+  const liveLines = screen?.surface.lines.map((line) => ({
+    text: line.text,
+    source: "live" as const,
+  })) ?? [];
+  const historyLines = history?.lines
+    .filter((line, index, lines) => line.length > 0 || index < lines.length - 1)
+    .map((line) => ({
+      text: line,
+      source: "history" as const,
+    })) ?? [];
+  const historyBoundaryLines: VisibleOutputLine[] = history?.hasMoreSegments
+    ? [{ text: RESTORED_HISTORY_PARTIAL_TEXT, source: "boundary" }]
+    : [];
+
+  if (historyLines.length === 0 && historyBoundaryLines.length === 0) {
+    return liveLines;
+  }
+
+  if (liveLines.length === 0) {
+    return [...historyLines, ...historyBoundaryLines];
+  }
+
+  return [
+    ...historyLines,
+    ...historyBoundaryLines,
+    { text: RESTORED_HISTORY_BOUNDARY_TEXT, source: "boundary" },
+    ...liveLines,
+  ];
 }
 
 function renderHighlightedSegments(
@@ -1295,4 +1442,52 @@ function renderHighlightedSegments(
 
 function isViewportAtBottom(viewport: HTMLElement): boolean {
   return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2;
+}
+
+export function shouldAutoLoadMoreHistoryFromViewport(
+  viewport: Pick<HTMLElement, "scrollTop">,
+  canLoadMoreHistory: boolean,
+  historyLoadState: TerminalScreenHistoryLoadState,
+): boolean {
+  return canLoadMoreHistory
+    && historyLoadState === "idle"
+    && viewport.scrollTop <= HISTORY_AUTO_LOAD_TOP_THRESHOLD_PX;
+}
+
+interface HistoryScrollAnchor {
+  readonly viewport: HTMLElement;
+  readonly scrollHeight: number;
+  readonly scrollTop: number;
+}
+
+function captureHistoryScrollAnchor(viewport: HTMLElement | null): HistoryScrollAnchor | null {
+  if (!viewport) {
+    return null;
+  }
+
+  return {
+    viewport,
+    scrollHeight: viewport.scrollHeight,
+    scrollTop: viewport.scrollTop,
+  };
+}
+
+function restoreHistoryScrollAnchor(anchor: HistoryScrollAnchor): void {
+  anchor.viewport.scrollTop = resolveScrollTopAfterHistoryPrepend(
+    anchor.scrollHeight,
+    anchor.scrollTop,
+    anchor.viewport.scrollHeight,
+  );
+}
+
+export function resolveScrollTopAfterHistoryPrepend(
+  previousScrollHeight: number,
+  previousScrollTop: number,
+  nextScrollHeight: number,
+): number {
+  return Math.max(0, previousScrollTop + Math.max(0, nextScrollHeight - previousScrollHeight));
+}
+
+function createTerminalClientEventId(prefix: string): string {
+  return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }

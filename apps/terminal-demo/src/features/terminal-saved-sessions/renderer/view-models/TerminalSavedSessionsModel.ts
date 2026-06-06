@@ -15,6 +15,7 @@ export interface TerminalSavedSessionItemModel {
   sessionId: string;
   title: string;
   meta: string;
+  restoreGuaranteeBadge: TerminalSavedSessionsBadgeModel | null;
   degradedReasons: TerminalSavedSessionsDegradedReasonModel[];
   canRestore: boolean;
 }

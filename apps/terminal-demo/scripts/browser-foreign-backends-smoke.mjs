@@ -12,10 +12,13 @@ import WebSocket from "ws";
 import {
   launchChromeWithCdp,
   pipeProcess,
+  removeChromeUserDataDir,
   resolveRuntimeEvaluationValue,
   stopProcess,
   waitForHttpServer,
 } from "./chrome-cdp-smoke.mjs";
+import { resolveSpawnCommand } from "./dev-launcher-utils.mjs";
+import { withTerminalDemoSmokeLock } from "./smoke-lock.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -24,11 +27,17 @@ const viteCliPath = path.join(appRoot, "node_modules", "vite", "bin", "vite.js")
 const rendererPort = process.env.TERMINAL_DEMO_FOREIGN_SMOKE_RENDERER_PORT ?? "4274";
 const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const cdpPort = process.env.TERMINAL_DEMO_FOREIGN_SMOKE_CDP_PORT ?? "9227";
+const runtimeSlug = process.env.TERMINAL_DEMO_FOREIGN_SMOKE_RUNTIME_SLUG
+  ?? `terminal-demo-foreign-browser-smoke-${process.pid}-${Date.now().toString(16)}`;
 const sessionStorePath = path.join(
   os.tmpdir(),
   `terminal-demo-foreign-browser-smoke-store-${process.pid}-${Date.now()}.sqlite3`,
 );
+const browserBootstrapPath = path.join(appRoot, "dist", "renderer", "terminal-runtime-bootstrap.json");
+const commandHistoryStorageKey = "terminal-platform-demo.command-history";
+const browserEvaluationTimeoutMs = process.platform === "win32" ? 180_000 : 60_000;
 const zellijMinimum = [0, 44, 0];
+const foreignBackends = process.platform === "win32" ? ["zellij"] : ["tmux", "zellij"];
 
 let previewProcess = null;
 let browserHostProcess = null;
@@ -38,22 +47,23 @@ let tmuxSessionName = null;
 let zellijSessionName = null;
 let tempZellijBinDir = null;
 let smokeEnv = process.env;
+const windowsZellijProcessIds = [];
 
-await main();
+await withTerminalDemoSmokeLock("browser-foreign-backends-smoke", main);
 
 async function main() {
   try {
-    if (process.platform === "win32") {
-      throw new Error("tmux UI smoke is Unix-only; Windows acceptance covers Native + Zellij.");
-    }
-
     runSync("npm", ["run", "build"], appRoot, smokeEnv);
-    smokeEnv = await resolveForeignBackendEnv();
+    smokeEnv = await resolveForeignBackendEnv(foreignBackends);
 
-    tmuxSessionName = uniqueName("tp-ui-tmux");
-    zellijSessionName = uniqueName("tp-ui-zellij");
-    startTmuxSession(tmuxSessionName, smokeEnv);
-    await startZellijSession(zellijSessionName, smokeEnv);
+    if (foreignBackends.includes("tmux")) {
+      tmuxSessionName = uniqueName("tp-ui-tmux");
+      startTmuxSession(tmuxSessionName, smokeEnv);
+    }
+    if (foreignBackends.includes("zellij")) {
+      zellijSessionName = uniqueName("tp-ui-zellij");
+      await startZellijSession(zellijSessionName, smokeEnv);
+    }
 
     previewProcess = spawn(process.execPath, [
       viteCliPath,
@@ -67,6 +77,7 @@ async function main() {
       cwd: appRoot,
       env: smokeEnv,
       stdio: "pipe",
+      windowsHide: true,
     });
     pipeProcess(previewProcess, "[foreign-browser-smoke:preview]");
     await waitForHttpServer(rendererUrl, {
@@ -97,25 +108,46 @@ async function main() {
       autoStartSession: "0",
       sessionStorePath,
     });
+    console.log("[foreign-browser-smoke] running foreign backend UI scenario");
     const result = await runForeignBackendScenario(browserUrl, {
-      tmuxSessionName,
-      zellijSessionName,
+      backendSessions: {
+        ...(tmuxSessionName ? { tmux: tmuxSessionName } : {}),
+        ...(zellijSessionName ? { zellij: zellijSessionName } : {}),
+      },
     });
 
     if (result.issues.length > 0) {
       throw new Error(`Foreign backend browser smoke reported runtime issues: ${JSON.stringify(result.issues)}`);
     }
 
-    for (const backend of ["tmux", "zellij"]) {
+    for (const backend of foreignBackends) {
       const imported = result.imports[backend];
       if (
         !imported?.importClicked
         || !imported.imported
         || imported.attachedBackend !== backend
         || !imported.commandSent
+        || !imported.commandHistoryPersisted
+        || !imported.historyAfterReload?.persisted
+        || imported.historyAfterReload?.attachedBackend !== backend
+        || imported.historyAfterReload?.historyChipCount < 1
         || !imported.screenText?.includes(imported.marker)
       ) {
         throw new Error(`Foreign backend ${backend} did not import through UI correctly: ${JSON.stringify(imported)}`);
+      }
+      if (
+        backend === "zellij"
+        && (
+          !imported.muxActions?.newTabCreated
+          || !imported.muxActions?.renamed
+          || !imported.muxActions?.pasteMarkerSeen
+          || !imported.muxActions?.closedTab
+          || !imported.muxActions?.unsupportedSplitRejected
+          || !imported.muxActions?.focusCapabilitiesMatchPlatform
+          || !imported.muxActions?.controlInputSucceeded
+        )
+      ) {
+        throw new Error(`Foreign backend zellij mux actions failed: ${JSON.stringify(imported.muxActions)}`);
       }
     }
 
@@ -123,8 +155,7 @@ async function main() {
       result.beforeImport.connectionState !== "ready"
       || !result.beforeImport.hasForeignSection
       || !result.beforeImport.hasRefresh
-      || result.beforeImport.tmuxDiscovered < 1
-      || result.beforeImport.zellijDiscovered < 1
+      || foreignBackends.some((backend) => (result.beforeImport.discoveredCounts?.[backend] ?? 0) < 1)
       || result.beforeImport.documentHorizontalOverflow > 1
     ) {
       throw new Error(`Foreign backend UI did not expose discovered sessions: ${JSON.stringify(result.beforeImport)}`);
@@ -134,8 +165,10 @@ async function main() {
   }
 }
 
-async function resolveForeignBackendEnv() {
-  assertCommand("tmux", ["-V"], "tmux is required for foreign backend browser smoke.");
+async function resolveForeignBackendEnv(backends) {
+  if (backends.includes("tmux")) {
+    assertCommand("tmux", ["-V"], "tmux is required for foreign backend browser smoke.");
+  }
   let env = { ...process.env };
   let version = resolveZellijVersion(env);
 
@@ -146,18 +179,18 @@ async function resolveForeignBackendEnv() {
 
     tempZellijBinDir = path.join(os.tmpdir(), `terminal-demo-zellij-${process.pid}-${Date.now()}`);
     const python = resolvePython();
+    const installEnv = { ...env };
+    if (process.env.SSL_CERT_FILE) {
+      installEnv.SSL_CERT_FILE = process.env.SSL_CERT_FILE;
+    }
     runSync(python, [
       path.join(repoRoot, ".github", "scripts", "install_zellij.py"),
       "--out",
       tempZellijBinDir,
-    ], repoRoot, {
-      ...env,
-      SSL_CERT_FILE: process.env.SSL_CERT_FILE ?? "/etc/ssl/cert.pem",
-    });
+    ], repoRoot, installEnv);
     env = {
       ...env,
       PATH: `${tempZellijBinDir}${path.delimiter}${env.PATH ?? ""}`,
-      SSL_CERT_FILE: env.SSL_CERT_FILE ?? "/etc/ssl/cert.pem",
     };
     version = resolveZellijVersion(env);
   }
@@ -166,7 +199,11 @@ async function resolveForeignBackendEnv() {
     throw new Error(`Zellij ${formatVersion(zellijMinimum)}+ is required; found ${version.raw}.`);
   }
 
-  process.stdout.write(`Foreign backend smoke tools - tmux ${runCapture("tmux", ["-V"], appRoot, env).trim()}, ${version.raw}\n`);
+  const tools = [
+    backends.includes("tmux") ? `tmux ${runCapture("tmux", ["-V"], appRoot, env).trim()}` : "tmux skipped",
+    version.raw,
+  ];
+  process.stdout.write(`Foreign backend smoke tools - ${tools.join(", ")}\n`);
   return env;
 }
 
@@ -196,6 +233,18 @@ function startTmuxSession(sessionName, env) {
 
 async function startZellijSession(sessionName, env) {
   runCapture("zellij", ["kill-session", sessionName], appRoot, env, { allowFailure: true });
+
+  if (process.platform === "win32") {
+    startWindowsZellijPty(sessionName, env);
+    await waitFor(async () => {
+      const sessions = runCapture("zellij", ["list-sessions", "--short", "--no-formatting"], appRoot, env, {
+        allowFailure: true,
+      });
+      return sessions.split("\n").map((line) => line.trim()).includes(sessionName);
+    }, `zellij session ${sessionName} to appear`);
+    return;
+  }
+
   runCapture("zellij", ["attach", "--create-background", sessionName], appRoot, env, {
     allowFailure: true,
     timeout: 15_000,
@@ -209,7 +258,23 @@ async function startZellijSession(sessionName, env) {
   }, `zellij session ${sessionName} to appear`);
 }
 
+function startWindowsZellijPty(sessionName, env) {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$zellij = (Get-Command zellij.exe -ErrorAction Stop).Source",
+    `$process = Start-Process -FilePath $zellij -ArgumentList @('attach','--create',${quotePowerShell(sessionName)}) -WindowStyle Hidden -PassThru`,
+    "Write-Output $process.Id",
+  ].join("; ");
+  const output = runCapture(windowsPowerShellPath(), ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], appRoot, env);
+  const processId = Number(output.trim().match(/\d+/u)?.[0] ?? 0);
+  if (!Number.isInteger(processId) || processId <= 0) {
+    throw new Error(`Failed to capture Windows Zellij process id: ${output.trim()}`);
+  }
+  windowsZellijProcessIds.push(processId);
+}
+
 async function runForeignBackendScenario(browserUrl, expected) {
+  const backendSessions = Object.entries(expected.backendSessions);
   const target = await fetch(`http://127.0.0.1:${cdpPort}/json/new?${encodeURIComponent(browserUrl)}`, {
     method: "PUT",
   }).then((response) => response.json());
@@ -267,12 +332,14 @@ async function runForeignBackendScenario(browserUrl, expected) {
       mobile: false,
     });
 
-    await waitForBrowser(send, `state ready with discovered ${expected.tmuxSessionName} and ${expected.zellijSessionName}`, `(() => {
+    await waitForBrowser(send, `state ready with discovered ${backendSessions.map(([, title]) => title).join(", ")}`, `(() => {
       const state = window.terminalDemoDebug?.getState?.();
       const discovered = state?.catalog?.discoveredSessions ?? {};
-      const hasTmux = (discovered.tmux ?? []).some((session) => session.title === ${JSON.stringify(expected.tmuxSessionName)});
-      const hasZellij = (discovered.zellij ?? []).some((session) => session.title === ${JSON.stringify(expected.zellijSessionName)});
-      return state?.connection?.state === 'ready' && hasTmux && hasZellij;
+      const expected = ${JSON.stringify(expected.backendSessions)};
+      return state?.connection?.state === 'ready'
+        && Object.entries(expected).every(([backend, title]) =>
+          (discovered[backend] ?? []).some((session) => session.title === title)
+        );
     })()`);
 
     const beforeImport = await evaluate(send, `(() => {
@@ -290,19 +357,25 @@ async function runForeignBackendScenario(browserUrl, expected) {
         hasRefresh: Boolean(sessionListRoot?.querySelector('[data-testid="tp-foreign-refresh"]')),
         tmuxDiscovered: buttons.filter((button) => button.getAttribute('data-backend') === 'tmux').length,
         zellijDiscovered: buttons.filter((button) => button.getAttribute('data-backend') === 'zellij').length,
+        discoveredCounts: buttons.reduce((counts, button) => {
+          const backend = button.getAttribute('data-backend');
+          counts[backend] = (counts[backend] ?? 0) + 1;
+          return counts;
+        }, {}),
         documentHorizontalOverflow: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
       };
     })()`);
 
-    const tmuxImport = await importBackendViaUi(send, "tmux", expected.tmuxSessionName, "tmux-ui-smoke-marker");
-    const zellijImport = await importBackendViaUi(send, "zellij", expected.zellijSessionName, "zellij-ui-smoke-marker");
+    const imports = {};
+    for (const [backend, title] of backendSessions) {
+      console.log(`[foreign-browser-smoke] importing ${backend} session ${title}`);
+      imports[backend] = await importBackendViaUi(send, backend, title, `${backend}-ui-smoke-marker`);
+      console.log(`[foreign-browser-smoke] imported ${backend} session ${title}`);
+    }
 
     return {
       beforeImport,
-      imports: {
-        tmux: tmuxImport,
-        zellij: zellijImport,
-      },
+      imports,
       issues,
     };
   } finally {
@@ -312,6 +385,7 @@ async function runForeignBackendScenario(browserUrl, expected) {
 }
 
 async function importBackendViaUi(send, backend, title, marker) {
+  console.log(`[foreign-browser-smoke] ${backend}: click import`);
   const importClicked = await evaluate(send, `(() => {
     const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
     const navigationDrawer = workspaceRoot?.querySelector('[data-testid="tp-workspace-navigation-drawer"]') ?? null;
@@ -339,6 +413,7 @@ async function importBackendViaUi(send, backend, title, marker) {
     ) && state?.attachedSession?.session?.route?.backend === ${JSON.stringify(backend)};
   })()`);
 
+  console.log(`[foreign-browser-smoke] ${backend}: send command`);
   const commandSent = await evaluate(send, `(async () => {
     const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
     const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
@@ -348,7 +423,7 @@ async function importBackendViaUi(send, backend, title, marker) {
       return false;
     }
     const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
-    descriptor?.set?.call(textarea, ${JSON.stringify(`printf "${marker}\\n"`)} );
+    descriptor?.set?.call(textarea, ${JSON.stringify(`echo ${marker}`)} );
     textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     if (button.disabled) {
@@ -357,6 +432,7 @@ async function importBackendViaUi(send, backend, title, marker) {
     button.click();
     return true;
   })()`);
+  const submittedCommand = `echo ${marker}`;
 
   await waitForBrowser(send, `${backend} screen marker`, `(() => {
     const state = window.terminalDemoDebug?.getState?.();
@@ -365,6 +441,21 @@ async function importBackendViaUi(send, backend, title, marker) {
       .join('\\n') ?? '';
     return screenText.includes(${JSON.stringify(marker)});
   })()`);
+
+  console.log(`[foreign-browser-smoke] ${backend}: verify command history before reload`);
+  await waitForBrowser(send, `${backend} command history persisted before page reload`, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const storedCommandHistory = (() => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+    return (state?.commandHistory?.entries ?? []).includes(${JSON.stringify(submittedCommand)})
+      && storedCommandHistory.includes(${JSON.stringify(submittedCommand)});
+  })()`, 10_000);
 
   const afterCommand = await evaluate(send, `(() => {
     const state = window.terminalDemoDebug?.getState?.();
@@ -378,16 +469,369 @@ async function importBackendViaUi(send, backend, title, marker) {
       ) ?? false,
       attachedBackend: state?.attachedSession?.session?.route?.backend ?? null,
       attachedTitle: state?.attachedSession?.session?.title ?? null,
+      commandHistoryLatest: state?.commandHistory?.entries?.at(-1) ?? null,
+      commandHistoryPersisted: (state?.commandHistory?.entries ?? []).includes(${JSON.stringify(submittedCommand)}),
+      storedCommandHistory: (() => {
+        try {
+          const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })(),
       screenSource: state?.attachedSession?.focused_screen?.source ?? null,
       screenText,
     };
   })()`);
+  afterCommand.storedCommandHistoryPersisted = afterCommand.storedCommandHistory.includes(submittedCommand);
+  afterCommand.commandHistoryPersisted = afterCommand.commandHistoryPersisted
+    && afterCommand.storedCommandHistoryPersisted;
+  console.log(`[foreign-browser-smoke] ${backend}: verify command history after reload`);
+  const historyAfterReload = await verifyCommandHistorySurvivesPageReload(send, {
+    backend,
+    submittedCommand,
+    title,
+  });
+  console.log(`[foreign-browser-smoke] ${backend}: exercise mux actions`);
+  const muxActions = backend === "zellij"
+    ? await exerciseZellijMuxActions(send, title)
+    : null;
 
   return {
     ...afterCommand,
     commandSent,
     importClicked,
     marker,
+    submittedCommand,
+    historyAfterReload,
+    muxActions,
+  };
+}
+
+async function verifyCommandHistorySurvivesPageReload(send, expected) {
+  await send("Page.reload", { ignoreCache: true });
+  await sleep(1200);
+  await waitForBrowser(send, `${expected.backend} command history restored after page reload`, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const session = state?.catalog?.sessions?.find((candidate) =>
+      candidate.route.backend === ${JSON.stringify(expected.backend)}
+      && candidate.title === ${JSON.stringify(expected.title)}
+    ) ?? null;
+    const storedCommandHistory = (() => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+    return state?.connection?.state === 'ready'
+      && Boolean(session)
+      && (state?.commandHistory?.entries ?? []).includes(${JSON.stringify(expected.submittedCommand)})
+      && storedCommandHistory.includes(${JSON.stringify(expected.submittedCommand)});
+  })()`, 45_000);
+
+  await evaluate(send, `(async () => {
+    const debug = window.terminalDemoDebug;
+    const state = debug?.getState?.();
+    const session = state?.catalog?.sessions?.find((candidate) =>
+      candidate.route.backend === ${JSON.stringify(expected.backend)}
+      && candidate.title === ${JSON.stringify(expected.title)}
+    ) ?? null;
+    if (!session) {
+      return false;
+    }
+    if (state?.attachedSession?.session?.session_id !== session.session_id) {
+      debug.controller.commands.setActiveSession(session.session_id);
+      await debug.controller.commands.attachSession(session.session_id);
+    }
+    return true;
+  })()`);
+
+  await waitForBrowser(send, `${expected.backend} reattached after page reload`, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    return state?.attachedSession?.session?.route?.backend === ${JSON.stringify(expected.backend)}
+      && state?.attachedSession?.session?.title === ${JSON.stringify(expected.title)};
+  })()`, 45_000);
+
+  return evaluate(send, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const workspaceRoot = document.querySelector('tp-terminal-workspace')?.shadowRoot ?? null;
+    const commandRoot = workspaceRoot?.querySelector('tp-terminal-command-dock')?.shadowRoot ?? null;
+    const historyEntries = [...(commandRoot?.querySelectorAll('[data-testid="tp-command-history-entry"]') ?? [])];
+    const storedCommandHistory = (() => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(${JSON.stringify(commandHistoryStorageKey)}) ?? '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+    const commandHistoryEntries = state?.commandHistory?.entries ?? [];
+    return {
+      attachedBackend: state?.attachedSession?.session?.route?.backend ?? null,
+      attachedTitle: state?.attachedSession?.session?.title ?? null,
+      commandHistoryEntries,
+      commandHistoryLatest: commandHistoryEntries.at(-1) ?? null,
+      historyChipCount: historyEntries.length,
+      persisted: commandHistoryEntries.includes(${JSON.stringify(expected.submittedCommand)})
+        && storedCommandHistory.includes(${JSON.stringify(expected.submittedCommand)}),
+      storedCommandHistory,
+    };
+  })()`);
+}
+
+async function exerciseZellijMuxActions(send, title) {
+  const newTabTitle = uniqueName("zellij-mux-tab");
+  const renamedTabTitle = uniqueName("zellij-mux-renamed");
+  const pasteMarker = uniqueName("zellij-paste-marker");
+  const expectedTabFocus = process.platform !== "win32";
+  const expectedPaneFocus = process.platform !== "win32";
+
+  const before = await evaluate(send, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const session = state?.attachedSession?.session ?? null;
+    const topology = state?.attachedSession?.topology ?? null;
+    const capabilities = state?.catalog?.backendCapabilities?.zellij?.capabilities ?? null;
+    const focusedTab = topology?.tabs?.find((tab) => tab.tab_id === topology.focused_tab)
+      ?? topology?.tabs?.[0]
+      ?? null;
+    return {
+      sessionId: session?.session_id ?? null,
+      attachedBackend: session?.route?.backend ?? null,
+      attachedTitle: session?.title ?? null,
+      tabCount: topology?.tabs?.length ?? 0,
+      focusedTabId: focusedTab?.tab_id ?? null,
+      focusedPaneId: focusedTab?.focused_pane ?? null,
+      capabilities,
+    };
+  })()`);
+
+  if (!before.sessionId || before.attachedBackend !== "zellij" || before.attachedTitle !== title) {
+    return {
+      ok: false,
+      reason: "zellij session was not attached before mux action exercise",
+      before,
+    };
+  }
+
+  const focusCapabilitiesMatchPlatform = Boolean(
+    before.capabilities
+    && before.capabilities.tab_focus === expectedTabFocus
+    && before.capabilities.pane_focus === expectedPaneFocus,
+  );
+
+  console.log("[foreign-browser-smoke] zellij mux: paste marker dispatch");
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    return await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'send_paste',
+      pane_id: ${JSON.stringify(before.focusedPaneId)},
+      data: ${JSON.stringify(`echo ${pasteMarker}`)},
+    });
+  })()`);
+
+  console.log("[foreign-browser-smoke] zellij mux: paste marker enter");
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    return await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'send_input',
+      pane_id: ${JSON.stringify(before.focusedPaneId)},
+      data: '\\r',
+    });
+  })()`);
+
+  console.log("[foreign-browser-smoke] zellij mux: paste marker attach");
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    await commands.attachSession(${JSON.stringify(before.sessionId)});
+    return true;
+  })()`);
+
+  await waitForBrowser(send, "zellij focused pane paste marker", `(() => {
+    const screenText = window.terminalDemoDebug?.getState?.()?.attachedSession?.focused_screen?.surface?.lines
+      ?.map((line) => line.text)
+      .join('\\n') ?? '';
+    return screenText.includes(${JSON.stringify(pasteMarker)});
+  })()`);
+
+  const zellijPasteScreen = {
+    markerSeen: true,
+    screenTextPreview: "verified through focused browser screen",
+  };
+  const afterPaste = await evaluate(send, `(() => {
+    const screenText = window.terminalDemoDebug?.getState?.()?.attachedSession?.focused_screen?.surface?.lines
+      ?.map((line) => line.text)
+      .join('\\n') ?? '';
+    return {
+      focusedScreenPasteMarkerSeen: screenText.includes(${JSON.stringify(pasteMarker)}),
+    };
+  })()`);
+
+  console.log("[foreign-browser-smoke] zellij mux: new_tab");
+  const dispatchResult = await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands ?? null;
+    if (!commands?.dispatchMuxCommand || !commands?.attachSession) {
+      return { ok: false, reason: 'workspace commands missing' };
+    }
+    await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'new_tab',
+      title: ${JSON.stringify(newTabTitle)},
+    });
+    await commands.attachSession(${JSON.stringify(before.sessionId)});
+    return { ok: true };
+  })()`);
+  if (!dispatchResult.ok) {
+    return {
+      ok: false,
+      reason: dispatchResult.reason ?? "new_tab dispatch failed",
+      before,
+      focusCapabilitiesMatchPlatform,
+    };
+  }
+
+  await waitForBrowser(send, "zellij new tab to appear", `(() => {
+    const tabs = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology?.tabs ?? [];
+    return tabs.some((tab) => tab.title === ${JSON.stringify(newTabTitle)});
+  })()`);
+
+  const afterNewTab = await evaluate(send, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const topology = state?.attachedSession?.topology ?? null;
+    const newTab = topology?.tabs?.find((tab) => tab.title === ${JSON.stringify(newTabTitle)}) ?? null;
+    return {
+      tabCount: topology?.tabs?.length ?? 0,
+      focusedTabId: topology?.focused_tab ?? null,
+      newTabId: newTab?.tab_id ?? null,
+      newPaneId: newTab?.focused_pane ?? null,
+    };
+  })()`);
+  const newTabCreated = Boolean(
+    afterNewTab.newTabId
+    && afterNewTab.newPaneId
+    && afterNewTab.tabCount > before.tabCount,
+  );
+  if (!newTabCreated) {
+    return {
+      ok: false,
+      reason: "new_tab did not create an importable zellij tab",
+      before,
+      afterNewTab,
+      focusCapabilitiesMatchPlatform,
+    };
+  }
+
+  console.log("[foreign-browser-smoke] zellij mux: control input");
+  const controlInput = await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    try {
+      await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+        kind: 'send_input',
+        pane_id: ${JSON.stringify(afterNewTab.newPaneId)},
+        data: ${JSON.stringify("\u001b[A\u0003")},
+      });
+      await commands.attachSession(${JSON.stringify(before.sessionId)});
+      return { ok: true, message: null };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  })()`);
+
+  console.log("[foreign-browser-smoke] zellij mux: rename_tab");
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'rename_tab',
+      tab_id: ${JSON.stringify(afterNewTab.newTabId)},
+      title: ${JSON.stringify(renamedTabTitle)},
+    });
+    await commands.attachSession(${JSON.stringify(before.sessionId)});
+    return true;
+  })()`);
+
+  await waitForBrowser(send, "zellij renamed tab", `(() => {
+    const tabs = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology?.tabs ?? [];
+    return tabs.some((tab) =>
+      tab.tab_id === ${JSON.stringify(afterNewTab.newTabId)}
+      && tab.title === ${JSON.stringify(renamedTabTitle)}
+    );
+  })()`);
+
+  console.log("[foreign-browser-smoke] zellij mux: unsupported split");
+  const unsupportedSplit = await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    try {
+      await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+        kind: 'split_pane',
+        pane_id: ${JSON.stringify(afterNewTab.newPaneId)},
+        direction: 'horizontal',
+      });
+      return { rejected: false, message: null };
+    } catch (error) {
+      return { rejected: true, message: error instanceof Error ? error.message : String(error) };
+    }
+  })()`);
+
+  console.log("[foreign-browser-smoke] zellij mux: close_tab");
+  await evaluate(send, `(async () => {
+    const commands = window.terminalDemoDebug?.controller?.commands;
+    await commands.dispatchMuxCommand(${JSON.stringify(before.sessionId)}, {
+      kind: 'close_tab',
+      tab_id: ${JSON.stringify(afterNewTab.newTabId)},
+    });
+    await commands.attachSession(${JSON.stringify(before.sessionId)});
+    return true;
+  })()`);
+
+  await waitForBrowser(send, "zellij tab closed", `(() => {
+    const tabs = window.terminalDemoDebug?.getState?.()?.attachedSession?.topology?.tabs ?? [];
+    return !tabs.some((tab) => tab.tab_id === ${JSON.stringify(afterNewTab.newTabId)});
+  })()`);
+
+  const afterClose = await evaluate(send, `(() => {
+    const state = window.terminalDemoDebug?.getState?.();
+    const topology = state?.attachedSession?.topology ?? null;
+    const splitButton = document
+      .querySelector('tp-terminal-workspace')
+      ?.shadowRoot
+      ?.querySelector('tp-terminal-pane-tree')
+      ?.shadowRoot
+      ?.querySelector('[data-testid="tp-split-right"]') ?? null;
+    return {
+      tabCount: topology?.tabs?.length ?? 0,
+      renamedStillPresent: topology?.tabs?.some((tab) => tab.title === ${JSON.stringify(renamedTabTitle)}) ?? false,
+      splitButtonDisabled: splitButton?.disabled ?? null,
+    };
+  })()`);
+
+  const splitMessage = String(unsupportedSplit.message ?? "");
+  const unsupportedSplitRejected = Boolean(
+    unsupportedSplit.rejected
+    && (
+      splitMessage.includes("do not support this command")
+      || splitMessage.includes("UnsupportedByBackend")
+      || splitMessage.includes("unsupported")
+    ),
+  );
+
+  return {
+    ok: true,
+    before,
+    afterNewTab,
+    afterPaste,
+    afterClose,
+    zellijPasteScreen,
+    focusCapabilitiesMatchPlatform,
+    newTabCreated,
+    renamed: !afterClose.renamedStillPresent,
+    pasteMarker,
+    pasteMarkerSeen: zellijPasteScreen.markerSeen,
+    controlInputSucceeded: controlInput.ok,
+    controlInputMessage: controlInput.message,
+    closedTab: afterClose.tabCount === before.tabCount,
+    unsupportedSplitRejected,
+    unsupportedSplitMessage: unsupportedSplit.message,
+    splitButtonDisabled: afterClose.splitButtonDisabled,
   };
 }
 
@@ -397,16 +841,18 @@ async function startBrowserHost(rendererUrlValue, options) {
       reject(new Error("Timed out waiting for TERMINAL_DEMO_BROWSER_URL"));
     }, 20_000);
 
-    browserHostProcess = spawn("node", ["./dist/host/browser/index.js"], {
+    browserHostProcess = spawn(process.execPath, ["./dist/host/browser/index.js"], {
       cwd: appRoot,
       env: {
         ...smokeEnv,
         TERMINAL_DEMO_AUTO_START_SESSION: options.autoStartSession,
         TERMINAL_DEMO_RENDERER_URL: rendererUrlValue,
         TERMINAL_DEMO_BROWSER_BOOTSTRAP_SCOPE: "dist-only",
+        TERMINAL_DEMO_RUNTIME_SLUG: runtimeSlug,
         TERMINAL_DEMO_SESSION_STORE_PATH: options.sessionStorePath,
       },
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     const onLine = (line) => {
@@ -448,8 +894,8 @@ function evaluate(send, expression) {
   }).then(resolveRuntimeEvaluationValue);
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
-      reject(new Error("Timed out waiting for browser evaluation"));
-    }, 60_000);
+      reject(new Error(`Timed out waiting for browser evaluation after ${browserEvaluationTimeoutMs}ms`));
+    }, browserEvaluationTimeoutMs);
   });
 
   return Promise.race([evaluation, timeout]).finally(() => {
@@ -474,6 +920,7 @@ async function waitFor(probe, label, timeoutMs = 20_000) {
 
 async function shutdown() {
   await stopProcess(browserHostProcess);
+  await removeBrowserBootstrapConfig();
   await stopProcess(previewProcess);
   await stopProcess(chromeProcess);
   if (tmuxSessionName) {
@@ -482,29 +929,56 @@ async function shutdown() {
   if (zellijSessionName) {
     runCapture("zellij", ["kill-session", zellijSessionName], appRoot, smokeEnv, { allowFailure: true });
   }
-  if (chromeUserDataDir) {
-    await fs.rm(chromeUserDataDir, { recursive: true, force: true });
+  for (const processId of windowsZellijProcessIds) {
+    runCapture(
+      windowsPowerShellPath(),
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `Stop-Process -Id ${processId} -Force -ErrorAction SilentlyContinue`],
+      appRoot,
+      smokeEnv,
+      { allowFailure: true },
+    );
   }
+  await removeChromeUserDataDir(chromeUserDataDir);
   await removeSessionStore(sessionStorePath);
   if (tempZellijBinDir) {
-    await fs.rm(tempZellijBinDir, { recursive: true, force: true });
+    await removeFileWithWindowsRetries(tempZellijBinDir, { recursive: true });
   }
+}
+
+async function removeBrowserBootstrapConfig() {
+  await removeFileWithWindowsRetries(browserBootstrapPath);
 }
 
 async function removeSessionStore(storePath) {
   await Promise.all([
-    fs.rm(storePath, { force: true }),
-    fs.rm(`${storePath}-shm`, { force: true }),
-    fs.rm(`${storePath}-wal`, { force: true }),
+    removeFileWithWindowsRetries(storePath),
+    removeFileWithWindowsRetries(`${storePath}-shm`),
+    removeFileWithWindowsRetries(`${storePath}-wal`),
   ]);
 }
 
+async function removeFileWithWindowsRetries(filePath, options = {}) {
+  await fs.rm(filePath, {
+    force: true,
+    recursive: Boolean(options.recursive),
+    maxRetries: process.platform === "win32" ? 8 : 0,
+    retryDelay: process.platform === "win32" ? 250 : 0,
+  });
+}
+
 function runSync(command, args, cwd, env) {
-  const result = spawnSync(command, args, {
+  const resolved = resolveSpawnCommand(command, args, env);
+  const result = spawnSync(resolved.command, resolved.args, {
     cwd,
     env,
+    shell: resolved.shell,
     stdio: "inherit",
+    windowsHide: true,
   });
+
+  if (result.error) {
+    throw new Error(`${command} ${args.join(" ")} failed: ${result.error.message}`);
+  }
 
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);
@@ -517,11 +991,26 @@ function runCapture(command, args, cwd, env, options = {}) {
     env,
     encoding: "utf8",
     timeout: options.timeout ?? 10_000,
+    windowsHide: true,
   });
-  if (result.status !== 0 && !options.allowFailure) {
-    throw new Error(`${command} ${args.join(" ")} failed: ${result.stderr.trim()}`);
+  if ((result.error || result.status !== 0 || result.signal) && !options.allowFailure) {
+    const output = [result.error?.message, result.stderr, result.stdout]
+      .filter(Boolean)
+      .map((value) => String(value).trim())
+      .filter(Boolean)
+      .join("\n");
+    const reason = output || `exit code ${result.status ?? "unknown"}${result.signal ? `, signal ${result.signal}` : ""}`;
+    throw new Error(`${command} ${args.join(" ")} failed: ${reason}`);
   }
   return result.stdout ?? "";
+}
+
+function windowsPowerShellPath() {
+  if (process.platform !== "win32") {
+    return "powershell.exe";
+  }
+  const windowsRoot = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
+  return path.join(windowsRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
 function assertCommand(command, args, message) {
@@ -529,6 +1018,7 @@ function assertCommand(command, args, message) {
     cwd: appRoot,
     env: process.env,
     encoding: "utf8",
+    windowsHide: true,
   });
   if (result.status !== 0) {
     throw new Error(message);
@@ -536,10 +1026,10 @@ function assertCommand(command, args, message) {
 }
 
 function resolveZellijVersion(env) {
-  const raw = runCapture("zellij", ["--version"], appRoot, env).trim();
+  const raw = runCapture("zellij", ["--version"], appRoot, env, { allowFailure: true }).trim();
   const parsed = raw.match(/(\d+)\.(\d+)\.(\d+)/u)?.slice(1).map(Number) ?? [0, 0, 0];
   return {
-    raw,
+    raw: raw || "zellij not found",
     parsed,
   };
 }
@@ -550,6 +1040,7 @@ function resolvePython() {
       cwd: repoRoot,
       env: process.env,
       encoding: "utf8",
+      windowsHide: true,
     });
     if (result.status === 0) {
       return candidate;
@@ -574,8 +1065,21 @@ function formatVersion(parts) {
   return parts.join(".");
 }
 
+function compactText(value, limit = 240) {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, limit)}...`;
+}
+
 function uniqueName(prefix) {
   return `${prefix}-${process.pid}-${Date.now().toString(16)}`;
+}
+
+function quotePowerShell(value) {
+  return `'${String(value).replace(/'/gu, "''")}'`;
 }
 
 function onceSocketOpen(socket) {

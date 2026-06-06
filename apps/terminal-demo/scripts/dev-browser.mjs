@@ -7,7 +7,13 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { runSync, spawnViteDevServer, stopProcess, waitForServer } from "./dev-launcher-utils.mjs";
+import {
+  buildBrowserBootstrapConfigPaths,
+  runSync,
+  spawnViteDevServer,
+  stopProcess,
+  waitForServer,
+} from "./dev-launcher-utils.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -15,6 +21,8 @@ const rendererPort = process.env.TERMINAL_DEMO_RENDERER_PORT ?? "5173";
 const rendererUrl = `http://127.0.0.1:${rendererPort}`;
 const sessionStore = resolveBrowserSessionStore();
 const autoStartSession = process.env.TERMINAL_DEMO_AUTO_START_SESSION ?? "1";
+const browserBootstrapPaths = buildBrowserBootstrapConfigPaths(appRoot);
+const initialBrowserBootstrapPayloads = readBrowserBootstrapPayloads(browserBootstrapPaths);
 
 runSync("npm", ["run", "stage:sdk"], appRoot);
 runSync("npm", ["run", "build:host"], appRoot);
@@ -22,22 +30,41 @@ runSync("npm", ["run", "build:host"], appRoot);
 const vite = spawnViteDevServer(appRoot, rendererPort);
 
 let browserHost = null;
-const shutdown = () => {
-  stopProcess(browserHost);
-  stopProcess(vite);
+let browserBootstrapPayload = null;
+let shuttingDown = false;
+let shutdownPromise = null;
+const shutdown = async (exitCode = 0) => {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  await Promise.allSettled([
+    stopProcess(browserHost),
+    stopProcess(vite),
+  ]);
+  cleanupBrowserBootstrapConfig();
   cleanupBrowserSessionStore(sessionStore);
+  process.exit(exitCode);
 };
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-process.on("exit", shutdown);
+const requestShutdown = (exitCode = 0) => {
+  shutdownPromise ??= shutdown(exitCode);
+};
+
+process.on("SIGINT", () => requestShutdown(0));
+process.on("SIGTERM", () => requestShutdown(0));
+process.on("exit", () => {
+  cleanupBrowserBootstrapConfig();
+  cleanupBrowserSessionStore(sessionStore);
+});
 
 await waitForServer(rendererUrl, {
   child: vite,
   label: "Renderer dev server",
 });
 
-browserHost = spawn("node", ["./dist/host/browser/index.js"], {
+browserHost = spawn(process.execPath, ["./dist/host/browser/index.js"], {
   cwd: appRoot,
   env: {
     ...process.env,
@@ -46,19 +73,29 @@ browserHost = spawn("node", ["./dist/host/browser/index.js"], {
     ...(sessionStore.path ? { TERMINAL_DEMO_SESSION_STORE_PATH: sessionStore.path } : {}),
   },
   stdio: "inherit",
+  windowsHide: true,
 });
 
 console.log(`[terminal-demo-browser] session store ${sessionStore.label}`);
 console.log(`[terminal-demo-browser] auto start session ${autoStartSession === "1" ? "enabled" : "disabled"}`);
 
+try {
+  browserBootstrapPayload = await waitForBrowserBootstrapPayload(browserBootstrapPaths, {
+    child: browserHost,
+    previousPayloads: initialBrowserBootstrapPayloads,
+  });
+} catch (error) {
+  console.error(error);
+  await shutdown(1);
+}
+
 browserHost.on("exit", (code) => {
-  shutdown();
-  process.exit(code ?? 0);
+  requestShutdown(code ?? 0);
 });
 
 vite.on("exit", (code) => {
-  if (code && code !== 0) {
-    process.exit(code);
+  if (!shuttingDown && code && code !== 0) {
+    requestShutdown(code);
   }
 });
 
@@ -98,6 +135,121 @@ function cleanupBrowserSessionStore(sessionStoreInfo) {
   }
 
   for (const suffix of ["", "-shm", "-wal"]) {
-    fs.rmSync(`${sessionStoreInfo.path}${suffix}`, { force: true });
+    try {
+      fs.rmSync(`${sessionStoreInfo.path}${suffix}`, {
+        force: true,
+        recursive: true,
+        maxRetries: process.platform === "win32" ? 8 : 0,
+        retryDelay: process.platform === "win32" ? 250 : 0,
+      });
+    } catch (error) {
+      if (process.platform === "win32" && ["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
+        process.stderr.write(
+          `[terminal-demo-browser] skipped locked session store cleanup ${sessionStoreInfo.path}${suffix}: ${error.message}\n`,
+        );
+        continue;
+      }
+
+      throw error;
+    }
   }
+}
+
+function cleanupBrowserBootstrapConfig() {
+  if (!browserBootstrapPayload) {
+    return;
+  }
+
+  for (const bootstrapPath of browserBootstrapPaths) {
+    try {
+      const currentPayload = readOptionalFile(bootstrapPath);
+      if (currentPayload !== browserBootstrapPayload) {
+        continue;
+      }
+
+      fs.rmSync(bootstrapPath, {
+        force: true,
+        maxRetries: process.platform === "win32" ? 8 : 0,
+        retryDelay: process.platform === "win32" ? 250 : 0,
+      });
+    } catch (error) {
+      if (process.platform === "win32" && ["EBUSY", "EPERM"].includes(error?.code)) {
+        process.stderr.write(
+          `[terminal-demo-browser] skipped locked bootstrap cleanup ${bootstrapPath}: ${error.message}\n`,
+        );
+        continue;
+      }
+
+      throw error;
+    }
+  }
+}
+
+function readBrowserBootstrapPayloads(paths) {
+  return new Set(paths.map((bootstrapPath) => readOptionalFile(bootstrapPath)).filter(Boolean));
+}
+
+async function waitForBrowserBootstrapPayload(paths, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const startedAt = Date.now();
+  const previousPayloads = options.previousPayloads ?? new Set();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const exitState = childExitState(options.child);
+    if (exitState) {
+      throw new Error(`Browser runtime host exited before publishing bootstrap - ${exitState}`);
+    }
+
+    for (const bootstrapPath of paths) {
+      const payload = readOptionalFile(bootstrapPath);
+      if (payload && !previousPayloads.has(payload) && isBrowserBootstrapPayload(payload)) {
+        return payload;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error("Timed out waiting for browser runtime bootstrap");
+}
+
+function isBrowserBootstrapPayload(payload) {
+  try {
+    const config = JSON.parse(payload);
+    return Boolean(config?.controlPlaneUrl && config?.sessionStreamUrl && config?.runtimeSlug);
+  } catch {
+    return false;
+  }
+}
+
+function readOptionalFile(filePath) {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT" || isTransientWindowsFileLock(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function isTransientWindowsFileLock(error) {
+  return process.platform === "win32" && ["EBUSY", "EPERM"].includes(error?.code);
+}
+
+function childExitState(child) {
+  if (!child) {
+    return null;
+  }
+
+  if (child.exitCode !== null) {
+    return `exit code ${child.exitCode}`;
+  }
+
+  if (child.signalCode !== null) {
+    return `signal ${child.signalCode}`;
+  }
+
+  return null;
 }

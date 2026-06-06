@@ -25,6 +25,7 @@ export function TerminalSavedSessionsSectionView(props: {
               <strong>{saved.title}</strong>
               <small>{saved.meta}</small>
             </div>
+            {saved.restoreGuaranteeBadge ? <Badge {...saved.restoreGuaranteeBadge} /> : null}
             <DegradedReasonList reasons={saved.degradedReasons} />
             <div className="button-row button-row--compact">
               <button className="button" onClick={() => void props.commands.restore(saved.sessionId)} disabled={!saved.canRestore}>

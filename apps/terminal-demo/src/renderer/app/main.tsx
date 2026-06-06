@@ -1,6 +1,6 @@
 import "./styles.css";
 
-import { StrictMode, startTransition, useEffect, useMemo, useState } from "react";
+import { StrictMode, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import {
@@ -9,7 +9,10 @@ import {
   syncTerminalRuntimeBrowserLocation,
   TerminalRuntimeBootstrapErrorView,
 } from "@features/terminal-runtime-host/renderer";
-import type { TerminalRuntimeBootstrapConfig } from "@features/terminal-runtime-host/contracts";
+import {
+  sameTerminalRuntimeBootstrapConfig,
+  type TerminalRuntimeBootstrapConfig,
+} from "@features/terminal-runtime-host/contracts";
 import {
   TerminalDemoWorkspaceApp,
   TerminalDemoWorkspaceScreen,
@@ -52,66 +55,82 @@ function TerminalDemoRuntimeBootstrapBoundary() {
   const [config, setConfig] = useState<TerminalRuntimeBootstrapConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resolvedOnce, setResolvedOnce] = useState(false);
+  const mountedRef = useRef(false);
+  const refreshGenerationRef = useRef(0);
+  const lastConnectionIssueRefreshAtRef = useRef(0);
 
-  useEffect(() => {
-    let disposed = false;
-
-    async function refreshBootstrap(initial = false) {
-      if (initial) {
-        const resolved = await resolveTerminalRuntimeBootstrapConfig();
-        if (disposed) {
-          return;
-        }
-
-        if (resolved.config) {
-          syncTerminalRuntimeBrowserLocation(resolved.config);
-        }
-
-        startTransition(() => {
-          setConfig((current) => (sameBootstrapConfig(current, resolved.config) ? current : resolved.config));
-          setError(resolved.error);
-          setResolvedOnce(true);
-        });
+  const refreshBootstrap = useCallback(async (initial = false, generation = refreshGenerationRef.current) => {
+    if (initial) {
+      const resolved = await resolveTerminalRuntimeBootstrapConfig();
+      if (!mountedRef.current || generation !== refreshGenerationRef.current) {
         return;
       }
 
-      const bootstrap = await loadLatestTerminalRuntimeBootstrapConfig();
-
-      if (disposed) {
-        return;
+      if (resolved.config) {
+        syncTerminalRuntimeBrowserLocation(resolved.config);
       }
 
-      if (bootstrap) {
-        syncTerminalRuntimeBrowserLocation(bootstrap);
-        startTransition(() => {
-          setConfig((current) => (sameBootstrapConfig(current, bootstrap) ? current : bootstrap));
-          setError(null);
-          setResolvedOnce(true);
-        });
-        return;
-      }
+      startTransition(() => {
+        setConfig((current) => (
+          sameTerminalRuntimeBootstrapConfig(current, resolved.config) ? current : resolved.config
+        ));
+        setError(resolved.error);
+        setResolvedOnce(true);
+      });
+      return;
     }
 
-    void refreshBootstrap(true);
+    const bootstrap = await loadLatestTerminalRuntimeBootstrapConfig();
+
+    if (!mountedRef.current || generation !== refreshGenerationRef.current || !bootstrap) {
+      return;
+    }
+
+    syncTerminalRuntimeBrowserLocation(bootstrap);
+    startTransition(() => {
+      setConfig((current) => (
+        sameTerminalRuntimeBootstrapConfig(current, bootstrap) ? current : bootstrap
+      ));
+      setError(null);
+      setResolvedOnce(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const generation = refreshGenerationRef.current + 1;
+    refreshGenerationRef.current = generation;
+    void refreshBootstrap(true, generation);
 
     const intervalId = window.setInterval(() => {
-      void refreshBootstrap(false);
+      void refreshBootstrap(false, generation);
     }, 2000);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void refreshBootstrap(false);
+        void refreshBootstrap(false, generation);
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      disposed = true;
+      mountedRef.current = false;
+      refreshGenerationRef.current += 1;
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, []);
+  }, [refreshBootstrap]);
+
+  const handleRuntimeConnectionIssue = useCallback(() => {
+    const now = Date.now();
+    if (now - lastConnectionIssueRefreshAtRef.current < 1_000) {
+      return;
+    }
+
+    lastConnectionIssueRefreshAtRef.current = now;
+    void refreshBootstrap(false, refreshGenerationRef.current);
+  }, [refreshBootstrap]);
 
   const appKey = useMemo(
     () => (config
@@ -120,6 +139,7 @@ function TerminalDemoRuntimeBootstrapBoundary() {
           config.controlPlaneUrl,
           config.sessionStreamUrl,
           config.demoDefaultShellProgram ?? "default-shell",
+          config.demoDefaultWorkingDirectory ?? "default-cwd",
         ].join("|")
       : "bootstrap"),
     [config],
@@ -141,7 +161,13 @@ function TerminalDemoRuntimeBootstrapBoundary() {
     return <TerminalRuntimeBootstrapErrorView error={error ?? "Unknown bootstrap error"} />;
   }
 
-  return <TerminalDemoWorkspaceApp key={appKey} config={config} />;
+  return (
+    <TerminalDemoWorkspaceApp
+      key={appKey}
+      config={config}
+      onRuntimeConnectionIssue={handleRuntimeConnectionIssue}
+    />
+  );
 }
 
 function resolveStaticPreviewWorkspace(): {
@@ -168,7 +194,7 @@ function resolveStaticPreviewWorkspace(): {
 
 function resolveStaticPreviewShellProgram(): string {
   if (typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)) {
-    return "pwsh.exe";
+    return "cmd.exe";
   }
 
   if (typeof navigator !== "undefined" && /macintosh|mac os x/i.test(navigator.userAgent)) {
@@ -176,20 +202,4 @@ function resolveStaticPreviewShellProgram(): string {
   }
 
   return "bash";
-}
-
-function sameBootstrapConfig(
-  left: TerminalRuntimeBootstrapConfig | null,
-  right: TerminalRuntimeBootstrapConfig | null,
-): boolean {
-  if (!left || !right) {
-    return left === right;
-  }
-
-  return (
-    left.controlPlaneUrl === right.controlPlaneUrl
-    && left.sessionStreamUrl === right.sessionStreamUrl
-    && left.runtimeSlug === right.runtimeSlug
-    && left.demoDefaultShellProgram === right.demoDefaultShellProgram
-  );
 }

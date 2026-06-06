@@ -31,6 +31,7 @@ import {
 import { resolveTerminalCommandDockAccessoryState } from "./terminal-command-dock-accessories.js";
 import {
   TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT,
+  formatTerminalCommandSubmitInput,
   resolveTerminalCommandDockControlState,
 } from "./terminal-command-dock-controls.js";
 import {
@@ -893,10 +894,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
-    await this.dispatchInput(controls.activeSessionId, controls.activePaneId, `${controls.draft}\n`);
     this.recordCommandHistory(controls.draft);
     this.clearHistoryClearConfirmation();
     this.resetHistoryNavigation();
+    await this.dispatchInput(
+      controls.activeSessionId,
+      controls.activePaneId,
+      formatTerminalCommandSubmitInput(controls.draft),
+    );
     this.kernel?.commands.clearDraft(controls.activePaneId);
     if (options.focusInput) {
       this.refocusCommandInputAfterUpdate();
@@ -1047,6 +1052,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         kind: "send_paste",
         pane_id: paneId,
         data,
+        client_event_id: createTerminalClientEventId("dock-paste"),
       });
       await this.kernel?.commands.attachSession(sessionId);
       this.dispatchEvent(
@@ -1080,6 +1086,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         kind: "send_input",
         pane_id: paneId,
         data,
+        client_event_id: createTerminalClientEventId("dock-input"),
       });
       await this.kernel?.commands.attachSession(sessionId);
       this.dispatchEvent(
@@ -1245,4 +1252,8 @@ function getErrorMessage(error: unknown): string {
   }
 
   return "Workspace command failed";
+}
+
+function createTerminalClientEventId(prefix: string): string {
+  return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }

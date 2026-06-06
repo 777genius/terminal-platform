@@ -1,13 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+  AttachedSession,
   BackendCapabilitiesInfo,
   BackendKind,
+  CommandHistoryEntry,
   DiscoveredSession,
   Handshake,
+  MuxCommand,
+  PaneHistory,
+  PaneId,
+  ScreenDelta,
+  ScreenSnapshot,
+  SavedSessionRecord,
   SavedSessionSummary,
+  SessionId,
+  SubscriptionEvent,
+  SubscriptionMeta,
+  SubscriptionSpec,
+  TopologySnapshot,
 } from "@terminal-platform/runtime-types";
-import type { WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
+import type { WorkspaceSubscription, WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
 
 import { createWorkspaceKernel } from "./create-workspace-kernel.js";
 import {
@@ -229,6 +242,35 @@ describe("createWorkspaceKernel command history", () => {
     await kernel.dispose();
   });
 
+  it("starts with normalized persisted command history entries", async () => {
+    const kernel = createWorkspaceKernel({
+      transport: createUnusedTransport(),
+      commandHistoryLimit: 3,
+      initialCommandHistoryEntries: [
+        "echo one",
+        "git status\r\n",
+        "echo one",
+        "   ",
+        "printf ok",
+        "node -v",
+      ],
+    });
+
+    expect(kernel.selectors.commandHistory()).toEqual({
+      entries: ["echo one", "printf ok", "node -v"],
+      limit: 3,
+    });
+
+    kernel.commands.recordCommandHistory("printf ok ");
+
+    expect(kernel.selectors.commandHistory()).toEqual({
+      entries: ["echo one", "node -v", "printf ok"],
+      limit: 3,
+    });
+
+    await kernel.dispose();
+  });
+
   it("falls back to the default command history limit", async () => {
     const kernel = createWorkspaceKernel({
       transport: createUnusedTransport(),
@@ -331,6 +373,323 @@ describe("createWorkspaceKernel bootstrap", () => {
   });
 });
 
+describe("createWorkspaceKernel live session subscriptions", () => {
+  it("applies pane surface updates without another attach", async () => {
+    const live = createLiveScreenTransport();
+    const kernel = createWorkspaceKernel({
+      transport: live.transport,
+    });
+
+    await kernel.commands.attachSession(live.sessionId);
+    expect(attachedScreenText(kernel)).toBe("ready");
+
+    await kernel.commands.dispatchMuxCommand(live.sessionId, {
+      kind: "send_input",
+      pane_id: live.paneId,
+      data: "echo live\r",
+    });
+
+    await waitUntil(() => attachedScreenText(kernel).includes("live output"));
+
+    expect(attachedScreenText(kernel)).toContain("live output");
+    expect(live.attachCalls()).toBe(1);
+
+    await kernel.dispose();
+  });
+
+  it("hydrates pane history from persistence when attaching a session", async () => {
+    const sessionId = "history-session-1";
+    const paneId = "history-pane-1";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
+    const subscription = new TestWorkspaceSubscription("history-pane-subscription");
+    let historyCalls = 0;
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async () => {
+          historyCalls += 1;
+          return createPaneHistory(
+            sessionId,
+            paneId,
+            "\x1B]52;c;ZmFrZS1jbGlwYm9hcmQ=\x07\x1B]0;fake-title\x07\x1B[31mgit status\x1B[0m\r\nfatal\r\n",
+          );
+        },
+      } as WorkspaceTransportClient,
+      now: () => 7000,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.lines.includes("fatal") ?? false);
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      sessionId,
+      paneId,
+      source: "v2_pane_history",
+      replayStrategy: "raw_vt_stream",
+      restoreGuaranteeLevel: "basic_history",
+      lines: ["git status", "fatal"],
+      hasGaps: false,
+      hasMoreSegments: false,
+    });
+    const restoredHistoryText = kernel.getSnapshot().historicalPanes?.[paneId]?.lines.join("\n") ?? "";
+    expect(restoredHistoryText).not.toContain("fake-title");
+    expect(restoredHistoryText).not.toContain("fake-clipboard");
+    expect(historyCalls).toBeGreaterThan(0);
+
+    await kernel.dispose();
+  });
+
+  it("loads pane history pages from the persisted cursor", async () => {
+    const sessionId = "history-session-pages";
+    const paneId = "history-pane-pages";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
+    const subscription = new TestWorkspaceSubscription("history-pane-pages-subscription");
+    const historyRequests: Array<{ fromEventSeq?: number | bigint | null }> = [];
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async (_sessionId, _paneId, options) => {
+          historyRequests.push({ fromEventSeq: options?.fromEventSeq });
+          if (options?.fromEventSeq === 2n) {
+            return createPaneHistory(sessionId, paneId, "second page\r\n", {
+              fromEventSeq: 2n,
+              eventSeqLow: 2n,
+              eventSeqHigh: 2n,
+              hasMoreSegments: false,
+              nextEventSeq: null,
+              segmentId: "segment-2",
+            });
+          }
+
+          return createPaneHistory(sessionId, paneId, "first page\r\n", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: true,
+            nextEventSeq: 2n,
+            segmentId: "segment-1",
+          });
+        },
+      } as WorkspaceTransportClient,
+      now: () => 7_500,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+
+    const requestedPages = historyRequests.map((request) => request.fromEventSeq);
+    expect(requestedPages[0]).toBe(1n);
+    expect(requestedPages.at(-1)).toBe(2n);
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["first page", "second page"],
+      hasMoreSegments: false,
+      nextEventSeq: null,
+      segmentCount: 2,
+    });
+
+    await kernel.dispose();
+  });
+
+  it("does not mix snapshot fallback into partial v2 history pages", async () => {
+    const sessionId = "history-session-snapshot-page";
+    const paneId = "history-pane-snapshot-page";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
+    const subscription = new TestWorkspaceSubscription("history-snapshot-page-subscription");
+    const historyRequests: Array<{ fromEventSeq?: number | bigint | null }> = [];
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async (_sessionId, _paneId, options) => {
+          historyRequests.push({ fromEventSeq: options?.fromEventSeq });
+          if (options?.fromEventSeq === 2n) {
+            return createPaneHistory(sessionId, paneId, "journal page\r\n", {
+              fromEventSeq: 2n,
+              eventSeqLow: 2n,
+              eventSeqHigh: 2n,
+              hasMoreSegments: false,
+              nextEventSeq: null,
+              segmentId: "segment-2",
+            });
+          }
+
+          return createPaneHistory(sessionId, paneId, "", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: true,
+            includeSegment: false,
+            latestScreenText: "latest snapshot fallback",
+            nextEventSeq: 2n,
+          });
+        },
+      } as WorkspaceTransportClient,
+      now: () => 7_600,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: [],
+      capturedAtMs: 7_600n,
+      hasMoreSegments: true,
+      nextEventSeq: 2n,
+    });
+
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+
+    expect(historyRequests.map((request) => request.fromEventSeq)).toEqual([1n, 2n]);
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["journal page"],
+      hasMoreSegments: false,
+      nextEventSeq: null,
+    });
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]?.lines).not.toContain("latest snapshot fallback");
+
+    await kernel.dispose();
+  });
+
+  it("keeps pane history paging stable across stream line boundaries", async () => {
+    const sessionId = "history-session-line-boundary";
+    const paneId = "history-pane-line-boundary";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
+    const subscription = new TestWorkspaceSubscription("history-line-boundary-subscription");
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async (_sessionId, _paneId, options) => {
+          if (options?.fromEventSeq === 2n) {
+            return createPaneHistory(sessionId, paneId, " line\r\nnext\r\n", {
+              fromEventSeq: 2n,
+              eventSeqLow: 2n,
+              eventSeqHigh: 2n,
+              hasMoreSegments: false,
+              nextEventSeq: null,
+              segmentId: "segment-2",
+            });
+          }
+
+          return createPaneHistory(sessionId, paneId, "partial", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: true,
+            nextEventSeq: 2n,
+            segmentId: "segment-1",
+          });
+        },
+      } as WorkspaceTransportClient,
+      now: () => 7_700,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["partial line", "next"],
+      hasMoreSegments: false,
+      nextEventSeq: null,
+      segmentCount: 2,
+    });
+
+    await kernel.dispose();
+  });
+
+  it("closes pane history cursor when the final page has no visible lines", async () => {
+    const sessionId = "history-session-empty-final";
+    const paneId = "history-pane-empty-final";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
+    const subscription = new TestWorkspaceSubscription("history-empty-final-subscription");
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async (_sessionId, _paneId, options) => {
+          if (options?.fromEventSeq === 2n) {
+            return createPaneHistory(sessionId, paneId, "\x1B[?25l", {
+              fromEventSeq: 2n,
+              eventSeqLow: 2n,
+              eventSeqHigh: 2n,
+              hasMoreSegments: false,
+              nextEventSeq: null,
+              segmentId: "segment-2",
+            });
+          }
+
+          return createPaneHistory(sessionId, paneId, "first page\r\n", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: true,
+            nextEventSeq: 2n,
+            segmentId: "segment-1",
+          });
+        },
+      } as WorkspaceTransportClient,
+      now: () => 7_800,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["first page"],
+      hasMoreSegments: false,
+      nextEventSeq: null,
+      segmentCount: 2,
+    });
+
+    await kernel.dispose();
+  });
+
+  it("hydrates command history from persistence during bootstrap", async () => {
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        handshake: async () => createHandshake(["native"]),
+        listSessions: async () => [],
+        listSavedSessions: async () => [],
+        getBackendCapabilities: async (backend: BackendKind) => createCapabilities(backend),
+        listCommandHistory: async () => [
+          createCommandHistoryEntry("git status", 2_000n),
+          createCommandHistoryEntry("pwd", 1_000n),
+        ],
+      } as WorkspaceTransportClient,
+      commandHistoryLimit: 4,
+      initialCommandHistoryEntries: ["node -v"],
+    });
+
+    await kernel.bootstrap();
+
+    expect(kernel.selectors.commandHistory()).toEqual({
+      entries: ["node -v", "pwd", "git status"],
+      limit: 4,
+    });
+
+    await kernel.dispose();
+  });
+});
+
 describe("createWorkspaceKernel saved session maintenance", () => {
   it("returns prune results and refreshes the saved session catalog", async () => {
     let savedSessions = [
@@ -407,6 +766,208 @@ describe("createWorkspaceKernel saved session maintenance", () => {
     await kernel.dispose();
   });
 
+  it("attaches restored sessions with saved visible history", async () => {
+    const savedRecord = createSavedSessionRecord("saved-1", "saved-pane-1", "historical output");
+    const restoredSessionId = "restored-session-1";
+    const livePaneId = "live-pane-1";
+    const liveTopology = createLiveTopology(restoredSessionId, livePaneId);
+    const attachedSession = createAttachedSession(
+      restoredSessionId,
+      livePaneId,
+      liveTopology,
+      "new live prompt",
+      1n,
+    );
+
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
+        getSavedSession: async () => savedRecord,
+        restoreSavedSession: async () => ({
+          saved_session_id: savedRecord.session_id,
+          manifest: savedRecord.manifest,
+          compatibility: savedRecord.compatibility,
+          session: {
+            session_id: restoredSessionId,
+            route: savedRecord.route,
+            title: savedRecord.title,
+          },
+          restore_semantics: savedRecord.restore_semantics,
+        }),
+        attachSession: async () => attachedSession,
+      } as WorkspaceTransportClient,
+      now: () => 5_000,
+    });
+
+    await kernel.commands.refreshSavedSessions();
+    await kernel.commands.restoreSavedSession(savedRecord.session_id);
+
+    const snapshot = kernel.getSnapshot();
+    expect(snapshot.attachedSession?.session.session_id).toBe(restoredSessionId);
+    expect(snapshot.selection).toEqual({
+      activeSessionId: restoredSessionId,
+      activePaneId: livePaneId,
+    });
+    expect(snapshot.historicalPanes?.[livePaneId]).toMatchObject({
+      sessionId: restoredSessionId,
+      paneId: livePaneId,
+      sourceSessionId: savedRecord.session_id,
+      sourcePaneId: "saved-pane-1",
+      lines: ["historical output"],
+      replayStrategy: "rendered_snapshot",
+      restoreGuaranteeLevel: "visual_snapshot_only",
+    });
+
+    await kernel.dispose();
+  });
+
+  it("hydrates restored sessions from v2 journal before falling back to saved screens", async () => {
+    const savedRecord = createSavedSessionRecord("saved-v2-history", "saved-pane-1", "snapshot fallback");
+    const restoredSessionId = "restored-v2-history";
+    const livePaneId = "live-pane-1";
+    const liveTopology = createLiveTopology(restoredSessionId, livePaneId);
+    const attachedSession = createAttachedSession(
+      restoredSessionId,
+      livePaneId,
+      liveTopology,
+      "new live prompt",
+      1n,
+    );
+    const historyRequests: Array<{ sessionId: string; paneId: string; fromEventSeq?: number | bigint | null }> = [];
+
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        historyRequests,
+        listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
+        getSavedSession: async () => savedRecord,
+        getPaneHistory: async function (
+          this: { historyRequests: typeof historyRequests },
+          sessionId,
+          paneId,
+          options,
+        ) {
+          this.historyRequests.push({ sessionId, paneId, fromEventSeq: options?.fromEventSeq });
+          return createPaneHistory(sessionId, paneId, "journal output\r\n", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+          });
+        },
+        restoreSavedSession: async () => ({
+          saved_session_id: savedRecord.session_id,
+          manifest: savedRecord.manifest,
+          compatibility: savedRecord.compatibility,
+          session: {
+            session_id: restoredSessionId,
+            route: savedRecord.route,
+            title: savedRecord.title,
+          },
+          restore_semantics: savedRecord.restore_semantics,
+        }),
+        attachSession: async () => attachedSession,
+      } as WorkspaceTransportClient,
+      now: () => 5_500,
+    });
+
+    await kernel.commands.refreshSavedSessions();
+    await kernel.commands.restoreSavedSession(savedRecord.session_id);
+
+    expect(historyRequests).toEqual([
+      {
+        sessionId: savedRecord.session_id,
+        paneId: "saved-pane-1",
+        fromEventSeq: 1n,
+      },
+    ]);
+    expect(kernel.getSnapshot().historicalPanes?.[livePaneId]).toMatchObject({
+      sessionId: restoredSessionId,
+      paneId: livePaneId,
+      sourceSessionId: savedRecord.session_id,
+      sourcePaneId: "saved-pane-1",
+      source: "v2_pane_history",
+      lines: ["journal output"],
+      replayStrategy: "raw_vt_stream",
+      restoreGuaranteeLevel: "basic_history",
+    });
+
+    await kernel.dispose();
+  });
+
+  it("keeps restore successful when immediate attach for history fails", async () => {
+    const savedRecord = createSavedSessionRecord("saved-attach-fails", "saved-pane-1", "historical output");
+    const restoredSessionId = "restored-attach-fails";
+    const previousSessionId = "previous-live-session";
+    const previousPaneId = "previous-live-pane";
+    const previousTopology = createLiveTopology(previousSessionId, previousPaneId);
+    const previousAttachedSession = createAttachedSession(
+      previousSessionId,
+      previousPaneId,
+      previousTopology,
+      "previous live output",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription("previous-live-subscription");
+    let openSubscriptionCalls = 0;
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachCalls: 0,
+        listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
+        getSavedSession: async () => savedRecord,
+        restoreSavedSession: async () => ({
+          saved_session_id: savedRecord.session_id,
+          manifest: savedRecord.manifest,
+          compatibility: savedRecord.compatibility,
+          session: {
+            session_id: restoredSessionId,
+            route: savedRecord.route,
+            title: savedRecord.title,
+          },
+          restore_semantics: savedRecord.restore_semantics,
+        }),
+        attachSession: async function (this: { attachCalls: number }) {
+          this.attachCalls += 1;
+          if (this.attachCalls === 1) {
+            return previousAttachedSession;
+          }
+          throw new Error("attach unavailable");
+        },
+        openSubscription: async () => {
+          openSubscriptionCalls += 1;
+          return subscription;
+        },
+      } as WorkspaceTransportClient,
+      now: () => 6_000,
+    });
+
+    await kernel.commands.attachSession(previousSessionId);
+    await waitUntil(() => openSubscriptionCalls > 0);
+    await kernel.commands.refreshSavedSessions();
+    await kernel.commands.restoreSavedSession(savedRecord.session_id);
+
+    expect(kernel.getSnapshot().selection).toEqual({
+      activeSessionId: restoredSessionId,
+      activePaneId: null,
+    });
+    expect(kernel.getSnapshot().attachedSession).toBeNull();
+    expect(kernel.getSnapshot().catalog.sessions.map((session) => session.session_id)).toContain(restoredSessionId);
+    expect(kernel.diagnostics.list()).toEqual([
+      {
+        code: "restored_session_attach_failed",
+        message: `failed to attach restored session ${restoredSessionId}`,
+        recoverable: true,
+        severity: "warn",
+        timestampMs: 6_000,
+        cause: expect.any(Error),
+      },
+    ]);
+    expect(subscription.isClosed()).toBe(true);
+
+    await kernel.dispose();
+  });
+
   it("blocks invalid saved session prune limits before calling transport", async () => {
     let pruneCalls = 0;
     const kernel = createWorkspaceKernel({
@@ -447,6 +1008,310 @@ function createUnusedTransport(): WorkspaceTransportClient {
     close: async () => {},
     discoverSessions: async () => [],
   } as unknown as WorkspaceTransportClient;
+}
+
+function createLiveScreenTransport(): {
+  transport: WorkspaceTransportClient;
+  sessionId: SessionId;
+  paneId: PaneId;
+  attachCalls(): number;
+} {
+  const sessionId = "live-session-1";
+  const paneId = "live-pane-1";
+  const topology = createLiveTopology(sessionId, paneId);
+  const attachedSession = createAttachedSession(sessionId, paneId, topology, "ready", 1n);
+  const topologySubscription = new TestWorkspaceSubscription("live-topology-subscription");
+  const paneSubscription = new TestWorkspaceSubscription("live-pane-subscription");
+  let attachCount = 0;
+
+  const transport: WorkspaceTransportClient = {
+    ...createUnusedTransport(),
+    attachSession: async () => {
+      attachCount += 1;
+      return structuredClone(attachedSession);
+    },
+    dispatchMuxCommand: async (_sessionId: SessionId, command: MuxCommand) => {
+      if (command.kind === "send_input") {
+        paneSubscription.push(createFullReplaceDelta(paneId, 1n, 2n, "ready\nlive output"));
+      }
+
+      return { changed: true };
+    },
+    openSubscription: async (_sessionId: SessionId, spec: SubscriptionSpec) => {
+      if (spec.kind === "session_topology") {
+        return topologySubscription;
+      }
+
+      return paneSubscription;
+    },
+  } as WorkspaceTransportClient;
+
+  return {
+    transport,
+    sessionId,
+    paneId,
+    attachCalls: () => attachCount,
+  };
+}
+
+class TestWorkspaceSubscription implements WorkspaceSubscription {
+  readonly #subscriptionId: string;
+  #closed = false;
+  #events: SubscriptionEvent[] = [];
+  #waiters: Array<(event: SubscriptionEvent | null) => void> = [];
+
+  constructor(subscriptionId: string) {
+    this.#subscriptionId = subscriptionId;
+  }
+
+  meta(): SubscriptionMeta {
+    return {
+      subscription_id: this.#subscriptionId,
+    };
+  }
+
+  isClosed(): boolean {
+    return this.#closed;
+  }
+
+  push(event: SubscriptionEvent): void {
+    if (this.#closed) {
+      return;
+    }
+
+    const waiter = this.#waiters.shift();
+    if (waiter) {
+      waiter(event);
+      return;
+    }
+
+    this.#events.push(event);
+  }
+
+  async nextEvent(): Promise<SubscriptionEvent | null> {
+    if (this.#closed) {
+      return null;
+    }
+
+    const event = this.#events.shift();
+    if (event) {
+      return event;
+    }
+
+    return new Promise((resolve) => {
+      this.#waiters.push(resolve);
+    });
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) {
+      return;
+    }
+
+    this.#closed = true;
+    this.#events = [];
+    const waiters = this.#waiters.splice(0);
+    for (const waiter of waiters) {
+      waiter(null);
+    }
+  }
+}
+
+function createAttachedSession(
+  sessionId: SessionId,
+  paneId: PaneId,
+  topology: TopologySnapshot,
+  line: string,
+  sequence: bigint,
+): AttachedSession {
+  return {
+    session: {
+      session_id: sessionId,
+      route: {
+        backend: "native",
+        authority: "local_daemon",
+        external: {
+          namespace: "native_session",
+          value: sessionId,
+        },
+      },
+      title: "Live shell",
+    },
+    health: {
+      session_id: sessionId,
+      phase: "ready",
+      can_attach: true,
+      invalidated: false,
+      reason: null,
+      detail: null,
+    },
+    topology,
+    focused_screen: createLiveScreen(paneId, line, sequence),
+  };
+}
+
+function createLiveTopology(sessionId: SessionId, paneId: PaneId): TopologySnapshot {
+  return {
+    session_id: sessionId,
+    backend_kind: "native",
+    focused_tab: "live-tab-1",
+    tabs: [
+      {
+        tab_id: "live-tab-1",
+        title: "Live shell",
+        root: {
+          kind: "leaf",
+          pane_id: paneId,
+        },
+        focused_pane: paneId,
+      },
+    ],
+  };
+}
+
+function createLiveScreen(paneId: PaneId, line: string, sequence: bigint): ScreenSnapshot {
+  return {
+    pane_id: paneId,
+    sequence,
+    rows: 24,
+    cols: 80,
+    source: "native_emulator",
+    surface: {
+      title: "Live shell",
+      cursor: {
+        row: 0,
+        col: line.length,
+      },
+      lines: line.split("\n").map((text) => ({ text })),
+    },
+  };
+}
+
+interface CreatePaneHistoryOptions {
+  readonly fromEventSeq?: bigint;
+  readonly eventSeqLow?: bigint;
+  readonly eventSeqHigh?: bigint;
+  readonly hasMoreSegments?: boolean;
+  readonly includeSegment?: boolean;
+  readonly latestScreenText?: string;
+  readonly nextEventSeq?: bigint | null;
+  readonly segmentId?: string;
+  readonly createdAtMs?: bigint;
+}
+
+function createPaneHistory(
+  sessionId: SessionId,
+  paneId: PaneId,
+  text: string,
+  options: CreatePaneHistoryOptions = {},
+): PaneHistory {
+  const encoded = new TextEncoder().encode(text);
+  const fromEventSeq = options.fromEventSeq ?? 1n;
+  const eventSeqLow = options.eventSeqLow ?? fromEventSeq;
+  const eventSeqHigh = options.eventSeqHigh ?? eventSeqLow;
+
+  return {
+    session_id: sessionId,
+    pane_id: paneId,
+    from_event_seq: fromEventSeq,
+    max_segments: 256n,
+    max_bytes: 1_048_576n,
+    restore_plan: {
+      session_id: sessionId,
+      restore_guarantee_level: "basic_history",
+      latest_screen_snapshot_id: null,
+      latest_topology_snapshot_id: null,
+      high_water_commit_seq: eventSeqHigh,
+      evidence: [
+        {
+          kind: "stream_segment_count",
+          value: "1",
+        },
+      ],
+    },
+    latest_screen_snapshot: options.latestScreenText == null
+      ? null
+      : {
+          id: "snapshot-1",
+          pane_id: paneId,
+          projection_source: "native_emulator",
+          buffer_kind: "screen",
+          rows: 24,
+          cols: 80,
+          base_event_seq: fromEventSeq,
+          high_water_event_seq: eventSeqHigh,
+          high_water_byte_seq: null,
+          screen_json: JSON.stringify({
+            surface: {
+              lines: [{ text: options.latestScreenText }],
+            },
+          }),
+          parser_version: "test-parser",
+          projection_version: "test-projection",
+          checksum: "test-snapshot-checksum",
+          created_at_ms: options.createdAtMs ?? 7_000n,
+        },
+    segments: options.includeSegment === false
+      ? []
+      : [
+          {
+            id: options.segmentId ?? "segment-1",
+            event_seq_low: eventSeqLow,
+            event_seq_high: eventSeqHigh,
+            byte_low: 0n,
+            byte_high: BigInt(encoded.byteLength),
+            payload: Array.from(encoded),
+            checksum: "test-checksum",
+            capture_semantics: "raw_vt_stream",
+            created_at_ms: options.createdAtMs ?? 7_000n,
+          },
+        ],
+    gaps: [],
+    replay_strategy: "raw_vt_stream",
+    has_more_segments: options.hasMoreSegments ?? false,
+    next_event_seq: options.nextEventSeq ?? null,
+    total_payload_bytes: BigInt(encoded.byteLength),
+  };
+}
+
+function createFullReplaceDelta(
+  paneId: PaneId,
+  fromSequence: bigint,
+  toSequence: bigint,
+  line: string,
+): Extract<SubscriptionEvent, { kind: "screen_delta" }> {
+  const screen = createLiveScreen(paneId, line, toSequence);
+  return {
+    kind: "screen_delta",
+    pane_id: paneId,
+    from_sequence: fromSequence,
+    to_sequence: toSequence,
+    rows: screen.rows,
+    cols: screen.cols,
+    source: screen.source,
+    patch: null,
+    full_replace: screen.surface,
+  } satisfies Extract<SubscriptionEvent, { kind: "screen_delta" }>;
+}
+
+function attachedScreenText(kernel: ReturnType<typeof createWorkspaceKernel>): string {
+  return kernel.getSnapshot().attachedSession?.focused_screen?.surface.lines
+    .map((line) => line.text)
+    .join("\n") ?? "";
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error("timed out waiting for workspace snapshot update");
 }
 
 function createHandshake(availableBackends: BackendKind[]): Handshake {
@@ -518,6 +1383,59 @@ function createDiscoveredSession(backend: BackendKind): DiscoveredSession {
       },
     },
     title: `${backend} workspace`,
+  };
+}
+
+function createCommandHistoryEntry(displayText: string, lastUsedAtMs: bigint): CommandHistoryEntry {
+  return {
+    id: `history-${displayText}`,
+    session_id: "session-1",
+    pane_id: "pane-1",
+    display_text: displayText,
+    last_used_at_ms: lastUsedAtMs,
+    use_count: 1n,
+  };
+}
+
+function createSavedSessionRecord(
+  sessionId: string,
+  paneId: string,
+  line: string,
+): SavedSessionRecord {
+  const summary = createSavedSessionSummary(sessionId, 1_000n);
+  const topology = createLiveTopology(sessionId, paneId);
+  const screen = createLiveScreen(paneId, line, 10n);
+
+  return {
+    session_id: summary.session_id,
+    route: summary.route,
+    title: summary.title,
+    launch: {
+      program: "cmd.exe",
+      args: [],
+      cwd: null,
+    },
+    manifest: summary.manifest,
+    compatibility: summary.compatibility,
+    topology,
+    screens: [screen],
+    saved_at_ms: summary.saved_at_ms,
+    restore_semantics: summary.restore_semantics,
+  };
+}
+
+function savedSessionRecordToSummary(record: SavedSessionRecord): SavedSessionSummary {
+  return {
+    session_id: record.session_id,
+    route: record.route,
+    title: record.title,
+    saved_at_ms: record.saved_at_ms,
+    manifest: record.manifest,
+    compatibility: record.compatibility,
+    has_launch: record.launch !== null,
+    tab_count: record.topology.tabs.length,
+    pane_count: record.screens.length,
+    restore_semantics: record.restore_semantics,
   };
 }
 

@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
@@ -19,7 +21,7 @@ export async function launchChromeWithCdp({
   const failures = [];
 
   for (const headlessMode of chromeLaunchModes) {
-    const userDataDir = path.join("/tmp", `${profilePrefix}-${process.pid}-${Date.now()}-${headlessMode}`);
+    const userDataDir = path.join(os.tmpdir(), `${profilePrefix}-${process.pid}-${Date.now()}-${headlessMode}`);
     const child = spawn(chromeBinary, buildChromeArgs({
       cdpPort,
       extraArgs,
@@ -29,6 +31,7 @@ export async function launchChromeWithCdp({
       cwd: appRoot,
       env: process.env,
       stdio: "pipe",
+      windowsHide: true,
     });
     const readOutput = pipeProcess(child, `[${logPrefix}:${headlessMode}]`);
 
@@ -54,7 +57,7 @@ export async function launchChromeWithCdp({
         version: chromeVersion,
       }));
       await stopProcess(child);
-      await fs.rm(userDataDir, { recursive: true, force: true });
+      await removeChromeUserDataDir(userDataDir);
     }
   }
 
@@ -100,10 +103,40 @@ export async function stopProcess(child) {
   const exited = new Promise((resolve) => {
     child.once("exit", () => resolve());
   });
-  child.kill("SIGTERM");
+  sendProcessSignal(child, process.platform === "win32" ? "SIGINT" : "SIGTERM");
   await Promise.race([exited, sleep(5_000)]);
   if (child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGKILL");
+    if (process.platform === "win32" && child.pid) {
+      spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } else {
+      sendProcessSignal(child, "SIGKILL");
+    }
+    await Promise.race([exited, sleep(2_000)]);
+  }
+}
+
+export async function removeChromeUserDataDir(userDataDir) {
+  if (!userDataDir) {
+    return;
+  }
+
+  try {
+    await fs.rm(userDataDir, {
+      recursive: true,
+      force: true,
+      maxRetries: process.platform === "win32" ? 8 : 0,
+      retryDelay: 250,
+    });
+  } catch (error) {
+    if (process.platform === "win32" && ["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
+      process.stderr.write(`Skipped locked Chrome profile cleanup: ${userDataDir} - ${error.message}\n`);
+      return;
+    }
+
+    throw error;
   }
 }
 
@@ -189,6 +222,7 @@ function processExitState(child) {
 function resolveChromeBinary({ appRoot, binaryMissingMessage }) {
   const candidates = [
     process.env.TERMINAL_DEMO_CHROME_BIN,
+    ...resolveWindowsChromeCandidates(),
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     resolveBinaryFromShell({ appRoot, name: "google-chrome" }),
@@ -196,12 +230,41 @@ function resolveChromeBinary({ appRoot, binaryMissingMessage }) {
     resolveBinaryFromShell({ appRoot, name: "chromium-browser" }),
   ].filter(Boolean);
 
-  const binary = candidates[0];
+  const binary = candidates.find((candidate) => existsSync(candidate));
   if (!binary) {
     throw new Error(binaryMissingMessage);
   }
 
   return binary;
+}
+
+function resolveWindowsChromeCandidates() {
+  if (process.platform !== "win32") {
+    return [];
+  }
+
+  const env = process.env;
+  return [
+    env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe"),
+    env.PROGRAMFILES && path.join(env.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe"),
+    env["PROGRAMFILES(X86)"] && path.join(env["PROGRAMFILES(X86)"], "Google", "Chrome", "Application", "chrome.exe"),
+    resolveBinaryFromWhere("chrome.exe"),
+    resolveBinaryFromWhere("msedge.exe"),
+  ].filter(Boolean);
+}
+
+function resolveBinaryFromWhere(name) {
+  const result = spawnSync("where.exe", [name], {
+    env: process.env,
+    encoding: "utf8",
+  });
+
+  if (result.status !== 0) {
+    return null;
+  }
+
+  const [firstMatch] = result.stdout.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean);
+  return firstMatch ?? null;
 }
 
 function resolveBinaryFromShell({ appRoot, name }) {
@@ -234,6 +297,11 @@ function resolveChromeLaunchModes({ envName }) {
 }
 
 function resolveChromeVersion({ appRoot, chromeBinary }) {
+  if (process.platform === "win32") {
+    return resolveWindowsExecutableVersion({ appRoot, binary: chromeBinary })
+      ?? "Chrome version unavailable on Windows";
+  }
+
   const result = spawnSync(chromeBinary, ["--version"], {
     cwd: appRoot,
     env: process.env,
@@ -241,6 +309,41 @@ function resolveChromeVersion({ appRoot, chromeBinary }) {
   });
   const version = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
   return version || "unknown";
+}
+
+function resolveWindowsExecutableVersion({ appRoot, binary }) {
+  const powershellCandidates = [
+    process.env.SystemRoot
+      ? path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+      : null,
+    resolveBinaryFromWhere("powershell.exe"),
+    resolveBinaryFromWhere("pwsh.exe"),
+  ].filter(Boolean);
+
+  for (const powershell of powershellCandidates) {
+    const result = spawnSync(powershell, [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      "(Get-Item -LiteralPath $env:TERMINAL_DEMO_CHROME_VERSION_TARGET).VersionInfo.ProductVersion",
+    ], {
+      cwd: appRoot,
+      env: {
+        ...process.env,
+        TERMINAL_DEMO_CHROME_VERSION_TARGET: binary,
+      },
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const version = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+    if (result.status === 0 && version) {
+      return version;
+    }
+  }
+
+  return null;
 }
 
 function indent(value) {
@@ -252,4 +355,12 @@ function indent(value) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sendProcessSignal(child, signal) {
+  try {
+    child.kill(signal);
+  } catch {
+    // The process may have exited between the running check and the signal.
+  }
 }

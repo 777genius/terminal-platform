@@ -1,0 +1,97 @@
+use crate::v2::{
+    BackendCapabilityReportInput, HistoryGapEventInput, PersistenceFaultHealthRecordInput,
+    ScreenSnapshotEventInput, TerminalOutputEventInput, TerminalPersistenceV2Error,
+    TopologySnapshotEventInput, UiInputEventInput,
+};
+
+use super::super::{SqliteSessionStore, retry::retry_v2_write};
+
+impl SqliteSessionStore {
+    pub fn record_v2_backend_capability_report(
+        &self,
+        input: BackendCapabilityReportInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let input = input.clone();
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_backend_capability_report_with_connection(connection, input)
+            })
+        })
+    }
+
+    pub fn record_v2_ui_input(
+        &self,
+        input: UiInputEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let input = input.clone();
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_ui_input_event_with_connection(connection, input)
+            })
+        })
+    }
+
+    pub fn record_v2_terminal_output(
+        &self,
+        input: TerminalOutputEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let input = input.clone();
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_terminal_output_event_with_connection(connection, input)?;
+                Ok(())
+            })
+        })
+    }
+
+    pub fn record_v2_history_gap(
+        &self,
+        input: HistoryGapEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let input = input.clone();
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_history_gap_event_with_connection(connection, input)?;
+                Ok(())
+            })
+        })
+    }
+
+    pub fn record_v2_screen_snapshot(
+        &self,
+        input: ScreenSnapshotEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let input = input.clone();
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_screen_snapshot_event_with_connection(connection, input)?;
+                Ok(())
+            })
+        })
+    }
+
+    pub fn record_v2_topology_snapshot(
+        &self,
+        input: TopologySnapshotEventInput,
+    ) -> Result<(), TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let input = input.clone();
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_topology_snapshot_event_with_connection(connection, input)?;
+                Ok(())
+            })
+        })
+    }
+
+    pub fn record_v2_persistence_fault_health_record(
+        &self,
+        input: PersistenceFaultHealthRecordInput,
+    ) -> Result<String, TerminalPersistenceV2Error> {
+        retry_v2_write(|| {
+            let input = input.clone();
+            self.with_v2_worker_connection(move |store, connection| {
+                store.record_persistence_fault_health_record_with_connection(connection, input)
+            })
+        })
+    }
+}

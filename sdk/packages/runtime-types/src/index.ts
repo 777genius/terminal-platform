@@ -17,6 +17,9 @@ export type {
   NodeCreateSessionRequest as CreateSessionRequest,
 } from "./generated/raw/NodeCreateSessionRequest.js";
 export type {
+  NodeCommandHistoryEntry as CommandHistoryEntry,
+} from "./generated/raw/NodeCommandHistoryEntry.js";
+export type {
   NodeDaemonCapabilities as DaemonCapabilities,
 } from "./generated/raw/NodeDaemonCapabilities.js";
 export type { NodeDaemonPhase as DaemonPhase } from "./generated/raw/NodeDaemonPhase.js";
@@ -38,6 +41,23 @@ export type {
 } from "./generated/raw/NodeOverrideLayoutCommand.js";
 export type { NodePaneSplit as PaneSplit } from "./generated/raw/NodePaneSplit.js";
 export type { NodePaneTreeNode as PaneTreeNode } from "./generated/raw/NodePaneTreeNode.js";
+export type { NodePaneHistory as PaneHistory } from "./generated/raw/NodePaneHistory.js";
+export type { NodePaneHistoryGap as PaneHistoryGap } from "./generated/raw/NodePaneHistoryGap.js";
+export type {
+  NodePaneHistoryReplayStrategy as PaneHistoryReplayStrategy,
+} from "./generated/raw/NodePaneHistoryReplayStrategy.js";
+export type {
+  NodePaneHistoryRestoreEvidence as PaneHistoryRestoreEvidence,
+} from "./generated/raw/NodePaneHistoryRestoreEvidence.js";
+export type {
+  NodePaneHistoryRestorePlan as PaneHistoryRestorePlan,
+} from "./generated/raw/NodePaneHistoryRestorePlan.js";
+export type {
+  NodePaneHistoryScreenSnapshot as PaneHistoryScreenSnapshot,
+} from "./generated/raw/NodePaneHistoryScreenSnapshot.js";
+export type {
+  NodePaneHistorySegment as PaneHistorySegment,
+} from "./generated/raw/NodePaneHistorySegment.js";
 export type {
   NodeProjectionSource as ProjectionSource,
 } from "./generated/raw/NodeProjectionSource.js";
@@ -68,6 +88,15 @@ export type { NodeSavedSessionRecord as SavedSessionRecord } from "./generated/r
 export type {
   NodeSavedSessionRestoreSemantics as SavedSessionRestoreSemantics,
 } from "./generated/raw/NodeSavedSessionRestoreSemantics.js";
+export type {
+  NodeSavedSessionRestoreSemanticsV2 as SavedSessionRestoreSemanticsV2,
+} from "./generated/raw/NodeSavedSessionRestoreSemanticsV2.js";
+export type {
+  NodeRestoreGuaranteeLevel as RestoreGuaranteeLevel,
+} from "./generated/raw/NodeRestoreGuaranteeLevel.js";
+export type {
+  NodeHistoryReplayState as HistoryReplayState,
+} from "./generated/raw/NodeHistoryReplayState.js";
 export type { NodeSavedSessionSummary as SavedSessionSummary } from "./generated/raw/NodeSavedSessionSummary.js";
 export type { NodeScreenCursor as ScreenCursor } from "./generated/raw/NodeScreenCursor.js";
 export type { NodeScreenDelta as ScreenDelta } from "./generated/raw/NodeScreenDelta.js";

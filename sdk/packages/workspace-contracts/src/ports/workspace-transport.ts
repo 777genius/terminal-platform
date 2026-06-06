@@ -2,12 +2,14 @@ import type {
   AttachedSession,
   BackendCapabilitiesInfo,
   BackendKind,
+  CommandHistoryEntry,
   CreateSessionRequest,
   DeleteSavedSessionResult,
   DiscoveredSession,
   Handshake,
   MuxCommand,
   MuxCommandResult,
+  PaneHistory,
   PaneId,
   PruneSavedSessionsResult,
   RestoredSession,
@@ -34,6 +36,15 @@ export interface WorkspaceTransportClient {
   handshake(): Promise<Handshake>;
   listSessions(): Promise<SessionSummary[]>;
   listSavedSessions(): Promise<SavedSessionSummary[]>;
+  listCommandHistory?(
+    sessionId?: SessionId | null,
+    limit?: number | null,
+  ): Promise<CommandHistoryEntry[]>;
+  getPaneHistory?(
+    sessionId: SessionId,
+    paneId: PaneId,
+    options?: WorkspacePaneHistoryRequestOptions,
+  ): Promise<PaneHistory>;
   discoverSessions(backend: BackendKind): Promise<DiscoveredSession[]>;
   getBackendCapabilities(backend: BackendKind): Promise<BackendCapabilitiesInfo>;
   createSession(backend: BackendKind, request: CreateSessionRequest): Promise<SessionSummary>;
@@ -53,6 +64,12 @@ export interface WorkspaceTransportClient {
   dispatchMuxCommand(sessionId: SessionId, command: MuxCommand): Promise<MuxCommandResult>;
   openSubscription(sessionId: SessionId, spec: SubscriptionSpec): Promise<WorkspaceSubscription>;
   close(): Promise<void>;
+}
+
+export interface WorkspacePaneHistoryRequestOptions {
+  fromEventSeq?: number | bigint | null;
+  maxSegments?: number | null;
+  maxBytes?: number | null;
 }
 
 export interface WorkspaceTransportFactory {

@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use terminal_backend_api::{
-    BackendError, BackendSubscription, BackendSubscriptionEvent, SubscriptionSpec,
+    BackendError, BackendRawOutputEvent, BackendRawOutputGap, BackendRawOutputSubscription,
+    BackendSubscription, BackendSubscriptionEvent, SubscriptionSpec,
 };
 use terminal_domain::{PaneId, SubscriptionId};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::engine::NativeSessionEngine;
 
@@ -18,6 +19,48 @@ pub(crate) fn open_native_subscription(
             open_pane_surface_subscription(runtime, pane_id)
         }
     }
+}
+
+pub(crate) fn open_native_raw_output_subscription(
+    runtime: Arc<NativeSessionEngine>,
+    pane_id: PaneId,
+) -> Result<BackendRawOutputSubscription, BackendError> {
+    let subscription_id = SubscriptionId::new();
+    let mut raw_tick = runtime.subscribe_pane_raw_output(pane_id)?;
+    let (events_tx, events_rx) = mpsc::channel(256);
+    let (cancel_tx, mut cancel_rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => break,
+                event = raw_tick.recv() => {
+                    match event {
+                        Ok(event) => {
+                            if events_tx.send(event).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped_events)) => {
+                            if events_tx
+                                .send(BackendRawOutputEvent::Gap(BackendRawOutputGap {
+                                    pane_id,
+                                    skipped_events,
+                                }))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(BackendRawOutputSubscription::new(subscription_id, events_rx, cancel_tx))
 }
 
 fn open_topology_subscription(

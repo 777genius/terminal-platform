@@ -145,6 +145,7 @@ export {
   type TerminalScreenActionPresentation,
   type TerminalScreenActionTone,
   type TerminalScreenCopyState,
+  type TerminalScreenHistoryLoadState,
 } from "./elements/terminal-screen-actions.js";
 export {
   TERMINAL_SCREEN_SEARCH_ACTION_IDS,

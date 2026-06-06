@@ -63,7 +63,8 @@ impl<'a> SessionCatalogService<'a> {
         }
 
         let session_id = self.runtime.resolve_session_id_for_route(&route)?;
-        self.runtime.backend(route.backend)?.attach_session(session_id, route.clone()).await?;
+        let session =
+            self.runtime.backend(route.backend)?.attach_session(session_id, route.clone()).await?;
 
         let descriptor = crate::registry::SessionDescriptor {
             session_id,
@@ -73,8 +74,10 @@ impl<'a> SessionCatalogService<'a> {
             health: SessionHealthSnapshot::ready(session_id),
         };
         let summary = SessionRuntime::to_summary(descriptor.clone());
+        let capture_descriptor = descriptor.clone();
         self.runtime.upsert_session_route(descriptor.session_id, &descriptor.route)?;
         self.runtime.registry().insert(descriptor);
+        self.runtime.start_v2_history_capture(capture_descriptor, session).await;
 
         Ok(summary)
     }

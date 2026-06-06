@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import { createServer } from "node:http";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
-import { launchChromeWithCdp, resolveRuntimeEvaluationValue, stopProcess } from "./chrome-cdp-smoke.mjs";
+import {
+  launchChromeWithCdp,
+  removeChromeUserDataDir,
+  resolveRuntimeEvaluationValue,
+  stopProcess,
+} from "./chrome-cdp-smoke.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
@@ -14,7 +20,7 @@ const rendererDistRoot = path.join(appRoot, "dist", "renderer");
 const rendererIndexPath = path.join(rendererDistRoot, "index.html");
 const cdpPort = process.env.TERMINAL_DEMO_STATIC_SMOKE_CDP_PORT ?? "9236";
 const staticRendererPort = process.env.TERMINAL_DEMO_STATIC_SMOKE_RENDERER_PORT ?? "0";
-const screenshotPath = path.join("/tmp", `terminal-demo-static-renderer-${Date.now()}.png`);
+const screenshotPath = path.join(os.tmpdir(), `terminal-demo-static-renderer-${Date.now()}.png`);
 
 let chromeProcess = null;
 let chromeUserDataDir = null;
@@ -212,9 +218,7 @@ async function main() {
   } finally {
     await stopProcess(chromeProcess);
     await closeStaticRendererServer(staticRendererServer?.server);
-    if (chromeUserDataDir) {
-      await fs.rm(chromeUserDataDir, { recursive: true, force: true });
-    }
+    await removeChromeUserDataDir(chromeUserDataDir);
   }
 }
 
@@ -362,6 +366,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
 
   try {
     await send("Page.enable");
+    await send("Page.bringToFront").catch(() => undefined);
     await send("Runtime.enable");
     await send("Log.enable");
     await send("Emulation.setDeviceMetricsOverride", {
@@ -370,6 +375,7 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
       deviceScaleFactor: 1,
       mobile: false,
     });
+    await sleep(3000);
 
     const result = await evaluate(send, `(async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -753,7 +759,22 @@ async function runStaticPreviewScenario(staticPreviewUrl) {
   }
 }
 
-function evaluate(send, expression) {
+async function evaluate(send, expression) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await evaluateOnce(send, expression);
+    } catch (error) {
+      if (!String(error?.message ?? error).includes("Execution context was destroyed") || attempt === 2) {
+        throw error;
+      }
+      await sleep(500);
+    }
+  }
+
+  throw new Error("Browser evaluation retry loop exhausted");
+}
+
+function evaluateOnce(send, expression) {
   let timeoutId;
   const evaluation = send("Runtime.evaluate", {
     expression,
@@ -769,6 +790,10 @@ function evaluate(send, expression) {
   return Promise.race([evaluation, timeout]).finally(() => {
     clearTimeout(timeoutId);
   });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function onceSocketOpen(socket) {

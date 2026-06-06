@@ -19,6 +19,8 @@
     "dev:browser": "node ./scripts/dev-browser.mjs",
     "smoke:browser": "node ./scripts/browser-smoke.mjs",
     "smoke:browser:foreign": "node ./scripts/browser-foreign-backends-smoke.mjs",
+    "smoke:browser:persistence-degraded": "node ./scripts/browser-persistence-degraded-smoke.mjs",
+    "smoke:browser:persistence-long-history": "node ./scripts/browser-persistence-long-history-smoke.mjs",
     "verify:renderer-static": "npm run stage:workspace-sdk && npm run build:renderer && node ./scripts/verify-static-renderer-preview.mjs",
     "verify:renderer-static:browser": "npm run verify:renderer-static && node ./scripts/verify-static-renderer-browser.mjs",
     "smoke:renderer-static": "npm run verify:renderer-static",
@@ -30,7 +32,7 @@
     "build:host": "node --input-type=module -e \"import fs from 'node:fs'; fs.rmSync('dist/host', { recursive: true, force: true }); fs.rmSync('dist/features', { recursive: true, force: true }); fs.rmSync('dist/shared', { recursive: true, force: true });\" && tsc -p tsconfig.host.json && tsc-alias -p tsconfig.host.json --resolve-full-paths --resolve-full-extension .js",
     "build:renderer": "vite build",
     "build": "npm run stage:sdk && npm run check:architecture && npm run build:host && npm run build:renderer",
-    "test": "npm run check:architecture && npm run stage:sdk && npm run build:host && node --test ./tests/**/*.test.mjs",
+    "test": "npm run check:architecture && npm run stage:sdk && npm run build:host && npm run build:renderer-node-test && node --test \"./tests/*.test.mjs\"",
     "preview": "electron ./dist/host/main/index.js",
     "start": "npm run build && electron ./dist/host/main/index.js"
   },
@@ -39,7 +41,7 @@
     "lit": "3.3.2",
     "react": "19.2.5",
     "react-dom": "19.2.5",
-    "ws": "8.20.0",
+    "ws": "8.21.0",
     "zustand": "5.0.12"
   },
   "devDependencies": {

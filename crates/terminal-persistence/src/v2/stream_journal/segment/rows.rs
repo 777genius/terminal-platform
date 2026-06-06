@@ -1,0 +1,91 @@
+use super::super::super::*;
+
+pub(super) struct StreamSegmentRowInput<'a> {
+    pub(super) segment_id: &'a str,
+    pub(super) session_id: &'a str,
+    pub(super) pane_id: &'a str,
+    pub(super) commit_id: &'a str,
+    pub(super) stream_id: &'a str,
+    pub(super) event_seq_low: i64,
+    pub(super) event_seq_high: i64,
+    pub(super) byte_low: i64,
+    pub(super) byte_high: i64,
+    pub(super) payload: &'a [u8],
+    pub(super) payload_len: i64,
+    pub(super) payload_checksum: &'a str,
+    pub(super) capture_semantics: &'a str,
+    pub(super) writer_generation: &'a str,
+    pub(super) metadata_json: Option<String>,
+    pub(super) now: i64,
+}
+
+pub(super) struct PrimaryEventRowInput<'a> {
+    pub(super) event_id: &'a str,
+    pub(super) session_id: &'a str,
+    pub(super) pane_id: &'a str,
+    pub(super) commit_id: &'a str,
+    pub(super) stream_id: &'a str,
+    pub(super) event_seq: i64,
+    pub(super) event_type: String,
+    pub(super) byte_low: i64,
+    pub(super) byte_high: i64,
+    pub(super) payload_json: Option<String>,
+    pub(super) payload_schema_id: Option<String>,
+    pub(super) source_event_id_hash: Option<String>,
+    pub(super) occurred_at_ms: i64,
+    pub(super) now: i64,
+    pub(super) capture_semantics: &'a str,
+    pub(super) trust_level: String,
+    pub(super) metadata_json: Option<String>,
+}
+
+pub(super) fn new_stream_segment_row(input: StreamSegmentRowInput<'_>) -> NewStreamSegmentRow {
+    NewStreamSegmentRow {
+        id: input.segment_id.to_string(),
+        session_id: input.session_id.to_string(),
+        pane_id: input.pane_id.to_string(),
+        commit_id: input.commit_id.to_string(),
+        stream_id: input.stream_id.to_string(),
+        event_seq_low: input.event_seq_low,
+        event_seq_high: input.event_seq_high,
+        byte_low: input.byte_low,
+        byte_high: input.byte_high,
+        payload: input.payload.to_vec(),
+        payload_len: input.payload_len,
+        stored_byte_len: input.payload_len,
+        uncompressed_byte_len: Some(input.payload_len),
+        checksum_algorithm: "blake3".to_string(),
+        checksum: input.payload_checksum.to_string(),
+        compression: "none".to_string(),
+        capture_semantics: input.capture_semantics.to_string(),
+        encryption_state: "plaintext".to_string(),
+        key_ref: None,
+        created_at_ms: input.now,
+        writer_generation: input.writer_generation.to_string(),
+        metadata_json: input.metadata_json,
+    }
+}
+
+pub(super) fn new_primary_journal_event_row(input: PrimaryEventRowInput<'_>) -> NewJournalEventRow {
+    NewJournalEventRow {
+        id: input.event_id.to_string(),
+        session_id: input.session_id.to_string(),
+        pane_id: Some(input.pane_id.to_string()),
+        commit_id: input.commit_id.to_string(),
+        stream_id: input.stream_id.to_string(),
+        event_scope_kind: "pane".to_string(),
+        event_scope_id: input.pane_id.to_string(),
+        event_seq: input.event_seq,
+        event_type: input.event_type,
+        byte_low: Some(input.byte_low),
+        byte_high: Some(input.byte_high),
+        payload_json: input.payload_json,
+        payload_schema_id: input.payload_schema_id,
+        source_event_id_hash: input.source_event_id_hash,
+        occurred_at_ms: input.occurred_at_ms,
+        created_at_ms: input.now,
+        capture_semantics: input.capture_semantics.to_string(),
+        trust_level: input.trust_level,
+        metadata_json: input.metadata_json,
+    }
+}

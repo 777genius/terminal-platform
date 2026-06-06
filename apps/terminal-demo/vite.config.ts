@@ -22,5 +22,8 @@ export default defineConfig({
     host: "127.0.0.1",
     port: rendererPort,
     strictPort: true,
+    watch: {
+      ignored: ["**/.generated/**"],
+    },
   },
 });
