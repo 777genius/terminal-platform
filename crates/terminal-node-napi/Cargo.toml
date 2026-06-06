@@ -22,7 +22,7 @@ terminal-node = { path = "../terminal-node" }
 terminal-protocol = { path = "../terminal-protocol" }
 
 [build-dependencies]
-napi-build = "2.3.1"
+napi-build = "2.3.2"
 
 [dev-dependencies]
 terminal-daemon = { path = "../terminal-daemon", default-features = false }
