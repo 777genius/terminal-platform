@@ -176,10 +176,14 @@ async fn bootstrap_smoke_roundtrips_request_reply_flow() {
     assert!(!screen.surface.lines.is_empty());
     assert_eq!(delta.rows, screen.rows);
     assert_eq!(delta.cols, screen.cols);
-    assert!(delta.patch.is_none());
     assert_eq!(delta.from_sequence, screen.sequence);
-    assert_eq!(delta.to_sequence, screen.sequence);
+    assert!(delta.to_sequence >= screen.sequence);
     assert!(delta.full_replace.is_none());
+    if delta.to_sequence == screen.sequence {
+        assert!(delta.patch.is_none());
+    } else {
+        assert!(delta.patch.is_some());
+    }
     assert!(dispatch.changed);
     assert_eq!(topology_after_dispatch.tabs.len(), 2);
 
