@@ -134,15 +134,18 @@ async fn handle_subscribe_line(
                 return true;
             }
 
-            let Ok(current) = session.screen_snapshot_from_viewport(
+            let Ok(mut current) = session.screen_snapshot_from_viewport(
                 pane_id,
                 viewport,
                 ProjectionSource::ZellijViewportSubscribe,
             ) else {
                 return false;
             };
-            if current.sequence == last.sequence {
+            if equivalent_surface(last, &current) {
                 return true;
+            }
+            if current.sequence <= last.sequence {
+                current.sequence = last.sequence.saturating_add(1);
             }
 
             let delta = ScreenDelta::between(last, &current);
@@ -153,6 +156,13 @@ async fn handle_subscribe_line(
             closed_pane_ref != backend_ref
         }
     }
+}
+
+fn equivalent_surface(previous: &ScreenSnapshot, current: &ScreenSnapshot) -> bool {
+    previous.pane_id == current.pane_id
+        && previous.rows == current.rows
+        && previous.cols == current.cols
+        && previous.surface == current.surface
 }
 
 async fn send_screen_delta(

@@ -24,7 +24,8 @@ pub(super) use terminal_persistence::SqliteSessionStore;
 #[cfg(unix)]
 pub(super) use terminal_projection::TopologySnapshot;
 pub(super) use terminal_protocol::{
-    DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion, SubscriptionEvent,
+    DaemonCapabilities, DaemonPhase, Handshake, HistoryReplayState, ProtocolVersion,
+    RestoreGuaranteeLevel, SubscriptionEvent,
 };
 #[cfg(unix)]
 pub(super) use tokio::time::sleep;

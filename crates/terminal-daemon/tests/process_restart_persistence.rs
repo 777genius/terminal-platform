@@ -1,3 +1,5 @@
+#![cfg(feature = "native-backend")]
+
 use std::{
     path::Path,
     process::{Child, Command, Stdio},

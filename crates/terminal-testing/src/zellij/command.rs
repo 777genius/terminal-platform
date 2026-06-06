@@ -5,6 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(windows)]
 fn resolve_windows_executable_path(program: &str) -> Option<PathBuf> {
     let has_path_separator = program.contains('\\') || program.contains('/');
     if has_path_separator {

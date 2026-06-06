@@ -3,7 +3,10 @@ use terminal_domain::{PaneId, SessionId, SessionRoute, TabId};
 use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
 use terminal_projection::{SessionHealthReason, SessionHealthSnapshot, TopologySnapshot};
 
-pub(super) fn tab_id_for_pane(topology: &TopologySnapshot, pane_id: PaneId) -> Option<TabId> {
+pub(in crate::sessions) fn tab_id_for_pane(
+    topology: &TopologySnapshot,
+    pane_id: PaneId,
+) -> Option<TabId> {
     topology
         .tabs
         .iter()

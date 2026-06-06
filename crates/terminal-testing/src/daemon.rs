@@ -37,7 +37,9 @@ pub fn unique_socket_address(label: &str) -> LocalSocketAddress {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-    let slug = format!("terminal-platform-{label}-{}-{nanos}.sock", std::process::id());
+    let short_label = label.chars().take(24).collect::<String>();
+    let entropy = (nanos & 0xffff_ffff_ffff) as u64;
+    let slug = format!("tp-{short_label}-{}-{entropy:x}.sock", std::process::id());
 
     LocalSocketAddress::from_runtime_slug(slug)
 }

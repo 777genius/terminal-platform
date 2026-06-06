@@ -16,9 +16,10 @@ use terminal_backend_tmux::TmuxBackend;
 use terminal_backend_zellij::ZellijBackend;
 #[cfg(all(unix, feature = "tmux-backend"))]
 use terminal_daemon::TerminalDaemon;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "tmux-backend"))]
 use terminal_runtime::{BackendCatalog, TerminalRuntime};
 
+#[cfg(all(unix, feature = "tmux-backend"))]
 pub fn tmux_daemon(socket_name: &str) -> TerminalDaemon {
     let mut backends = Vec::<Arc<dyn MuxBackendPort>>::new();
 
@@ -101,7 +102,6 @@ impl Drop for TmuxServerGuard {
 }
 
 #[cfg(any(unix, windows))]
-
 fn run_tmux(socket_name: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new("tmux")
         .arg("-L")

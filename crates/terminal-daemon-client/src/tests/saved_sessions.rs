@@ -49,8 +49,25 @@ async fn lists_and_loads_saved_native_sessions() {
     assert_eq!(saved_summary.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
     assert!(saved_summary.restore_semantics.restores_topology);
     assert!(saved_summary.restore_semantics.uses_saved_launch_spec);
-    assert!(!saved_summary.restore_semantics.replays_saved_screen_buffers);
     assert!(!saved_summary.restore_semantics.preserves_process_state);
+    let summary_v2 = saved_summary
+        .restore_semantics_v2
+        .as_ref()
+        .expect("saved summary should expose v2 restore semantics");
+    assert_eq!(
+        saved_summary.restore_semantics.replays_saved_screen_buffers,
+        summary_v2.replays_saved_screen_buffers
+    );
+    assert!(matches!(
+        summary_v2.restore_guarantee_level,
+        RestoreGuaranteeLevel::RichHistory
+            | RestoreGuaranteeLevel::BasicHistory
+            | RestoreGuaranteeLevel::VisualRestoreOnly
+    ));
+    assert!(matches!(
+        summary_v2.history_replay_state,
+        HistoryReplayState::ReplayedFromJournal | HistoryReplayState::HydratedFromSnapshot
+    ));
     assert_eq!(loaded.session.session_id, created.session.session_id);
     assert_eq!(loaded.session.title.as_deref(), Some("shell"));
     assert_eq!(loaded.session.topology.tabs.len(), 1);
@@ -60,8 +77,26 @@ async fn lists_and_loads_saved_native_sessions() {
     assert_eq!(loaded.session.compatibility.status, SavedSessionCompatibilityStatus::Compatible);
     assert!(loaded.session.restore_semantics.restores_focus_state);
     assert!(loaded.session.restore_semantics.restores_tab_titles);
-    assert!(!loaded.session.restore_semantics.replays_saved_screen_buffers);
     assert!(!loaded.session.restore_semantics.preserves_process_state);
+    let loaded_v2 = loaded
+        .session
+        .restore_semantics_v2
+        .as_ref()
+        .expect("loaded saved session should expose v2 restore semantics");
+    assert_eq!(
+        loaded.session.restore_semantics.replays_saved_screen_buffers,
+        loaded_v2.replays_saved_screen_buffers
+    );
+    assert!(matches!(
+        loaded_v2.restore_guarantee_level,
+        RestoreGuaranteeLevel::RichHistory
+            | RestoreGuaranteeLevel::BasicHistory
+            | RestoreGuaranteeLevel::VisualRestoreOnly
+    ));
+    assert!(matches!(
+        loaded_v2.history_replay_state,
+        HistoryReplayState::ReplayedFromJournal | HistoryReplayState::HydratedFromSnapshot
+    ));
 
     server.shutdown().await.expect("server shutdown should succeed");
 }

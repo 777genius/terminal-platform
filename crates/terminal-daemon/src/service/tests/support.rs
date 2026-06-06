@@ -1,5 +1,6 @@
 use super::prelude::*;
 
+#[cfg(feature = "native-backend")]
 pub(super) fn isolated_store_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "terminal-platform-daemon-service-{label}-{}-{}.sqlite3",

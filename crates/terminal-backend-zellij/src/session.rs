@@ -44,10 +44,13 @@ impl BackendSessionPort for ZellijAttachedSession {
         from_sequence: u64,
     ) -> BoxFuture<'_, Result<ScreenDelta, BackendError>> {
         Box::pin(async move {
-            let current = self.screen_snapshot_inner(pane_id)?;
+            let mut current = self.screen_snapshot_inner(pane_id)?;
             if current.sequence == from_sequence {
                 Ok(ScreenDelta::unchanged_from(&current))
             } else {
+                if current.sequence < from_sequence {
+                    current.sequence = from_sequence.saturating_add(1);
+                }
                 Ok(ScreenDelta::full_replace(from_sequence, &current))
             }
         })

@@ -94,7 +94,7 @@ async fn bootstrap_smoke_reports_dynamic_backend_capabilities() {
         assert!(zellij.capabilities.plugin_panes);
         assert!(zellij.capabilities.advisory_metadata_subscriptions);
         assert!(!zellij.capabilities.floating_panes);
-        assert!(!zellij.capabilities.rendered_scrollback_snapshot);
+        assert!(zellij.capabilities.rendered_scrollback_snapshot);
     } else {
         assert!(!zellij.capabilities.tab_create);
         assert!(!zellij.capabilities.tab_close);

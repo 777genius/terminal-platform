@@ -15,7 +15,7 @@ use crate::{backend_catalog::BackendCatalog, registry::SessionRegistry};
 
 pub(super) use helpers::{
     collect_pane_ids_from_node, collect_pane_ids_from_topology, command_updates_summary_title,
-    saved_session_title, tab_snapshot_by_id,
+    saved_session_title, tab_id_for_pane, tab_snapshot_by_id,
 };
 #[cfg(test)]
 pub(super) use helpers::{session_health_from_attach_error, session_route_fingerprint};
