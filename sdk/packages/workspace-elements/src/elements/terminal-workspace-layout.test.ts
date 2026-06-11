@@ -12,8 +12,32 @@ import {
   resolveTerminalWorkspaceInspectorState,
   resolveTerminalWorkspaceNavigationState,
 } from "./terminal-workspace-layout.js";
+import {
+  TERMINAL_WORKSPACE_PARTS,
+  TERMINAL_WORKSPACE_SLOTS,
+  type TerminalWorkspacePartName,
+  type TerminalWorkspaceSlotName,
+} from "./terminal-workspace-surface-contract.js";
 
 describe("terminal workspace layout", () => {
+  it("publishes host extension slots and parts for embeddable workspace shells", () => {
+    const slotNames: TerminalWorkspaceSlotName[] = Object.values(TERMINAL_WORKSPACE_SLOTS);
+    const partNames: TerminalWorkspacePartName[] = Object.values(TERMINAL_WORKSPACE_PARTS);
+
+    expect(slotNames).toEqual([
+      "command-dock",
+      "inspector",
+      "navigation",
+      "screen",
+      "status-bar",
+      "tab-strip",
+    ]);
+    expect(partNames).toContain("workspace");
+    expect(partNames).toContain("terminal-column");
+    expect(partNames).toContain("inspector-column");
+    expect(partNames).toContain("navigation-drawer");
+  });
+
   it("keeps the inline inspector as the default public layout", () => {
     expect(resolveTerminalWorkspaceInspectorState(undefined)).toEqual({
       mode: TERMINAL_WORKSPACE_INSPECTOR_MODES.inline,

@@ -9,7 +9,11 @@ import type { WorkspaceTransportClient } from "@terminal-platform/workspace-cont
 
 import { decodeWorkspaceWebSocketPayload, encodeWorkspaceWebSocketPayload } from "./json-codec.js";
 import {
+  WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES,
+  createWorkspaceGatewayError,
   createWorkspaceWebSocketTransport,
+  mapWorkspaceGatewayError,
+  normalizeWorkspaceGatewayErrorCode,
   type WorkspaceGatewayControlClientMessage,
   type WorkspaceGatewayControlServerResponse,
   type WorkspaceGatewayStreamClientMessage,
@@ -144,6 +148,40 @@ describe.skipIf(!canBindLoopback)("workspace websocket adapter", () => {
 });
 
 describe("workspace websocket adapter failure handling", () => {
+  it("maps websocket diagnostics to contract-compatible errors without leaking unknown gateway codes", () => {
+    const storagePressureError = createWorkspaceGatewayError({
+      message: "storage pressure",
+      code: "storage_pressure",
+    }, {
+      phase: "response",
+      plane: "control",
+    });
+    const unknownGatewayDiagnostic = mapWorkspaceGatewayError({
+      message: "backend-native ref should stay private",
+      code: "tmux:%pane-1",
+    }, {
+      phase: "subscription",
+      plane: "stream",
+    });
+
+    expect(WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES.gatewayError).toBe("websocket_gateway_error");
+    expect(storagePressureError).toMatchObject({
+      code: "storage_pressure",
+      recoverable: true,
+      message: "storage pressure",
+    });
+    expect(normalizeWorkspaceGatewayErrorCode("protocol_error")).toBe("protocol_error");
+    expect(normalizeWorkspaceGatewayErrorCode("tmux:%pane-1")).toBe("transport_failed");
+    expect(unknownGatewayDiagnostic).toMatchObject({
+      code: "websocket_gateway_error",
+      workspaceErrorCode: "transport_failed",
+      phase: "subscription",
+      plane: "stream",
+      recoverable: true,
+    });
+    expect("gatewayCode" in unknownGatewayDiagnostic).toBe(false);
+  });
+
   it("rejects control requests when websocket send throws synchronously", async () => {
     const transport = createWorkspaceWebSocketTransport({
       controlUrl: "ws://127.0.0.1/terminal-gateway/control",
@@ -151,7 +189,11 @@ describe("workspace websocket adapter failure handling", () => {
       webSocketFactory: createOpenThenThrowingSendWebSocket,
     });
 
-    await expect(transport.listSessions()).rejects.toThrow("simulated websocket send failure");
+    await expect(transport.listSessions()).rejects.toMatchObject({
+      code: "transport_failed",
+      message: "simulated websocket send failure",
+      recoverable: true,
+    });
     await transport.close();
   });
 

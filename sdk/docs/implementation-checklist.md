@@ -95,24 +95,24 @@ Use this file as the operational progress list while implementing the SDK plan.
 - [x] Add memory adapter
 - [x] Add codec and normalization
 - [x] Add reconnect policy
-- [ ] Add explicit diagnostics mapping
+- [x] Add explicit diagnostics mapping
 - [x] Add contract tests
 - [x] Add race tests
 
 ## Phase 7 - Design Tokens
 
 - [x] Add token source
-- [ ] Add transforms
-- [ ] Add CSS vars generation
+- [x] Add transforms
+- [x] Add CSS vars generation
 - [x] Add theme manifests
-- [ ] Document token taxonomy
+- [x] Document token taxonomy
 - [x] Freeze custom element tag namespace
 
 ## Phase 8 - Elements v1
 
 - [x] Add public composite elements
 - [x] Add Shadow DOM styling
-- [ ] Add slots and parts
+- [x] Add slots and parts
 - [x] Add documented element registration helper
 - [ ] Add accessibility baseline
 - [x] Add documented keyboard and focus behavior
@@ -132,7 +132,7 @@ Use this file as the operational progress list while implementing the SDK plan.
 - [x] Add wrappers
 - [x] Add hooks
 - [x] Add JSX typings
-- [ ] Add typed event mapping
+- [x] Add typed event mapping
 - [x] Verify no duplicate business logic
 
 ## Phase 11 - Hardening
@@ -141,9 +141,9 @@ Use this file as the operational progress list while implementing the SDK plan.
 - [ ] Run browser test matrix
 - [x] Fill compatibility matrix
 - [x] Add perf budgets
-- [ ] Confirm rollback plan for release cut
-- [ ] Add deprecation policy checkpoints
-- [ ] Add release checklist
-- [ ] Add integration samples
-- [ ] Validate samples use only public entrypoints
-- [ ] Verify production-grade release gates
+- [x] Confirm rollback plan for release cut
+- [x] Add deprecation policy checkpoints
+- [x] Add release checklist
+- [x] Add integration samples
+- [x] Validate samples use only public entrypoints
+- [x] Verify production-grade release gates

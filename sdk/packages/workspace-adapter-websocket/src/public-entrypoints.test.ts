@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES,
+  createWorkspaceGatewayError,
+  mapWorkspaceGatewayError,
+} from "./index.js";
 import type {
   WorkspaceGatewayControlClientMessage,
   WorkspaceGatewayControlRequestMap,
@@ -18,6 +23,34 @@ type _PaneHistoryRequestIsPublic = Assert<
 >;
 
 describe("workspace websocket protocol public subpath", () => {
+  it("exposes websocket diagnostics mapping from the main public entrypoint", () => {
+    const diagnostic = mapWorkspaceGatewayError({
+      message: "daemon rejected request",
+      code: "session_not_found",
+    }, {
+      phase: "response",
+      plane: "control",
+    });
+    const error = createWorkspaceGatewayError({
+      message: "daemon rejected request",
+      code: "session_not_found",
+    }, {
+      phase: "response",
+      plane: "control",
+    });
+
+    expect(WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES.gatewayError).toBe("websocket_gateway_error");
+    expect(diagnostic).toMatchObject({
+      workspaceErrorCode: "session_not_found",
+      gatewayCode: "session_not_found",
+      recoverable: true,
+    });
+    expect(error).toMatchObject({
+      code: "session_not_found",
+      recoverable: true,
+    });
+  });
+
   it("exposes gateway protocol types without adding runtime surface", async () => {
     const protocol = await import("./protocol.js");
     const controlRequest = {

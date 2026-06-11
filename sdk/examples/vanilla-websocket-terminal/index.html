@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en" data-tp-theme="terminal-platform-default">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Terminal Platform WebSocket Sample</title>
+    <style>
+      html,
+      body {
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        background: var(--tp-color-bg, #0f1117);
+        color: var(--tp-color-text, #e8edf6);
+        font-family: var(--tp-font-family-ui, system-ui, sans-serif);
+      }
+
+      .shell {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        min-height: 3rem;
+        padding: 0 1rem;
+        border-bottom: 1px solid var(--tp-color-border, #2a3242);
+        background: var(--tp-color-panel, #171b24);
+      }
+
+      .title,
+      .status {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .title {
+        font-weight: 650;
+      }
+
+      .status {
+        color: var(--tp-color-text-muted, #9ba7bd);
+        font-size: 0.875rem;
+      }
+
+      .status[data-state="ready"] {
+        color: var(--tp-color-success, #86efac);
+      }
+
+      .status[data-state="failed"] {
+        color: var(--tp-color-danger, #fca5a5);
+      }
+
+      .workspace-frame {
+        min-height: 0;
+        padding: 0.75rem;
+      }
+
+      tp-terminal-workspace {
+        display: block;
+        height: calc(100vh - 4.5rem);
+        min-height: 32rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="toolbar">
+        <div class="title">Terminal Platform</div>
+        <div id="connection-status" class="status" data-state="connecting">Connecting</div>
+      </header>
+      <section class="workspace-frame">
+        <tp-terminal-workspace
+          layout-preset="terminal"
+          auto-focus-command-input
+        ></tp-terminal-workspace>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -59,10 +59,14 @@ At minimum, the SDK CI model should include:
 - packed-consumer smoke tests
 - compatibility matrix drift check
 - performance budget drift check
+- example public import and typecheck guard
+- release readiness policy check
 
 The packed-consumer lane runs `npm run test:packed-consumer` from `sdk/`.
 The compatibility matrix lane runs `npm run check:compatibility-matrix` from `sdk/`.
 The performance budget lane runs `npm run check:performance-budgets` from `sdk/`.
+The example guard lane runs `npm run check:examples` from `sdk/`.
+The release readiness lane runs `npm run check:release-readiness` from `sdk/`.
 
 ## Alignment With Repo Governance
 

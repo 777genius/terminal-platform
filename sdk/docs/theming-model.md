@@ -17,9 +17,42 @@ The token source is DTCG-compatible and lives in `@terminal-platform/design-toke
 
 Token tiers:
 
-- reference tokens
-- semantic tokens
-- component tokens
+- semantic tokens, such as `--tp-color-text`, `--tp-space-4`, and `--tp-font-family-ui`
+- component tokens, such as `--tp-terminal-color-bg` and `--tp-terminal-color-text`
+
+Reference tokens may be added later, but v1 public theming starts from semantic and component CSS variables.
+
+## Token Taxonomy
+
+`@terminal-platform/design-tokens` exposes token taxonomy metadata:
+
+- `terminalPlatformTokenDefinitions`
+- `TERMINAL_PLATFORM_TOKEN_TIERS`
+- `TERMINAL_PLATFORM_TOKEN_CATEGORIES`
+- `listTerminalPlatformTokensByCategory`
+- `listMissingTerminalPlatformThemeTokens`
+
+Current categories are:
+
+- `color`
+- `terminal-color`
+- `typography`
+- `radius`
+- `spacing`
+- `elevation`
+
+Built-in themes must provide every documented token. Host themes may add extension tokens, but extension tokens are not SDK contract unless documented.
+
+## Token Transforms
+
+The design token package exposes pure transforms for host integration:
+
+- `createTerminalPlatformThemeCssDeclarations`
+- `createTerminalPlatformThemeCssRule`
+- `createTerminalPlatformThemeCssText`
+- `listTerminalPlatformThemeTokenEntries`
+
+Transforms order known tokens by taxonomy and append host extension tokens in stable sorted order.
 
 ## Runtime Contract
 
@@ -57,13 +90,21 @@ Examples:
 
 Expose `part` names only where structural customization is intentionally supported.
 
-Examples:
+Public workspace parts are exported as `TERMINAL_WORKSPACE_PARTS`:
 
-- `header`
-- `toolbar`
-- `session-row`
-- `screen-surface`
+- `workspace`
+- `body`
+- `content`
+- `operations-deck`
+- `terminal-column`
+- `command-region`
+- `inspector-column`
+- `inspector-drawer`
+- `navigation-drawer`
 - `sidebar`
+- `secondary-summary`
+- `diagnostics-stack`
+- `diagnostics`
 
 Part names are public API once documented.
 
@@ -71,11 +112,14 @@ Part names are public API once documented.
 
 Use slots for content extension only where there is a clear product-level use case.
 
-Examples:
+Public workspace slots are exported as `TERMINAL_WORKSPACE_SLOTS`:
 
-- toolbar extra actions
-- empty states
-- side panels
+- `status-bar`
+- `navigation`
+- `tab-strip`
+- `screen`
+- `command-dock`
+- `inspector`
 
 Do not add slots for every internal node.
 

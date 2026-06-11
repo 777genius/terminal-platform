@@ -28,7 +28,9 @@
     "test:packed-consumer": "npm run build && node scripts/packed-consumer-smoke.mjs",
     "check:compatibility-matrix": "node scripts/check-compatibility-matrix.mjs",
     "check:performance-budgets": "node scripts/check-performance-budgets.mjs",
-    "check": "npm run check:compatibility-matrix && npm run check:performance-budgets && npm run typecheck && npm run build && npm run test",
+    "check:examples": "node scripts/check-example-public-imports.mjs && tsc -p examples/tsconfig.json --noEmit",
+    "check:release-readiness": "node scripts/check-release-readiness.mjs",
+    "check": "npm run check:compatibility-matrix && npm run check:performance-budgets && npm run check:examples && npm run check:release-readiness && npm run typecheck && npm run build && npm run test",
     "changeset": "changeset"
   },
   "devDependencies": {

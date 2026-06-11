@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   TerminalCommandComposer,
+  TerminalScreen,
   TerminalWorkspace,
   TerminalCommandComposerActionId,
   TerminalCommandComposerActionLabelMode,
@@ -11,6 +12,7 @@ import type {
   TerminalCommandComposerActionTone,
   TerminalCommandComposerDraftChangeDetail,
   TerminalCommandComposerHistoryNavigateDetail,
+  TerminalCommandComposerReactEventHandlers,
   TerminalCommandComposerShortcutDetail,
   TerminalCommandDockAccessoryMode,
   TerminalCommandDockAccessoryOptions,
@@ -28,6 +30,8 @@ import type {
   TerminalScreenActionPlacement,
   TerminalScreenActionPresentation,
   TerminalScreenActionTone,
+  TerminalScreenCopiedDetail,
+  TerminalScreenCopyFailedDetail,
   TerminalScreenSearchActionId,
   TerminalScreenSearchActionLabelMode,
   TerminalScreenSearchActionOptions,
@@ -36,6 +40,11 @@ import type {
   TerminalScreenSearchActionTone,
   TerminalScreenChromeMode,
   TerminalScreenChromeState,
+  TerminalScreenInputFailedDetail,
+  TerminalScreenInputSubmittedDetail,
+  TerminalScreenPasteFailedDetail,
+  TerminalScreenPasteSubmittedDetail,
+  TerminalScreenReactEventHandlers,
   TerminalWorkspaceChromeState,
   TerminalWorkspaceChromeTone,
   TerminalWorkspaceInspectorMode,
@@ -44,9 +53,11 @@ import type {
   TerminalWorkspaceLayoutState,
   TerminalWorkspaceNavigationMode,
   TerminalWorkspaceNavigationState,
+  TerminalWorkspacePartName,
   TerminalWorkspaceSecondaryChromeMode,
+  TerminalWorkspaceSlotName,
 } from "./index.js";
-import type { TerminalCommandComposerElement } from "@terminal-platform/workspace-elements";
+import type { TerminalCommandComposerElement, TerminalScreenElement } from "@terminal-platform/workspace-elements";
 
 type Assert<T extends true> = T;
 
@@ -58,6 +69,7 @@ type Equal<Actual, Expected> = (<T>() => T extends Actual ? 1 : 2) extends
 type EventParameter<Handler> = NonNullable<Handler> extends (event: infer Event) => void ? Event : never;
 
 type ComposerProps = React.ComponentProps<typeof TerminalCommandComposer>;
+type ScreenProps = React.ComponentProps<typeof TerminalScreen>;
 
 type _ComposerRefTargetsElement = Assert<
   Equal<React.ComponentRef<typeof TerminalCommandComposer>, TerminalCommandComposerElement>
@@ -80,6 +92,39 @@ type _ComposerShortcutEvent = Assert<
 >;
 type _ComposerPasteEvent = Assert<Equal<EventParameter<ComposerProps["onCommandPaste"]>, CustomEvent<void>>>;
 type _ComposerSubmitEvent = Assert<Equal<EventParameter<ComposerProps["onCommandSubmit"]>, CustomEvent<void>>>;
+type _ScreenRefTargetsElement = Assert<
+  Equal<React.ComponentRef<typeof TerminalScreen>, TerminalScreenElement>
+>;
+type _ScreenCopiedEvent = Assert<
+  Equal<EventParameter<ScreenProps["onScreenCopied"]>, CustomEvent<TerminalScreenCopiedDetail>>
+>;
+type _ScreenCopyFailedEvent = Assert<
+  Equal<EventParameter<ScreenProps["onScreenCopyFailed"]>, CustomEvent<TerminalScreenCopyFailedDetail>>
+>;
+type _ScreenInputSubmittedEvent = Assert<
+  Equal<EventParameter<ScreenProps["onScreenInputSubmitted"]>, CustomEvent<TerminalScreenInputSubmittedDetail>>
+>;
+type _ScreenInputFailedEvent = Assert<
+  Equal<EventParameter<ScreenProps["onScreenInputFailed"]>, CustomEvent<TerminalScreenInputFailedDetail>>
+>;
+type _ScreenPasteSubmittedEvent = Assert<
+  Equal<EventParameter<ScreenProps["onScreenPasteSubmitted"]>, CustomEvent<TerminalScreenPasteSubmittedDetail>>
+>;
+type _ScreenPasteFailedEvent = Assert<
+  Equal<EventParameter<ScreenProps["onScreenPasteFailed"]>, CustomEvent<TerminalScreenPasteFailedDetail>>
+>;
+type _ComposerReactHandlerType = Assert<
+  Equal<
+    NonNullable<TerminalCommandComposerReactEventHandlers["onCommandDraftChange"]>,
+    (event: CustomEvent<TerminalCommandComposerDraftChangeDetail>) => void
+  >
+>;
+type _ScreenReactHandlerType = Assert<
+  Equal<
+    NonNullable<TerminalScreenReactEventHandlers["onScreenInputSubmitted"]>,
+    (event: CustomEvent<TerminalScreenInputSubmittedDetail>) => void
+  >
+>;
 type WorkspaceProps = React.ComponentProps<typeof TerminalWorkspace>;
 type _WorkspacePropsRemainImportable = WorkspaceProps;
 type _WorkspaceInspectorModeProp = Assert<
@@ -129,7 +174,9 @@ type _ComposerActionContractTypesRemainImportable =
   | TerminalWorkspaceLayoutState
   | TerminalWorkspaceNavigationMode
   | TerminalWorkspaceNavigationState
-  | TerminalWorkspaceSecondaryChromeMode;
+  | TerminalWorkspacePartName
+  | TerminalWorkspaceSecondaryChromeMode
+  | TerminalWorkspaceSlotName;
 
 describe("workspace react public api", () => {
   it("exports the command composer wrapper and composer utilities", async () => {
@@ -138,6 +185,11 @@ describe("workspace react public api", () => {
     const workspaceReact = await import("./index.js");
 
     expect(workspaceReact.TerminalCommandComposer.displayName).toBe("TerminalCommandComposer");
+    expect(workspaceReact.TerminalScreen.displayName).toBe("TerminalScreen");
+    expect(workspaceReact.terminalCommandComposerReactEvents.onCommandSubmit).toBe("tp-terminal-command-submit");
+    expect(workspaceReact.terminalScreenReactEvents.onScreenInputSubmitted).toBe(
+      "tp-terminal-screen-input-submitted",
+    );
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit).toBe("submit");
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_ACTIONS.map((action) => action.id).join("|")).toBe(
       "submit|paste|interrupt|enter",
@@ -150,6 +202,7 @@ describe("workspace react public api", () => {
       .join("|")).toBe("glyph|glyph|glyph|glyph");
     expect(workspaceReact.resolveTerminalCommandComposerActions()[0]?.keyHint).toBe("Enter");
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
+    expect(workspaceReact.TERMINAL_SCREEN_EVENTS.pasteFailed).toBe("tp-terminal-screen-paste-failed");
     expect(workspaceReact.TERMINAL_SCREEN_ACTION_IDS.followOutput).toBe("follow-output");
     expect(workspaceReact.resolveTerminalScreenActions({ placement: "terminal", followOutput: true })
       .map((action) => action.labelMode)
@@ -204,7 +257,9 @@ describe("workspace react public api", () => {
     expect(workspaceReact.TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed).toBe("collapsed");
     expect(workspaceReact.TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal).toBe("terminal");
     expect(workspaceReact.TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed).toBe("collapsed");
+    expect(workspaceReact.TERMINAL_WORKSPACE_PARTS.commandRegion).toBe("command-region");
     expect(workspaceReact.TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal).toBe("terminal");
+    expect(workspaceReact.TERMINAL_WORKSPACE_SLOTS.commandDock).toBe("command-dock");
     expect(workspaceReact.resolveTerminalWorkspaceChromeState("terminal")).toMatchObject({
       tone: "terminal",
       secondaryChrome: "terminal",

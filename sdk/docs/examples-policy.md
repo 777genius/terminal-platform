@@ -45,3 +45,13 @@ They exist to prove specific integration patterns, not to become another applica
 ## Documentation Rule
 
 If a sample demonstrates a recommended integration pattern, the related docs should point to it explicitly.
+
+## Verification Rule
+
+Run `npm run check:examples` from `sdk/` before changing samples.
+
+This validates that examples:
+
+- import only documented public SDK entrypoints
+- do not reach into package internals or `apps/terminal-demo`
+- still typecheck as downstream TypeScript consumers

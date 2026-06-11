@@ -245,3 +245,9 @@ export {
   type TerminalWorkspaceSecondaryChromeMode,
   type TerminalWorkspaceSecondaryDensity,
 } from "./elements/terminal-workspace-layout.js";
+export {
+  TERMINAL_WORKSPACE_PARTS,
+  TERMINAL_WORKSPACE_SLOTS,
+  type TerminalWorkspacePartName,
+  type TerminalWorkspaceSlotName,
+} from "./elements/terminal-workspace-surface-contract.js";

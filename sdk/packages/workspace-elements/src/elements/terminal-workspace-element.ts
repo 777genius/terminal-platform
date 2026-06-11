@@ -17,6 +17,7 @@ import {
   type TerminalWorkspaceNavigationMode,
   type TerminalWorkspaceNavigationState,
 } from "./terminal-workspace-layout.js";
+import { TERMINAL_WORKSPACE_PARTS, TERMINAL_WORKSPACE_SLOTS } from "./terminal-workspace-surface-contract.js";
 
 export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
   static override properties = {
@@ -55,6 +56,10 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
 
       .workspace[data-chrome-tone="terminal"] {
         --tp-workspace-gap: 0.42rem;
+      }
+
+      slot {
+        display: contents;
       }
 
       .workspace[data-chrome-tone="terminal"] tp-terminal-status-bar {
@@ -419,12 +424,14 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     const chromeState = layoutState.chrome;
 
     return html`
-      <div class="workspace" part="workspace" data-chrome-tone=${chromeState.tone}>
-        <tp-terminal-status-bar .kernel=${this.kernel}></tp-terminal-status-bar>
+      <div class="workspace" part=${TERMINAL_WORKSPACE_PARTS.workspace} data-chrome-tone=${chromeState.tone}>
+        <slot name=${TERMINAL_WORKSPACE_SLOTS.statusBar}>
+          <tp-terminal-status-bar .kernel=${this.kernel}></tp-terminal-status-bar>
+        </slot>
 
         <div
           class="body"
-          part="body"
+          part=${TERMINAL_WORKSPACE_PARTS.body}
           data-testid="tp-workspace-layout"
           data-layout="operations-deck"
           data-layout-preset=${layoutState.preset}
@@ -434,34 +441,52 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
         >
           ${navigationState.renderInlineNavigation
             ? html`
-                <div class="sidebar" part="sidebar" data-testid="tp-workspace-sidebar">
+                <div class="sidebar" part=${TERMINAL_WORKSPACE_PARTS.sidebar} data-testid="tp-workspace-sidebar">
                   ${this.renderNavigationContent()}
                 </div>
               `
             : null}
-          <div class="content" part="content">
+          <div class="content" part=${TERMINAL_WORKSPACE_PARTS.content}>
             <div
               class="operations-deck"
-              part="operations-deck"
+              part=${TERMINAL_WORKSPACE_PARTS.operationsDeck}
               data-testid="tp-workspace-operations-deck"
               data-inspector-mode=${inspectorState.mode}
             >
-              <div class="terminal-column" part="terminal-column" data-testid="tp-workspace-terminal-column">
-                <tp-terminal-tab-strip .kernel=${this.kernel}></tp-terminal-tab-strip>
-                <tp-terminal-screen .kernel=${this.kernel} placement="terminal"></tp-terminal-screen>
-                <div class="command-region" part="command-region" data-testid="tp-workspace-command-region">
-                  <tp-terminal-command-dock
-                    .kernel=${this.kernel}
-                    .quickCommands=${this.quickCommands}
-                    .autoFocusInput=${this.autoFocusCommandInput}
-                    placement="terminal"
-                  ></tp-terminal-command-dock>
+              <div
+                class="terminal-column"
+                part=${TERMINAL_WORKSPACE_PARTS.terminalColumn}
+                data-testid="tp-workspace-terminal-column"
+              >
+                <slot name=${TERMINAL_WORKSPACE_SLOTS.tabStrip}>
+                  <tp-terminal-tab-strip .kernel=${this.kernel}></tp-terminal-tab-strip>
+                </slot>
+                <slot name=${TERMINAL_WORKSPACE_SLOTS.screen}>
+                  <tp-terminal-screen .kernel=${this.kernel} placement="terminal"></tp-terminal-screen>
+                </slot>
+                <div
+                  class="command-region"
+                  part=${TERMINAL_WORKSPACE_PARTS.commandRegion}
+                  data-testid="tp-workspace-command-region"
+                >
+                  <slot name=${TERMINAL_WORKSPACE_SLOTS.commandDock}>
+                    <tp-terminal-command-dock
+                      .kernel=${this.kernel}
+                      .quickCommands=${this.quickCommands}
+                      .autoFocusInput=${this.autoFocusCommandInput}
+                      placement="terminal"
+                    ></tp-terminal-command-dock>
+                  </slot>
                 </div>
               </div>
 
               ${inspectorState.renderInlineInspector
                 ? html`
-                    <div class="inspector-column" part="inspector-column" data-testid="tp-workspace-inspector-column">
+                    <div
+                      class="inspector-column"
+                      part=${TERMINAL_WORKSPACE_PARTS.inspectorColumn}
+                      data-testid="tp-workspace-inspector-column"
+                    >
                       ${this.renderInspectorContent()}
                     </div>
                   `
@@ -471,14 +496,18 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
                 ? html`
                     <details
                       class="secondary-toggle inspector-drawer"
-                      part="inspector-drawer"
+                      part=${TERMINAL_WORKSPACE_PARTS.inspectorDrawer}
                       data-testid="tp-workspace-inspector-drawer"
                       data-secondary-chrome=${chromeState.secondaryChrome}
                       data-secondary-density=${chromeState.secondaryDensity}
                     >
                       ${this.renderSecondarySummary(inspectorState)}
                       <div class="inspector-drawer__content">
-                        <div class="inspector-column" part="inspector-column" data-testid="tp-workspace-inspector-column">
+                        <div
+                          class="inspector-column"
+                          part=${TERMINAL_WORKSPACE_PARTS.inspectorColumn}
+                          data-testid="tp-workspace-inspector-column"
+                        >
                           ${this.renderInspectorContent()}
                         </div>
                       </div>
@@ -492,14 +521,14 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
             ? html`
                 <details
                   class="secondary-toggle navigation-drawer"
-                  part="navigation-drawer"
+                  part=${TERMINAL_WORKSPACE_PARTS.navigationDrawer}
                   data-testid="tp-workspace-navigation-drawer"
                   data-secondary-chrome=${chromeState.secondaryChrome}
                   data-secondary-density=${chromeState.secondaryDensity}
                 >
                   ${this.renderSecondarySummary(navigationState)}
                   <div class="navigation-drawer__content">
-                    <div class="sidebar" part="sidebar" data-testid="tp-workspace-sidebar">
+                    <div class="sidebar" part=${TERMINAL_WORKSPACE_PARTS.sidebar} data-testid="tp-workspace-sidebar">
                       ${this.renderNavigationContent()}
                     </div>
                   </div>
@@ -513,8 +542,10 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
 
   private renderNavigationContent(): TemplateResult {
     return html`
-      <tp-terminal-session-list .kernel=${this.kernel}></tp-terminal-session-list>
-      <tp-terminal-saved-sessions .kernel=${this.kernel}></tp-terminal-saved-sessions>
+      <slot name=${TERMINAL_WORKSPACE_SLOTS.navigation}>
+        <tp-terminal-session-list .kernel=${this.kernel}></tp-terminal-session-list>
+        <tp-terminal-saved-sessions .kernel=${this.kernel}></tp-terminal-saved-sessions>
+      </slot>
     `;
   }
 
@@ -522,7 +553,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
     state: TerminalWorkspaceInspectorState | TerminalWorkspaceNavigationState,
   ): TemplateResult {
     return html`
-      <summary part="secondary-summary">
+      <summary part=${TERMINAL_WORKSPACE_PARTS.secondarySummary}>
         <span class="secondary-toggle__label" part="secondary-summary-label">${state.summaryLabel}</span>
         <span class="secondary-toggle__action" part="secondary-summary-action">
           <span class="secondary-toggle__action-open">${state.summaryActionClosedLabel}</span>
@@ -534,18 +565,20 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
 
   private renderInspectorContent(): TemplateResult {
     return html`
-      <tp-terminal-pane-tree .kernel=${this.kernel}></tp-terminal-pane-tree>
+      <slot name=${TERMINAL_WORKSPACE_SLOTS.inspector}>
+        <tp-terminal-pane-tree .kernel=${this.kernel}></tp-terminal-pane-tree>
 
-      <details class="secondary-toggle workspace-tools">
-        <summary>Workspace tools</summary>
-        <div class="advanced-stack">
-          <tp-terminal-toolbar .kernel=${this.kernel}></tp-terminal-toolbar>
+        <details class="secondary-toggle workspace-tools">
+          <summary>Workspace tools</summary>
+          <div class="advanced-stack">
+            <tp-terminal-toolbar .kernel=${this.kernel}></tp-terminal-toolbar>
+          </div>
+        </details>
+
+        <div class="advanced-stack" part=${TERMINAL_WORKSPACE_PARTS.diagnosticsStack}>
+          ${this.renderDiagnostics()}
         </div>
-      </details>
-
-      <div class="advanced-stack" part="diagnostics-stack">
-        ${this.renderDiagnostics()}
-      </div>
+      </slot>
     `;
   }
 
@@ -554,7 +587,7 @@ export class TerminalWorkspaceElement extends WorkspaceKernelConsumerElement {
       ? html`
           <details class="secondary-toggle" open>
             <summary>Workspace notices - ${this.snapshot.diagnostics.length}</summary>
-            <div class="panel diagnostics" part="diagnostics">
+            <div class="panel diagnostics" part=${TERMINAL_WORKSPACE_PARTS.diagnostics}>
               <div class="panel-header">
                 <div class="panel-eyebrow">Alerts</div>
                 <div class="panel-title">Workspace diagnostics</div>

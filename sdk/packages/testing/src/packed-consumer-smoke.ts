@@ -43,18 +43,30 @@ export const TERMINAL_PLATFORM_PACKED_CONSUMER_SMOKE_SPEC = [
   {
     specifier: "@terminal-platform/design-tokens",
     expectedRuntimeExports: [
+      "TERMINAL_PLATFORM_TOKEN_CATEGORIES",
       "TERMINAL_PLATFORM_THEME_ATTRIBUTE",
+      "createTerminalPlatformThemeCssText",
+      "terminalPlatformTokenDefinitions",
       "terminalPlatformThemeCssText",
       "terminalPlatformThemeManifests",
     ],
   },
   {
     specifier: "@terminal-platform/design-tokens/css",
-    expectedRuntimeExports: ["terminalPlatformThemeCssText"],
+    expectedRuntimeExports: [
+      "createTerminalPlatformThemeCssDeclarations",
+      "createTerminalPlatformThemeCssText",
+      "terminalPlatformThemeCssText",
+    ],
   },
   {
     specifier: "@terminal-platform/design-tokens/themes",
-    expectedRuntimeExports: ["terminalPlatformThemeManifests"],
+    expectedRuntimeExports: [
+      "TERMINAL_PLATFORM_TOKEN_CATEGORIES",
+      "listMissingTerminalPlatformThemeTokens",
+      "terminalPlatformTokenDefinitions",
+      "terminalPlatformThemeManifests",
+    ],
   },
   {
     specifier: "@terminal-platform/workspace-contracts",
@@ -103,9 +115,12 @@ export const TERMINAL_PLATFORM_PACKED_CONSUMER_SMOKE_SPEC = [
   {
     specifier: "@terminal-platform/workspace-adapter-websocket",
     expectedRuntimeExports: [
+      "WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES",
+      "createWorkspaceGatewayError",
       "createWorkspaceWebSocketTransport",
       "decodeWorkspaceWebSocketPayload",
       "encodeWorkspaceWebSocketPayload",
+      "mapWorkspaceWebSocketDiagnostic",
     ],
   },
   {
@@ -126,6 +141,8 @@ export const TERMINAL_PLATFORM_PACKED_CONSUMER_SMOKE_SPEC = [
   {
     specifier: "@terminal-platform/workspace-elements",
     expectedRuntimeExports: [
+      "TERMINAL_WORKSPACE_PARTS",
+      "TERMINAL_WORKSPACE_SLOTS",
       "TerminalWorkspaceElement",
       "defineTerminalPlatformElements",
       "resolveTerminalWorkspaceLayoutState",
@@ -142,8 +159,13 @@ export const TERMINAL_PLATFORM_PACKED_CONSUMER_SMOKE_SPEC = [
   {
     specifier: "@terminal-platform/workspace-react",
     expectedRuntimeExports: [
-      "TerminalWorkspace",
+      "TERMINAL_WORKSPACE_PARTS",
+      "TERMINAL_WORKSPACE_SLOTS",
       "TerminalCommandComposer",
+      "TerminalScreen",
+      "TerminalWorkspace",
+      "terminalCommandComposerReactEvents",
+      "terminalScreenReactEvents",
       "useWorkspaceSnapshot",
     ],
   },

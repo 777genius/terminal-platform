@@ -29,29 +29,33 @@ Read in this order:
 3. [Event Model](./docs/event-model.md)
 4. [Theming Model](./docs/theming-model.md)
 5. [Release Policy](./docs/release-policy.md)
-6. [Compatibility Matrix](./docs/compatibility-matrix.md)
-7. [Package API Map](./docs/package-api-map.md)
-8. [Testing Strategy](./docs/testing-strategy.md)
-9. [Accessibility Model](./docs/accessibility-model.md)
-10. [Keyboard And Focus Behavior](./docs/keyboard-and-focus-behavior.md)
-11. [Security Model](./docs/security-model.md)
-12. [Workspace Command History Model](./docs/workspace-command-history-model.md)
-13. [Degraded Semantics Policy](./docs/degraded-semantics-policy.md)
-14. [Diagnostics Model](./docs/diagnostics-model.md)
-15. [Performance Model](./docs/performance-model.md)
-16. [Performance Budgets](./docs/performance-budgets.md)
-17. [Product Expansion Model](./docs/product-expansion-model.md)
-18. [Build And CI Model](./docs/build-and-ci-model.md)
-19. [Runtime Types Generation Model](./docs/runtime-types-generation-model.md)
-20. [Examples Policy](./docs/examples-policy.md)
-21. [Dependency Management Policy](./docs/dependency-management-policy.md)
-22. [Workspace Bootstrap Spec](./docs/workspace-bootstrap-spec.md)
-23. [Package Template Spec](./docs/package-template-spec.md)
-24. [Governance Model](./docs/governance-model.md)
-25. [Migration Guide](./docs/migration-guide.md)
-26. [ADR Set](./docs/adr/)
+6. [Release Checklist](./docs/release-checklist.md)
+7. [Rollback Plan](./docs/rollback-plan.md)
+8. [Deprecation Checkpoints](./docs/deprecation-checkpoints.md)
+9. [Compatibility Matrix](./docs/compatibility-matrix.md)
+10. [Package API Map](./docs/package-api-map.md)
+11. [Testing Strategy](./docs/testing-strategy.md)
+12. [Accessibility Model](./docs/accessibility-model.md)
+13. [Keyboard And Focus Behavior](./docs/keyboard-and-focus-behavior.md)
+14. [Security Model](./docs/security-model.md)
+15. [Workspace Command History Model](./docs/workspace-command-history-model.md)
+16. [Degraded Semantics Policy](./docs/degraded-semantics-policy.md)
+17. [Diagnostics Model](./docs/diagnostics-model.md)
+18. [Performance Model](./docs/performance-model.md)
+19. [Performance Budgets](./docs/performance-budgets.md)
+20. [Product Expansion Model](./docs/product-expansion-model.md)
+21. [Build And CI Model](./docs/build-and-ci-model.md)
+22. [Runtime Types Generation Model](./docs/runtime-types-generation-model.md)
+23. [Examples Policy](./docs/examples-policy.md)
+24. [Dependency Management Policy](./docs/dependency-management-policy.md)
+25. [Workspace Bootstrap Spec](./docs/workspace-bootstrap-spec.md)
+26. [Package Template Spec](./docs/package-template-spec.md)
+27. [Governance Model](./docs/governance-model.md)
+28. [Migration Guide](./docs/migration-guide.md)
+29. [ADR Set](./docs/adr/)
 
 For release-grade package validation, run `npm run test:packed-consumer` after the SDK build is green.
+For sample validation, run `npm run check:examples` to prove examples use only public SDK entrypoints and typecheck as downstream consumers.
 
 Core product rules:
 
@@ -84,3 +88,7 @@ const workspace = document.querySelector("tp-terminal-workspace") as HTMLElement
 
 workspace.kernel = host.kernel;
 ```
+
+## Integration Samples
+
+- [Vanilla WebSocket Terminal](./examples/vanilla-websocket-terminal/) - custom elements mounted with a host-owned WebSocket gateway, lifecycle, and theme bootstrap.

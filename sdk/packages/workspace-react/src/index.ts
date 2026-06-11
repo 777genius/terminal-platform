@@ -9,6 +9,10 @@ export {
   TerminalToolbar,
   TerminalWorkspace,
 } from "./components/terminal-workspace.js";
+export {
+  terminalCommandComposerReactEvents,
+  terminalScreenReactEvents,
+} from "./events.js";
 export { useWorkspaceSnapshot } from "./hooks/use-workspace-snapshot.js";
 export {
   TERMINAL_COMMAND_COMPOSER_ACTIONS,
@@ -24,6 +28,7 @@ export {
   TERMINAL_COMMAND_QUICK_COMMAND_TONES,
   TERMINAL_SCREEN_ACTION_IDS,
   TERMINAL_SCREEN_CHROME_MODES,
+  TERMINAL_SCREEN_EVENTS,
   TERMINAL_SCREEN_SEARCH_ACTION_IDS,
   TERMINAL_PANE_MAX_COLS,
   TERMINAL_PANE_MAX_ROWS,
@@ -33,7 +38,9 @@ export {
   TERMINAL_WORKSPACE_CHROME_TONES,
   TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_NAVIGATION_MODES,
+  TERMINAL_WORKSPACE_PARTS,
   TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES,
+  TERMINAL_WORKSPACE_SLOTS,
   canRunTerminalTopologyCommand,
   compactTerminalId,
   countPaneTreeLeaves,
@@ -124,9 +131,17 @@ export type {
   TerminalScreenChromeOptions,
   TerminalScreenChromeState,
   TerminalScreenControlState,
+  TerminalScreenCopiedDetail,
+  TerminalScreenCopyFailedDetail,
+  TerminalScreenEventMap,
+  TerminalScreenEventType,
   TerminalScreenInputActivity,
+  TerminalScreenInputFailedDetail,
   TerminalScreenInputStatus,
+  TerminalScreenInputSubmittedDetail,
   TerminalScreenInputTone,
+  TerminalScreenPasteFailedDetail,
+  TerminalScreenPasteSubmittedDetail,
   TerminalScreenSearchActionId,
   TerminalScreenSearchActionLabelMode,
   TerminalScreenSearchActionOptions,
@@ -146,5 +161,12 @@ export type {
   TerminalWorkspaceLayoutState,
   TerminalWorkspaceNavigationMode,
   TerminalWorkspaceNavigationState,
+  TerminalWorkspacePartName,
   TerminalWorkspaceSecondaryChromeMode,
+  TerminalWorkspaceSlotName,
 } from "@terminal-platform/workspace-elements";
+export type {
+  TerminalCommandComposerReactEventHandlers,
+  TerminalReactEventHandler,
+  TerminalScreenReactEventHandlers,
+} from "./events.js";

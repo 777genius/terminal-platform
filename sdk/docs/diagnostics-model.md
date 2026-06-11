@@ -34,6 +34,15 @@ The UI may surface diagnostics and state hints, but must not rely on ad hoc log 
 
 Adapters are responsible for converting transport/runtime failures into explicit diagnostics and contract-compatible errors.
 
+The WebSocket adapter exposes diagnostics mapping helpers from `@terminal-platform/workspace-adapter-websocket`:
+
+- `mapWorkspaceWebSocketDiagnostic`
+- `mapWorkspaceGatewayError`
+- `createWorkspaceWebSocketDiagnosticError`
+- `createWorkspaceGatewayError`
+
+Unknown gateway error codes are normalized to public `WorkspaceErrorCode` values instead of leaking backend-native refs.
+
 ## Testing Rule
 
 Diagnostics paths should be exercised in tests for:

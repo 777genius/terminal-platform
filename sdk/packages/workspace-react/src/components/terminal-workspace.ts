@@ -1,8 +1,7 @@
 import * as React from "react";
-import { createComponent, type EventName } from "@lit/react";
+import { createComponent } from "@lit/react";
 
 import {
-  TERMINAL_COMMAND_COMPOSER_EVENTS,
   TerminalCommandComposerElement,
   TerminalCommandDockElement,
   TerminalPaneTreeElement,
@@ -13,10 +12,9 @@ import {
   TerminalToolbarElement,
   TerminalWorkspaceElement,
   defineTerminalPlatformElements,
-  type TerminalCommandComposerDraftChangeDetail,
-  type TerminalCommandComposerHistoryNavigateDetail,
-  type TerminalCommandComposerShortcutDetail,
 } from "@terminal-platform/workspace-elements";
+
+import { terminalCommandComposerReactEvents, terminalScreenReactEvents } from "../events.js";
 
 defineTerminalPlatformElements();
 
@@ -45,19 +43,7 @@ export const TerminalCommandComposer = createComponent({
   react: React,
   tagName: "tp-terminal-command-composer",
   elementClass: TerminalCommandComposerElement,
-  events: {
-    onCommandDraftChange: TERMINAL_COMMAND_COMPOSER_EVENTS.draftChange as EventName<
-      CustomEvent<TerminalCommandComposerDraftChangeDetail>
-    >,
-    onCommandHistoryNavigate: TERMINAL_COMMAND_COMPOSER_EVENTS.historyNavigate as EventName<
-      CustomEvent<TerminalCommandComposerHistoryNavigateDetail>
-    >,
-    onCommandPaste: TERMINAL_COMMAND_COMPOSER_EVENTS.paste as EventName<CustomEvent<void>>,
-    onCommandShortcut: TERMINAL_COMMAND_COMPOSER_EVENTS.shortcut as EventName<
-      CustomEvent<TerminalCommandComposerShortcutDetail>
-    >,
-    onCommandSubmit: TERMINAL_COMMAND_COMPOSER_EVENTS.submit as EventName<CustomEvent<void>>,
-  },
+  events: terminalCommandComposerReactEvents,
   displayName: "TerminalCommandComposer",
 });
 
@@ -79,6 +65,7 @@ export const TerminalScreen = createComponent({
   react: React,
   tagName: "tp-terminal-screen",
   elementClass: TerminalScreenElement,
+  events: terminalScreenReactEvents,
   displayName: "TerminalScreen",
 });
 

@@ -27,8 +27,13 @@ import type {
 } from "@terminal-platform/runtime-types";
 import type { WorkspaceSubscription, WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
 import type { WorkspacePaneHistoryRequestOptions } from "@terminal-platform/workspace-contracts";
-import { WorkspaceError, type WorkspaceErrorCode } from "@terminal-platform/workspace-contracts";
+import { WorkspaceError } from "@terminal-platform/workspace-contracts";
 
+import {
+  WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES,
+  createWorkspaceGatewayError,
+  createWorkspaceWebSocketDiagnosticError,
+} from "./diagnostics.js";
 import { decodeWorkspaceWebSocketPayload, encodeWorkspaceWebSocketPayload } from "./json-codec.js";
 import type {
   WorkspaceGatewayControlClientMessage,
@@ -93,6 +98,21 @@ export function createWorkspaceWebSocketTransport(
 }
 
 export { decodeWorkspaceWebSocketPayload, encodeWorkspaceWebSocketPayload } from "./json-codec.js";
+export {
+  WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES,
+  createWorkspaceGatewayError,
+  createWorkspaceWebSocketDiagnosticError,
+  mapWorkspaceGatewayError,
+  mapWorkspaceWebSocketDiagnostic,
+  normalizeWorkspaceGatewayErrorCode,
+} from "./diagnostics.js";
+export type {
+  WorkspaceWebSocketDiagnostic,
+  WorkspaceWebSocketDiagnosticCode,
+  WorkspaceWebSocketDiagnosticInput,
+  WorkspaceWebSocketDiagnosticPhase,
+  WorkspaceWebSocketDiagnosticPlane,
+} from "./diagnostics.js";
 export type {
   WorkspaceGatewayControlClientMessage,
   WorkspaceGatewayControlMethod,
@@ -281,9 +301,10 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     this.#closed = true;
     this.clearRetryWaiters();
     this.#streamReconnectLoopPromise = null;
-    this.rejectAllControlRequests(new Error("workspace websocket transport closed"));
-    this.#controlConnectReject?.(new Error("workspace websocket transport closed"));
-    this.#streamConnectReject?.(new Error("workspace websocket transport closed"));
+    const closedError = workspaceWebSocketClosedError();
+    this.rejectAllControlRequests(closedError);
+    this.#controlConnectReject?.(closedError);
+    this.#streamConnectReject?.(closedError);
 
     const closeOperations = [
       closeSocket(this.#controlSocket),
@@ -299,7 +320,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
     for (const record of this.#subscriptions.values()) {
       this.finalizeSubscription(record, {
         notifyWaitersWithNull: true,
-        rejectAckWith: new Error("workspace websocket transport closed"),
+        rejectAckWith: closedError,
       });
     }
 
@@ -332,7 +353,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         socket.send(encodeWorkspaceWebSocketPayload(envelope));
       } catch (error) {
         this.#pendingControlRequests.delete(requestId);
-        reject(toError(error));
+        reject(workspaceWebSocketSendError(error));
       }
     });
   }
@@ -354,7 +375,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
       }
     }
 
-    throw lastError ?? new Error("Failed to connect to workspace control plane");
+    throw lastError ?? workspaceWebSocketControlConnectFailedError();
   }
 
   private async ensureControlConnected(): Promise<WebSocket> {
@@ -380,7 +401,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
             this.#controlConnectReject = null;
           }
           void closeSocket(socket);
-          reject(new Error("workspace websocket transport closed"));
+          reject(workspaceWebSocketClosedError());
           return;
         }
 
@@ -397,7 +418,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
           this.#controlConnectPromise = null;
           this.#controlConnectReject = null;
         }
-        reject(new Error("Failed to connect to workspace control plane"));
+        reject(workspaceWebSocketControlConnectFailedError());
       };
 
       socket.addEventListener("open", onOpen, { once: true });
@@ -413,10 +434,11 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
           this.#controlConnectPromise = null;
           this.#controlConnectReject = null;
         }
-        reject(new Error(this.#closed
-          ? "workspace websocket transport closed"
-          : "Workspace control plane connection closed"));
-        this.rejectAllControlRequests(new Error("Workspace control plane connection closed"));
+        const closeError = this.#closed
+          ? workspaceWebSocketClosedError()
+          : workspaceWebSocketControlClosedError();
+        reject(closeError);
+        this.rejectAllControlRequests(closeError);
       });
     });
 
@@ -436,7 +458,10 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
 
     this.#pendingControlRequests.delete(message.requestId);
     if (!message.ok) {
-      request.reject(toGatewayError(message.error));
+      request.reject(createWorkspaceGatewayError(message.error, {
+        phase: "response",
+        plane: "control",
+      }));
       return;
     }
 
@@ -467,7 +492,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
       }
     }
 
-    throw lastError ?? new Error("Failed to connect to workspace stream plane");
+    throw lastError ?? workspaceWebSocketStreamConnectFailedError();
   }
 
   private async ensureStreamConnected(): Promise<WebSocket> {
@@ -493,7 +518,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
             this.#streamConnectReject = null;
           }
           void closeSocket(socket);
-          reject(new Error("workspace websocket transport closed"));
+          reject(workspaceWebSocketClosedError());
           return;
         }
 
@@ -510,7 +535,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
           this.#streamConnectPromise = null;
           this.#streamConnectReject = null;
         }
-        reject(new Error("Failed to connect to workspace stream plane"));
+        reject(workspaceWebSocketStreamConnectFailedError());
       };
 
       socket.addEventListener("open", onOpen, { once: true });
@@ -525,9 +550,9 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         if (isCurrentSocket) {
           this.#streamConnectReject = null;
         }
-        reject(new Error(this.#closed
-          ? "workspace websocket transport closed"
-          : "Workspace stream plane connection closed"));
+        reject(this.#closed
+          ? workspaceWebSocketClosedError()
+          : workspaceWebSocketStreamClosedError());
       });
     });
 
@@ -606,7 +631,10 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
       case "workspace_subscription_rejected":
         this.finalizeSubscription(record, {
           notifyWaitersWithNull: true,
-          rejectAckWith: toGatewayError(message.error),
+          rejectAckWith: createWorkspaceGatewayError(message.error, {
+            phase: "subscription",
+            plane: "stream",
+          }),
         });
         return;
       case "workspace_subscription_event":
@@ -615,7 +643,10 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
       case "workspace_subscription_error":
         this.finalizeSubscription(record, {
           notifyWaitersWithNull: true,
-          rejectAckWith: toGatewayError(message.error),
+          rejectAckWith: createWorkspaceGatewayError(message.error, {
+            phase: "subscription",
+            plane: "stream",
+          }),
         });
         return;
       case "workspace_subscription_closed":
@@ -654,7 +685,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
         await withTimeout(
           record.closed.promise,
           SUBSCRIPTION_CLOSE_TIMEOUT_MS,
-          `Workspace subscription ${subscriptionId} close acknowledgement timed out`,
+          workspaceWebSocketSubscriptionCloseTimeoutError(subscriptionId).message,
         );
       } catch {
         this.finalizeSubscription(record, {
@@ -688,7 +719,7 @@ class WorkspaceWebSocketTransport implements WorkspaceTransportClient {
       record.ackSettled = true;
       record.ack.reject(
         options.rejectAckWith
-          ?? new Error(`Workspace subscription ${record.requestedId} closed before activation`),
+          ?? workspaceWebSocketSubscriptionClosedBeforeActivationError(record.requestedId),
       );
     }
 
@@ -842,28 +873,103 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function toGatewayError(error: { message: string; code?: string }): WorkspaceError {
-  return new WorkspaceError({
-    code: normalizeGatewayErrorCode(error.code),
-    message: error.message,
-    recoverable: true,
-  });
-}
-
-function normalizeGatewayErrorCode(code: string | undefined): WorkspaceErrorCode {
-  switch (code) {
-    case "storage_pressure":
-      return code;
-    default:
-      return "transport_failed";
-  }
-}
-
 function unsupportedCreateBackend(backend: BackendKind): WorkspaceError {
   return new WorkspaceError({
     code: "unsupported_capability",
     message: `workspace websocket gateway does not support createSession for backend ${backend}`,
     recoverable: false,
+  });
+}
+
+function workspaceWebSocketClosedError(): WorkspaceError {
+  return createWorkspaceWebSocketDiagnosticError({
+    code: WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES.transportClosed,
+    message: "workspace websocket transport closed",
+    phase: "dispose",
+    workspaceErrorCode: "disposed",
+    recoverable: false,
+  });
+}
+
+function workspaceWebSocketControlConnectFailedError(): WorkspaceError {
+  return createWorkspaceWebSocketDiagnosticError({
+    code: WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES.controlConnectFailed,
+    message: "Failed to connect to workspace control plane",
+    phase: "connect",
+    plane: "control",
+    workspaceErrorCode: "transport_failed",
+    recoverable: true,
+  });
+}
+
+function workspaceWebSocketStreamConnectFailedError(): WorkspaceError {
+  return createWorkspaceWebSocketDiagnosticError({
+    code: WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES.streamConnectFailed,
+    message: "Failed to connect to workspace stream plane",
+    phase: "connect",
+    plane: "stream",
+    workspaceErrorCode: "transport_failed",
+    recoverable: true,
+  });
+}
+
+function workspaceWebSocketControlClosedError(): WorkspaceError {
+  return createWorkspaceWebSocketDiagnosticError({
+    code: WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES.controlConnectionClosed,
+    message: "Workspace control plane connection closed",
+    phase: "response",
+    plane: "control",
+    workspaceErrorCode: "transport_failed",
+    recoverable: true,
+  });
+}
+
+function workspaceWebSocketStreamClosedError(): WorkspaceError {
+  return createWorkspaceWebSocketDiagnosticError({
+    code: WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES.streamConnectionClosed,
+    message: "Workspace stream plane connection closed",
+    phase: "subscription",
+    plane: "stream",
+    workspaceErrorCode: "subscription_failed",
+    recoverable: true,
+  });
+}
+
+function workspaceWebSocketSendError(cause: unknown): WorkspaceError {
+  return createWorkspaceWebSocketDiagnosticError({
+    code: WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES.sendFailed,
+    message: errorMessage(cause),
+    phase: "request",
+    plane: "control",
+    workspaceErrorCode: "transport_failed",
+    recoverable: true,
+    cause,
+  });
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function workspaceWebSocketSubscriptionClosedBeforeActivationError(subscriptionId: string): WorkspaceError {
+  return createWorkspaceWebSocketDiagnosticError({
+    code: WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES.subscriptionClosedBeforeActivation,
+    message: `Workspace subscription ${subscriptionId} closed before activation`,
+    phase: "subscription",
+    plane: "stream",
+    workspaceErrorCode: "subscription_failed",
+    recoverable: true,
+  });
+}
+
+function workspaceWebSocketSubscriptionCloseTimeoutError(subscriptionId: string): WorkspaceError {
+  return createWorkspaceWebSocketDiagnosticError({
+    code: WORKSPACE_WEBSOCKET_DIAGNOSTIC_CODES.subscriptionCloseTimeout,
+    message: `Workspace subscription ${subscriptionId} close acknowledgement timed out`,
+    phase: "subscription",
+    plane: "stream",
+    workspaceErrorCode: "subscription_failed",
+    recoverable: true,
   });
 }
 

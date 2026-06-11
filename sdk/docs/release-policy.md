@@ -75,6 +75,7 @@ Every release candidate must satisfy:
 - demo consumer smoke green
 - docs updated
 - rollback path understood for the release cut
+- release readiness policy check green
 
 ## Packed Package Rule
 
@@ -110,9 +111,13 @@ No package may expose undocumented deep imports as public API.
 Use:
 
 - `@changesets/cli`
+- [Release Checklist](./release-checklist.md) for ordered release ownership
+- [Rollback Plan](./rollback-plan.md) for failed release decisions
+- [Deprecation Checkpoints](./deprecation-checkpoints.md) for public API lifecycle
 - `npm run test:packed-consumer` for packed tarball install smoke
 - `npm run check:compatibility-matrix` for compatibility matrix drift checks
 - `npm run check:performance-budgets` for performance budget drift checks
+- `npm run check:release-readiness` for release artifact and policy drift checks
 
 ## Rollback Rule
 

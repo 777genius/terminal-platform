@@ -77,6 +77,7 @@ Expected exports:
 - token metadata
 - theme manifests
 - CSS variable bundles
+- token taxonomy and CSS transform helpers
 
 ### `@terminal-platform/workspace-contracts`
 
@@ -134,6 +135,7 @@ Expected exports:
 - websocket adapter factory
 - config types
 - gateway protocol types for host implementations
+- diagnostics mapping helpers that normalize gateway failures to `WorkspaceError`
 
 ### `@terminal-platform/workspace-adapter-preload`
 
@@ -175,6 +177,7 @@ Expected exports:
 - `TerminalCommandQuickCommand` and quick command defaults/resolvers for command dock customization
 - command composer events, action presentations with stable action IDs and keyboard hints, layout helpers, row defaults, and typed event details
 - workspace layout presets and pure layout resolvers for terminal-first and host-owned custom workspace chrome
+- `TERMINAL_WORKSPACE_SLOTS`, `TERMINAL_WORKSPACE_PARTS`, and typed slot/part names for embeddable host shells
 - documented style helpers only if necessary
 - command dock and command composer events and parts documented in feature model docs
 
@@ -192,6 +195,7 @@ Expected exports:
 - thin `TerminalCommandComposer` wrapper with typed custom-event props
 - command composer action presentations and layout helpers re-exported from `@terminal-platform/workspace-elements`
 - workspace layout presets and resolver types re-exported from `@terminal-platform/workspace-elements`
+- workspace slot and part constants re-exported from `@terminal-platform/workspace-elements`
 
 ### `@terminal-platform/testing`
 

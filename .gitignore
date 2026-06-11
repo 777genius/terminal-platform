@@ -1,5 +1,6 @@
 /target/
-/.DS_Store
+**/.DS_Store
+.serena/
 /fuzz/corpus/
 /fuzz/artifacts/
 **/node_modules/
