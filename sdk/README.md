@@ -1,15 +1,25 @@
-# UI SDK Planning Pack
+# Terminal Platform UI SDK
 
 **Checked**: 2026-04-22  
-**Status**: architecture and execution plan frozen
+**Status**: v1 release-candidate SDK workspace
 
-This directory is the future home of the independent UI SDK product unit for Terminal Platform.
+This directory contains the independent UI SDK product unit for Terminal Platform.
 
 The SDK is intentionally separate from:
 
 - Rust runtime truth
 - host bindings such as Node and Electron leaves
 - `apps/terminal-demo`, which remains a consumer only
+
+Use these packages when embedding Terminal Platform UI in host applications:
+
+- `@terminal-platform/runtime-types` for generated runtime mirrors.
+- `@terminal-platform/workspace-contracts` and its `/commands`, `/errors`, `/observations`, and `/ports` subpaths for host-facing contracts.
+- `@terminal-platform/workspace-core` and `@terminal-platform/workspace-core/testing` for the framework-neutral workspace kernel.
+- `@terminal-platform/workspace-adapter-websocket`, `@terminal-platform/workspace-adapter-preload`, and `@terminal-platform/workspace-adapter-memory` for transport boundaries.
+- `@terminal-platform/workspace-elements` for custom elements.
+- `@terminal-platform/workspace-react` for thin React wrappers over the custom elements.
+- `@terminal-platform/design-tokens/css` and `@terminal-platform/design-tokens/themes` for host-owned styling.
 
 Read in this order:
 

@@ -6,6 +6,22 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./commands": {
+      "types": "./dist/commands.d.ts",
+      "import": "./dist/commands.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js"
+    },
+    "./observations": {
+      "types": "./dist/observations.d.ts",
+      "import": "./dist/observations.js"
+    },
+    "./ports": {
+      "types": "./dist/ports.d.ts",
+      "import": "./dist/ports.js"
     }
   },
   "types": "./dist/index.d.ts",

@@ -10,6 +10,10 @@
     "./define": {
       "types": "./dist/define.d.ts",
       "import": "./dist/define.js"
+    },
+    "./styles": {
+      "types": "./dist/styles.d.ts",
+      "import": "./dist/styles.js"
     }
   },
   "types": "./dist/index.d.ts",

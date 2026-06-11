@@ -22,11 +22,32 @@
       "@terminal-platform/design-tokens": [
         "packages/design-tokens/src/index.ts"
       ],
+      "@terminal-platform/design-tokens/css": [
+        "packages/design-tokens/src/css.ts"
+      ],
+      "@terminal-platform/design-tokens/themes": [
+        "packages/design-tokens/src/themes.ts"
+      ],
       "@terminal-platform/workspace-contracts": [
         "packages/workspace-contracts/src/index.ts"
       ],
+      "@terminal-platform/workspace-contracts/commands": [
+        "packages/workspace-contracts/src/commands.ts"
+      ],
+      "@terminal-platform/workspace-contracts/errors": [
+        "packages/workspace-contracts/src/errors.ts"
+      ],
+      "@terminal-platform/workspace-contracts/observations": [
+        "packages/workspace-contracts/src/observations.ts"
+      ],
+      "@terminal-platform/workspace-contracts/ports": [
+        "packages/workspace-contracts/src/ports.ts"
+      ],
       "@terminal-platform/workspace-core": [
         "packages/workspace-core/src/index.ts"
+      ],
+      "@terminal-platform/workspace-core/testing": [
+        "packages/workspace-core/src/testing.ts"
       ],
       "@terminal-platform/workspace-adapter-websocket": [
         "packages/workspace-adapter-websocket/src/index.ts"
@@ -39,6 +60,9 @@
       ],
       "@terminal-platform/workspace-elements": [
         "packages/workspace-elements/src/index.ts"
+      ],
+      "@terminal-platform/workspace-elements/styles": [
+        "packages/workspace-elements/src/styles.ts"
       ],
       "@terminal-platform/workspace-react": [
         "packages/workspace-react/src/index.ts"

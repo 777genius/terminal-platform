@@ -241,7 +241,11 @@ Run `npm run test:public-api` from `sdk/` before changing public SDK exports.
 
 The gate covers:
 
+- `@terminal-platform/design-tokens/css` and `@terminal-platform/design-tokens/themes` public subpath entrypoints
+- `@terminal-platform/workspace-contracts/commands`, `/errors`, `/observations`, and `/ports` public subpath entrypoints
+- `@terminal-platform/workspace-core/testing` public subpath entrypoint
 - `@terminal-platform/workspace-elements` package entrypoint exports
+- `@terminal-platform/workspace-elements/styles` public subpath entrypoint
 - command composer action presentation contract and stable action IDs
 - command composer row layout helpers and defaults
 - `@terminal-platform/workspace-react` wrapper types and re-exported composer helpers
