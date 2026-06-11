@@ -137,10 +137,10 @@ Use this file as the operational progress list while implementing the SDK plan.
 
 ## Phase 11 - Hardening
 
-- [ ] Add packed package smoke tests
+- [x] Add packed package smoke tests
 - [ ] Run browser test matrix
-- [ ] Fill compatibility matrix
-- [ ] Add perf budgets
+- [x] Fill compatibility matrix
+- [x] Add perf budgets
 - [ ] Confirm rollback plan for release cut
 - [ ] Add deprecation policy checkpoints
 - [ ] Add release checklist

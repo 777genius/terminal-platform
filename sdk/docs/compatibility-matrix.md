@@ -16,11 +16,15 @@ Track compatibility between the Rust runtime truth and the UI SDK packages.
 - `@terminal-platform/workspace-elements`
 - `@terminal-platform/workspace-react`
 
-## Matrix Template
+## Current Matrix
 
 | Runtime Protocol | Runtime Types | Workspace Contracts | Workspace Core | Workspace Elements | Workspace React | Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD | TBD | planned | Initial v1 target row |
+| 0.2 | 0.1.0 | 0.1.0 | 0.1.0 | 0.1.0 | 0.1.0 | preview | Initial v1 preview row validated by `npm run check:compatibility-matrix`; stable status still requires the remaining release gates. |
+
+## Verification
+
+Run `npm run check:compatibility-matrix` from `sdk/` before release cuts and after changes to runtime protocol constants or public SDK package versions.
 
 ## Rules
 

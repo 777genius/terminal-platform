@@ -11,6 +11,7 @@
   "types": "./dist/index.d.ts",
   "dependencies": {
     "@terminal-platform/workspace-adapter-memory": "0.1.0",
+    "@terminal-platform/workspace-contracts": "0.1.0",
     "@terminal-platform/workspace-core": "0.1.0"
   },
   "scripts": {

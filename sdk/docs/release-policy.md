@@ -110,8 +110,9 @@ No package may expose undocumented deep imports as public API.
 Use:
 
 - `@changesets/cli`
-- packed tarball install tests
-- compatibility matrix updates as release artifacts
+- `npm run test:packed-consumer` for packed tarball install smoke
+- `npm run check:compatibility-matrix` for compatibility matrix drift checks
+- `npm run check:performance-budgets` for performance budget drift checks
 
 ## Rollback Rule
 

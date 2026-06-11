@@ -1,4 +1,5 @@
 export { createWorkspaceKernel } from "./kernel/create-workspace-kernel.js";
+export { createWorkspaceHost } from "./bootstrap.js";
 
 export type {
   CreateWorkspaceKernelOptions,
@@ -7,6 +8,10 @@ export type {
   WorkspaceKernel,
   WorkspaceSelectors,
 } from "./kernel/types.js";
+export type {
+  CreateWorkspaceHostOptions,
+  WorkspaceHost,
+} from "./bootstrap.js";
 
 export {
   DEFAULT_TERMINAL_FONT_SCALE,

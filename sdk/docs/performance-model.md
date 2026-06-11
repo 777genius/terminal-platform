@@ -54,6 +54,8 @@ Stable-ready releases must define and review performance budgets for:
 
 The exact numeric budgets may evolve, but the existence of budgets is mandatory.
 
+The current budget artifact is [Performance Budgets](./performance-budgets.md), checked by `npm run check:performance-budgets`.
+
 ## Anti-Pattern Rule
 
 The following are performance architecture failures:

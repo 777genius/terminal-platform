@@ -128,6 +128,8 @@ Coverage focus:
 
 Every stable-ready package must be validated from packed artifacts, not only from workspace linking.
 
+Run `npm run test:packed-consumer` from `sdk/` to pack the SDK workspaces, install the tarballs into a temporary consumer project, and execute the public entrypoint smoke.
+
 ## Required Release Gates
 
 Before stable release:

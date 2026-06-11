@@ -109,12 +109,14 @@ Main entrypoint:
 
 Optional documented subpaths:
 
+- `@terminal-platform/workspace-core/bootstrap`
 - `@terminal-platform/workspace-core/testing`
 
 Expected exports:
 
 - `WorkspaceKernel`
 - kernel factory
+- host bootstrap helper
 - selectors
 - diagnostics interfaces
 - workspace read models, including `WorkspaceCommandHistorySnapshot`
@@ -243,9 +245,13 @@ The gate covers:
 
 - `@terminal-platform/design-tokens/css` and `@terminal-platform/design-tokens/themes` public subpath entrypoints
 - `@terminal-platform/workspace-contracts/commands`, `/errors`, `/observations`, and `/ports` public subpath entrypoints
+- `@terminal-platform/workspace-core/bootstrap` public host composition entrypoint
 - `@terminal-platform/workspace-core/testing` public subpath entrypoint
+- `@terminal-platform/workspace-adapter-websocket/protocol` public type-only protocol entrypoint
+- `@terminal-platform/workspace-elements/define` public registration entrypoint
 - `@terminal-platform/workspace-elements` package entrypoint exports
 - `@terminal-platform/workspace-elements/styles` public subpath entrypoint
 - command composer action presentation contract and stable action IDs
 - command composer row layout helpers and defaults
 - `@terminal-platform/workspace-react` wrapper types and re-exported composer helpers
+- `@terminal-platform/testing` workspace test harness and packed-consumer smoke public contracts

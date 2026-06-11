@@ -46,11 +46,17 @@
       "@terminal-platform/workspace-core": [
         "packages/workspace-core/src/index.ts"
       ],
+      "@terminal-platform/workspace-core/bootstrap": [
+        "packages/workspace-core/src/bootstrap.ts"
+      ],
       "@terminal-platform/workspace-core/testing": [
         "packages/workspace-core/src/testing.ts"
       ],
       "@terminal-platform/workspace-adapter-websocket": [
         "packages/workspace-adapter-websocket/src/index.ts"
+      ],
+      "@terminal-platform/workspace-adapter-websocket/protocol": [
+        "packages/workspace-adapter-websocket/src/protocol.ts"
       ],
       "@terminal-platform/workspace-adapter-preload": [
         "packages/workspace-adapter-preload/src/index.ts"
@@ -60,6 +66,9 @@
       ],
       "@terminal-platform/workspace-elements": [
         "packages/workspace-elements/src/index.ts"
+      ],
+      "@terminal-platform/workspace-elements/define": [
+        "packages/workspace-elements/src/define.ts"
       ],
       "@terminal-platform/workspace-elements/styles": [
         "packages/workspace-elements/src/styles.ts"

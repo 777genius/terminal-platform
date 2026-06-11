@@ -10,6 +10,9 @@
       "path": "../workspace-adapter-memory"
     },
     {
+      "path": "../workspace-contracts"
+    },
+    {
       "path": "../workspace-core"
     }
   ],

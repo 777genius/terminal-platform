@@ -57,6 +57,12 @@ At minimum, the SDK CI model should include:
 - browser component tests
 - adapter conformance tests
 - packed-consumer smoke tests
+- compatibility matrix drift check
+- performance budget drift check
+
+The packed-consumer lane runs `npm run test:packed-consumer` from `sdk/`.
+The compatibility matrix lane runs `npm run check:compatibility-matrix` from `sdk/`.
+The performance budget lane runs `npm run check:performance-budgets` from `sdk/`.
 
 ## Alignment With Repo Governance
 

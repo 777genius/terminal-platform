@@ -3,23 +3,50 @@ import {
   createMemoryWorkspaceTransport,
   type CreateMemoryWorkspaceTransportOptions,
 } from "@terminal-platform/workspace-adapter-memory";
-import { createWorkspaceKernel, type WorkspaceKernel } from "@terminal-platform/workspace-core";
+import type { WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
+import type { WorkspaceKernel } from "@terminal-platform/workspace-core";
+import { createWorkspaceHost, type WorkspaceHost } from "@terminal-platform/workspace-core/bootstrap";
+
+export {
+  TERMINAL_PLATFORM_PACKED_CONSUMER_SMOKE_SPEC,
+  assertTerminalPlatformPackedConsumerSmoke,
+  runTerminalPlatformPackedConsumerSmoke,
+  type RunTerminalPlatformPackedConsumerSmokeOptions,
+  type TerminalPlatformPackageImporter,
+  type TerminalPlatformPackedConsumerSmokeEntry,
+  type TerminalPlatformPackedConsumerSmokeFailure,
+  type TerminalPlatformPackedConsumerSmokeResult,
+} from "./packed-consumer-smoke.js";
 
 export interface WorkspaceTestHarness {
+  host: WorkspaceHost;
   kernel: WorkspaceKernel;
+  transport: WorkspaceTransportClient;
+  bootstrap(): Promise<WorkspaceKernel>;
   dispose(): Promise<void>;
 }
 
+export interface CreateWorkspaceTestHarnessOptions extends CreateMemoryWorkspaceTransportOptions {
+  autoBootstrap?: boolean;
+}
+
 export function createWorkspaceTestHarness(
-  options: CreateMemoryWorkspaceTransportOptions = {},
+  options: CreateWorkspaceTestHarnessOptions = {},
 ): WorkspaceTestHarness {
-  const transport = createMemoryWorkspaceTransport(options);
-  const kernel = createWorkspaceKernel({ transport });
+  const { autoBootstrap = false, ...transportOptions } = options;
+  const transport = createMemoryWorkspaceTransport(transportOptions);
+  const host = createWorkspaceHost({
+    autoBootstrap,
+    transport,
+  });
 
   return {
-    kernel,
+    host,
+    kernel: host.kernel,
+    transport,
+    bootstrap: () => host.bootstrap(),
     dispose() {
-      return kernel.dispose();
+      return host.dispose();
     },
   };
 }
