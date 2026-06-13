@@ -65,6 +65,7 @@ function createControls(
     commandHistory: [],
     recentCommands: [],
     canSend: true,
+    canInterrupt: false,
     canUsePane: true,
     canWriteInput: true,
     canPasteClipboard: true,

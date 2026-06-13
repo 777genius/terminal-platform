@@ -128,6 +128,15 @@ export const TERMINAL_PLATFORM_PACKED_CONSUMER_SMOKE_SPEC = [
     expectNoRuntimeExports: true,
   },
   {
+    specifier: "@terminal-platform/workspace-gateway-node",
+    expectedRuntimeExports: [
+      "WorkspaceGatewayNodeServer",
+      "dispatchWorkspaceGatewayControlPayload",
+      "dispatchWorkspaceGatewayControlRequest",
+      "startWorkspaceGatewayNodeServer",
+    ],
+  },
+  {
     specifier: "@terminal-platform/workspace-adapter-preload",
     expectedRuntimeExports: ["createWorkspacePreloadTransport"],
   },

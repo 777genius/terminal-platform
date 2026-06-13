@@ -85,7 +85,7 @@ describe("terminal command composer actions", () => {
     expect(ariaShortcuts).toEqual([[TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit, "Enter"]]);
   });
 
-  it("resolves compact terminal-placement action glyphs without changing accessible names", () => {
+  it("resolves readable terminal-placement labels without changing accessible names", () => {
     const actions = resolveTerminalCommandComposerActions({ placement: "terminal" });
 
     expect(actions.map((action) => action.placement)).toEqual([
@@ -94,11 +94,52 @@ describe("terminal command composer actions", () => {
       "terminal",
       "terminal",
     ]);
-    expect(actions.map((action) => action.label)).toEqual(["\u25b6", "\u2398", "^C", "\u21b5"]);
-    expect(actions.map((action) => action.labelMode)).toEqual(["glyph", "glyph", "glyph", "glyph"]);
+    expect(actions.map((action) => action.label)).toEqual(["Run", "Paste", "Ctrl+C", "Enter"]);
+    expect(actions.map((action) => action.labelMode)).toEqual(["label", "label", "label", "label"]);
     expect(actions.at(0)?.ariaLabel).toBe("Send command to the focused pane");
     expect(actions.at(-1)?.ariaLabel).toBe("Send Enter to the focused pane");
     expect(actions.at(-1)?.title).toBe("Send Enter to the focused pane");
+  });
+
+  it("filters terminal-placement action buttons from command state", () => {
+    expect(resolveTerminalCommandComposerActions({
+      placement: "terminal",
+      terminalActions: {
+        canInterrupt: false,
+        canSend: false,
+      },
+    })).toEqual([]);
+
+    expect(resolveTerminalCommandComposerActions({
+      placement: "terminal",
+      terminalActions: {
+        canInterrupt: false,
+        canSend: true,
+      },
+    }).map((action) => action.id)).toEqual([
+      TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit,
+    ]);
+
+    expect(resolveTerminalCommandComposerActions({
+      placement: "terminal",
+      terminalActions: {
+        canInterrupt: true,
+        canSend: false,
+      },
+    }).map((action) => action.id)).toEqual([
+      TERMINAL_COMMAND_COMPOSER_ACTION_IDS.interrupt,
+    ]);
+
+    expect(resolveTerminalCommandComposerActions({
+      placement: "terminal",
+      terminalActions: {
+        canInterrupt: true,
+        canSend: true,
+      },
+    }).map((action) => [action.id, action.label])).toEqual([
+      [TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit, "Run"],
+      [TERMINAL_COMMAND_COMPOSER_ACTION_IDS.interrupt, "Ctrl+C"],
+    ]);
   });
 
   it("normalizes unknown action placement to the panel contract", () => {

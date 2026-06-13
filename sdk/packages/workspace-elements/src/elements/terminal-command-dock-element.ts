@@ -44,6 +44,12 @@ type TerminalCommandInputFocusOptions = {
   focusInput?: boolean;
 };
 
+type TerminalCommandDispatchInputOptions = {
+  clientEventId?: string;
+  command?: string;
+  startedAtMs?: number;
+};
+
 type TerminalCommandDockPlacement = "panel" | "terminal";
 
 export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
@@ -64,8 +70,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         display: grid;
         gap: var(--tp-space-2);
         padding: var(--tp-space-3);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--tp-color-panel-raised) 82%, transparent), transparent),
+        background: linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--tp-color-panel-raised) 82%, transparent),
+            transparent
+          ),
           var(--tp-color-panel);
       }
 
@@ -76,8 +85,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         box-shadow: none;
         color: var(--tp-terminal-color-text);
         gap: var(--tp-space-2);
-        background:
-          linear-gradient(
+        background: linear-gradient(
             180deg,
             color-mix(in srgb, var(--tp-terminal-color-bg) 86%, transparent),
             var(--tp-terminal-color-bg)
@@ -131,7 +139,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         gap: 0.42rem;
         align-items: center;
         min-width: 0;
-        border-top: 1px solid color-mix(in srgb, var(--tp-terminal-color-border) 58%, transparent);
+        border-top: 1px solid
+          color-mix(in srgb, var(--tp-terminal-color-border) 58%, transparent);
         padding-top: 0.45rem;
       }
 
@@ -188,16 +197,33 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .chip {
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 72%,
+          transparent
+        );
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 78%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 78%,
+          transparent
+        );
         color: var(--tp-terminal-color-text-muted);
         padding: 0.3rem 0.5rem;
       }
 
-      .dock[data-placement="terminal"] .chip[data-quick-command-tone="primary"] {
-        border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 52%, transparent);
-        background: color-mix(in srgb, var(--tp-terminal-color-accent) 14%, var(--tp-terminal-color-bg-raised));
+      .dock[data-placement="terminal"]
+        .chip[data-quick-command-tone="primary"] {
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 52%,
+          transparent
+        );
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 14%,
+          var(--tp-terminal-color-bg-raised)
+        );
         color: var(--tp-terminal-color-text);
       }
 
@@ -230,9 +256,17 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .history-chip {
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 72%,
+          transparent
+        );
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 78%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 78%,
+          transparent
+        );
         color: var(--tp-terminal-color-text);
         padding: 0.3rem 0.5rem;
       }
@@ -255,7 +289,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         grid-template-columns: auto minmax(0, 1fr) auto;
         gap: var(--tp-space-2);
         align-items: stretch;
-        border: 1px solid color-mix(in srgb, var(--tp-color-border) 82%, transparent);
+        border: 1px solid
+          color-mix(in srgb, var(--tp-color-border) 82%, transparent);
         border-radius: var(--tp-radius-md);
         background: color-mix(in srgb, var(--tp-color-bg) 74%, transparent);
         padding: var(--tp-space-2);
@@ -276,6 +311,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .composer {
+        align-items: center;
         border-color: color-mix(
           in srgb,
           var(--tp-terminal-color-accent) 36%,
@@ -283,17 +319,27 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         );
         border-top-width: 0;
         border-radius: 0 0 var(--tp-radius-md) var(--tp-radius-md);
-        background:
-          linear-gradient(
+        background: linear-gradient(
             180deg,
-            color-mix(in srgb, var(--tp-terminal-color-bg-raised) 86%, transparent),
+            color-mix(
+              in srgb,
+              var(--tp-terminal-color-bg-raised) 86%,
+              transparent
+            ),
             transparent
           ),
-          color-mix(in srgb, var(--tp-terminal-color-bg) 92%, var(--tp-terminal-color-bg-raised));
+          color-mix(
+            in srgb,
+            var(--tp-terminal-color-bg) 92%,
+            var(--tp-terminal-color-bg-raised)
+          );
+        min-height: 3.65rem;
         padding: 0.48rem 0.62rem;
       }
 
       .dock[data-placement="terminal"] .composer-actions {
+        align-items: center;
+        align-content: center;
         gap: 0.35rem;
         flex-wrap: nowrap;
       }
@@ -302,21 +348,35 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 72%,
+          transparent
+        );
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 82%,
+          transparent
+        );
         color: var(--tp-terminal-color-text);
-        font-size: 0.8rem;
-        min-width: 2.15rem;
-        padding: 0.3rem 0.48rem;
+        font-size: 0.74rem;
+        font-weight: 700;
+        min-width: 3.65rem;
+        min-height: 2.25rem;
+        padding: 0.35rem 0.62rem;
       }
 
-      .dock[data-placement="terminal"] .composer-actions button[data-action-disabled="true"] {
+      .dock[data-placement="terminal"]
+        .composer-actions
+        button[data-action-disabled="true"] {
         cursor: not-allowed;
         opacity: 0.46;
       }
 
-      .dock[data-placement="terminal"] .composer-actions button[data-action-label-mode="glyph"] {
+      .dock[data-placement="terminal"]
+        .composer-actions
+        button[data-action-label-mode="glyph"] {
         inline-size: 2.2rem;
         min-width: 2.2rem;
         aspect-ratio: 1;
@@ -327,8 +387,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .composer-actions .primary,
-      .dock[data-placement="terminal"] .composer-actions button[data-action-tone="primary"] {
-        border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 54%, transparent);
+      .dock[data-placement="terminal"]
+        .composer-actions
+        button[data-action-tone="primary"] {
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 54%,
+          transparent
+        );
         background: color-mix(
           in srgb,
           var(--tp-terminal-color-accent) 16%,
@@ -336,9 +402,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         );
       }
 
-      .dock[data-placement="terminal"] .composer-actions button[data-action="submit"] {
-        inline-size: 2.35rem;
-        min-width: 2.35rem;
+      .dock[data-placement="terminal"]
+        .composer-actions
+        button[data-action="submit"] {
+        inline-size: auto;
+        min-width: 4.1rem;
       }
 
       .prompt {
@@ -349,8 +417,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] .prompt {
+        align-self: center;
         color: var(--tp-terminal-color-accent);
-        padding-top: 0.28rem;
+        line-height: 1;
+        padding-top: 0;
       }
 
       textarea {
@@ -367,9 +437,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] textarea {
+        align-self: center;
         color: var(--tp-terminal-color-text);
+        font: 0.94rem/1.35 var(--tp-font-family-mono);
         min-height: 1.65rem;
         max-height: min(9rem, 28vh);
+        padding: 0.12rem 0;
         resize: none;
       }
 
@@ -378,7 +451,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] textarea::placeholder {
-        color: color-mix(in srgb, var(--tp-terminal-color-text-muted) 78%, transparent);
+        color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-text-muted) 78%,
+          transparent
+        );
       }
 
       textarea:disabled {
@@ -396,9 +473,17 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] details .actions button {
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 72%,
+          transparent
+        );
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 82%,
+          transparent
+        );
         color: var(--tp-terminal-color-text);
       }
 
@@ -410,16 +495,26 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 72%,
+          transparent
+        );
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 82%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 82%,
+          transparent
+        );
         color: var(--tp-terminal-color-text);
         min-width: 2.15rem;
         padding: 0.3rem 0.48rem;
         white-space: nowrap;
       }
 
-      .dock[data-placement="terminal"] .session-actions button[data-session-action-label-mode="glyph"] {
+      .dock[data-placement="terminal"]
+        .session-actions
+        button[data-session-action-label-mode="glyph"] {
         inline-size: 2.2rem;
         min-width: 2.2rem;
         aspect-ratio: 1;
@@ -430,13 +525,25 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .primary {
-        border-color: color-mix(in srgb, var(--tp-color-accent) 52%, transparent);
-        background: color-mix(in srgb, var(--tp-color-accent) 18%, var(--tp-color-panel-raised));
+        border-color: color-mix(
+          in srgb,
+          var(--tp-color-accent) 52%,
+          transparent
+        );
+        background: color-mix(
+          in srgb,
+          var(--tp-color-accent) 18%,
+          var(--tp-color-panel-raised)
+        );
       }
 
       .dock[data-placement="terminal"] .primary,
       .dock[data-placement="terminal"] button[data-action-tone="primary"] {
-        border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 54%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 54%,
+          transparent
+        );
         background: color-mix(
           in srgb,
           var(--tp-terminal-color-accent) 16%,
@@ -444,8 +551,14 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         );
       }
 
-      .dock[data-placement="terminal"] .session-actions button[data-session-action-tone="danger"] {
-        border-color: color-mix(in srgb, var(--tp-color-danger) 52%, transparent);
+      .dock[data-placement="terminal"]
+        .session-actions
+        button[data-session-action-tone="danger"] {
+        border-color: color-mix(
+          in srgb,
+          var(--tp-color-danger) 52%,
+          transparent
+        );
         color: var(--tp-color-danger);
       }
 
@@ -454,34 +567,59 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         align-items: center;
         border: 1px solid var(--tp-color-border);
         border-radius: 999px;
-        background: color-mix(in srgb, var(--tp-color-panel-raised) 68%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-color-panel-raised) 68%,
+          transparent
+        );
         color: var(--tp-color-text-muted);
         font-size: 0.78rem;
         padding: 0.22rem 0.55rem;
       }
 
       .dock[data-placement="terminal"] .badge {
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 72%,
+          transparent
+        );
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 78%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 78%,
+          transparent
+        );
         color: var(--tp-terminal-color-text-muted);
         padding: 0.2rem 0.48rem;
       }
 
       .badge[data-tone="ready"] {
-        border-color: color-mix(in srgb, var(--tp-color-success) 55%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-color-success) 55%,
+          transparent
+        );
         color: var(--tp-color-success);
       }
 
       .badge[data-tone="pending"] {
-        border-color: color-mix(in srgb, var(--tp-color-warning) 55%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-color-warning) 55%,
+          transparent
+        );
         color: var(--tp-color-warning);
       }
 
       .notice {
-        border: 1px solid color-mix(in srgb, var(--tp-color-warning) 45%, transparent);
+        border: 1px solid
+          color-mix(in srgb, var(--tp-color-warning) 45%, transparent);
         border-radius: var(--tp-radius-md);
-        background: color-mix(in srgb, var(--tp-color-warning) 10%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-color-warning) 10%,
+          transparent
+        );
         color: var(--tp-color-text);
         padding: var(--tp-space-3);
       }
@@ -492,7 +630,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .dock[data-placement="terminal"] details {
-        border-top-color: color-mix(in srgb, var(--tp-terminal-color-border) 58%, transparent);
+        border-top-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 58%,
+          transparent
+        );
         padding-top: var(--tp-space-2);
       }
 
@@ -579,15 +721,20 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     `,
   ];
 
-  declare quickCommands: readonly TerminalCommandQuickCommand[] | null | undefined;
+  declare quickCommands:
+    | readonly TerminalCommandQuickCommand[]
+    | null
+    | undefined;
   declare autoFocusInput: boolean;
   declare placement: TerminalCommandDockPlacement;
   protected declare pending: boolean;
   protected declare actionError: string | null;
   protected declare historyClearConfirmationArmed: boolean;
 
-  #historyNavigation: TerminalCommandHistoryNavigationState = createTerminalCommandHistoryNavigationState();
-  #historyClearConfirmationResetTimer: ReturnType<typeof setTimeout> | null = null;
+  #historyNavigation: TerminalCommandHistoryNavigationState =
+    createTerminalCommandHistoryNavigationState();
+  #historyClearConfirmationResetTimer: ReturnType<typeof setTimeout> | null =
+    null;
   #lastAutoFocusedPaneId: string | null = null;
 
   constructor() {
@@ -607,9 +754,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
   protected override updated(changedProperties: PropertyValues): void {
     if (
-      changedProperties.has("snapshot")
-      || changedProperties.has("pending")
-      || changedProperties.has("autoFocusInput")
+      changedProperties.has("snapshot") ||
+      changedProperties.has("pending") ||
+      changedProperties.has("autoFocusInput")
     ) {
       this.maybeAutoFocusInput();
     }
@@ -619,16 +766,25 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     const isTerminalPlacement = this.placement === "terminal";
     const controls = resolveTerminalCommandDockControlState(this.snapshot, {
       pending: this.pending,
-      recentCommandLimit: isTerminalPlacement ? TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT : null,
+      recentCommandLimit: isTerminalPlacement
+        ? TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT
+        : null,
     });
-    const quickCommands = resolveTerminalCommandQuickCommands(this.quickCommands);
+    const quickCommands = resolveTerminalCommandQuickCommands(
+      this.quickCommands
+    );
     const inputStatus = resolveTerminalCommandInputStatus(controls);
-    const statusBadges = resolveTerminalCommandDockStatusBadges(controls, inputStatus, {
-      placement: this.placement,
-    });
-    const pasteTitle = controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
-      ? "Paste is not supported by the active backend"
-      : "Paste clipboard into the focused pane";
+    const statusBadges = resolveTerminalCommandDockStatusBadges(
+      controls,
+      inputStatus,
+      {
+        placement: this.placement,
+      }
+    );
+    const pasteTitle =
+      controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
+        ? "Paste is not supported by the active backend"
+        : "Paste clipboard into the focused pane";
     const accessoryState = resolveTerminalCommandDockAccessoryState({
       placement: this.placement,
       quickCommandCount: quickCommands.length,
@@ -648,7 +804,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
               <div class="panel-header">
                 <div class="panel-eyebrow">Command Input</div>
                 <div class="panel-title">Focused pane command lane</div>
-                <div class="panel-copy">Send shell input to the selected pane without leaving the workspace.</div>
+                <div class="panel-copy">
+                  Send shell input to the selected pane without leaving the
+                  workspace.
+                </div>
               </div>
             `}
 
@@ -664,69 +823,87 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                 data-testid=${badge.testId}
                 data-tone=${badge.tone}
                 title=${badge.title}
-                aria-live=${badge.id === TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input ? "polite" : nothing}
-                aria-atomic=${badge.id === TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input ? "true" : nothing}
+                aria-live=${badge.id ===
+                TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input
+                  ? "polite"
+                  : nothing}
+                aria-atomic=${badge.id ===
+                TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.input
+                  ? "true"
+                  : nothing}
               >
                 ${badge.label}
               </span>
-            `,
+            `
           )}
         </div>
       </div>
     `;
 
-    const quickCommandsTemplate = quickCommands.length > 0
-      ? html`
-          <div class="chip-row" part="quick-commands" aria-label="Quick commands">
-            ${quickCommands.map(
-              (command) => html`
-                <button
-                  class="chip"
-                  type="button"
-                  part="quick-command"
-                  data-testid="tp-quick-command"
-                  data-quick-command=${command.id}
-                  data-quick-command-tone=${command.tone}
-                  title=${command.title}
-                  aria-label=${command.ariaLabel}
-                  ?disabled=${!controls.canWriteInput}
-                  @click=${() => this.setDraft(command.value, { focusInput: true })}
-                >
-                  ${command.label}
-                </button>
-              `,
-            )}
-          </div>
-        `
-      : nothing;
-
-    const commandHistoryTemplate = controls.recentCommandEntries.length > 0
-      ? html`
-          <div class="history-row" part="command-history" aria-label="Recent commands">
-            <span class="history-label">Recent</span>
-            <div class="history-actions">
-              ${controls.recentCommandEntries.map(
+    const quickCommandsTemplate =
+      quickCommands.length > 0
+        ? html`
+            <div
+              class="chip-row"
+              part="quick-commands"
+              aria-label="Quick commands"
+            >
+              ${quickCommands.map(
                 (command) => html`
                   <button
-                    class="history-chip"
+                    class="chip"
                     type="button"
-                    data-testid="tp-command-history-entry"
-                    data-command-history-entry=${command.id}
-                    data-history-index=${command.historyIndex}
-                    data-recent-index=${command.index}
+                    part="quick-command"
+                    data-testid="tp-quick-command"
+                    data-quick-command=${command.id}
+                    data-quick-command-tone=${command.tone}
                     title=${command.title}
                     aria-label=${command.ariaLabel}
                     ?disabled=${!controls.canWriteInput}
-                    @click=${() => this.setDraft(command.value, { focusInput: true })}
+                    @click=${() =>
+                      this.setDraft(command.value, { focusInput: true })}
                   >
-                    <span class="history-command">${command.label}</span>
+                    ${command.label}
                   </button>
-                `,
+                `
               )}
             </div>
-          </div>
-        `
-      : nothing;
+          `
+        : nothing;
+
+    const commandHistoryTemplate =
+      controls.recentCommandEntries.length > 0
+        ? html`
+            <div
+              class="history-row"
+              part="command-history"
+              aria-label="Recent commands"
+            >
+              <span class="history-label">Recent</span>
+              <div class="history-actions">
+                ${controls.recentCommandEntries.map(
+                  (command) => html`
+                    <button
+                      class="history-chip"
+                      type="button"
+                      data-testid="tp-command-history-entry"
+                      data-command-history-entry=${command.id}
+                      data-history-index=${command.historyIndex}
+                      data-recent-index=${command.index}
+                      title=${command.title}
+                      aria-label=${command.ariaLabel}
+                      ?disabled=${!controls.canWriteInput}
+                      @click=${() =>
+                        this.setDraft(command.value, { focusInput: true })}
+                    >
+                      <span class="history-command">${command.label}</span>
+                    </button>
+                  `
+                )}
+              </div>
+            </div>
+          `
+        : nothing;
 
     const composerTemplate = html`
       <tp-terminal-command-composer
@@ -735,19 +912,25 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         .draft=${controls.draft}
         .canWriteInput=${controls.canWriteInput}
         .canSend=${controls.canSend}
+        .canInterrupt=${controls.canInterrupt}
         .canPasteClipboard=${controls.canPasteClipboard}
         .placeholder=${inputStatus.placeholder}
         .inputDescriptionId=${TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID}
         .pasteTitle=${pasteTitle}
         .placement=${this.placement}
-        @tp-terminal-command-draft-change=${(event: CustomEvent<TerminalCommandComposerDraftChangeDetail>) =>
-          this.handleComposerDraftChange(event)}
-        @tp-terminal-command-history-navigate=${(event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>) =>
-          this.handleComposerHistoryNavigate(event)}
-        @tp-terminal-command-submit=${() => this.sendDraft({ focusInput: true })}
-        @tp-terminal-command-paste=${() => this.pasteClipboard({ focusInput: true })}
-        @tp-terminal-command-shortcut=${(event: CustomEvent<TerminalCommandComposerShortcutDetail>) =>
-          this.handleComposerShortcut(event)}
+        @tp-terminal-command-draft-change=${(
+          event: CustomEvent<TerminalCommandComposerDraftChangeDetail>
+        ) => this.handleComposerDraftChange(event)}
+        @tp-terminal-command-history-navigate=${(
+          event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>
+        ) => this.handleComposerHistoryNavigate(event)}
+        @tp-terminal-command-submit=${() =>
+          this.sendDraft({ focusInput: true })}
+        @tp-terminal-command-paste=${() =>
+          this.pasteClipboard({ focusInput: true })}
+        @tp-terminal-command-shortcut=${(
+          event: CustomEvent<TerminalCommandComposerShortcutDetail>
+        ) => this.handleComposerShortcut(event)}
       ></tp-terminal-command-composer>
     `;
 
@@ -764,42 +947,47 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       ? nothing
       : html`
           <div class="dock-footer">
-            <div class="hint" part="hint">
-              ${inputStatus.hint}
-            </div>
+            <div class="hint" part="hint">${inputStatus.hint}</div>
           </div>
         `;
 
     const sessionActionsTemplate = html`
-      <div class="actions session-actions" part="session-actions" data-testid="tp-session-actions">
-            ${sessionActions.map(
-              (action) => html`
-                <button
-                  data-testid=${action.testId}
-                  data-session-action=${action.id}
-                  data-session-action-label-mode=${action.labelMode}
-                  data-session-action-placement=${action.placement}
-                  data-session-action-tone=${action.tone}
-                  data-danger=${action.dangerous ? "true" : nothing}
-                  data-confirming=${String(action.confirming)}
-                  data-history-count=${action.historyCount == null ? nothing : String(action.historyCount)}
-                  title=${action.title}
-                  aria-label=${action.ariaLabel}
-                  ?disabled=${action.disabled}
-                  @click=${() => this.handleSessionActionClick(action.id)}
-                >
-                  ${action.label}
-                </button>
-              `,
-            )}
-          </div>
+      <div
+        class="actions session-actions"
+        part="session-actions"
+        data-testid="tp-session-actions"
+      >
+        ${sessionActions.map(
+          (action) => html`
+            <button
+              type="button"
+              data-testid=${action.testId}
+              data-session-action=${action.id}
+              data-session-action-label-mode=${action.labelMode}
+              data-session-action-placement=${action.placement}
+              data-session-action-tone=${action.tone}
+              data-danger=${action.dangerous ? "true" : nothing}
+              data-confirming=${String(action.confirming)}
+              data-history-count=${action.historyCount == null
+                ? nothing
+                : String(action.historyCount)}
+              title=${action.placement === "terminal" ? nothing : action.title}
+              aria-label=${action.ariaLabel}
+              ?disabled=${action.disabled}
+              @click=${() => this.handleSessionActionClick(action.id)}
+            >
+              ${action.label}
+            </button>
+          `
+        )}
+      </div>
     `;
 
     const sessionToolsTemplate = html`
       <details part="session-tools" data-testid="tp-session-tools">
-          <summary>Session tools</summary>
-          ${sessionActionsTemplate}
-        </details>
+        <summary>Session tools</summary>
+        ${sessionActionsTemplate}
+      </details>
     `;
 
     const accessoryBarTemplate = html`
@@ -814,19 +1002,13 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         data-recent-command-count=${accessoryState.recentCommandCount}
         aria-label="Terminal command accessories"
       >
-        ${headerTemplate}
-        ${quickCommandsTemplate}
-        ${commandHistoryTemplate}
+        ${headerTemplate} ${quickCommandsTemplate} ${commandHistoryTemplate}
         ${sessionActionsTemplate}
       </div>
     `;
 
     const orderedDockContent = isTerminalPlacement
-      ? [
-          composerTemplate,
-          errorTemplate,
-          accessoryBarTemplate,
-        ]
+      ? [composerTemplate, errorTemplate, accessoryBarTemplate]
       : [
           headerTemplate,
           quickCommandsTemplate,
@@ -858,8 +1040,13 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     `;
   }
 
-  private setDraft(value: string, options: TerminalCommandInputFocusOptions = {}): void {
-    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+  private setDraft(
+    value: string,
+    options: TerminalCommandInputFocusOptions = {}
+  ): void {
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, {
+      pending: this.pending,
+    });
     if (!controls.activePaneId || !controls.canWriteInput) {
       return;
     }
@@ -873,34 +1060,74 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     }
   }
 
-  private handleComposerDraftChange(event: CustomEvent<TerminalCommandComposerDraftChangeDetail>): void {
+  private handleComposerDraftChange(
+    event: CustomEvent<TerminalCommandComposerDraftChangeDetail>
+  ): void {
     this.setDraft(event.detail.value);
   }
 
-  private handleComposerHistoryNavigate(event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>): void {
+  private handleComposerHistoryNavigate(
+    event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>
+  ): void {
     const composer = event.currentTarget as TerminalCommandComposerElement;
-    if (this.navigateCommandHistory(event.detail.direction, event.detail.input, composer)) {
+    if (
+      this.navigateCommandHistory(
+        event.detail.direction,
+        event.detail.input,
+        composer
+      )
+    ) {
       event.preventDefault();
     }
   }
 
-  private handleComposerShortcut(event: CustomEvent<TerminalCommandComposerShortcutDetail>): void {
+  private handleComposerShortcut(
+    event: CustomEvent<TerminalCommandComposerShortcutDetail>
+  ): void {
     void this.sendShortcut(event.detail.data, { focusInput: true });
   }
 
-  private async sendDraft(options: TerminalCommandInputFocusOptions = {}): Promise<void> {
-    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
-    if (!controls.activeSessionId || !controls.activePaneId || !controls.canSend) {
+  private async sendDraft(
+    options: TerminalCommandInputFocusOptions = {}
+  ): Promise<void> {
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, {
+      pending: this.pending,
+    });
+    if (
+      !controls.activeSessionId ||
+      !controls.activePaneId ||
+      !controls.canSend
+    ) {
       return;
     }
 
     this.recordCommandHistory(controls.draft);
     this.clearHistoryClearConfirmation();
     this.resetHistoryNavigation();
+    const startedAtMs = Date.now();
+    const clientEventId = createTerminalClientEventId("dock-input");
+    this.dispatchEvent(
+      new CustomEvent("tp-terminal-command-started", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          clientEventId,
+          command: controls.draft,
+          paneId: controls.activePaneId,
+          sessionId: controls.activeSessionId,
+          startedAtMs,
+        },
+      })
+    );
     await this.dispatchInput(
       controls.activeSessionId,
       controls.activePaneId,
       formatTerminalCommandSubmitInput(controls.draft),
+      {
+        clientEventId,
+        command: controls.draft,
+        startedAtMs,
+      }
     );
     this.kernel?.commands.clearDraft(controls.activePaneId);
     if (options.focusInput) {
@@ -911,9 +1138,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   private navigateCommandHistory(
     direction: TerminalCommandHistoryNavigationDirection,
     input: TerminalCommandHistoryInputState,
-    composer: TerminalCommandComposerElement,
+    composer: TerminalCommandComposerElement
   ): boolean {
-    const paneId = this.snapshot.selection.activePaneId ?? this.snapshot.attachedSession?.focused_screen?.pane_id ?? null;
+    const paneId =
+      this.snapshot.selection.activePaneId ??
+      this.snapshot.attachedSession?.focused_screen?.pane_id ??
+      null;
     const commandHistory = this.snapshot.commandHistory.entries;
     if (!paneId) {
       return false;
@@ -923,7 +1153,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       direction,
       input,
       commandHistory,
-      this.#historyNavigation,
+      this.#historyNavigation
     );
     this.#historyNavigation = result.state;
 
@@ -935,7 +1165,11 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     return true;
   }
 
-  private applyHistoryDraft(paneId: string, composer: TerminalCommandComposerElement, value: string): void {
+  private applyHistoryDraft(
+    paneId: string,
+    composer: TerminalCommandComposerElement,
+    value: string
+  ): void {
     this.clearHistoryClearConfirmation();
     composer.applyDraft(value);
     this.kernel?.commands.updateDraft(paneId, value);
@@ -955,7 +1189,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
-    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, {
+      pending: this.pending,
+    });
     if (!controls.activePaneId || !controls.canWriteInput) {
       this.#lastAutoFocusedPaneId = null;
       return;
@@ -971,7 +1207,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private focusCommandInput(
-    composer = this.shadowRoot?.querySelector<TerminalCommandComposerElement>("tp-terminal-command-composer"),
+    composer = this.shadowRoot?.querySelector<TerminalCommandComposerElement>(
+      "tp-terminal-command-composer"
+    )
   ): boolean {
     return composer?.focusInput() ?? false;
   }
@@ -982,9 +1220,17 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     });
   }
 
-  private async pasteClipboard(options: TerminalCommandInputFocusOptions = {}): Promise<void> {
-    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
-    if (!controls.activeSessionId || !controls.activePaneId || !controls.canPasteClipboard) {
+  private async pasteClipboard(
+    options: TerminalCommandInputFocusOptions = {}
+  ): Promise<void> {
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, {
+      pending: this.pending,
+    });
+    if (
+      !controls.activeSessionId ||
+      !controls.activePaneId ||
+      !controls.canPasteClipboard
+    ) {
       return;
     }
 
@@ -1010,7 +1256,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             paneId: controls.activePaneId,
             error,
           },
-        }),
+        })
       );
       return;
     }
@@ -1023,26 +1269,47 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
-    await this.dispatchPaste(controls.activeSessionId, controls.activePaneId, pastedText);
+    await this.dispatchPaste(
+      controls.activeSessionId,
+      controls.activePaneId,
+      pastedText
+    );
     if (options.focusInput) {
       this.refocusCommandInputAfterUpdate();
     }
   }
 
-  private async sendShortcut(data: string, options: TerminalCommandInputFocusOptions = {}): Promise<void> {
-    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
-    if (!controls.activeSessionId || !controls.activePaneId || !controls.canWriteInput) {
+  private async sendShortcut(
+    data: string,
+    options: TerminalCommandInputFocusOptions = {}
+  ): Promise<void> {
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, {
+      pending: this.pending,
+    });
+    if (
+      !controls.activeSessionId ||
+      !controls.activePaneId ||
+      !controls.canWriteInput
+    ) {
       return;
     }
 
     this.clearHistoryClearConfirmation();
-    await this.dispatchInput(controls.activeSessionId, controls.activePaneId, data);
+    await this.dispatchInput(
+      controls.activeSessionId,
+      controls.activePaneId,
+      data
+    );
     if (options.focusInput) {
       this.refocusCommandInputAfterUpdate();
     }
   }
 
-  private async dispatchPaste(sessionId: string, paneId: string, data: string): Promise<void> {
+  private async dispatchPaste(
+    sessionId: string,
+    paneId: string,
+    data: string
+  ): Promise<void> {
     this.pending = true;
     this.actionError = null;
     this.clearHistoryClearConfirmation();
@@ -1060,7 +1327,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: { sessionId, paneId, inputLength: data.length },
-        }),
+        })
       );
     } catch (error) {
       this.actionError = getErrorMessage(error);
@@ -1069,32 +1336,45 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: { sessionId, paneId, error },
-        }),
+        })
       );
     } finally {
       this.pending = false;
     }
   }
 
-  private async dispatchInput(sessionId: string, paneId: string, data: string): Promise<void> {
+  private async dispatchInput(
+    sessionId: string,
+    paneId: string,
+    data: string,
+    options: TerminalCommandDispatchInputOptions = {}
+  ): Promise<void> {
     this.pending = true;
     this.actionError = null;
     this.clearHistoryClearConfirmation();
+    const clientEventId =
+      options.clientEventId ?? createTerminalClientEventId("dock-input");
 
     try {
       await this.kernel?.commands.dispatchMuxCommand(sessionId, {
         kind: "send_input",
         pane_id: paneId,
         data,
-        client_event_id: createTerminalClientEventId("dock-input"),
+        client_event_id: clientEventId,
       });
       await this.kernel?.commands.attachSession(sessionId);
       this.dispatchEvent(
         new CustomEvent("tp-terminal-command-submitted", {
           bubbles: true,
           composed: true,
-          detail: { sessionId, paneId },
-        }),
+          detail: {
+            clientEventId,
+            command: options.command ?? null,
+            paneId,
+            sessionId,
+            startedAtMs: options.startedAtMs ?? null,
+          },
+        })
       );
     } catch (error) {
       this.actionError = getErrorMessage(error);
@@ -1102,8 +1382,15 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         new CustomEvent("tp-terminal-command-failed", {
           bubbles: true,
           composed: true,
-          detail: { sessionId, paneId, error },
-        }),
+          detail: {
+            clientEventId,
+            command: options.command ?? null,
+            error,
+            paneId,
+            sessionId,
+            startedAtMs: options.startedAtMs ?? null,
+          },
+        })
       );
     } finally {
       this.pending = false;
@@ -1111,7 +1398,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private async saveLayout(): Promise<void> {
-    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, {
+      pending: this.pending,
+    });
     if (!controls.activeSessionId || !controls.canSaveLayout) {
       return;
     }
@@ -1121,9 +1410,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     this.clearHistoryClearConfirmation();
 
     try {
-      await this.kernel?.commands.dispatchMuxCommand(controls.activeSessionId, { kind: "save_session" });
+      await this.kernel?.commands.dispatchMuxCommand(controls.activeSessionId, {
+        kind: "save_session",
+      });
       await this.kernel?.commands.refreshSavedSessions();
-      const savedSessions = this.kernel?.getSnapshot().catalog.savedSessions ?? [];
+      const savedSessions =
+        this.kernel?.getSnapshot().catalog.savedSessions ?? [];
       this.dispatchEvent(
         new CustomEvent("tp-terminal-layout-saved", {
           bubbles: true,
@@ -1133,7 +1425,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             savedSessionCount: savedSessions.length,
             savedSessionId: savedSessions[0]?.session_id ?? null,
           },
-        }),
+        })
       );
     } catch (error) {
       this.actionError = getErrorMessage(error);
@@ -1142,7 +1434,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: { sessionId: controls.activeSessionId, error },
-        }),
+        })
       );
     } finally {
       this.pending = false;
@@ -1150,7 +1442,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private async refreshActiveSession(): Promise<void> {
-    const sessionId = this.snapshot.selection.activeSessionId ?? this.snapshot.attachedSession?.session.session_id ?? null;
+    const sessionId =
+      this.snapshot.selection.activeSessionId ??
+      this.snapshot.attachedSession?.session.session_id ??
+      null;
     if (!sessionId || this.pending) {
       return;
     }
@@ -1166,7 +1461,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: { sessionId },
-        }),
+        })
       );
     } catch (error) {
       this.actionError = getErrorMessage(error);
@@ -1175,14 +1470,16 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: { sessionId, error },
-        }),
+        })
       );
     } finally {
       this.pending = false;
     }
   }
 
-  private handleSessionActionClick(actionId: TerminalCommandDockSessionActionId): void {
+  private handleSessionActionClick(
+    actionId: TerminalCommandDockSessionActionId
+  ): void {
     switch (actionId) {
       case TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout:
         void this.saveLayout();
@@ -1197,7 +1494,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private handleClearCommandHistoryClick(): void {
-    const controls = resolveTerminalCommandDockControlState(this.snapshot, { pending: this.pending });
+    const controls = resolveTerminalCommandDockControlState(this.snapshot, {
+      pending: this.pending,
+    });
     if (controls.commandHistory.length === 0 || this.pending) {
       this.clearHistoryClearConfirmation();
       return;
@@ -1219,7 +1518,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       new CustomEvent("tp-terminal-command-history-cleared", {
         bubbles: true,
         composed: true,
-      }),
+      })
     );
   }
 
@@ -1255,5 +1554,8 @@ function getErrorMessage(error: unknown): string {
 }
 
 function createTerminalClientEventId(prefix: string): string {
-  return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+  return `${prefix}:${
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  }`;
 }

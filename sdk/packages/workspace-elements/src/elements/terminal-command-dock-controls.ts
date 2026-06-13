@@ -19,6 +19,7 @@ export interface TerminalCommandDockControlState {
   recentCommands: string[];
   recentCommandEntries: TerminalCommandRecentCommandPresentation[];
   canSend: boolean;
+  canInterrupt: boolean;
   canUsePane: boolean;
   canWriteInput: boolean;
   canPasteClipboard: boolean;
@@ -53,6 +54,7 @@ export function resolveTerminalCommandDockControlState(
     recentCommands: recentCommandEntries.map((entry) => entry.value),
     recentCommandEntries,
     canSend: Boolean(canWriteInput && draft.trim().length > 0),
+    canInterrupt: Boolean(canWriteInput && snapshot.commandHistory.entries.length > 0),
     canUsePane,
     canWriteInput,
     canPasteClipboard: Boolean(canUsePane && pasteCapability.canPaste),

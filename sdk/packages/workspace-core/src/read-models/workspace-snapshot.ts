@@ -11,7 +11,12 @@ import type {
 } from "@terminal-platform/runtime-types";
 import type { WorkspaceErrorShape } from "@terminal-platform/workspace-contracts";
 
-export type WorkspaceConnectionState = "idle" | "bootstrapping" | "ready" | "error" | "disposed";
+export type WorkspaceConnectionState =
+  | "idle"
+  | "bootstrapping"
+  | "ready"
+  | "error"
+  | "disposed";
 export type WorkspaceDiagnosticSeverity = "info" | "warn" | "error";
 
 export const DEFAULT_WORKSPACE_THEME_ID = "terminal-platform-default" as const;
@@ -29,8 +34,10 @@ export const terminalPlatformTerminalFontScales = [
   "large",
 ] as const;
 
-export type TerminalPlatformWorkspaceThemeId = (typeof terminalPlatformWorkspaceThemeIds)[number];
-export type TerminalPlatformTerminalFontScale = (typeof terminalPlatformTerminalFontScales)[number];
+export type TerminalPlatformWorkspaceThemeId =
+  (typeof terminalPlatformWorkspaceThemeIds)[number];
+export type TerminalPlatformTerminalFontScale =
+  (typeof terminalPlatformTerminalFontScales)[number];
 
 export interface WorkspaceDiagnosticRecord {
   code: string;
@@ -79,7 +86,12 @@ export interface WorkspaceHistoricalPaneSnapshot {
   sourceSessionId: SessionId;
   sourcePaneId: PaneId;
   source: "saved_session_restore" | "v2_pane_history";
-  replayStrategy: "empty" | "raw_vt_stream" | "rendered_snapshot" | "mixed" | "degraded";
+  replayStrategy:
+    | "empty"
+    | "raw_vt_stream"
+    | "rendered_snapshot"
+    | "mixed"
+    | "degraded";
   restoreGuaranteeLevel: string;
   lines: string[];
   capturedAtMs: bigint;
@@ -117,7 +129,9 @@ export interface CreateInitialWorkspaceSnapshotOptions {
 export function createInitialWorkspaceSnapshot(
   options: CreateInitialWorkspaceSnapshotOptions = {},
 ): WorkspaceSnapshot {
-  const commandHistoryLimit = normalizeCommandHistoryLimit(options.commandHistoryLimit);
+  const commandHistoryLimit = normalizeCommandHistoryLimit(
+    options.commandHistoryLimit,
+  );
 
   return {
     connection: {
@@ -139,7 +153,10 @@ export function createInitialWorkspaceSnapshot(
     diagnostics: [],
     drafts: {},
     commandHistory: {
-      entries: normalizeCommandHistoryEntries(options.commandHistoryEntries, commandHistoryLimit),
+      entries: normalizeCommandHistoryEntries(
+        options.commandHistoryEntries,
+        commandHistoryLimit,
+      ),
       limit: commandHistoryLimit,
     },
     historicalPanes: {},
@@ -153,7 +170,9 @@ export function createInitialWorkspaceSnapshot(
   };
 }
 
-export function normalizeCommandHistoryLimit(limit: number | null | undefined): number {
+export function normalizeCommandHistoryLimit(
+  limit: number | null | undefined,
+): number {
   if (typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0) {
     return DEFAULT_COMMAND_HISTORY_LIMIT;
   }
@@ -193,6 +212,19 @@ export function normalizeCommandHistoryEntries(
 }
 
 export function normalizeCommandHistoryEntry(value: string): string | null {
-  const entry = value.replace(/\s+$/u, "");
+  const entry = stripShellPromptPrefix(value.trim()).trim();
   return entry.trim().length > 0 ? entry : null;
+}
+
+function stripShellPromptPrefix(value: string): string {
+  const promptCommandPattern =
+    /^(?:\([^)]{1,48}\)\s*)*(?:(?:[\w.-]+@[\w.-]+)\s+)?(?:~(?:\/[\w.,@:+-][\w.,@:+/-]{0,180})?|(?:\/|\.\/|\.\.\/)?[\w.,@:+-][\w.,@:+/-]{0,180}|[A-Za-z]:[\w.,@:+/\\-]{0,180})\s[%$#]\s+(.+)$/u;
+  const commandMatch = promptCommandPattern.exec(value);
+  if (commandMatch) {
+    return commandMatch[1] ?? "";
+  }
+
+  const promptOnlyPattern =
+    /^(?:\([^)]{1,48}\)\s*)*(?:(?:[\w.-]+@[\w.-]+)\s+)?(?:~(?:\/[\w.,@:+-][\w.,@:+/-]{0,180})?|(?:\/|\.\/|\.\.\/)?[\w.,@:+-][\w.,@:+/-]{0,180}|[A-Za-z]:[\w.,@:+/\\-]{0,180})\s[%$#]\s*$/u;
+  return promptOnlyPattern.test(value) ? "" : value;
 }

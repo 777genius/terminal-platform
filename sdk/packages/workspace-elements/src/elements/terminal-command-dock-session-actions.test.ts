@@ -111,6 +111,7 @@ function createControls(
     canPasteClipboard: true,
     canSaveLayout: true,
     canSend: true,
+    canInterrupt: true,
     canUsePane: true,
     canWriteInput: true,
     commandHistory: ["pwd", "git status"],

@@ -32,6 +32,7 @@ describe("terminal command dock controls", () => {
     expect(controls.activePaneId).toBe("pane-1");
     expect(controls.draft).toBe("git status");
     expect(controls.canSend).toBe(true);
+    expect(controls.canInterrupt).toBe(true);
     expect(controls.canUsePane).toBe(true);
     expect(controls.canWriteInput).toBe(true);
     expect(controls.inputCapabilityStatus).toBe("known");
@@ -93,6 +94,22 @@ describe("terminal command dock controls", () => {
     expect(controls.recentCommandEntries).toEqual([]);
   });
 
+  it("enables interrupt fallback only when writable command history exists", () => {
+    const idleControls = resolveTerminalCommandDockControlState(createWorkspaceSnapshot(), { pending: false });
+    const historyControls = resolveTerminalCommandDockControlState(
+      createWorkspaceSnapshot({
+        commandHistory: {
+          entries: ["npm test"],
+          limit: 50,
+        },
+      }),
+      { pending: false },
+    );
+
+    expect(idleControls.canInterrupt).toBe(false);
+    expect(historyControls.canInterrupt).toBe(true);
+  });
+
   it("disables command input when loaded backend capabilities reject pane input writes", () => {
     const snapshot = createWorkspaceSnapshot({
       catalog: {
@@ -111,6 +128,7 @@ describe("terminal command dock controls", () => {
     expect(controls.canUsePane).toBe(true);
     expect(controls.canWriteInput).toBe(false);
     expect(controls.canSend).toBe(false);
+    expect(controls.canInterrupt).toBe(false);
     expect(controls.inputCapabilityStatus).toBe("known");
   });
 
@@ -201,6 +219,7 @@ describe("terminal command dock controls", () => {
     const controls = resolveTerminalCommandDockControlState(createWorkspaceSnapshot(), { pending: true });
 
     expect(controls.canSend).toBe(false);
+    expect(controls.canInterrupt).toBe(false);
     expect(controls.canUsePane).toBe(false);
     expect(controls.canWriteInput).toBe(false);
     expect(controls.canPasteClipboard).toBe(false);

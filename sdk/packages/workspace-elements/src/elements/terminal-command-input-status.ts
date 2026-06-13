@@ -46,7 +46,7 @@ export function resolveTerminalCommandInputStatus(
       label: "Input pending",
       tone: "pending",
       title: "Backend input capability is still loading.",
-      placeholder: "Type shell input while capabilities load",
+      placeholder: "Type a command...",
       hint: "Input capability is still loading. Commands are accepted optimistically.",
     };
   }
@@ -55,7 +55,7 @@ export function resolveTerminalCommandInputStatus(
     label: "Ready",
     tone: "ready",
     title: "Focused pane accepts command input.",
-    placeholder: "Type shell input for the focused pane",
+    placeholder: "Type a command...",
     hint: "Enter sends the command. Shift+Enter inserts a newline.",
   };
 }

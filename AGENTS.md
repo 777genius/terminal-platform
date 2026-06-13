@@ -17,4 +17,6 @@ Non-negotiable rules:
 - public contracts never leak backend-native refs
 - control plane and data plane stay separate
 - degraded semantics must be explicit
-
+- do not test agent teams, launch/provisioning, terminal runtime, task assignment, smoke-flow, or agent actions on real user projects
+- use only new sandbox/test projects or explicitly test-only existing projects for verification
+- real projects such as `~/dev/projects/ai/claude-runtime` must not be used even for opening a runtime/terminal without fresh direct user permission

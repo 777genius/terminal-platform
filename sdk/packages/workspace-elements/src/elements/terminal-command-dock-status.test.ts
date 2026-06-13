@@ -67,6 +67,7 @@ function createControls(
     commandHistory: ["pwd", "ls -la", "git status"],
     recentCommands: ["git status", "ls -la"],
     canSend: true,
+    canInterrupt: true,
     canUsePane: true,
     canWriteInput: true,
     canPasteClipboard: true,
@@ -84,7 +85,7 @@ function createInputStatus(
   return {
     hint: "Enter sends the command.",
     label: "Ready",
-    placeholder: "Type shell input for the focused pane",
+    placeholder: "Type a command...",
     title: "Focused pane accepts command input.",
     tone: "ready",
     ...overrides,

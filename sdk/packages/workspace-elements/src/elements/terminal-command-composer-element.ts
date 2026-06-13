@@ -37,6 +37,7 @@ export class TerminalCommandComposerElement extends LitElement {
     draft: { type: String },
     canWriteInput: { attribute: "can-write-input", type: Boolean },
     canSend: { attribute: "can-send", type: Boolean },
+    canInterrupt: { attribute: "can-interrupt", type: Boolean },
     canPasteClipboard: { attribute: "can-paste-clipboard", type: Boolean },
     maxRows: { attribute: "max-rows", type: Number },
     minRows: { attribute: "min-rows", type: Number },
@@ -49,6 +50,7 @@ export class TerminalCommandComposerElement extends LitElement {
   declare draft: string;
   declare canWriteInput: boolean;
   declare canSend: boolean;
+  declare canInterrupt: boolean;
   declare canPasteClipboard: boolean;
   declare maxRows: number;
   declare minRows: number;
@@ -64,6 +66,7 @@ export class TerminalCommandComposerElement extends LitElement {
     this.draft = "";
     this.canWriteInput = false;
     this.canSend = false;
+    this.canInterrupt = false;
     this.canPasteClipboard = false;
     this.maxRows = TERMINAL_COMMAND_COMPOSER_DEFAULT_MAX_ROWS;
     this.minRows = TERMINAL_COMMAND_COMPOSER_DEFAULT_MIN_ROWS;
@@ -83,7 +86,24 @@ export class TerminalCommandComposerElement extends LitElement {
     const actions = resolveTerminalCommandComposerActions({
       pasteTitle: this.pasteTitle,
       placement,
+      terminalActions: {
+        canInterrupt: this.canInterrupt,
+        canSend: this.canSend,
+      },
     });
+    const actionsTemplate = actions.length > 0
+      ? html`
+          <div
+            class="composer-actions"
+            part="composer-actions"
+            data-action-placement=${placement}
+            data-testid="tp-command-composer-actions"
+            aria-label="Command actions"
+          >
+            ${actions.map((action) => this.renderAction(action))}
+          </div>
+        `
+      : nothing;
 
     return html`
       <span class="prompt" part="prompt" aria-hidden="true">&gt;_</span>
@@ -107,15 +127,7 @@ export class TerminalCommandComposerElement extends LitElement {
         @input=${(event: Event) => this.handleInput(event)}
         @keydown=${(event: KeyboardEvent) => this.handleKeydown(event)}
       ></textarea>
-      <div
-        class="composer-actions"
-        part="composer-actions"
-        data-action-placement=${placement}
-        data-testid="tp-command-composer-actions"
-        aria-label="Command actions"
-      >
-        ${actions.map((action) => this.renderAction(action))}
-      </div>
+      ${actionsTemplate}
     `;
   }
 
@@ -205,12 +217,28 @@ export class TerminalCommandComposerElement extends LitElement {
   private handleInput(event: Event): void {
     const target = event.currentTarget as HTMLTextAreaElement;
     this.syncCommandInputHeight(target);
+    this.dispatchDraftChange(target.value);
+  }
+
+  private insertTextAtSelection(textarea: HTMLTextAreaElement, text: string): void {
+    const selectionStart = textarea.selectionStart ?? textarea.value.length;
+    const selectionEnd = textarea.selectionEnd ?? selectionStart;
+    const nextValue = `${textarea.value.slice(0, selectionStart)}${text}${textarea.value.slice(selectionEnd)}`;
+    const nextSelection = selectionStart + text.length;
+
+    textarea.value = nextValue;
+    textarea.setSelectionRange(nextSelection, nextSelection);
+    this.syncCommandInputHeight(textarea);
+    this.dispatchDraftChange(nextValue);
+  }
+
+  private dispatchDraftChange(value: string): void {
     this.dispatchEvent(
       new CustomEvent<TerminalCommandComposerDraftChangeDetail>(TERMINAL_COMMAND_COMPOSER_EVENTS.draftChange, {
         bubbles: true,
         composed: true,
         detail: {
-          value: target.value,
+          value,
         },
       }),
     );
@@ -244,6 +272,12 @@ export class TerminalCommandComposerElement extends LitElement {
       return;
     }
 
+    if (event.key === "Tab" && event.shiftKey) {
+      event.preventDefault();
+      this.insertTextAtSelection(target, "\n");
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       this.dispatchComposerEvent(TERMINAL_COMMAND_COMPOSER_EVENTS.submit);
@@ -265,7 +299,7 @@ export class TerminalCommandComposerElement extends LitElement {
         data-action-tone=${action.tone}
         data-key-hint=${action.keyHint ?? nothing}
         data-testid=${action.testId}
-        title=${action.title}
+        title=${action.placement === "terminal" ? nothing : action.title}
         aria-label=${action.ariaLabel}
         aria-keyshortcuts=${action.ariaKeyShortcuts ?? nothing}
         ?disabled=${disabled}
@@ -283,8 +317,9 @@ export class TerminalCommandComposerElement extends LitElement {
       case TERMINAL_COMMAND_COMPOSER_ACTION_IDS.paste:
         return !this.canPasteClipboard;
       case TERMINAL_COMMAND_COMPOSER_ACTION_IDS.enter:
-      case TERMINAL_COMMAND_COMPOSER_ACTION_IDS.interrupt:
         return !this.canWriteInput;
+      case TERMINAL_COMMAND_COMPOSER_ACTION_IDS.interrupt:
+        return !this.canWriteInput || !this.canInterrupt;
     }
   }
 

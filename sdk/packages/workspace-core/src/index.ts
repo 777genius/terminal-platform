@@ -8,16 +8,14 @@ export type {
   WorkspaceKernel,
   WorkspaceSelectors,
 } from "./kernel/types.js";
-export type {
-  CreateWorkspaceHostOptions,
-  WorkspaceHost,
-} from "./bootstrap.js";
+export type { CreateWorkspaceHostOptions, WorkspaceHost } from "./bootstrap.js";
 
 export {
   DEFAULT_TERMINAL_FONT_SCALE,
   DEFAULT_WORKSPACE_THEME_ID,
   DEFAULT_COMMAND_HISTORY_LIMIT,
   createInitialWorkspaceSnapshot,
+  normalizeCommandHistoryEntry,
   normalizeCommandHistoryLimit,
   terminalPlatformTerminalFontScales,
   terminalPlatformWorkspaceThemeIds,

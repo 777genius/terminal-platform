@@ -20,7 +20,10 @@ import type {
   SubscriptionSpec,
   TopologySnapshot,
 } from "@terminal-platform/runtime-types";
-import type { WorkspaceSubscription, WorkspaceTransportClient } from "@terminal-platform/workspace-contracts";
+import type {
+  WorkspaceSubscription,
+  WorkspaceTransportClient,
+} from "@terminal-platform/workspace-contracts";
 
 import { createWorkspaceKernel } from "./create-workspace-kernel.js";
 import {
@@ -55,7 +58,7 @@ describe("createWorkspaceKernel theme commands", () => {
     expect(kernel.diagnostics.list()).toEqual([
       {
         code: "theme_unsupported",
-        message: "Theme \"missing-theme\" is not registered for this workspace",
+        message: 'Theme "missing-theme" is not registered for this workspace',
         recoverable: true,
         severity: "warn",
         timestampMs: 2000,
@@ -101,7 +104,8 @@ describe("createWorkspaceKernel theme commands", () => {
     expect(kernel.diagnostics.list()).toEqual([
       {
         code: "theme_unsupported",
-        message: "Initial theme \"stale-theme\" is not registered for this workspace",
+        message:
+          'Initial theme "stale-theme" is not registered for this workspace',
         recoverable: true,
         severity: "warn",
         timestampMs: 3000,
@@ -271,6 +275,35 @@ describe("createWorkspaceKernel command history", () => {
     await kernel.dispose();
   });
 
+  it("strips shell prompt prefixes from command history entries", async () => {
+    const kernel = createWorkspaceKernel({
+      transport: createUnusedTransport(),
+      commandHistoryLimit: 5,
+      initialCommandHistoryEntries: [
+        "(venv312) (base) belief@MacBook-Pro-belief terminal-ui-smoke % pnpm test",
+        "belief@MacBook-Pro-belief terminal-ui-smoke %",
+        "git status",
+      ],
+    });
+
+    expect(kernel.selectors.commandHistory()).toEqual({
+      entries: ["pnpm test", "git status"],
+      limit: 5,
+    });
+
+    kernel.commands.recordCommandHistory(
+      'belief@MacBook-Pro-belief terminal-ui-smoke % printf "ok\\n"',
+    );
+    kernel.commands.recordCommandHistory("terminal-ui-smoke %");
+
+    expect(kernel.selectors.commandHistory()).toEqual({
+      entries: ["pnpm test", "git status", 'printf "ok\\n"'],
+      limit: 5,
+    });
+
+    await kernel.dispose();
+  });
+
   it("falls back to the default command history limit", async () => {
     const kernel = createWorkspaceKernel({
       transport: createUnusedTransport(),
@@ -305,8 +338,12 @@ describe("createWorkspaceKernel bootstrap", () => {
     await kernel.bootstrap();
 
     expect(requestedBackends).toEqual(["native", "tmux"]);
-    expect(kernel.getSnapshot().catalog.backendCapabilities.native?.backend).toBe("native");
-    expect(kernel.getSnapshot().catalog.backendCapabilities.tmux?.backend).toBe("tmux");
+    expect(
+      kernel.getSnapshot().catalog.backendCapabilities.native?.backend,
+    ).toBe("native");
+    expect(kernel.getSnapshot().catalog.backendCapabilities.tmux?.backend).toBe(
+      "tmux",
+    );
 
     await kernel.dispose();
   });
@@ -319,7 +356,8 @@ describe("createWorkspaceKernel bootstrap", () => {
         handshake: async () => createHandshake(["native", "tmux", "zellij"]),
         listSessions: async () => [],
         listSavedSessions: async () => [],
-        getBackendCapabilities: async (backend: BackendKind) => createCapabilities(backend),
+        getBackendCapabilities: async (backend: BackendKind) =>
+          createCapabilities(backend),
         discoverSessions: async (backend: BackendKind) => {
           requestedBackends.push(backend);
           return [createDiscoveredSession(backend)];
@@ -330,8 +368,13 @@ describe("createWorkspaceKernel bootstrap", () => {
     await kernel.bootstrap();
 
     expect(requestedBackends).toEqual(["tmux", "zellij"]);
-    expect(kernel.getSnapshot().catalog.discoveredSessions.tmux?.[0]?.route.backend).toBe("tmux");
-    expect(kernel.getSnapshot().catalog.discoveredSessions.zellij?.[0]?.route.backend).toBe("zellij");
+    expect(
+      kernel.getSnapshot().catalog.discoveredSessions.tmux?.[0]?.route.backend,
+    ).toBe("tmux");
+    expect(
+      kernel.getSnapshot().catalog.discoveredSessions.zellij?.[0]?.route
+        .backend,
+    ).toBe("zellij");
 
     await kernel.dispose();
   });
@@ -357,7 +400,9 @@ describe("createWorkspaceKernel bootstrap", () => {
     await kernel.bootstrap();
 
     expect(kernel.selectors.connection().state).toBe("ready");
-    expect(kernel.getSnapshot().catalog.backendCapabilities.native?.backend).toBe("native");
+    expect(
+      kernel.getSnapshot().catalog.backendCapabilities.native?.backend,
+    ).toBe("native");
     expect(kernel.diagnostics.list()).toEqual([
       {
         code: "transport_failed",
@@ -401,8 +446,16 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     const sessionId = "history-session-1";
     const paneId = "history-pane-1";
     const topology = createLiveTopology(sessionId, paneId);
-    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
-    const subscription = new TestWorkspaceSubscription("history-pane-subscription");
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription(
+      "history-pane-subscription",
+    );
     let historyCalls = 0;
     const kernel = createWorkspaceKernel({
       transport: {
@@ -422,7 +475,12 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     });
 
     await kernel.commands.attachSession(sessionId);
-    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.lines.includes("fatal") ?? false);
+    await waitUntil(
+      () =>
+        kernel
+          .getSnapshot()
+          .historicalPanes?.[paneId]?.lines.includes("fatal") ?? false,
+    );
 
     expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
       sessionId,
@@ -434,7 +492,8 @@ describe("createWorkspaceKernel live session subscriptions", () => {
       hasGaps: false,
       hasMoreSegments: false,
     });
-    const restoredHistoryText = kernel.getSnapshot().historicalPanes?.[paneId]?.lines.join("\n") ?? "";
+    const restoredHistoryText =
+      kernel.getSnapshot().historicalPanes?.[paneId]?.lines.join("\n") ?? "";
     expect(restoredHistoryText).not.toContain("fake-title");
     expect(restoredHistoryText).not.toContain("fake-clipboard");
     expect(historyCalls).toBeGreaterThan(0);
@@ -446,9 +505,18 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     const sessionId = "history-session-pages";
     const paneId = "history-pane-pages";
     const topology = createLiveTopology(sessionId, paneId);
-    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
-    const subscription = new TestWorkspaceSubscription("history-pane-pages-subscription");
-    const historyRequests: Array<{ fromEventSeq?: number | bigint | null }> = [];
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription(
+      "history-pane-pages-subscription",
+    );
+    const historyRequests: Array<{ fromEventSeq?: number | bigint | null }> =
+      [];
     const kernel = createWorkspaceKernel({
       transport: {
         ...createUnusedTransport(),
@@ -481,11 +549,19 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     });
 
     await kernel.commands.attachSession(sessionId);
-    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ??
+        false,
+    );
 
-    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(
+      true,
+    );
 
-    const requestedPages = historyRequests.map((request) => request.fromEventSeq);
+    const requestedPages = historyRequests.map(
+      (request) => request.fromEventSeq,
+    );
     expect(requestedPages[0]).toBe(1n);
     expect(requestedPages.at(-1)).toBe(2n);
     expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
@@ -502,9 +578,18 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     const sessionId = "history-session-snapshot-page";
     const paneId = "history-pane-snapshot-page";
     const topology = createLiveTopology(sessionId, paneId);
-    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
-    const subscription = new TestWorkspaceSubscription("history-snapshot-page-subscription");
-    const historyRequests: Array<{ fromEventSeq?: number | bigint | null }> = [];
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription(
+      "history-snapshot-page-subscription",
+    );
+    const historyRequests: Array<{ fromEventSeq?: number | bigint | null }> =
+      [];
     const kernel = createWorkspaceKernel({
       transport: {
         ...createUnusedTransport(),
@@ -538,7 +623,11 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     });
 
     await kernel.commands.attachSession(sessionId);
-    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ??
+        false,
+    );
 
     expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
       lines: [],
@@ -547,15 +636,22 @@ describe("createWorkspaceKernel live session subscriptions", () => {
       nextEventSeq: 2n,
     });
 
-    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(
+      true,
+    );
 
-    expect(historyRequests.map((request) => request.fromEventSeq)).toEqual([1n, 2n]);
+    expect(historyRequests.map((request) => request.fromEventSeq)).toEqual([
+      1n,
+      2n,
+    ]);
     expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
       lines: ["journal page"],
       hasMoreSegments: false,
       nextEventSeq: null,
     });
-    expect(kernel.getSnapshot().historicalPanes?.[paneId]?.lines).not.toContain("latest snapshot fallback");
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]?.lines).not.toContain(
+      "latest snapshot fallback",
+    );
 
     await kernel.dispose();
   });
@@ -564,8 +660,16 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     const sessionId = "history-session-line-boundary";
     const paneId = "history-pane-line-boundary";
     const topology = createLiveTopology(sessionId, paneId);
-    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
-    const subscription = new TestWorkspaceSubscription("history-line-boundary-subscription");
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription(
+      "history-line-boundary-subscription",
+    );
     const kernel = createWorkspaceKernel({
       transport: {
         ...createUnusedTransport(),
@@ -597,9 +701,15 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     });
 
     await kernel.commands.attachSession(sessionId);
-    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ??
+        false,
+    );
 
-    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(
+      true,
+    );
 
     expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
       lines: ["partial line", "next"],
@@ -615,8 +725,16 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     const sessionId = "history-session-empty-final";
     const paneId = "history-pane-empty-final";
     const topology = createLiveTopology(sessionId, paneId);
-    const attachedSession = createAttachedSession(sessionId, paneId, topology, "live prompt", 1n);
-    const subscription = new TestWorkspaceSubscription("history-empty-final-subscription");
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription(
+      "history-empty-final-subscription",
+    );
     const kernel = createWorkspaceKernel({
       transport: {
         ...createUnusedTransport(),
@@ -648,9 +766,15 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     });
 
     await kernel.commands.attachSession(sessionId);
-    await waitUntil(() => kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ?? false);
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().historicalPanes?.[paneId]?.hasMoreSegments ??
+        false,
+    );
 
-    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(true);
+    await expect(kernel.commands.loadMorePaneHistory(paneId)).resolves.toBe(
+      true,
+    );
 
     expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
       lines: ["first page"],
@@ -669,7 +793,8 @@ describe("createWorkspaceKernel live session subscriptions", () => {
         handshake: async () => createHandshake(["native"]),
         listSessions: async () => [],
         listSavedSessions: async () => [],
-        getBackendCapabilities: async (backend: BackendKind) => createCapabilities(backend),
+        getBackendCapabilities: async (backend: BackendKind) =>
+          createCapabilities(backend),
         listCommandHistory: async () => [
           createCommandHistoryEntry("git status", 2_000n),
           createCommandHistoryEntry("pwd", 1_000n),
@@ -702,7 +827,9 @@ describe("createWorkspaceKernel saved session maintenance", () => {
         ...createUnusedTransport(),
         listSavedSessions: async () => savedSessions,
         pruneSavedSessions: async (keepLatest: number) => {
-          const sorted = [...savedSessions].sort((left, right) => Number(right.saved_at_ms - left.saved_at_ms));
+          const sorted = [...savedSessions].sort((left, right) =>
+            Number(right.saved_at_ms - left.saved_at_ms),
+          );
           savedSessions = sorted.slice(0, keepLatest);
           return {
             deleted_count: sorted.length - savedSessions.length,
@@ -719,10 +846,11 @@ describe("createWorkspaceKernel saved session maintenance", () => {
       deleted_count: 1,
       kept_count: 2,
     });
-    expect(kernel.getSnapshot().catalog.savedSessions.map((session) => session.session_id)).toEqual([
-      "saved-3",
-      "saved-2",
-    ]);
+    expect(
+      kernel
+        .getSnapshot()
+        .catalog.savedSessions.map((session) => session.session_id),
+    ).toEqual(["saved-3", "saved-2"]);
 
     await kernel.dispose();
   });
@@ -747,7 +875,9 @@ describe("createWorkspaceKernel saved session maintenance", () => {
     });
 
     await kernel.commands.refreshSavedSessions();
-    await expect(kernel.commands.restoreSavedSession("saved-1")).rejects.toMatchObject({
+    await expect(
+      kernel.commands.restoreSavedSession("saved-1"),
+    ).rejects.toMatchObject({
       code: "unsupported_capability",
       recoverable: false,
     });
@@ -756,7 +886,8 @@ describe("createWorkspaceKernel saved session maintenance", () => {
     expect(kernel.diagnostics.list()).toEqual([
       {
         code: "unsupported_capability",
-        message: "saved session saved-1 is not restore-compatible: protocol_minor_ahead",
+        message:
+          "saved session saved-1 is not restore-compatible: protocol_minor_ahead",
         recoverable: false,
         severity: "error",
         timestampMs: 3_000,
@@ -767,7 +898,11 @@ describe("createWorkspaceKernel saved session maintenance", () => {
   });
 
   it("attaches restored sessions with saved visible history", async () => {
-    const savedRecord = createSavedSessionRecord("saved-1", "saved-pane-1", "historical output");
+    const savedRecord = createSavedSessionRecord(
+      "saved-1",
+      "saved-pane-1",
+      "historical output",
+    );
     const restoredSessionId = "restored-session-1";
     const livePaneId = "live-pane-1";
     const liveTopology = createLiveTopology(restoredSessionId, livePaneId);
@@ -782,7 +917,9 @@ describe("createWorkspaceKernel saved session maintenance", () => {
     const kernel = createWorkspaceKernel({
       transport: {
         ...createUnusedTransport(),
-        listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
+        listSavedSessions: async () => [
+          savedSessionRecordToSummary(savedRecord),
+        ],
         getSavedSession: async () => savedRecord,
         restoreSavedSession: async () => ({
           saved_session_id: savedRecord.session_id,
@@ -804,7 +941,9 @@ describe("createWorkspaceKernel saved session maintenance", () => {
     await kernel.commands.restoreSavedSession(savedRecord.session_id);
 
     const snapshot = kernel.getSnapshot();
-    expect(snapshot.attachedSession?.session.session_id).toBe(restoredSessionId);
+    expect(snapshot.attachedSession?.session.session_id).toBe(
+      restoredSessionId,
+    );
     expect(snapshot.selection).toEqual({
       activeSessionId: restoredSessionId,
       activePaneId: livePaneId,
@@ -823,7 +962,11 @@ describe("createWorkspaceKernel saved session maintenance", () => {
   });
 
   it("hydrates restored sessions from v2 journal before falling back to saved screens", async () => {
-    const savedRecord = createSavedSessionRecord("saved-v2-history", "saved-pane-1", "snapshot fallback");
+    const savedRecord = createSavedSessionRecord(
+      "saved-v2-history",
+      "saved-pane-1",
+      "snapshot fallback",
+    );
     const restoredSessionId = "restored-v2-history";
     const livePaneId = "live-pane-1";
     const liveTopology = createLiveTopology(restoredSessionId, livePaneId);
@@ -834,13 +977,19 @@ describe("createWorkspaceKernel saved session maintenance", () => {
       "new live prompt",
       1n,
     );
-    const historyRequests: Array<{ sessionId: string; paneId: string; fromEventSeq?: number | bigint | null }> = [];
+    const historyRequests: Array<{
+      sessionId: string;
+      paneId: string;
+      fromEventSeq?: number | bigint | null;
+    }> = [];
 
     const kernel = createWorkspaceKernel({
       transport: {
         ...createUnusedTransport(),
         historyRequests,
-        listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
+        listSavedSessions: async () => [
+          savedSessionRecordToSummary(savedRecord),
+        ],
         getSavedSession: async () => savedRecord,
         getPaneHistory: async function (
           this: { historyRequests: typeof historyRequests },
@@ -848,7 +997,11 @@ describe("createWorkspaceKernel saved session maintenance", () => {
           paneId,
           options,
         ) {
-          this.historyRequests.push({ sessionId, paneId, fromEventSeq: options?.fromEventSeq });
+          this.historyRequests.push({
+            sessionId,
+            paneId,
+            fromEventSeq: options?.fromEventSeq,
+          });
           return createPaneHistory(sessionId, paneId, "journal output\r\n", {
             fromEventSeq: 1n,
             eventSeqLow: 1n,
@@ -896,11 +1049,18 @@ describe("createWorkspaceKernel saved session maintenance", () => {
   });
 
   it("keeps restore successful when immediate attach for history fails", async () => {
-    const savedRecord = createSavedSessionRecord("saved-attach-fails", "saved-pane-1", "historical output");
+    const savedRecord = createSavedSessionRecord(
+      "saved-attach-fails",
+      "saved-pane-1",
+      "historical output",
+    );
     const restoredSessionId = "restored-attach-fails";
     const previousSessionId = "previous-live-session";
     const previousPaneId = "previous-live-pane";
-    const previousTopology = createLiveTopology(previousSessionId, previousPaneId);
+    const previousTopology = createLiveTopology(
+      previousSessionId,
+      previousPaneId,
+    );
     const previousAttachedSession = createAttachedSession(
       previousSessionId,
       previousPaneId,
@@ -908,13 +1068,17 @@ describe("createWorkspaceKernel saved session maintenance", () => {
       "previous live output",
       1n,
     );
-    const subscription = new TestWorkspaceSubscription("previous-live-subscription");
+    const subscription = new TestWorkspaceSubscription(
+      "previous-live-subscription",
+    );
     let openSubscriptionCalls = 0;
     const kernel = createWorkspaceKernel({
       transport: {
         ...createUnusedTransport(),
         attachCalls: 0,
-        listSavedSessions: async () => [savedSessionRecordToSummary(savedRecord)],
+        listSavedSessions: async () => [
+          savedSessionRecordToSummary(savedRecord),
+        ],
         getSavedSession: async () => savedRecord,
         restoreSavedSession: async () => ({
           saved_session_id: savedRecord.session_id,
@@ -952,7 +1116,11 @@ describe("createWorkspaceKernel saved session maintenance", () => {
       activePaneId: null,
     });
     expect(kernel.getSnapshot().attachedSession).toBeNull();
-    expect(kernel.getSnapshot().catalog.sessions.map((session) => session.session_id)).toContain(restoredSessionId);
+    expect(
+      kernel
+        .getSnapshot()
+        .catalog.sessions.map((session) => session.session_id),
+    ).toContain(restoredSessionId);
     expect(kernel.diagnostics.list()).toEqual([
       {
         code: "restored_session_attach_failed",
@@ -988,16 +1156,17 @@ describe("createWorkspaceKernel saved session maintenance", () => {
       code: "protocol_error",
       recoverable: false,
     });
-    await expect(kernel.commands.pruneSavedSessions(Number.POSITIVE_INFINITY)).rejects.toMatchObject({
+    await expect(
+      kernel.commands.pruneSavedSessions(Number.POSITIVE_INFINITY),
+    ).rejects.toMatchObject({
       code: "protocol_error",
       recoverable: false,
     });
 
     expect(pruneCalls).toBe(0);
-    expect(kernel.diagnostics.list().map((diagnostic) => diagnostic.code)).toEqual([
-      "protocol_error",
-      "protocol_error",
-    ]);
+    expect(
+      kernel.diagnostics.list().map((diagnostic) => diagnostic.code),
+    ).toEqual(["protocol_error", "protocol_error"]);
 
     await kernel.dispose();
   });
@@ -1019,9 +1188,19 @@ function createLiveScreenTransport(): {
   const sessionId = "live-session-1";
   const paneId = "live-pane-1";
   const topology = createLiveTopology(sessionId, paneId);
-  const attachedSession = createAttachedSession(sessionId, paneId, topology, "ready", 1n);
-  const topologySubscription = new TestWorkspaceSubscription("live-topology-subscription");
-  const paneSubscription = new TestWorkspaceSubscription("live-pane-subscription");
+  const attachedSession = createAttachedSession(
+    sessionId,
+    paneId,
+    topology,
+    "ready",
+    1n,
+  );
+  const topologySubscription = new TestWorkspaceSubscription(
+    "live-topology-subscription",
+  );
+  const paneSubscription = new TestWorkspaceSubscription(
+    "live-pane-subscription",
+  );
   let attachCount = 0;
 
   const transport: WorkspaceTransportClient = {
@@ -1032,7 +1211,9 @@ function createLiveScreenTransport(): {
     },
     dispatchMuxCommand: async (_sessionId: SessionId, command: MuxCommand) => {
       if (command.kind === "send_input") {
-        paneSubscription.push(createFullReplaceDelta(paneId, 1n, 2n, "ready\nlive output"));
+        paneSubscription.push(
+          createFullReplaceDelta(paneId, 1n, 2n, "ready\nlive output"),
+        );
       }
 
       return { changed: true };
@@ -1150,7 +1331,10 @@ function createAttachedSession(
   };
 }
 
-function createLiveTopology(sessionId: SessionId, paneId: PaneId): TopologySnapshot {
+function createLiveTopology(
+  sessionId: SessionId,
+  paneId: PaneId,
+): TopologySnapshot {
   return {
     session_id: sessionId,
     backend_kind: "native",
@@ -1169,7 +1353,11 @@ function createLiveTopology(sessionId: SessionId, paneId: PaneId): TopologySnaps
   };
 }
 
-function createLiveScreen(paneId: PaneId, line: string, sequence: bigint): ScreenSnapshot {
+function createLiveScreen(
+  paneId: PaneId,
+  line: string,
+  sequence: bigint,
+): ScreenSnapshot {
   return {
     pane_id: paneId,
     sequence,
@@ -1229,43 +1417,45 @@ function createPaneHistory(
         },
       ],
     },
-    latest_screen_snapshot: options.latestScreenText == null
-      ? null
-      : {
-          id: "snapshot-1",
-          pane_id: paneId,
-          projection_source: "native_emulator",
-          buffer_kind: "screen",
-          rows: 24,
-          cols: 80,
-          base_event_seq: fromEventSeq,
-          high_water_event_seq: eventSeqHigh,
-          high_water_byte_seq: null,
-          screen_json: JSON.stringify({
-            surface: {
-              lines: [{ text: options.latestScreenText }],
-            },
-          }),
-          parser_version: "test-parser",
-          projection_version: "test-projection",
-          checksum: "test-snapshot-checksum",
-          created_at_ms: options.createdAtMs ?? 7_000n,
-        },
-    segments: options.includeSegment === false
-      ? []
-      : [
-          {
-            id: options.segmentId ?? "segment-1",
-            event_seq_low: eventSeqLow,
-            event_seq_high: eventSeqHigh,
-            byte_low: 0n,
-            byte_high: BigInt(encoded.byteLength),
-            payload: Array.from(encoded),
-            checksum: "test-checksum",
-            capture_semantics: "raw_vt_stream",
+    latest_screen_snapshot:
+      options.latestScreenText == null
+        ? null
+        : {
+            id: "snapshot-1",
+            pane_id: paneId,
+            projection_source: "native_emulator",
+            buffer_kind: "screen",
+            rows: 24,
+            cols: 80,
+            base_event_seq: fromEventSeq,
+            high_water_event_seq: eventSeqHigh,
+            high_water_byte_seq: null,
+            screen_json: JSON.stringify({
+              surface: {
+                lines: [{ text: options.latestScreenText }],
+              },
+            }),
+            parser_version: "test-parser",
+            projection_version: "test-projection",
+            checksum: "test-snapshot-checksum",
             created_at_ms: options.createdAtMs ?? 7_000n,
           },
-        ],
+    segments:
+      options.includeSegment === false
+        ? []
+        : [
+            {
+              id: options.segmentId ?? "segment-1",
+              event_seq_low: eventSeqLow,
+              event_seq_high: eventSeqHigh,
+              byte_low: 0n,
+              byte_high: BigInt(encoded.byteLength),
+              payload: Array.from(encoded),
+              checksum: "test-checksum",
+              capture_semantics: "raw_vt_stream",
+              created_at_ms: options.createdAtMs ?? 7_000n,
+            },
+          ],
     gaps: [],
     replay_strategy: "raw_vt_stream",
     has_more_segments: options.hasMoreSegments ?? false,
@@ -1294,10 +1484,15 @@ function createFullReplaceDelta(
   } satisfies Extract<SubscriptionEvent, { kind: "screen_delta" }>;
 }
 
-function attachedScreenText(kernel: ReturnType<typeof createWorkspaceKernel>): string {
-  return kernel.getSnapshot().attachedSession?.focused_screen?.surface.lines
-    .map((line) => line.text)
-    .join("\n") ?? "";
+function attachedScreenText(
+  kernel: ReturnType<typeof createWorkspaceKernel>,
+): string {
+  return (
+    kernel
+      .getSnapshot()
+      .attachedSession?.focused_screen?.surface.lines.map((line) => line.text)
+      .join("\n") ?? ""
+  );
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
@@ -1386,7 +1581,10 @@ function createDiscoveredSession(backend: BackendKind): DiscoveredSession {
   };
 }
 
-function createCommandHistoryEntry(displayText: string, lastUsedAtMs: bigint): CommandHistoryEntry {
+function createCommandHistoryEntry(
+  displayText: string,
+  lastUsedAtMs: bigint,
+): CommandHistoryEntry {
   return {
     id: `history-${displayText}`,
     session_id: "session-1",
@@ -1424,7 +1622,9 @@ function createSavedSessionRecord(
   };
 }
 
-function savedSessionRecordToSummary(record: SavedSessionRecord): SavedSessionSummary {
+function savedSessionRecordToSummary(
+  record: SavedSessionRecord,
+): SavedSessionSummary {
   return {
     session_id: record.session_id,
     route: record.route,
@@ -1439,7 +1639,10 @@ function savedSessionRecordToSummary(record: SavedSessionRecord): SavedSessionSu
   };
 }
 
-function createSavedSessionSummary(sessionId: string, savedAtMs: bigint): SavedSessionSummary {
+function createSavedSessionSummary(
+  sessionId: string,
+  savedAtMs: bigint,
+): SavedSessionSummary {
   return {
     session_id: sessionId,
     route: {

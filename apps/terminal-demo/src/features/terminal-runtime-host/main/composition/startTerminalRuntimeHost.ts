@@ -1,17 +1,16 @@
-import {
-  TerminalRuntimeControlService,
-  TerminalRuntimeSessionStreamService,
-} from "../../core/application/index.js";
-import { TerminalRuntimeGatewayServer } from "../adapters/input/TerminalRuntimeGatewayServer.js";
-import { TerminalPlatformControlRuntimeAdapter } from "../adapters/output/TerminalPlatformControlRuntimeAdapter.js";
-import { TerminalPlatformSessionStateRuntimeAdapter } from "../adapters/output/TerminalPlatformSessionStateRuntimeAdapter.js";
+import { startWorkspaceGatewayNodeServer } from "@terminal-platform/workspace-gateway-node";
 import { DaemonSupervisor } from "../infrastructure/DaemonSupervisor.js";
 import { TerminalPlatformClientProvider } from "../infrastructure/TerminalPlatformClientProvider.js";
 import {
   DEFAULT_TERMINAL_RUNTIME_SLUG,
   normalizeTerminalShellProgram,
 } from "./shell-policy.js";
-import type { TerminalRuntimeGatewayFaultInjectionPort } from "../adapters/input/TerminalRuntimeGatewayServer.js";
+import type {
+  WorkspaceGatewayFaultInjectionPort,
+  WorkspaceGatewayNodeServerHandle,
+  WorkspaceRuntimeClientPort,
+} from "@terminal-platform/workspace-gateway-node";
+import type { WorkspacePaneHistoryRequestOptions } from "@terminal-platform/workspace-contracts";
 
 export {
   DEFAULT_TERMINAL_RUNTIME_SLUG,
@@ -21,7 +20,7 @@ export {
   resolveDemoDefaultWorkingDirectory,
   resolveDemoDefaultShellProgram,
 } from "./shell-policy.js";
-export type { TerminalRuntimeGatewayFaultInjectionPort } from "../adapters/input/TerminalRuntimeGatewayServer.js";
+export type TerminalRuntimeGatewayFaultInjectionPort = WorkspaceGatewayFaultInjectionPort;
 
 export interface TerminalRuntimeHostHandle {
   controlPlaneUrl: string;
@@ -52,7 +51,13 @@ interface TerminalRuntimeGatewayServerHandle {
 interface TerminalRuntimeHostDependencies {
   daemonSupervisor: TerminalRuntimeDaemonSupervisorPort;
   createClientProvider(runtimeSlug: string): TerminalPlatformClientProvider;
-  startGateway: typeof TerminalRuntimeGatewayServer.start;
+  startGateway(input: TerminalRuntimeGatewayStartInput): Promise<TerminalRuntimeGatewayServerHandle>;
+}
+
+interface TerminalRuntimeGatewayStartInput {
+  runtimeSlug: string;
+  runtime: WorkspaceRuntimeClientPort;
+  faultInjection?: WorkspaceGatewayFaultInjectionPort | null;
 }
 
 export async function startTerminalRuntimeHost(options?: {
@@ -70,7 +75,7 @@ export async function startTerminalRuntimeHost(options?: {
       sessionStorePath: options?.sessionStorePath ?? null,
     }),
     createClientProvider: (slug) => new TerminalPlatformClientProvider(slug),
-    startGateway: (input) => TerminalRuntimeGatewayServer.start(input),
+    startGateway: startTerminalRuntimeWorkspaceGateway,
   });
 }
 
@@ -93,15 +98,10 @@ export async function startTerminalRuntimeHostWithDependencies(
       await ensureInitialNativeSession(clientProvider, options.initialNativeSession);
     }
 
-    const controlRuntimeAdapter = new TerminalPlatformControlRuntimeAdapter(clientProvider);
-    const sessionStateRuntimeAdapter = new TerminalPlatformSessionStateRuntimeAdapter(clientProvider);
-    const controlService = new TerminalRuntimeControlService(controlRuntimeAdapter);
-    const sessionStreamService = new TerminalRuntimeSessionStreamService(sessionStateRuntimeAdapter);
+    const runtime = createWorkspaceRuntimeClientPort(clientProvider);
     gatewayServer = await dependencies.startGateway({
       runtimeSlug,
-      controlService,
-      sessionStreamService,
-      clientProvider,
+      runtime,
       faultInjection: options?.gatewayFaultInjection ?? null,
     });
 
@@ -123,6 +123,158 @@ export async function startTerminalRuntimeHostWithDependencies(
     }).catch(() => undefined);
     throw error;
   }
+}
+
+async function startTerminalRuntimeWorkspaceGateway(
+  input: TerminalRuntimeGatewayStartInput,
+): Promise<TerminalRuntimeGatewayServerHandle> {
+  const handle = await startWorkspaceGatewayNodeServer({
+    runtime: input.runtime,
+    ...(input.faultInjection ? { faultInjection: input.faultInjection } : {}),
+  });
+
+  return toTerminalRuntimeGatewayServerHandle(input.runtimeSlug, handle);
+}
+
+function toTerminalRuntimeGatewayServerHandle(
+  runtimeSlug: string,
+  handle: WorkspaceGatewayNodeServerHandle,
+): TerminalRuntimeGatewayServerHandle {
+  return {
+    controlPlaneUrl: handle.controlUrl,
+    sessionStreamUrl: handle.streamUrl,
+    runtimeSlug,
+    dispose: () => handle.dispose(),
+  };
+}
+
+function createWorkspaceRuntimeClientPort(
+  clientProvider: TerminalPlatformClientProvider,
+): WorkspaceRuntimeClientPort {
+  return {
+    async handshake() {
+      const client = await clientProvider.getClient();
+      return (await client.handshakeInfo()).handshake;
+    },
+    async listSessions() {
+      const client = await clientProvider.getClient();
+      return client.listSessions();
+    },
+    async listSavedSessions() {
+      const client = await clientProvider.getClient();
+      return client.listSavedSessions();
+    },
+    async listCommandHistory(sessionId, limit) {
+      const client = await clientProvider.getClient();
+      return client.commandHistory(sessionId ?? null, limit ?? null);
+    },
+    async getPaneHistory(sessionId, paneId, options?: WorkspacePaneHistoryRequestOptions) {
+      const client = await clientProvider.getClient();
+      return client.paneHistory(
+        sessionId,
+        paneId,
+        toNullableSafeInteger(options?.fromEventSeq, "pane history fromEventSeq"),
+        toNullableSafeInteger(options?.maxSegments, "pane history maxSegments"),
+        toNullableSafeInteger(options?.maxBytes, "pane history maxBytes"),
+      );
+    },
+    async discoverSessions(backend) {
+      const client = await clientProvider.getClient();
+      return client.discoverSessions(backend);
+    },
+    async getBackendCapabilities(backend) {
+      const client = await clientProvider.getClient();
+      return client.backendCapabilities(backend);
+    },
+    async createSession(backend, request) {
+      if (backend !== "native") {
+        throw new Error(`Unsupported backend ${backend}`);
+      }
+
+      const client = await clientProvider.getClient();
+      return client.createNativeSession(request);
+    },
+    async importSession(route, title) {
+      const client = await clientProvider.getClient();
+      return client.importSession(route, title ?? null);
+    },
+    async getSavedSession(sessionId) {
+      const client = await clientProvider.getClient();
+      return client.savedSession(sessionId);
+    },
+    async deleteSavedSession(sessionId) {
+      const client = await clientProvider.getClient();
+      return client.deleteSavedSession(sessionId);
+    },
+    async pruneSavedSessions(keepLatest) {
+      const client = await clientProvider.getClient();
+      return client.pruneSavedSessions(keepLatest);
+    },
+    async restoreSavedSession(sessionId) {
+      const client = await clientProvider.getClient();
+      return client.restoreSavedSession(sessionId);
+    },
+    async attachSession(sessionId) {
+      const client = await clientProvider.getClient();
+      return client.attachSession(sessionId);
+    },
+    async getTopologySnapshot(sessionId) {
+      const client = await clientProvider.getClient();
+      return client.topologySnapshot(sessionId);
+    },
+    async getScreenSnapshot(sessionId, paneId) {
+      const client = await clientProvider.getClient();
+      return client.screenSnapshot(sessionId, paneId);
+    },
+    async getScreenDelta(sessionId, paneId, fromSequence) {
+      if (fromSequence > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error("screen delta sequence exceeds the generated runtime client safe range");
+      }
+
+      const client = await clientProvider.getClient();
+      return client.screenDelta(sessionId, paneId, Number(fromSequence));
+    },
+    async dispatchMuxCommand(sessionId, command) {
+      const client = await clientProvider.getClient();
+      return client.dispatchMuxCommand(sessionId, command);
+    },
+    async openSubscription(sessionId, spec) {
+      const client = await clientProvider.getClient();
+      const subscription = await client.openSubscription(sessionId, spec);
+      return {
+        meta: () => ({
+          subscription_id: subscription.subscriptionId,
+        }),
+        nextEvent: () => subscription.nextEvent(),
+        close: () => subscription.close(),
+      };
+    },
+    async close() {
+      // The generated TerminalNodeClient does not own the daemon lifecycle.
+    },
+  };
+}
+
+function toNullableSafeInteger(
+  value: bigint | number | null | undefined,
+  label: string,
+): number | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === "bigint") {
+    if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < BigInt(Number.MIN_SAFE_INTEGER)) {
+      throw new Error(`${label} exceeds native client safe integer range`);
+    }
+    return Number(value);
+  }
+
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`${label} must be a safe integer`);
+  }
+
+  return value;
 }
 
 export async function disposeTerminalRuntimeHostResources(resources: {

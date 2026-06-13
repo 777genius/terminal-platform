@@ -58,6 +58,9 @@
       "@terminal-platform/workspace-adapter-websocket/protocol": [
         "packages/workspace-adapter-websocket/src/protocol.ts"
       ],
+      "@terminal-platform/workspace-gateway-node": [
+        "packages/workspace-gateway-node/src/index.ts"
+      ],
       "@terminal-platform/workspace-adapter-preload": [
         "packages/workspace-adapter-preload/src/index.ts"
       ],

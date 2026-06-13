@@ -13,9 +13,7 @@ export {
   type TerminalCommandComposerActionPresentation,
   type TerminalCommandComposerActionTone,
 } from "./elements/terminal-command-composer-actions.js";
-export {
-  TerminalCommandComposerElement,
-} from "./elements/terminal-command-composer-element.js";
+export { TerminalCommandComposerElement } from "./elements/terminal-command-composer-element.js";
 export {
   TERMINAL_COMMAND_COMPOSER_EVENTS,
   type TerminalCommandComposerDraftChangeDetail,
@@ -123,6 +121,9 @@ export {
 export { TerminalStatusBarElement } from "./elements/terminal-status-bar-element.js";
 export {
   TerminalScreenElement,
+  type TerminalCommandPresentationMetadata,
+  type TerminalCommandPresentationStatus,
+  type TerminalHistoryRenderOptions,
 } from "./elements/terminal-screen-element.js";
 export {
   TERMINAL_SCREEN_EVENTS,

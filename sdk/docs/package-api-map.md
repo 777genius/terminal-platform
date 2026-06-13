@@ -19,6 +19,7 @@ Package names are fixed as:
 - `@terminal-platform/workspace-contracts`
 - `@terminal-platform/workspace-core`
 - `@terminal-platform/workspace-adapter-websocket`
+- `@terminal-platform/workspace-gateway-node`
 - `@terminal-platform/workspace-adapter-preload`
 - `@terminal-platform/workspace-adapter-memory`
 - `@terminal-platform/workspace-elements`
@@ -136,6 +137,20 @@ Expected exports:
 - config types
 - gateway protocol types for host implementations
 - diagnostics mapping helpers that normalize gateway failures to `WorkspaceError`
+
+### `@terminal-platform/workspace-gateway-node`
+
+Main entrypoint:
+
+- `@terminal-platform/workspace-gateway-node`
+
+Expected exports:
+
+- Node WebSocket gateway server for the public workspace gateway protocol
+- server-side runtime client port types
+- token-based localhost auth policy defaults
+- control dispatcher helpers for host conformance tests
+- stream subscription pump behavior for host applications
 
 ### `@terminal-platform/workspace-adapter-preload`
 

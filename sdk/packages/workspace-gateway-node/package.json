@@ -1,0 +1,22 @@
+{
+  "name": "@terminal-platform/workspace-gateway-node",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@terminal-platform/runtime-types": "0.1.0",
+    "@terminal-platform/workspace-adapter-websocket": "0.1.0",
+    "@terminal-platform/workspace-contracts": "0.1.0",
+    "ws": "8.21.0"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json"
+  }
+}

@@ -28,6 +28,7 @@ const workspaceSdkProjectRefs = [
   "packages/workspace-contracts/tsconfig.json",
   "packages/workspace-core/tsconfig.json",
   "packages/workspace-adapter-websocket/tsconfig.json",
+  "packages/workspace-gateway-node/tsconfig.json",
   "packages/workspace-adapter-preload/tsconfig.json",
   "packages/workspace-adapter-memory/tsconfig.json",
   "packages/workspace-elements/tsconfig.json",

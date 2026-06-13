@@ -5,6 +5,7 @@ import { terminalInputForKeyboardEvent, type TerminalKeyboardInputEvent } from "
 describe("terminalInputForKeyboardEvent", () => {
   it("maps printable keys and terminal navigation keys to input bytes", () => {
     expect(inputFor({ key: "a" })).toBe("a");
+    expect(inputFor({ key: " " })).toBe(" ");
     expect(inputFor({ key: "Enter" })).toBe("\r");
     expect(inputFor({ key: "Tab" })).toBe("\t");
     expect(inputFor({ key: "Backspace" })).toBe("\u007f");

@@ -35,6 +35,10 @@ export type TerminalCommandComposerActionPresentation = {
 export type TerminalCommandComposerActionOptions = {
   pasteTitle?: string | null;
   placement?: string | null;
+  terminalActions?: {
+    canInterrupt: boolean;
+    canSend: boolean;
+  } | null;
 };
 
 export const TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE = "Paste clipboard into the focused pane";
@@ -55,11 +59,11 @@ const terminalCommandComposerActions = [
     label: "Run",
     labels: {
       panel: "Run",
-      terminal: "\u25b6",
+      terminal: "Run",
     },
     labelModes: {
       panel: "label",
-      terminal: "glyph",
+      terminal: "label",
     },
     part: "send-command",
     primary: true,
@@ -73,11 +77,11 @@ const terminalCommandComposerActions = [
     label: "Paste",
     labels: {
       panel: "Paste",
-      terminal: "\u2398",
+      terminal: "Paste",
     },
     labelModes: {
       panel: "label",
-      terminal: "glyph",
+      terminal: "label",
     },
     part: "paste-clipboard",
     primary: false,
@@ -92,11 +96,11 @@ const terminalCommandComposerActions = [
     label: "^C",
     labels: {
       panel: "^C",
-      terminal: "^C",
+      terminal: "Ctrl+C",
     },
     labelModes: {
       panel: "label",
-      terminal: "glyph",
+      terminal: "label",
     },
     part: "send-interrupt",
     primary: false,
@@ -112,11 +116,11 @@ const terminalCommandComposerActions = [
     label: "Enter",
     labels: {
       panel: "Enter",
-      terminal: "\u21b5",
+      terminal: "Enter",
     },
     labelModes: {
       panel: "label",
-      terminal: "glyph",
+      terminal: "label",
     },
     part: "send-enter",
     primary: false,
@@ -135,8 +139,9 @@ export function resolveTerminalCommandComposerActions(
 ): readonly TerminalCommandComposerActionPresentation[] {
   const pasteTitle = normalizeOptionalLabel(options.pasteTitle) ?? TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE;
   const placement = resolveTerminalCommandComposerActionPlacement(options.placement);
+  const actions = resolveTerminalCommandComposerActionDefinitions(placement, options.terminalActions);
 
-  return terminalCommandComposerActions.map((action) => {
+  return actions.map((action) => {
     const label = resolveTerminalCommandComposerActionLabel(action, placement);
     const labelMode = resolveTerminalCommandComposerActionLabelMode(action, placement);
     const { labelModes: _labelModes, labels: _labels, ...baseAction } = action;
@@ -169,15 +174,36 @@ function normalizeOptionalLabel(value: string | null | undefined): string | null
 }
 
 function resolveTerminalCommandComposerActionLabel(
-  action: (typeof terminalCommandComposerActions)[number],
+  action: TerminalCommandComposerActionDefinition,
   placement: TerminalCommandComposerActionPlacement,
 ): string {
   return action.labels[placement] ?? action.label;
 }
 
 function resolveTerminalCommandComposerActionLabelMode(
-  action: (typeof terminalCommandComposerActions)[number],
+  action: TerminalCommandComposerActionDefinition,
   placement: TerminalCommandComposerActionPlacement,
 ): TerminalCommandComposerActionLabelMode {
   return action.labelModes[placement] ?? "label";
+}
+
+function resolveTerminalCommandComposerActionDefinitions(
+  placement: TerminalCommandComposerActionPlacement,
+  terminalActions: TerminalCommandComposerActionOptions["terminalActions"],
+): readonly TerminalCommandComposerActionDefinition[] {
+  if (placement !== "terminal" || !terminalActions) {
+    return terminalCommandComposerActions;
+  }
+
+  return terminalCommandComposerActions.filter((action) => {
+    if (action.id === TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit) {
+      return terminalActions.canSend;
+    }
+
+    if (action.id === TERMINAL_COMMAND_COMPOSER_ACTION_IDS.interrupt) {
+      return terminalActions.canInterrupt;
+    }
+
+    return false;
+  });
 }

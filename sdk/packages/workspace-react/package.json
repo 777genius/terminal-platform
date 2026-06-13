@@ -15,7 +15,7 @@
     "@terminal-platform/workspace-elements": "0.1.0"
   },
   "peerDependencies": {
-    "react": "19.2.5"
+    "react": ">=19.0.0 <20"
   },
   "devDependencies": {
     "@types/react": "19.2.14",

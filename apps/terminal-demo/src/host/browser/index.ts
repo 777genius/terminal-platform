@@ -100,24 +100,29 @@ function createGatewayFaultInjection(options: {
   }
 
   return {
-    beforeWorkspacePaneHistory() {
-      if (shouldFailWorkspacePaneHistory) {
-        shouldFailWorkspacePaneHistory = false;
+    beforeControlRequest(message) {
+      if (message.method === "workspace_pane_history") {
+        if (shouldFailWorkspacePaneHistory) {
+          shouldFailWorkspacePaneHistory = false;
+          throw new Error("Simulated workspace pane history failure for degraded persistence smoke");
+        }
+
+        if (!options.workspacePaneHistoryFaultMarkerPath) {
+          return;
+        }
+
+        if (!fs.existsSync(options.workspacePaneHistoryFaultMarkerPath)) {
+          return;
+        }
+
+        fs.rmSync(options.workspacePaneHistoryFaultMarkerPath, { force: true });
         throw new Error("Simulated workspace pane history failure for degraded persistence smoke");
       }
 
-      if (!options.workspacePaneHistoryFaultMarkerPath) {
+      if (message.method !== "workspace_dispatch_mux_command") {
         return;
       }
 
-      if (!fs.existsSync(options.workspacePaneHistoryFaultMarkerPath)) {
-        return;
-      }
-
-      fs.rmSync(options.workspacePaneHistoryFaultMarkerPath, { force: true });
-      throw new Error("Simulated workspace pane history failure for degraded persistence smoke");
-    },
-    beforeWorkspaceDispatchMuxCommand() {
       if (!options.workspaceDispatchStoragePressureMarkerPath) {
         return;
       }

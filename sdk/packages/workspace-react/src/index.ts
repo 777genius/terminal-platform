@@ -103,6 +103,8 @@ export type {
   TerminalCommandDockSessionActionPresentation,
   TerminalCommandDockSessionActionTone,
   TerminalCommandInputStatus,
+  TerminalCommandPresentationMetadata,
+  TerminalCommandPresentationStatus,
   TerminalCommandQuickCommand,
   TerminalCommandQuickCommandPresentation,
   TerminalCommandQuickCommandTone,

@@ -60,8 +60,62 @@ export interface VisibleOutputLine {
   source: VisibleOutputLineSource;
 }
 
+export interface VisibleOutputLineOptions {
+  hideShellPromptNoise?: boolean;
+  preserveShellPromptCommands?: boolean;
+  terminalPromptLabel?: string;
+}
+
+export interface TerminalHistoryEntryOptions {
+  terminalPromptLabel?: string;
+}
+
+export type TerminalCommandPresentationStatus =
+  | "failed"
+  | "running"
+  | "succeeded"
+  | "unknown";
+
+export interface TerminalCommandPresentationMetadata {
+  command: string;
+  durationMs?: number | null;
+  exitCode?: number | null;
+  startedAtMs?: number | null;
+  status?: TerminalCommandPresentationStatus | null;
+}
+
+export interface TerminalHistoryRenderOptions {
+  commandMetadata?: readonly TerminalCommandPresentationMetadata[] | null;
+}
+
+interface ShellPromptCommandLine {
+  prompt: string;
+  command: string;
+}
+
+export interface TerminalHistoryCommandOutputLine {
+  line: VisibleOutputLine;
+  lineIndex: number;
+}
+
+export type TerminalHistoryEntry =
+  | {
+      kind: "line";
+      line: VisibleOutputLine;
+      lineIndex: number;
+    }
+  | {
+      kind: "command";
+      prompt: string;
+      commandLine: VisibleOutputLine;
+      commandLineIndex: number;
+      command: string;
+      output: TerminalHistoryCommandOutputLine[];
+    };
+
 const TERMINAL_SCREEN_SEARCH_COUNT_ID = "tp-screen-search-count";
-const RESTORED_HISTORY_BOUNDARY_TEXT = "--- restored history above; live process below ---";
+const RESTORED_HISTORY_BOUNDARY_TEXT =
+  "--- restored history above; live process below ---";
 const RESTORED_HISTORY_PARTIAL_TEXT =
   "--- restored history is partial; more persisted output is available ---";
 const HISTORY_AUTO_LOAD_TOP_THRESHOLD_PX = 24;
@@ -70,6 +124,15 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
     placement: { type: String },
+    hideShellPromptNoise: {
+      attribute: "hide-shell-prompt-noise",
+      type: Boolean,
+    },
+    terminalPromptLabel: {
+      attribute: "terminal-prompt-label",
+      type: String,
+    },
+    commandPresentationMetadata: { attribute: false },
     followOutput: { state: true },
     searchQuery: { state: true },
     activeSearchMatchIndex: { state: true },
@@ -86,7 +149,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         grid-template-rows: auto auto auto minmax(0, 1fr);
         gap: var(--tp-space-3);
         padding: var(--tp-terminal-screen-panel-padding, var(--tp-space-4));
-        padding-bottom: var(--tp-terminal-screen-panel-padding-bottom, var(--tp-space-4));
+        padding-bottom: var(
+          --tp-terminal-screen-panel-padding-bottom,
+          var(--tp-space-4)
+        );
         border-top-left-radius: var(
           --tp-terminal-screen-panel-border-top-left-radius,
           var(--tp-radius-md)
@@ -103,9 +169,15 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           --tp-terminal-screen-panel-border-bottom-right-radius,
           var(--tp-radius-md)
         );
-        box-shadow: var(--tp-terminal-screen-panel-shadow, var(--tp-shadow-panel));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--tp-color-bg-inset) 92%, transparent), var(--tp-color-bg)),
+        box-shadow: var(
+          --tp-terminal-screen-panel-shadow,
+          var(--tp-shadow-panel)
+        );
+        background: linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--tp-color-bg-inset) 92%, transparent),
+            var(--tp-color-bg)
+          ),
           var(--tp-color-bg);
         min-height: 18rem;
       }
@@ -116,10 +188,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         height: 100%;
         min-height: 0;
         color: var(--tp-terminal-color-text);
-        background:
-          linear-gradient(
+        background: linear-gradient(
             180deg,
-            color-mix(in srgb, var(--tp-terminal-color-bg-raised) 92%, transparent),
+            color-mix(
+              in srgb,
+              var(--tp-terminal-color-bg-raised) 92%,
+              transparent
+            ),
             var(--tp-terminal-color-bg)
           ),
           var(--tp-terminal-color-bg);
@@ -132,13 +207,17 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         align-items: center;
         min-height: 2.45rem;
         min-width: 0;
-        border: 1px solid color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
+        border: 1px solid
+          color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
         border-bottom-width: 0;
         border-radius: var(--tp-radius-md) var(--tp-radius-md) 0 0;
-        background:
-          linear-gradient(
+        background: linear-gradient(
             180deg,
-            color-mix(in srgb, var(--tp-terminal-color-bg-raised) 88%, transparent),
+            color-mix(
+              in srgb,
+              var(--tp-terminal-color-bg-raised) 88%,
+              transparent
+            ),
             color-mix(in srgb, var(--tp-terminal-color-bg) 96%, transparent)
           ),
           var(--tp-terminal-color-bg);
@@ -207,15 +286,25 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 78%,
+          transparent
+        );
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 84%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 84%,
+          transparent
+        );
         color: var(--tp-terminal-color-text);
         font-size: 0.82rem;
         padding: 0.32rem 0.55rem;
       }
 
-      .screen[data-placement="terminal"] .screen-actions button[data-screen-action-label-mode="glyph"] {
+      .screen[data-placement="terminal"]
+        .screen-actions
+        button[data-screen-action-label-mode="glyph"] {
         inline-size: 2.25rem;
         min-width: 2.25rem;
         aspect-ratio: 1;
@@ -225,8 +314,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         line-height: 1;
       }
 
-      .screen[data-placement="terminal"] .screen-actions button[data-screen-action-tone="primary"] {
-        border-color: color-mix(in srgb, var(--tp-terminal-color-accent) 54%, transparent);
+      .screen[data-placement="terminal"]
+        .screen-actions
+        button[data-screen-action-tone="primary"] {
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 54%,
+          transparent
+        );
         background: color-mix(
           in srgb,
           var(--tp-terminal-color-accent) 16%,
@@ -273,20 +368,33 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .search input {
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 78%,
+          transparent
+        );
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 84%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 84%,
+          transparent
+        );
         color: var(--tp-terminal-color-text);
         font-size: 0.84rem;
         padding: 0.34rem 0.55rem;
       }
 
       .screen[data-placement="terminal"] .search input::placeholder {
-        color: color-mix(in srgb, var(--tp-terminal-color-text-muted) 72%, transparent);
+        color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-text-muted) 72%,
+          transparent
+        );
       }
 
       .search input:focus-visible {
-        outline: 2px solid color-mix(in srgb, var(--tp-color-accent) 62%, transparent);
+        outline: 2px solid
+          color-mix(in srgb, var(--tp-color-accent) 62%, transparent);
         outline-offset: 2px;
       }
 
@@ -305,7 +413,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         color: var(--tp-terminal-color-text-muted);
       }
 
-      .screen[data-placement="terminal"] .search-count[data-search-active="false"] {
+      .screen[data-placement="terminal"]
+        .search-count[data-search-active="false"] {
         display: none;
       }
 
@@ -328,16 +437,26 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 78%,
+          transparent
+        );
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 84%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 84%,
+          transparent
+        );
         color: var(--tp-terminal-color-text);
         font-size: 0.82rem;
         min-width: 2.15rem;
         padding: 0.34rem 0.55rem;
       }
 
-      .screen[data-placement="terminal"] .search-actions button[data-screen-search-action-label-mode="glyph"] {
+      .screen[data-placement="terminal"]
+        .search-actions
+        button[data-screen-search-action-label-mode="glyph"] {
         inline-size: 2.2rem;
         min-width: 2.2rem;
         aspect-ratio: 1;
@@ -348,11 +467,19 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .viewport {
+        --tp-terminal-history-base-font-size: 0.9rem;
         margin: 0;
-        min-height: var(--tp-terminal-screen-viewport-min-height, clamp(18rem, 42vh, 34rem));
-        max-height: var(--tp-terminal-screen-viewport-max-height, min(58vh, 44rem));
+        min-height: var(
+          --tp-terminal-screen-viewport-min-height,
+          clamp(18rem, 42vh, 34rem)
+        );
+        max-height: var(
+          --tp-terminal-screen-viewport-max-height,
+          min(58vh, 44rem)
+        );
         overflow: auto;
-        border: 1px solid color-mix(in srgb, var(--tp-color-border) 70%, transparent);
+        border: 1px solid
+          color-mix(in srgb, var(--tp-color-border) 70%, transparent);
         border-radius: var(--tp-radius-lg);
         border-bottom-left-radius: var(
           --tp-terminal-screen-viewport-border-bottom-left-radius,
@@ -372,18 +499,34 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .viewport {
+        grid-row: 2;
+        height: 100%;
         min-height: 0;
         max-height: none;
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
+        align-self: stretch;
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 78%,
+          transparent
+        );
         border-top-width: 0;
         border-radius: 0;
-        border-bottom-left-radius: var(--tp-terminal-screen-viewport-border-bottom-left-radius, 0);
-        border-bottom-right-radius: var(--tp-terminal-screen-viewport-border-bottom-right-radius, 0);
-        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--tp-terminal-color-accent) 18%, transparent);
+        border-bottom-left-radius: var(
+          --tp-terminal-screen-viewport-border-bottom-left-radius,
+          0
+        );
+        border-bottom-right-radius: var(
+          --tp-terminal-screen-viewport-border-bottom-right-radius,
+          0
+        );
+        padding: 0;
+        box-shadow: inset 0 1px 0
+          color-mix(in srgb, var(--tp-terminal-color-accent) 18%, transparent);
       }
 
       .viewport:focus-visible {
-        outline: 2px solid color-mix(in srgb, var(--tp-color-accent) 64%, transparent);
+        outline: 2px solid
+          color-mix(in srgb, var(--tp-color-accent) 64%, transparent);
         outline-offset: 3px;
       }
 
@@ -392,11 +535,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-font-scale="compact"] .viewport {
+        --tp-terminal-history-base-font-size: 0.82rem;
         font-size: 0.82rem;
         line-height: 1.42;
       }
 
       .screen[data-font-scale="large"] .viewport {
+        --tp-terminal-history-base-font-size: 1rem;
         font-size: 1rem;
         line-height: 1.56;
       }
@@ -414,12 +559,20 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .line[data-line-source="history"] {
-        color: color-mix(in srgb, var(--tp-terminal-color-text) 82%, var(--tp-terminal-color-text-muted));
+        color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-text) 82%,
+          var(--tp-terminal-color-text-muted)
+        );
       }
 
       .line[data-line-source="boundary"] {
         margin: 0.45rem 0;
-        color: color-mix(in srgb, var(--tp-terminal-color-accent) 72%, var(--tp-terminal-color-text));
+        color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 72%,
+          var(--tp-terminal-color-text)
+        );
         font-size: 0.82em;
         text-transform: uppercase;
       }
@@ -429,7 +582,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .gutter {
-        border-right: 1px solid color-mix(in srgb, var(--tp-color-border) 42%, transparent);
+        border-right: 1px solid
+          color-mix(in srgb, var(--tp-color-border) 42%, transparent);
         color: color-mix(in srgb, var(--tp-color-text-muted) 48%, transparent);
         font-variant-numeric: tabular-nums;
         padding-right: 0.55rem;
@@ -438,17 +592,134 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .gutter {
-        border-right-color: color-mix(in srgb, var(--tp-terminal-color-border) 46%, transparent);
-        color: color-mix(in srgb, var(--tp-terminal-color-text-muted) 58%, transparent);
+        border-right-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 46%,
+          transparent
+        );
+        color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-text-muted) 58%,
+          transparent
+        );
       }
 
       .screen[data-placement="terminal"] .line {
         grid-template-columns: minmax(0, 1fr);
         gap: 0;
+        padding: 0.1rem 1.15rem;
       }
 
       .screen[data-placement="terminal"] .gutter {
         display: none;
+      }
+
+      .history-entry {
+        display: grid;
+        box-sizing: border-box;
+        width: 100%;
+        justify-items: start;
+        gap: 0.18rem;
+        border-top: 1px solid
+          color-mix(in srgb, var(--tp-terminal-color-border) 46%, transparent);
+        padding: 0.72rem 1.15rem 0.78rem;
+        text-align: left;
+      }
+
+      .history-entry:first-child {
+        border-top-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 42%,
+          transparent
+        );
+      }
+
+      .history-entry[data-line-source="history"] {
+        color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-text) 82%,
+          var(--tp-terminal-color-text-muted)
+        );
+      }
+
+      .history-entry-prompt {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.48rem;
+        color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-text-muted) 86%,
+          transparent
+        );
+        font-size: 0.91em;
+        line-height: 1.28;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .history-entry-meta {
+        color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-text-muted) 78%,
+          transparent
+        );
+        font-size: 0.9em;
+        white-space: nowrap;
+      }
+
+      .history-entry-meta[data-command-status="failed"] {
+        color: color-mix(
+          in srgb,
+          var(--tp-color-danger) 82%,
+          var(--tp-terminal-color-text)
+        );
+      }
+
+      .history-entry-meta[data-command-status="running"] {
+        color: color-mix(
+          in srgb,
+          var(--tp-color-warning) 78%,
+          var(--tp-terminal-color-text)
+        );
+      }
+
+      .history-entry-command {
+        --tp-history-entry-text-size: calc(
+          var(--tp-terminal-history-base-font-size) * 1.04
+        );
+        color: var(--tp-terminal-color-text);
+        font-size: 1.04em;
+        font-weight: 760;
+        line-height: 1.28;
+      }
+
+      .history-entry-output {
+        --tp-history-entry-text-size: var(--tp-terminal-history-base-font-size);
+        color: var(--tp-terminal-color-text);
+        line-height: 1.34;
+        margin-top: 0.06rem;
+      }
+
+      .history-entry-text {
+        display: block;
+        font-size: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .history-entry-text .terminal-output-segment {
+        font-size: var(
+          --tp-history-entry-text-size,
+          var(--tp-terminal-history-base-font-size)
+        );
+        line-height: inherit;
+      }
+
+      .screen[data-line-wrap="false"] .history-entry-prompt,
+      .screen[data-line-wrap="false"] .history-entry-text {
+        white-space: pre;
+        overflow-wrap: normal;
       }
 
       .text {
@@ -460,15 +731,24 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         -webkit-box-decoration-break: clone;
         box-decoration-break: clone;
         border-radius: 0.2rem;
-        background: color-mix(in srgb, var(--tp-color-warning) 36%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-color-warning) 36%,
+          transparent
+        );
         color: var(--tp-color-text);
         line-height: inherit;
         padding: 0 0.08em;
       }
 
       mark[data-active="true"] {
-        outline: 1px solid color-mix(in srgb, var(--tp-color-warning) 80%, transparent);
-        background: color-mix(in srgb, var(--tp-color-warning) 58%, var(--tp-color-bg));
+        outline: 1px solid
+          color-mix(in srgb, var(--tp-color-warning) 80%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-color-warning) 58%,
+          var(--tp-color-bg)
+        );
       }
 
       .screen[data-placement="terminal"] mark {
@@ -476,7 +756,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] mark[data-active="true"] {
-        background: color-mix(in srgb, var(--tp-color-warning) 58%, var(--tp-terminal-color-bg));
+        background: color-mix(
+          in srgb,
+          var(--tp-color-warning) 58%,
+          var(--tp-terminal-color-bg)
+        );
       }
 
       .screen-meta {
@@ -491,7 +775,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         border: 1px solid var(--tp-color-border);
         border-radius: 999px;
         padding: 0.2rem 0.5rem;
-        background: color-mix(in srgb, var(--tp-color-panel-raised) 60%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-color-panel-raised) 60%,
+          transparent
+        );
       }
 
       .screen[data-placement="terminal"] .screen-meta {
@@ -504,9 +792,17 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen[data-placement="terminal"] .screen-meta span {
-        border-color: color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-border) 72%,
+          transparent
+        );
         border-radius: 0.45rem;
-        background: color-mix(in srgb, var(--tp-terminal-color-bg-raised) 78%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 78%,
+          transparent
+        );
         min-width: 0;
         max-width: 10rem;
         overflow: hidden;
@@ -516,24 +812,41 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       }
 
       .screen-meta [data-input-tone="ready"] {
-        border-color: color-mix(in srgb, var(--tp-color-success) 52%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-color-success) 52%,
+          transparent
+        );
         color: var(--tp-color-success);
       }
 
       .screen-meta [data-input-tone="pending"] {
-        border-color: color-mix(in srgb, var(--tp-color-warning) 56%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-color-warning) 56%,
+          transparent
+        );
         color: var(--tp-color-warning);
       }
 
       .screen-meta [data-input-tone="failed"] {
-        border-color: color-mix(in srgb, var(--tp-color-danger) 62%, transparent);
-        background: color-mix(in srgb, var(--tp-color-danger-soft) 70%, transparent);
+        border-color: color-mix(
+          in srgb,
+          var(--tp-color-danger) 62%,
+          transparent
+        );
+        background: color-mix(
+          in srgb,
+          var(--tp-color-danger-soft) 70%,
+          transparent
+        );
         color: var(--tp-color-danger);
       }
 
       @media (max-width: 960px) {
         .screen[data-placement="terminal"] .screen-chrome,
-        .screen[data-placement="terminal"] .screen-chrome[data-search-active="true"] {
+        .screen[data-placement="terminal"]
+          .screen-chrome[data-search-active="true"] {
           grid-template-columns: minmax(0, 1fr) auto auto;
         }
 
@@ -546,8 +859,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       @media (max-width: 720px) {
         .screen {
           gap: var(--tp-space-2);
-          padding: var(--tp-terminal-screen-mobile-panel-padding, var(--tp-space-3));
-          padding-bottom: var(--tp-terminal-screen-panel-padding-bottom, var(--tp-space-3));
+          padding: var(
+            --tp-terminal-screen-mobile-panel-padding,
+            var(--tp-space-3)
+          );
+          padding-bottom: var(
+            --tp-terminal-screen-panel-padding-bottom,
+            var(--tp-space-3)
+          );
         }
 
         .screen-header {
@@ -593,8 +912,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         }
 
         .viewport {
-          min-height: var(--tp-terminal-screen-mobile-viewport-min-height, clamp(14rem, 38vh, 22rem));
-          max-height: var(--tp-terminal-screen-mobile-viewport-max-height, min(48vh, 26rem));
+          min-height: var(
+            --tp-terminal-screen-mobile-viewport-min-height,
+            clamp(14rem, 38vh, 22rem)
+          );
+          max-height: var(
+            --tp-terminal-screen-mobile-viewport-max-height,
+            min(48vh, 26rem)
+          );
           padding: var(--tp-space-2);
         }
 
@@ -621,6 +946,12 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   ];
 
   declare placement: TerminalScreenPlacement;
+  declare hideShellPromptNoise: boolean;
+  declare terminalPromptLabel: string;
+  declare commandPresentationMetadata:
+    | readonly TerminalCommandPresentationMetadata[]
+    | null
+    | undefined;
   protected declare followOutput: boolean;
   protected declare searchQuery: string;
   protected declare activeSearchMatchIndex: number | null;
@@ -638,6 +969,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   constructor() {
     super();
     this.placement = "panel";
+    this.hideShellPromptNoise = false;
+    this.terminalPromptLabel = "shell";
+    this.commandPresentationMetadata = null;
     this.followOutput = true;
     this.searchQuery = "";
     this.activeSearchMatchIndex = null;
@@ -657,6 +991,10 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     super.disconnectedCallback();
   }
 
+  scrollToLatestOutput(): void {
+    this.scrollLatest();
+  }
+
   protected override willUpdate(changedProperties: PropertyValues): void {
     super.willUpdate(changedProperties);
     if (changedProperties.has("snapshot")) {
@@ -666,16 +1004,16 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   protected override updated(changedProperties: PropertyValues): void {
     const shouldSyncSearch =
-      changedProperties.has("snapshot")
-      || changedProperties.has("searchQuery")
-      || changedProperties.has("activeSearchMatchIndex");
+      changedProperties.has("snapshot") ||
+      changedProperties.has("searchQuery") ||
+      changedProperties.has("activeSearchMatchIndex");
     if (shouldSyncSearch && this.syncActiveSearchMatch()) {
       return;
     }
 
     if (
-      changedProperties.has("snapshot")
-      || changedProperties.has("followOutput")
+      changedProperties.has("snapshot") ||
+      changedProperties.has("followOutput")
     ) {
       if (this.followOutput && this.snapshot.attachedSession?.focused_screen) {
         this.scrollViewportToBottom();
@@ -686,11 +1024,27 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   override render() {
     const controls = resolveTerminalScreenControlState(this.snapshot);
     const screen = controls.screen;
-    const inputStatus = resolveTerminalScreenInputStatus(controls, this.directInputActivity);
-    const outputLines = createVisibleOutputLines(controls.history, screen);
-    const searchResult = this.createSearchResult(undefined, outputLines.map((line) => line.text));
-    const terminalDisplay = this.snapshot.terminalDisplay;
+    const inputStatus = resolveTerminalScreenInputStatus(
+      controls,
+      this.directInputActivity
+    );
     const isTerminalPlacement = this.placement === "terminal";
+    const terminalPromptLabel = normalizeTerminalPromptLabel(
+      this.terminalPromptLabel
+    );
+    const outputLines = createVisibleOutputLines(controls.history, screen, {
+      hideShellPromptNoise: this.hideShellPromptNoise || isTerminalPlacement,
+      preserveShellPromptCommands: isTerminalPlacement,
+      terminalPromptLabel,
+    });
+    const searchResult = this.createSearchResult(
+      undefined,
+      outputLines.map((line) => line.text)
+    );
+    const terminalHistoryEntries = isTerminalPlacement
+      ? createTerminalHistoryEntries(outputLines, { terminalPromptLabel })
+      : [];
+    const terminalDisplay = this.snapshot.terminalDisplay;
     const chrome = screen
       ? resolveTerminalScreenChromeState(screen, terminalDisplay, {
           mode: isTerminalPlacement
@@ -717,32 +1071,62 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           ? html`
               ${chrome
                 ? isTerminalPlacement
-                  ? this.renderCompactChrome(chrome, inputStatus, searchResult, controls)
-                  : this.renderFullChrome(chrome, inputStatus, searchResult, controls)
+                  ? this.renderCompactChrome(
+                      chrome,
+                      inputStatus,
+                      searchResult,
+                      controls
+                    )
+                  : this.renderFullChrome(
+                      chrome,
+                      inputStatus,
+                      searchResult,
+                      controls
+                    )
                 : nothing}
               <div
                 class="viewport"
                 part="screen-lines"
                 data-testid="tp-screen-viewport"
-                tabindex=${controls.canUseDirectInput || controls.canUseDirectPaste ? "0" : nothing}
+                tabindex=${controls.canUseDirectInput ||
+                controls.canUseDirectPaste
+                  ? "0"
+                  : nothing}
                 role="region"
                 aria-describedby="tp-screen-input-status"
                 aria-keyshortcuts="Control+F Meta+F"
-                aria-label=${controls.canUseDirectInput || controls.canUseDirectPaste
+                aria-label=${controls.canUseDirectInput ||
+                controls.canUseDirectPaste
                   ? "Terminal output and focused pane input"
                   : "Terminal output"}
-                @keydown=${(event: KeyboardEvent) => this.handleViewportKeydown(event)}
-                @paste=${(event: ClipboardEvent) => this.handleViewportPaste(event)}
+                @keydown=${(event: KeyboardEvent) =>
+                  this.handleViewportKeydown(event)}
+                @paste=${(event: ClipboardEvent) =>
+                  this.handleViewportPaste(event)}
                 @scroll=${(event: Event) => this.handleViewportScroll(event)}
               >
-                ${searchResult.lines.map((line) => renderLine(
-                  line.lineIndex + 1,
-                  line.segments,
-                  outputLines[line.lineIndex]?.source ?? "live",
-                ))}
+                ${isTerminalPlacement
+                  ? renderTerminalHistoryEntries(
+                      terminalHistoryEntries,
+                      searchResult,
+                      {
+                        commandMetadata:
+                          this.commandPresentationMetadata ?? null,
+                      }
+                    )
+                  : searchResult.lines.map((line) =>
+                      renderLine(
+                        line.lineIndex + 1,
+                        line.segments,
+                        outputLines[line.lineIndex]?.source ?? "live"
+                      )
+                    )}
               </div>
             `
-          : html`<div class="empty-state" part="empty">No active screen yet. Start or attach a session to see output here.</div>`}
+          : html`<div class="empty-state" part="empty">
+              No active screen yet. Start or attach a session to see output
+              here.
+            </div>`}
       </div>
     `;
   }
@@ -751,7 +1135,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     chrome: TerminalScreenChromeState,
     inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
     searchResult: TerminalOutputSearchResult,
-    controls: ReturnType<typeof resolveTerminalScreenControlState>,
+    controls: ReturnType<typeof resolveTerminalScreenControlState>
   ): TemplateResult {
     return html`
       <div class="screen-header">
@@ -774,7 +1158,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     chrome: TerminalScreenChromeState,
     inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
     searchResult: TerminalOutputSearchResult,
-    controls: ReturnType<typeof resolveTerminalScreenControlState>,
+    controls: ReturnType<typeof resolveTerminalScreenControlState>
   ): TemplateResult {
     return html`
       <div
@@ -790,7 +1174,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         </div>
         <div class="screen-chrome__tools">
           ${this.renderSearch(searchResult)}
-          ${searchResult.query ? this.renderSearchActions(searchResult) : nothing}
+          ${searchResult.query
+            ? this.renderSearchActions(searchResult)
+            : nothing}
           ${this.renderScreenActions(controls)}
         </div>
       </div>
@@ -799,7 +1185,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   private renderScreenMeta(
     chrome: TerminalScreenChromeState,
-    inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
+    inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>
   ): TemplateResult {
     return html`
       <div class="screen-meta" part="meta" data-chrome-mode=${chrome.mode}>
@@ -818,12 +1204,16 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     `;
   }
 
-  private renderScreenMetaItem(item: TerminalScreenChromeMetaItem): TemplateResult {
-    return html`<span data-meta-id=${item.id} title=${item.title ?? item.label}>${item.label}</span>`;
+  private renderScreenMetaItem(
+    item: TerminalScreenChromeMetaItem
+  ): TemplateResult {
+    return html`<span data-meta-id=${item.id} title=${item.title ?? item.label}
+      >${item.label}</span
+    >`;
   }
 
   private renderScreenActions(
-    controls: ReturnType<typeof resolveTerminalScreenControlState>,
+    controls: ReturnType<typeof resolveTerminalScreenControlState>
   ): TemplateResult {
     const actions = resolveTerminalScreenActions({
       canCopyVisibleOutput: controls.canCopyVisibleOutput,
@@ -836,23 +1226,27 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
     return html`
       <div class="screen-actions" part="screen-actions">
-        ${actions.map((action) => html`
-          <button
-            type="button"
-            data-testid=${action.testId}
-            data-screen-action=${action.id}
-            data-screen-action-label-mode=${action.labelMode}
-            data-screen-action-placement=${action.placement}
-            data-screen-action-tone=${action.tone}
-            aria-label=${action.ariaLabel}
-            aria-pressed=${action.ariaPressed == null ? nothing : String(action.ariaPressed)}
-            title=${action.title}
-            ?disabled=${action.disabled}
-            @click=${() => this.handleScreenActionClick(action.id)}
-          >
-            ${action.label}
-          </button>
-        `)}
+        ${actions.map(
+          (action) => html`
+            <button
+              type="button"
+              data-testid=${action.testId}
+              data-screen-action=${action.id}
+              data-screen-action-label-mode=${action.labelMode}
+              data-screen-action-placement=${action.placement}
+              data-screen-action-tone=${action.tone}
+              aria-label=${action.ariaLabel}
+              aria-pressed=${action.ariaPressed == null
+                ? nothing
+                : String(action.ariaPressed)}
+              title=${action.title}
+              ?disabled=${action.disabled}
+              @click=${() => this.handleScreenActionClick(action.id)}
+            >
+              ${action.label}
+            </button>
+          `
+        )}
       </div>
     `;
   }
@@ -875,14 +1269,18 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private async loadMoreHistory(
-    options: { preserveScrollAnchor?: boolean; viewport?: HTMLElement } = {},
+    options: { preserveScrollAnchor?: boolean; viewport?: HTMLElement } = {}
   ): Promise<void> {
     if (this.historyLoadState === "loading") {
       return;
     }
 
     const controls = resolveTerminalScreenControlState(this.snapshot);
-    if (!this.kernel || !controls.activePaneId || !controls.canLoadMoreHistory) {
+    if (
+      !this.kernel ||
+      !controls.activePaneId ||
+      !controls.canLoadMoreHistory
+    ) {
       return;
     }
 
@@ -890,13 +1288,17 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     this.setHistoryLoadState("loading");
     const anchor = options.preserveScrollAnchor
       ? captureHistoryScrollAnchor(
-          options.viewport
-            ?? this.shadowRoot?.querySelector<HTMLElement>('[data-testid="tp-screen-viewport"]')
-            ?? null,
+          options.viewport ??
+            this.shadowRoot?.querySelector<HTMLElement>(
+              '[data-testid="tp-screen-viewport"]'
+            ) ??
+            null
         )
       : null;
     try {
-      const loaded = await this.kernel.commands.loadMorePaneHistory(controls.activePaneId);
+      const loaded = await this.kernel.commands.loadMorePaneHistory(
+        controls.activePaneId
+      );
       if (loaded && anchor) {
         await this.updateComplete;
         restoreHistoryScrollAnchor(anchor);
@@ -907,7 +1309,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     }
   }
 
-  private renderSearch(searchResult: TerminalOutputSearchResult): TemplateResult {
+  private renderSearch(
+    searchResult: TerminalOutputSearchResult
+  ): TemplateResult {
     return html`
       <label class="search" part="search">
         <input
@@ -939,14 +1343,16 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           ${formatTerminalOutputSearchCount(
             searchResult.query,
             searchResult.matchCount,
-            searchResult.activeMatchIndex,
+            searchResult.activeMatchIndex
           )}
         </span>
       </label>
     `;
   }
 
-  private renderSearchActions(searchResult: TerminalOutputSearchResult): TemplateResult {
+  private renderSearchActions(
+    searchResult: TerminalOutputSearchResult
+  ): TemplateResult {
     const actions = resolveTerminalScreenSearchActions({
       matchCount: searchResult.matchCount,
       placement: this.placement,
@@ -955,27 +1361,31 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
     return html`
       <div class="search-actions" part="search-actions">
-        ${actions.map((action) => html`
-          <button
-            type="button"
-            data-testid=${action.testId}
-            data-screen-search-action=${action.id}
-            data-screen-search-action-label-mode=${action.labelMode}
-            data-screen-search-action-placement=${action.placement}
-            data-screen-search-action-tone=${action.tone}
-            aria-label=${action.ariaLabel}
-            title=${action.title}
-            ?disabled=${action.disabled}
-            @click=${() => this.handleSearchActionClick(action.id)}
-          >
-            ${action.label}
-          </button>
-        `)}
+        ${actions.map(
+          (action) => html`
+            <button
+              type="button"
+              data-testid=${action.testId}
+              data-screen-search-action=${action.id}
+              data-screen-search-action-label-mode=${action.labelMode}
+              data-screen-search-action-placement=${action.placement}
+              data-screen-search-action-tone=${action.tone}
+              aria-label=${action.ariaLabel}
+              title=${action.title}
+              ?disabled=${action.disabled}
+              @click=${() => this.handleSearchActionClick(action.id)}
+            >
+              ${action.label}
+            </button>
+          `
+        )}
       </div>
     `;
   }
 
-  private handleSearchActionClick(actionId: TerminalScreenSearchActionId): void {
+  private handleSearchActionClick(
+    actionId: TerminalScreenSearchActionId
+  ): void {
     switch (actionId) {
       case TERMINAL_SCREEN_SEARCH_ACTION_IDS.previousMatch:
         this.selectSearchMatch("previous");
@@ -1010,7 +1420,12 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private handleSearchKeydown(event: KeyboardEvent): void {
-    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
+    if (
+      event.defaultPrevented ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey
+    ) {
       return;
     }
 
@@ -1034,9 +1449,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     }
 
     const currentMatchIndex = searchResult.activeMatchIndex ?? 0;
-    this.activeSearchMatchIndex = direction === "next"
-      ? (currentMatchIndex + 1) % searchResult.matchCount
-      : (currentMatchIndex - 1 + searchResult.matchCount) % searchResult.matchCount;
+    this.activeSearchMatchIndex =
+      direction === "next"
+        ? (currentMatchIndex + 1) % searchResult.matchCount
+        : (currentMatchIndex - 1 + searchResult.matchCount) %
+          searchResult.matchCount;
   }
 
   private clearSearch(): void {
@@ -1051,26 +1468,36 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       return;
     }
 
-    const outputLines = createVisibleOutputLines(controls.history, screen);
-    const output = serializeTerminalOutputLines(outputLines.map((line) => line.text));
+    const outputLines = createVisibleOutputLines(controls.history, screen, {
+      hideShellPromptNoise: this.hideShellPromptNoise,
+    });
+    const output = serializeTerminalOutputLines(
+      outputLines.map((line) => line.text)
+    );
     try {
       await writeClipboardText(output);
       this.setCopyState("copied");
       this.dispatchEvent(
-        new CustomEvent<TerminalScreenCopiedDetail>(TERMINAL_SCREEN_EVENTS.copied, {
-          bubbles: true,
-          composed: true,
-          detail: { paneId: screen.pane_id, lineCount: outputLines.length },
-        }),
+        new CustomEvent<TerminalScreenCopiedDetail>(
+          TERMINAL_SCREEN_EVENTS.copied,
+          {
+            bubbles: true,
+            composed: true,
+            detail: { paneId: screen.pane_id, lineCount: outputLines.length },
+          }
+        )
       );
     } catch (error) {
       this.setCopyState("failed");
       this.dispatchEvent(
-        new CustomEvent<TerminalScreenCopyFailedDetail>(TERMINAL_SCREEN_EVENTS.copyFailed, {
-          bubbles: true,
-          composed: true,
-          detail: { paneId: screen.pane_id, error },
-        }),
+        new CustomEvent<TerminalScreenCopyFailedDetail>(
+          TERMINAL_SCREEN_EVENTS.copyFailed,
+          {
+            bubbles: true,
+            composed: true,
+            detail: { paneId: screen.pane_id, error },
+          }
+        )
       );
     }
   }
@@ -1091,7 +1518,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     }
   }
 
-  private setHistoryLoadState(historyLoadState: TerminalScreenHistoryLoadState): void {
+  private setHistoryLoadState(
+    historyLoadState: TerminalScreenHistoryLoadState
+  ): void {
     this.historyLoadState = historyLoadState;
     this.clearHistoryLoadStateResetTimer();
     if (historyLoadState === "failed") {
@@ -1137,10 +1566,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       return false;
     }
 
-    const activeSearchMatchIndex = resolveTerminalOutputSearchMatchIndex(
-      this.activeSearchMatchIndex,
-      searchResult.matchCount,
-    ) ?? 0;
+    const activeSearchMatchIndex =
+      resolveTerminalOutputSearchMatchIndex(
+        this.activeSearchMatchIndex,
+        searchResult.matchCount
+      ) ?? 0;
     if (activeSearchMatchIndex !== this.activeSearchMatchIndex) {
       this.activeSearchMatchIndex = activeSearchMatchIndex;
       return true;
@@ -1151,7 +1581,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private scrollActiveSearchMatchIntoView(): void {
-    const activeMatch = this.shadowRoot?.querySelector<HTMLElement>('[data-testid="tp-screen-active-search-match"]');
+    const activeMatch = this.shadowRoot?.querySelector<HTMLElement>(
+      '[data-testid="tp-screen-active-search-match"]'
+    );
     activeMatch?.scrollIntoView({
       block: "center",
       inline: "nearest",
@@ -1160,23 +1592,29 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   private createSearchResult(
     searchQuery = this.searchQuery,
-    lines?: readonly string[],
+    lines?: readonly string[]
   ): TerminalOutputSearchResult {
     const fallbackControls = resolveTerminalScreenControlState(this.snapshot);
     const fallbackLines = createVisibleOutputLines(
       fallbackControls.history,
-      fallbackControls.screen,
+      fallbackControls.screen
     ).map((line) => line.text);
     return createTerminalOutputSearchResult(
       lines ?? fallbackLines,
       searchQuery,
-      { activeMatchIndex: this.activeSearchMatchIndex },
+      { activeMatchIndex: this.activeSearchMatchIndex }
     );
   }
 
   private syncTerminalDisplayAttributes(): void {
-    this.setAttribute("data-font-scale", this.snapshot.terminalDisplay.fontScale);
-    this.setAttribute("data-line-wrap", String(this.snapshot.terminalDisplay.lineWrap));
+    this.setAttribute(
+      "data-font-scale",
+      this.snapshot.terminalDisplay.fontScale
+    );
+    this.setAttribute(
+      "data-line-wrap",
+      String(this.snapshot.terminalDisplay.lineWrap)
+    );
   }
 
   private handleViewportScroll(event: Event): void {
@@ -1189,11 +1627,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       this.followOutput = false;
     }
 
-    if (shouldAutoLoadMoreHistoryFromViewport(
-      viewport,
-      resolveTerminalScreenControlState(this.snapshot).canLoadMoreHistory,
-      this.historyLoadState,
-    )) {
+    if (
+      shouldAutoLoadMoreHistoryFromViewport(
+        viewport,
+        resolveTerminalScreenControlState(this.snapshot).canLoadMoreHistory,
+        this.historyLoadState
+      )
+    ) {
       void this.loadMoreHistory({ preserveScrollAnchor: true, viewport });
     }
   }
@@ -1252,7 +1692,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   private async dispatchDirectInput(input: string): Promise<void> {
     const controls = resolveTerminalScreenControlState(this.snapshot);
-    if (!controls.activeSessionId || !controls.activePaneId || !controls.canUseDirectInput) {
+    if (
+      !controls.activeSessionId ||
+      !controls.activePaneId ||
+      !controls.canUseDirectInput
+    ) {
       return;
     }
 
@@ -1270,35 +1714,45 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         this.setDirectInputActivity("idle");
       }
       this.dispatchEvent(
-        new CustomEvent<TerminalScreenInputSubmittedDetail>(TERMINAL_SCREEN_EVENTS.inputSubmitted, {
-          bubbles: true,
-          composed: true,
-          detail: {
-            sessionId: controls.activeSessionId,
-            paneId: controls.activePaneId,
-            inputLength: input.length,
-          },
-        }),
+        new CustomEvent<TerminalScreenInputSubmittedDetail>(
+          TERMINAL_SCREEN_EVENTS.inputSubmitted,
+          {
+            bubbles: true,
+            composed: true,
+            detail: {
+              sessionId: controls.activeSessionId,
+              paneId: controls.activePaneId,
+              inputLength: input.length,
+            },
+          }
+        )
       );
     } catch (error) {
       this.setDirectInputActivity("failed");
       this.dispatchEvent(
-        new CustomEvent<TerminalScreenInputFailedDetail>(TERMINAL_SCREEN_EVENTS.inputFailed, {
-          bubbles: true,
-          composed: true,
-          detail: {
-            sessionId: controls.activeSessionId,
-            paneId: controls.activePaneId,
-            error,
-          },
-        }),
+        new CustomEvent<TerminalScreenInputFailedDetail>(
+          TERMINAL_SCREEN_EVENTS.inputFailed,
+          {
+            bubbles: true,
+            composed: true,
+            detail: {
+              sessionId: controls.activeSessionId,
+              paneId: controls.activePaneId,
+              error,
+            },
+          }
+        )
       );
     }
   }
 
   private async dispatchDirectPaste(data: string): Promise<void> {
     const controls = resolveTerminalScreenControlState(this.snapshot);
-    if (!controls.activeSessionId || !controls.activePaneId || !controls.canUseDirectPaste) {
+    if (
+      !controls.activeSessionId ||
+      !controls.activePaneId ||
+      !controls.canUseDirectPaste
+    ) {
       return;
     }
 
@@ -1314,34 +1768,42 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         this.setDirectInputActivity("idle");
       }
       this.dispatchEvent(
-        new CustomEvent<TerminalScreenPasteSubmittedDetail>(TERMINAL_SCREEN_EVENTS.pasteSubmitted, {
-          bubbles: true,
-          composed: true,
-          detail: {
-            sessionId: controls.activeSessionId,
-            paneId: controls.activePaneId,
-            inputLength: data.length,
-          },
-        }),
+        new CustomEvent<TerminalScreenPasteSubmittedDetail>(
+          TERMINAL_SCREEN_EVENTS.pasteSubmitted,
+          {
+            bubbles: true,
+            composed: true,
+            detail: {
+              sessionId: controls.activeSessionId,
+              paneId: controls.activePaneId,
+              inputLength: data.length,
+            },
+          }
+        )
       );
     } catch (error) {
       this.setDirectInputActivity("failed");
       this.dispatchEvent(
-        new CustomEvent<TerminalScreenPasteFailedDetail>(TERMINAL_SCREEN_EVENTS.pasteFailed, {
-          bubbles: true,
-          composed: true,
-          detail: {
-            sessionId: controls.activeSessionId,
-            paneId: controls.activePaneId,
-            error,
-          },
-        }),
+        new CustomEvent<TerminalScreenPasteFailedDetail>(
+          TERMINAL_SCREEN_EVENTS.pasteFailed,
+          {
+            bubbles: true,
+            composed: true,
+            detail: {
+              sessionId: controls.activeSessionId,
+              paneId: controls.activePaneId,
+              error,
+            },
+          }
+        )
       );
     }
   }
 
   private scrollViewportToBottom(): void {
-    const viewport = this.shadowRoot?.querySelector<HTMLElement>('[data-testid="tp-screen-viewport"]');
+    const viewport = this.shadowRoot?.querySelector<HTMLElement>(
+      '[data-testid="tp-screen-viewport"]'
+    );
     if (!viewport) {
       return;
     }
@@ -1362,7 +1824,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private focusSearchInput(): void {
-    const searchInput = this.shadowRoot?.querySelector<HTMLInputElement>('[data-testid="tp-screen-search"]');
+    const searchInput = this.shadowRoot?.querySelector<HTMLInputElement>(
+      '[data-testid="tp-screen-search"]'
+    );
     if (!searchInput || searchInput.disabled) {
       return;
     }
@@ -1372,7 +1836,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private focusViewport(): void {
-    const viewport = this.shadowRoot?.querySelector<HTMLElement>('[data-testid="tp-screen-viewport"]');
+    const viewport = this.shadowRoot?.querySelector<HTMLElement>(
+      '[data-testid="tp-screen-viewport"]'
+    );
     viewport?.focus({ preventScroll: true });
   }
 }
@@ -1380,78 +1846,758 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 function renderLine(
   index: number,
   segments: readonly TerminalOutputSearchSegment[],
-  source: VisibleOutputLineSource = "live",
+  source: VisibleOutputLineSource = "live"
 ): TemplateResult {
   return html`
     <div class="line" part="screen-line" data-line-source=${source}>
       <span class="gutter" part="line-number" aria-hidden="true">${index}</span>
-      <span class="text" part="line-text">${renderHighlightedSegments(segments)}</span>
+      <span class="text" part="line-text"
+        >${renderHighlightedSegments(segments)}</span
+      >
     </div>
   `;
+}
+
+function renderTerminalHistoryEntries(
+  entries: readonly TerminalHistoryEntry[],
+  searchResult: TerminalOutputSearchResult,
+  options: TerminalHistoryRenderOptions = {}
+): TemplateResult[] {
+  const commandMetadataByEntryIndex = matchCommandPresentationMetadata(
+    entries,
+    options.commandMetadata ?? []
+  );
+
+  return entries.map((entry) => {
+    if (entry.kind === "line") {
+      return renderLine(
+        entry.lineIndex + 1,
+        getSearchSegments(searchResult, entry.lineIndex),
+        entry.line.source
+      );
+    }
+
+    return html`
+      <section
+        class="history-entry"
+        part="history-entry"
+        data-line-source=${entry.commandLine.source}
+        data-command-status=${commandMetadataByEntryIndex.get(
+          entry.commandLineIndex
+        )?.status ?? "unknown"}
+      >
+        <div class="history-entry-prompt" part="history-entry-prompt">
+          <span>${entry.prompt}</span>${renderCommandPresentationMetadata(
+            commandMetadataByEntryIndex.get(entry.commandLineIndex)
+          )}
+        </div>
+        <div class="history-entry-command" part="history-entry-command">
+          <span class="history-entry-text" part="history-entry-command-text">
+            ${renderCommandSegments(entry.command, searchResult.query)}
+          </span>
+        </div>
+        ${entry.output.map(
+          (outputLine) => html`
+            <div
+              class="history-entry-output"
+              part="history-entry-output"
+              data-line-source=${outputLine.line.source}
+            >
+              <span class="history-entry-text" part="history-entry-output-text">
+                ${renderHighlightedSegments(
+                  getSearchSegments(searchResult, outputLine.lineIndex)
+                )}
+              </span>
+            </div>
+          `
+        )}
+      </section>
+    `;
+  });
+}
+
+function matchCommandPresentationMetadata(
+  entries: readonly TerminalHistoryEntry[],
+  metadata: readonly TerminalCommandPresentationMetadata[]
+): Map<number, TerminalCommandPresentationMetadata> {
+  const matched = new Map<number, TerminalCommandPresentationMetadata>();
+  if (metadata.length === 0) {
+    return matched;
+  }
+
+  const candidates = metadata
+    .map((item, index) => ({
+      index,
+      item,
+      command: normalizeCommandPresentationMatch(item.command),
+    }))
+    .filter((candidate) => candidate.command.length > 0);
+  const used = new Set<number>();
+
+  for (let entryIndex = entries.length - 1; entryIndex >= 0; entryIndex -= 1) {
+    const entry = entries[entryIndex];
+    if (!entry || entry.kind !== "command") {
+      continue;
+    }
+
+    const command = normalizeCommandPresentationMatch(entry.command);
+    for (
+      let candidateIndex = candidates.length - 1;
+      candidateIndex >= 0;
+      candidateIndex -= 1
+    ) {
+      const candidate = candidates[candidateIndex];
+      if (
+        !candidate ||
+        used.has(candidate.index) ||
+        candidate.command !== command
+      ) {
+        continue;
+      }
+
+      matched.set(entry.commandLineIndex, candidate.item);
+      used.add(candidate.index);
+      break;
+    }
+  }
+
+  return matched;
+}
+
+function renderCommandPresentationMetadata(
+  metadata: TerminalCommandPresentationMetadata | undefined
+): TemplateResult | typeof nothing {
+  if (!metadata) {
+    return nothing;
+  }
+
+  const status = metadata.status ?? "unknown";
+  const durationLabel =
+    typeof metadata.durationMs === "number" &&
+    Number.isFinite(metadata.durationMs)
+      ? formatCommandDuration(metadata.durationMs)
+      : null;
+  const exitCodeLabel =
+    typeof metadata.exitCode === "number" && Number.isFinite(metadata.exitCode)
+      ? `exit ${Math.trunc(metadata.exitCode)}`
+      : null;
+  const label = formatCommandMetadataLabel(
+    status,
+    durationLabel,
+    exitCodeLabel
+  );
+
+  return label
+    ? html`
+        <span
+          class="history-entry-meta"
+          part="history-entry-meta"
+          data-command-status=${status}
+          title=${formatCommandMetadataTitle(
+            status,
+            durationLabel,
+            exitCodeLabel
+          )}
+        >
+          ${label}
+        </span>
+      `
+    : nothing;
+}
+
+function formatCommandMetadataLabel(
+  status: TerminalCommandPresentationStatus,
+  durationLabel: string | null,
+  exitCodeLabel: string | null
+): string | null {
+  if (status === "running") {
+    return durationLabel ? `running (${durationLabel})` : "running";
+  }
+
+  if (status === "failed") {
+    return [
+      exitCodeLabel ?? "error",
+      durationLabel ? `(${durationLabel})` : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  if (durationLabel) {
+    return `(${durationLabel})`;
+  }
+
+  return exitCodeLabel;
+}
+
+function formatCommandMetadataTitle(
+  status: TerminalCommandPresentationStatus,
+  durationLabel: string | null,
+  exitCodeLabel: string | null
+): string {
+  const statusLabel =
+    status === "failed"
+      ? "Command failed"
+      : status === "running"
+      ? "Command is running"
+      : status === "succeeded"
+      ? "Command completed"
+      : "Command status unknown";
+  return [
+    statusLabel,
+    durationLabel ? `Duration ${durationLabel}` : null,
+    exitCodeLabel,
+  ]
+    .filter(Boolean)
+    .join(" - ");
+}
+
+function formatCommandDuration(durationMs: number): string {
+  const safeMs = Math.max(0, durationMs);
+  if (safeMs < 1000) {
+    return `${(safeMs / 1000).toFixed(3)}s`;
+  }
+
+  if (safeMs < 10_000) {
+    return `${(safeMs / 1000).toFixed(2)}s`;
+  }
+
+  return `${(safeMs / 1000).toFixed(1)}s`;
+}
+
+function normalizeCommandPresentationMatch(command: string): string {
+  return command.trim().replace(/\s+/gu, " ");
+}
+
+function getSearchSegments(
+  searchResult: TerminalOutputSearchResult,
+  lineIndex: number
+): readonly TerminalOutputSearchSegment[] {
+  return (
+    searchResult.lines[lineIndex]?.segments ?? [{ kind: "text", value: "" }]
+  );
+}
+
+function renderCommandSegments(command: string, query: string): TemplateResult {
+  const result = createTerminalOutputSearchResult([command], query);
+  return renderHighlightedSegments(
+    result.lines[0]?.segments ?? [{ kind: "text", value: command }]
+  );
 }
 
 export function createVisibleOutputLines(
   history: ReturnType<typeof resolveTerminalScreenControlState>["history"],
   screen: ReturnType<typeof resolveTerminalScreenControlState>["screen"],
+  options: VisibleOutputLineOptions = {}
 ): VisibleOutputLine[] {
-  const liveLines = screen?.surface.lines.map((line) => ({
-    text: line.text,
-    source: "live" as const,
-  })) ?? [];
-  const historyLines = history?.lines
-    .filter((line, index, lines) => line.length > 0 || index < lines.length - 1)
-    .map((line) => ({
-      text: line,
-      source: "history" as const,
-    })) ?? [];
-  const historyBoundaryLines: VisibleOutputLine[] = history?.hasMoreSegments
+  const liveLines = trimTrailingEmptyLiveLines(
+    screen?.surface.lines.map((line) => ({
+      text: line.text,
+      source: "live" as const,
+    })) ?? []
+  );
+  const historyLines =
+    history?.lines
+      .filter(
+        (line, index, lines) => line.length > 0 || index < lines.length - 1
+      )
+      .map((line) => ({
+        text: line,
+        source: "history" as const,
+      })) ?? [];
+  const dedupedHistoryLines =
+    liveLines.length > 0
+      ? removeHistorySuffixOverlappingLivePrefix(historyLines, liveLines)
+      : historyLines;
+  const hasPartialRestoredHistory = history?.hasMoreSegments === true;
+  const historyBoundaryLines: VisibleOutputLine[] = hasPartialRestoredHistory
     ? [{ text: RESTORED_HISTORY_PARTIAL_TEXT, source: "boundary" }]
     : [];
 
-  if (historyLines.length === 0 && historyBoundaryLines.length === 0) {
-    return liveLines;
+  if (dedupedHistoryLines.length === 0 && historyBoundaryLines.length === 0) {
+    return dedupeVisibleHistoryLiveOverlap(
+      filterVisibleOutputLines(liveLines, options)
+    );
   }
 
   if (liveLines.length === 0) {
-    return [...historyLines, ...historyBoundaryLines];
+    return dedupeVisibleHistoryLiveOverlap(
+      filterVisibleOutputLines(
+        [...dedupedHistoryLines, ...historyBoundaryLines],
+        options
+      )
+    );
+  }
+
+  return dedupeVisibleHistoryLiveOverlap(
+    filterVisibleOutputLines(
+      [
+        ...dedupedHistoryLines,
+        ...historyBoundaryLines,
+        ...(dedupedHistoryLines.length > 0 || hasPartialRestoredHistory
+          ? [
+              {
+                text: RESTORED_HISTORY_BOUNDARY_TEXT,
+                source: "boundary",
+              } as const,
+            ]
+          : []),
+        ...liveLines,
+      ],
+      options
+    )
+  );
+}
+
+function removeHistorySuffixOverlappingLivePrefix(
+  historyLines: readonly VisibleOutputLine[],
+  liveLines: readonly VisibleOutputLine[]
+): VisibleOutputLine[] {
+  const overlap = findHistoryLiveLineOverlap(historyLines, liveLines);
+  return overlap > 0 ? historyLines.slice(0, -overlap) : [...historyLines];
+}
+
+function findHistoryLiveLineOverlap(
+  historyLines: readonly VisibleOutputLine[],
+  liveLines: readonly VisibleOutputLine[]
+): number {
+  const maxOverlap = Math.min(historyLines.length, liveLines.length, 240);
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    let matches = true;
+    for (let index = 0; index < size; index += 1) {
+      const historyText =
+        historyLines[historyLines.length - size + index]?.text ?? "";
+      const liveText = liveLines[index]?.text ?? "";
+      if (historyText !== liveText) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      return size;
+    }
+  }
+
+  return 0;
+}
+
+function dedupeVisibleHistoryLiveOverlap(
+  lines: readonly VisibleOutputLine[]
+): VisibleOutputLine[] {
+  const firstLiveIndex = lines.findIndex((line) => line.source === "live");
+  if (firstLiveIndex <= 0) {
+    return [...lines];
+  }
+
+  let historyBlockStart = firstLiveIndex;
+  while (
+    historyBlockStart > 0 &&
+    lines[historyBlockStart - 1]?.source === "history"
+  ) {
+    historyBlockStart -= 1;
+  }
+
+  const historyBlock = lines.slice(historyBlockStart, firstLiveIndex);
+  const liveBlock = lines
+    .slice(firstLiveIndex)
+    .filter((line) => line.source === "live");
+  const overlap = findHistoryLiveLineOverlap(historyBlock, liveBlock);
+  if (overlap === 0) {
+    return [...lines];
   }
 
   return [
-    ...historyLines,
-    ...historyBoundaryLines,
-    { text: RESTORED_HISTORY_BOUNDARY_TEXT, source: "boundary" },
-    ...liveLines,
+    ...lines.slice(0, historyBlockStart),
+    ...historyBlock.slice(0, -overlap),
+    ...lines.slice(firstLiveIndex),
   ];
 }
 
+export function createTerminalHistoryEntries(
+  lines: readonly VisibleOutputLine[],
+  options: TerminalHistoryEntryOptions = {}
+): TerminalHistoryEntry[] {
+  const entries: TerminalHistoryEntry[] = [];
+  let activeEntry: Extract<TerminalHistoryEntry, { kind: "command" }> | null =
+    null;
+  const terminalPromptLabel = normalizeTerminalPromptLabel(
+    options.terminalPromptLabel
+  );
+
+  const flushActiveEntry = () => {
+    if (activeEntry) {
+      entries.push(activeEntry);
+      activeEntry = null;
+    }
+  };
+
+  lines.forEach((line, lineIndex) => {
+    if (line.source === "boundary") {
+      flushActiveEntry();
+      entries.push({ kind: "line", line, lineIndex });
+      return;
+    }
+
+    const promptCommand = parseShellPromptCommandLine(line.text);
+    if (promptCommand) {
+      flushActiveEntry();
+      activeEntry = {
+        kind: "command",
+        prompt: promptCommand.prompt,
+        commandLine: line,
+        commandLineIndex: lineIndex,
+        command: promptCommand.command,
+        output: [],
+      };
+      return;
+    }
+
+    const wrappedInputCommand = parseWrappedInputCommandLine(
+      line.text,
+      terminalPromptLabel
+    );
+    if (wrappedInputCommand) {
+      flushActiveEntry();
+      activeEntry = {
+        kind: "command",
+        prompt: wrappedInputCommand.prompt,
+        commandLine: line,
+        commandLineIndex: lineIndex,
+        command: wrappedInputCommand.command,
+        output: [],
+      };
+      return;
+    }
+
+    if (activeEntry && activeEntry.commandLine.source !== line.source) {
+      flushActiveEntry();
+    }
+
+    if (activeEntry) {
+      activeEntry.output.push({ line, lineIndex });
+      return;
+    }
+
+    entries.push({ kind: "line", line, lineIndex });
+  });
+
+  flushActiveEntry();
+  return dedupeHistoryCommandEntriesAgainstLive(entries);
+}
+
+function dedupeHistoryCommandEntriesAgainstLive(
+  entries: readonly TerminalHistoryEntry[]
+): TerminalHistoryEntry[] {
+  const liveCommandSignatures = new Set(
+    entries
+      .filter(
+        (entry): entry is Extract<TerminalHistoryEntry, { kind: "command" }> =>
+          entry.kind === "command" && entry.commandLine.source === "live"
+      )
+      .map(createTerminalCommandEntrySignature)
+  );
+
+  if (liveCommandSignatures.size === 0) {
+    return [...entries];
+  }
+
+  return entries.filter((entry) => {
+    if (entry.kind !== "command" || entry.commandLine.source !== "history") {
+      return true;
+    }
+    return !liveCommandSignatures.has(
+      createTerminalCommandEntrySignature(entry)
+    );
+  });
+}
+
+function createTerminalCommandEntrySignature(
+  entry: Extract<TerminalHistoryEntry, { kind: "command" }>
+): string {
+  const outputText = entry.output
+    .map(({ line }) => line.text.trim())
+    .filter(Boolean)
+    .join("\u0000");
+  return `${entry.prompt}\u0000${entry.command}\u0000${outputText}`;
+}
+
+function trimTrailingEmptyLiveLines(
+  lines: readonly VisibleOutputLine[]
+): VisibleOutputLine[] {
+  let endIndex = lines.length;
+  while (endIndex > 0 && isBlankTerminalLine(lines[endIndex - 1]?.text ?? "")) {
+    endIndex -= 1;
+  }
+  return lines.slice(0, endIndex);
+}
+
+function isBlankTerminalLine(text: string): boolean {
+  return text.trim().length === 0;
+}
+
+function filterVisibleOutputLines(
+  lines: readonly VisibleOutputLine[],
+  options: VisibleOutputLineOptions
+): VisibleOutputLine[] {
+  if (!options.hideShellPromptNoise) {
+    return [...lines];
+  }
+
+  const filteredLines: VisibleOutputLine[] = [];
+  for (const line of lines) {
+    const normalizedLine = normalizeShellPromptNoiseLine(line, options);
+    if (normalizedLine) {
+      filteredLines.push(normalizedLine);
+    }
+  }
+
+  return filteredLines;
+}
+
+function normalizeShellPromptNoiseLine(
+  line: VisibleOutputLine,
+  options: VisibleOutputLineOptions
+): VisibleOutputLine | null {
+  const text = line.text.trim();
+  if (!text) {
+    return line;
+  }
+
+  if (text === RESTORED_HISTORY_BOUNDARY_TEXT) {
+    return null;
+  }
+
+  if (text === "%" || text === "$" || text === "#") {
+    return null;
+  }
+
+  if (/^(?:dquote|quote|bquote|cmdsubst|heredoc)>/u.test(text)) {
+    return null;
+  }
+
+  if (/^printf\s+"TP_[A-Z0-9_]/u.test(text)) {
+    return null;
+  }
+
+  const wrappedInputCommand = parseWrappedInputCommandLine(
+    line.text,
+    options.terminalPromptLabel
+  );
+  if (wrappedInputCommand) {
+    return isInternalSmokeCommand(wrappedInputCommand.command) ||
+      !options.preserveShellPromptCommands
+      ? null
+      : { ...line, text: wrappedInputCommand.text };
+  }
+
+  if (parseShellPromptOnlyLine(line.text)) {
+    return null;
+  }
+
+  const promptCommand = parseShellPromptCommandLine(line.text);
+  if (promptCommand) {
+    return isInternalSmokeCommand(promptCommand.command) ||
+      !options.preserveShellPromptCommands
+      ? null
+      : line;
+  }
+
+  const wrappedPromptCommandPattern =
+    /^(\s*)[\w.-]{1,64}\s+(?:~(?:\/[\w.,@:+-][\w.,@:+/-]{0,180})?|(?:\/|\.\/|\.\.\/)?[\w.,@:+-][\w.,@:+/-]{0,180}|[A-Za-z]:[\w.,@:+/\\-]{0,180})\s[%$#]\s+(.+)$/u;
+  const wrappedPromptCommandMatch = wrappedPromptCommandPattern.exec(line.text);
+  if (wrappedPromptCommandMatch) {
+    return isInternalSmokeCommand(wrappedPromptCommandMatch[2] ?? "") ||
+      !options.preserveShellPromptCommands
+      ? null
+      : line;
+  }
+
+  const wrappedPromptOnlyPattern =
+    /^\s*[\w.-]{1,64}\s+(?:~(?:\/[\w.,@:+-][\w.,@:+/-]{0,180})?|(?:\/|\.\/|\.\.\/)?[\w.,@:+-][\w.,@:+/-]{0,180}|[A-Za-z]:[\w.,@:+/\\-]{0,180})\s[%$#]\s*$/u;
+  return wrappedPromptOnlyPattern.test(text) ? null : line;
+}
+
+function parseShellPromptCommandLine(
+  value: string
+): ShellPromptCommandLine | null {
+  const trimmed = value.trimEnd();
+  for (let index = trimmed.length - 1; index >= 0; index -= 1) {
+    const marker = trimmed[index] ?? "";
+    if (!isShellPromptMarker(marker)) {
+      continue;
+    }
+
+    const command = trimmed.slice(index + 1);
+    if (!command.startsWith(" ") || command.trim().length === 0) {
+      continue;
+    }
+
+    const prompt = trimmed.slice(0, index).trim();
+    if (looksLikeShellPromptPrefix(prompt)) {
+      return {
+        prompt: normalizeShellPromptDisplay(prompt),
+        command: command.trimStart(),
+      };
+    }
+  }
+
+  return null;
+}
+
+function parseWrappedInputCommandLine(
+  value: string,
+  promptLabel?: string
+): (ShellPromptCommandLine & { text: string }) | null {
+  const match = /^<\s{4,}(.+)$/u.exec(value.trimEnd());
+  const command = match?.[1]?.trim();
+  if (!command) {
+    return null;
+  }
+
+  const prompt = normalizeTerminalPromptLabel(promptLabel);
+  return {
+    prompt,
+    command,
+    text: `${prompt} % ${command}`,
+  };
+}
+
+function normalizeTerminalPromptLabel(
+  value: string | null | undefined
+): string {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : "shell";
+}
+
+function parseShellPromptOnlyLine(value: string): string | null {
+  const trimmed = value.trimEnd();
+  const marker = trimmed.at(-1) ?? "";
+  if (!isShellPromptMarker(marker)) {
+    return null;
+  }
+
+  const prompt = trimmed.slice(0, -1).trim();
+  return looksLikeShellPromptPrefix(prompt)
+    ? normalizeShellPromptDisplay(prompt)
+    : null;
+}
+
+function isShellPromptMarker(value: string): boolean {
+  return value === "%" || value === "$" || value === "#";
+}
+
+function looksLikeShellPromptPrefix(value: string): boolean {
+  const normalized = stripShellPromptTiming(value).trim();
+  if (!normalized || normalized.length > 320) {
+    return false;
+  }
+  if (normalized === "shell") {
+    return true;
+  }
+
+  const tokens = normalized.split(/\s+/u).filter(Boolean);
+  if (tokens.length === 0) {
+    return false;
+  }
+
+  let remaining = normalized;
+  let hasEnvironmentPrefix = false;
+  while (remaining.startsWith("(")) {
+    const closeIndex = remaining.indexOf(")");
+    if (closeIndex < 2 || closeIndex > 48) {
+      break;
+    }
+
+    hasEnvironmentPrefix = true;
+    remaining = remaining.slice(closeIndex + 1).trimStart();
+  }
+
+  const remainingTokens = remaining.split(/\s+/u).filter(Boolean);
+  const firstToken = remainingTokens[0] ?? "";
+  const lastToken = remainingTokens.at(-1) ?? "";
+  const hasUserHostPrefix =
+    firstToken.includes("@") && remainingTokens.length > 1;
+  const hasPathToken = tokens.some(isShellPromptPathToken);
+
+  return (
+    hasPathToken ||
+    ((hasEnvironmentPrefix || hasUserHostPrefix) &&
+      isSafeShellPromptToken(lastToken))
+  );
+}
+
+function stripShellPromptTiming(value: string): string {
+  return value.replace(/\s+\({1,2}\d+(?:\.\d+)?s\){1,2}\s*$/u, "");
+}
+
+function normalizeShellPromptDisplay(value: string): string {
+  return value.replace(/\s+/gu, " ").trim();
+}
+
+function isShellPromptPathToken(value: string): boolean {
+  return (
+    value === "~" ||
+    value.startsWith("~/") ||
+    value.startsWith("/") ||
+    value.startsWith("./") ||
+    value.startsWith("../") ||
+    /^[A-Za-z]:[\\/]/u.test(value)
+  );
+}
+
+function isSafeShellPromptToken(value: string): boolean {
+  if (value.length === 0 || value.length > 181) {
+    return false;
+  }
+
+  return Array.from(value).every((char) => {
+    const code = char.charCodeAt(0);
+    return code > 32 && !isShellPromptMarker(char);
+  });
+}
+
+function isInternalSmokeCommand(command: string): boolean {
+  return /^printf\s+"TP_[A-Z0-9_]/u.test(command.trim());
+}
+
 function renderHighlightedSegments(
-  segments: readonly TerminalOutputSearchSegment[],
+  segments: readonly TerminalOutputSearchSegment[]
 ): TemplateResult {
   return html`${segments.map((segment) => {
     if (segment.kind === "text") {
-      return segment.value;
+      return html`<span class="terminal-output-segment"
+        >${segment.value}</span
+      >`;
     }
 
     return html`<mark
-      part=${segment.active ? "search-match active-search-match" : "search-match"}
+      class="terminal-output-segment"
+      part=${segment.active
+        ? "search-match active-search-match"
+        : "search-match"}
       data-active=${String(segment.active)}
       data-testid=${segment.active ? "tp-screen-active-search-match" : nothing}
-    >${segment.value}</mark>`;
+      >${segment.value}</mark
+    >`;
   })}`;
 }
 
 function isViewportAtBottom(viewport: HTMLElement): boolean {
-  return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2;
+  return (
+    viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2
+  );
 }
 
 export function shouldAutoLoadMoreHistoryFromViewport(
   viewport: Pick<HTMLElement, "scrollTop">,
   canLoadMoreHistory: boolean,
-  historyLoadState: TerminalScreenHistoryLoadState,
+  historyLoadState: TerminalScreenHistoryLoadState
 ): boolean {
-  return canLoadMoreHistory
-    && historyLoadState === "idle"
-    && viewport.scrollTop <= HISTORY_AUTO_LOAD_TOP_THRESHOLD_PX;
+  return (
+    canLoadMoreHistory &&
+    historyLoadState === "idle" &&
+    viewport.scrollTop <= HISTORY_AUTO_LOAD_TOP_THRESHOLD_PX
+  );
 }
 
 interface HistoryScrollAnchor {
@@ -1460,7 +2606,9 @@ interface HistoryScrollAnchor {
   readonly scrollTop: number;
 }
 
-function captureHistoryScrollAnchor(viewport: HTMLElement | null): HistoryScrollAnchor | null {
+function captureHistoryScrollAnchor(
+  viewport: HTMLElement | null
+): HistoryScrollAnchor | null {
   if (!viewport) {
     return null;
   }
@@ -1476,18 +2624,24 @@ function restoreHistoryScrollAnchor(anchor: HistoryScrollAnchor): void {
   anchor.viewport.scrollTop = resolveScrollTopAfterHistoryPrepend(
     anchor.scrollHeight,
     anchor.scrollTop,
-    anchor.viewport.scrollHeight,
+    anchor.viewport.scrollHeight
   );
 }
 
 export function resolveScrollTopAfterHistoryPrepend(
   previousScrollHeight: number,
   previousScrollTop: number,
-  nextScrollHeight: number,
+  nextScrollHeight: number
 ): number {
-  return Math.max(0, previousScrollTop + Math.max(0, nextScrollHeight - previousScrollHeight));
+  return Math.max(
+    0,
+    previousScrollTop + Math.max(0, nextScrollHeight - previousScrollHeight)
+  );
 }
 
 function createTerminalClientEventId(prefix: string): string {
-  return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+  return `${prefix}:${
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  }`;
 }
