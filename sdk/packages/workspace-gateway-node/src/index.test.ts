@@ -1,7 +1,7 @@
 import { createServer } from "node:net";
 
 import { WebSocket as NodeWebSocket } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createMemoryWorkspaceTransport } from "@terminal-platform/workspace-adapter-memory";
 import {
@@ -50,15 +50,20 @@ describe.skipIf(!canBindLoopback)("workspace gateway node", () => {
 
     const sessions = await transport.listSessions();
     const attached = await transport.attachSession(sessions[0]!.session_id);
-    const topology = await transport.getTopologySnapshot(sessions[0]!.session_id);
+    const topology = await transport.getTopologySnapshot(
+      sessions[0]!.session_id
+    );
     const screen = await transport.getScreenSnapshot(
       sessions[0]!.session_id,
-      attached.focused_screen!.pane_id,
+      attached.focused_screen!.pane_id
     );
-    const subscription = await transport.openSubscription(sessions[0]!.session_id, {
-      kind: "pane_surface",
-      pane_id: attached.focused_screen!.pane_id,
-    });
+    const subscription = await transport.openSubscription(
+      sessions[0]!.session_id,
+      {
+        kind: "pane_surface",
+        pane_id: attached.focused_screen!.pane_id,
+      }
+    );
     const event = await subscription.nextEvent();
 
     expect(gateway).toBeInstanceOf(WorkspaceGatewayNodeServer);
@@ -93,20 +98,106 @@ describe.skipIf(!canBindLoopback)("workspace gateway node", () => {
     const socket = await openNodeWebSocket(gateway.controlUrl);
     cleanups.push(() => closeNodeWebSocket(socket));
 
-    socket.send(JSON.stringify({
-      type: "request",
-      requestId: "bad-backend",
-      method: "workspace_backend_capabilities",
-      payload: { backend: "screen" },
-    }));
-
-    const response = decodeWorkspaceWebSocketPayload<WorkspaceGatewayControlServerResponse>(
-      await waitForSocketMessage(socket),
+    socket.send(
+      JSON.stringify({
+        type: "request",
+        requestId: "bad-backend",
+        method: "workspace_backend_capabilities",
+        payload: { backend: "screen" },
+      })
     );
+
+    const response =
+      decodeWorkspaceWebSocketPayload<WorkspaceGatewayControlServerResponse>(
+        await waitForSocketMessage(socket)
+      );
     expect(response.ok).toBe(false);
     expect(response.error.code).toBe("protocol_error");
     expect(response.error.message).toContain("backend");
     expect(runtime.calls).toHaveLength(0);
+  });
+
+  it("returns a protocol error for invalid control frames without touching runtime", async () => {
+    const runtime = createCountingRuntime(createMemoryWorkspaceTransport());
+    const gateway = await startWorkspaceGatewayNodeServer({ runtime });
+    cleanups.push(() => gateway.dispose());
+
+    const socket = await openNodeWebSocket(gateway.controlUrl);
+    cleanups.push(() => closeNodeWebSocket(socket));
+
+    socket.send("{not-json");
+
+    const response =
+      decodeWorkspaceWebSocketPayload<WorkspaceGatewayControlServerResponse>(
+        await waitForSocketMessage(socket)
+      );
+    expect(response).toMatchObject({
+      ok: false,
+      requestId: "invalid-request",
+      method: "workspace_handshake",
+    });
+    expect(response.ok ? null : response.error.message).toContain("JSON");
+    expect(runtime.calls).toHaveLength(0);
+  });
+
+  it("closes malformed stream clients before opening runtime subscriptions", async () => {
+    const runtime = {
+      ...createMemoryWorkspaceTransport(),
+      openSubscription: vi.fn(),
+    } satisfies WorkspaceRuntimeClientPort;
+    const gateway = await startWorkspaceGatewayNodeServer({ runtime });
+    cleanups.push(() => gateway.dispose());
+
+    const socket = await openNodeWebSocket(gateway.streamUrl);
+    cleanups.push(() => closeNodeWebSocket(socket));
+
+    socket.send("{not-json");
+
+    const close = await waitForSocketClose(socket);
+    expect(close.code).toBe(1011);
+    expect(close.reason).toBe("Invalid stream message");
+    expect(runtime.openSubscription).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate stream subscription ids without opening a second runtime subscription", async () => {
+    const runtime = {
+      ...createMemoryWorkspaceTransport(),
+      openSubscription: vi.fn(async () => createHangingSubscription()),
+    } satisfies WorkspaceRuntimeClientPort;
+    const gateway = await startWorkspaceGatewayNodeServer({ runtime });
+    cleanups.push(() => gateway.dispose());
+
+    const socket = await openNodeWebSocket(gateway.streamUrl);
+    cleanups.push(() => closeNodeWebSocket(socket));
+
+    const subscribe = encodeWorkspaceWebSocketPayload({
+      type: "workspace_subscribe",
+      subscriptionId: "sub-duplicate",
+      sessionId: "session-1",
+      spec: {
+        kind: "session_topology",
+      },
+    });
+    socket.send(subscribe);
+    const ack =
+      decodeWorkspaceWebSocketPayload<WorkspaceGatewayStreamServerMessage>(
+        await waitForSocketMessage(socket)
+      );
+    socket.send(subscribe);
+    const rejected =
+      decodeWorkspaceWebSocketPayload<WorkspaceGatewayStreamServerMessage>(
+        await waitForSocketMessage(socket)
+      );
+
+    expect(ack).toMatchObject({
+      type: "workspace_subscription_ack",
+      subscriptionId: "sub-duplicate",
+    });
+    expect(rejected).toMatchObject({
+      type: "workspace_subscription_rejected",
+      subscriptionId: "sub-duplicate",
+    });
+    expect(runtime.openSubscription).toHaveBeenCalledTimes(1);
   });
 
   it("settles unsubscribe when runtime subscription close hangs", async () => {
@@ -124,26 +215,32 @@ describe.skipIf(!canBindLoopback)("workspace gateway node", () => {
     const socket = await openNodeWebSocket(gateway.streamUrl);
     cleanups.push(() => closeNodeWebSocket(socket));
 
-    socket.send(encodeWorkspaceWebSocketPayload({
-      type: "workspace_subscribe",
-      subscriptionId: "sub-1",
-      sessionId: "session-1",
-      spec: {
-        kind: "session_topology",
-      },
-    }));
-    const ack = decodeWorkspaceWebSocketPayload<WorkspaceGatewayStreamServerMessage>(
-      await waitForSocketMessage(socket),
+    socket.send(
+      encodeWorkspaceWebSocketPayload({
+        type: "workspace_subscribe",
+        subscriptionId: "sub-1",
+        sessionId: "session-1",
+        spec: {
+          kind: "session_topology",
+        },
+      })
     );
+    const ack =
+      decodeWorkspaceWebSocketPayload<WorkspaceGatewayStreamServerMessage>(
+        await waitForSocketMessage(socket)
+      );
     expect(ack.type).toBe("workspace_subscription_ack");
 
-    socket.send(encodeWorkspaceWebSocketPayload({
-      type: "workspace_unsubscribe",
-      subscriptionId: "sub-1",
-    }));
-    const closed = decodeWorkspaceWebSocketPayload<WorkspaceGatewayStreamServerMessage>(
-      await waitForSocketMessage(socket),
+    socket.send(
+      encodeWorkspaceWebSocketPayload({
+        type: "workspace_unsubscribe",
+        subscriptionId: "sub-1",
+      })
     );
+    const closed =
+      decodeWorkspaceWebSocketPayload<WorkspaceGatewayStreamServerMessage>(
+        await waitForSocketMessage(socket)
+      );
 
     expect(closed).toEqual({
       type: "workspace_subscription_closed",
@@ -167,11 +264,16 @@ describe("workspace gateway node public api", () => {
   });
 });
 
-function createNodeWebSocket(url: string, protocols?: string[]): globalThis.WebSocket {
+function createNodeWebSocket(
+  url: string,
+  protocols?: string[]
+): globalThis.WebSocket {
   return new NodeWebSocket(url, protocols) as unknown as globalThis.WebSocket;
 }
 
-function createCountingRuntime(runtime: WorkspaceTransportClient): WorkspaceTransportClient & { calls: string[] } {
+function createCountingRuntime(
+  runtime: WorkspaceTransportClient
+): WorkspaceTransportClient & { calls: string[] } {
   const calls: string[] = [];
   return {
     ...runtime,
@@ -187,7 +289,9 @@ function createCountingRuntime(runtime: WorkspaceTransportClient): WorkspaceTran
   };
 }
 
-function createHangingSubscription(): WorkspaceSubscription & { closeCalls: number } {
+function createHangingSubscription(): WorkspaceSubscription & {
+  closeCalls: number;
+} {
   return {
     closeCalls: 0,
     meta: () => ({ subscription_id: "hanging-subscription" }),
@@ -227,7 +331,9 @@ async function waitForSocketMessage(socket: NodeWebSocket): Promise<string> {
   });
 }
 
-async function waitForSocketClose(socket: NodeWebSocket): Promise<{ code: number; reason: string }> {
+async function waitForSocketClose(
+  socket: NodeWebSocket
+): Promise<{ code: number; reason: string }> {
   return new Promise((resolve) => {
     socket.once("close", (code, reason) => {
       resolve({ code, reason: reason.toString() });

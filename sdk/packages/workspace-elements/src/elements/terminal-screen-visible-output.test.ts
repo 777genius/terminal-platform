@@ -127,15 +127,9 @@ describe("terminal screen visible output", () => {
     const lines = createVisibleOutputLines(
       createHistory({
         hasMoreSegments: false,
-        lines: [
-          "<                      echo TP_VERIFY_1",
-          "TP_VERIFY_1",
-        ],
+        lines: ["<                      echo TP_VERIFY_1", "TP_VERIFY_1"],
       }),
-      createScreen([
-        "shell % echo TP_VERIFY_1",
-        "TP_VERIFY_1",
-      ]),
+      createScreen(["shell % echo TP_VERIFY_1", "TP_VERIFY_1"]),
       { hideShellPromptNoise: true, preserveShellPromptCommands: true }
     );
 
@@ -192,9 +186,7 @@ describe("terminal screen visible output", () => {
       { hideShellPromptNoise: true }
     );
 
-    expect(lines).toEqual([
-      { text: "ok", source: "live" },
-    ]);
+    expect(lines).toEqual([{ text: "ok", source: "live" }]);
   });
 
   it("keeps shell prompt command echo lines for terminal history grouping", () => {
@@ -324,6 +316,95 @@ describe("terminal screen visible output", () => {
             lineIndex: 1,
           },
         ],
+      },
+    ]);
+  });
+
+  it("keeps normal user printf commands while hiding internal smoke commands", () => {
+    const lines = createVisibleOutputLines(
+      null,
+      createScreen([
+        'shell % printf "TP_INTERNAL_1\\n"',
+        "TP_INTERNAL_1",
+        'shell % printf "hello\\n"',
+        "hello",
+      ]),
+      { hideShellPromptNoise: true, preserveShellPromptCommands: true }
+    );
+
+    expect(lines).toEqual([
+      { text: "TP_INTERNAL_1", source: "live" },
+      { text: 'shell % printf "hello\\n"', source: "live" },
+      { text: "hello", source: "live" },
+    ]);
+  });
+
+  it("groups terminal commands after prompt-only rows are removed from visible output", () => {
+    const lines = createVisibleOutputLines(
+      null,
+      createScreen([
+        "shell %",
+        "shell % echo one",
+        "one",
+        "shell %",
+        "shell % echo two",
+        "two",
+        "shell %",
+      ]),
+      { hideShellPromptNoise: true, preserveShellPromptCommands: true }
+    );
+
+    expect(createTerminalHistoryEntries(lines)).toEqual([
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: { text: "shell % echo one", source: "live" },
+        commandLineIndex: 0,
+        command: "echo one",
+        output: [{ line: { text: "one", source: "live" }, lineIndex: 1 }],
+      },
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: { text: "shell % echo two", source: "live" },
+        commandLineIndex: 2,
+        command: "echo two",
+        output: [{ line: { text: "two", source: "live" }, lineIndex: 3 }],
+      },
+    ]);
+  });
+
+  it("keeps unrelated restored output as plain lines between command groups", () => {
+    const entries = createTerminalHistoryEntries([
+      { text: "shell % echo before", source: "history" },
+      { text: "before", source: "history" },
+      { text: "standalone restored note", source: "history" },
+      { text: "shell % echo after", source: "history" },
+      { text: "after", source: "history" },
+    ]);
+
+    expect(entries).toEqual([
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: { text: "shell % echo before", source: "history" },
+        commandLineIndex: 0,
+        command: "echo before",
+        output: [
+          { line: { text: "before", source: "history" }, lineIndex: 1 },
+          {
+            line: { text: "standalone restored note", source: "history" },
+            lineIndex: 2,
+          },
+        ],
+      },
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: { text: "shell % echo after", source: "history" },
+        commandLineIndex: 3,
+        command: "echo after",
+        output: [{ line: { text: "after", source: "history" }, lineIndex: 4 }],
       },
     ]);
   });
