@@ -1,0 +1,370 @@
+name: release-runtime
+
+run-name: terminal-platform runtime ${{ inputs.runtime_version || github.ref_name }} -> ${{ inputs.target_release_repo || github.repository }}@${{ inputs.target_release_tag || github.ref_name }}
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: terminal-platform release tag to package, for example v0.2.0
+        required: true
+        type: string
+      runtime_version:
+        description: Runtime artifact version. Defaults to source_ref without the v prefix.
+        required: false
+        default: ''
+        type: string
+      target_release_repo:
+        description: Repository that receives runtime release assets
+        required: false
+        default: 777genius/terminal-platform
+        type: string
+      target_release_tag:
+        description: Release tag that receives runtime assets. Defaults to source_ref.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: terminal-platform-runtime-${{ inputs.target_release_repo || github.repository }}-${{ inputs.target_release_tag || inputs.source_ref || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    outputs:
+      runtime_version: ${{ steps.resolve.outputs.runtime_version }}
+      source_commit: ${{ steps.resolve.outputs.source_commit }}
+      source_ref: ${{ steps.resolve.outputs.source_ref }}
+      target_release_repo: ${{ steps.resolve.outputs.target_release_repo }}
+      target_release_tag: ${{ steps.resolve.outputs.target_release_tag }}
+
+    steps:
+      - name: Checkout source ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: resolve
+        env:
+          INPUT_RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+          INPUT_TARGET_RELEASE_REPO: ${{ inputs.target_release_repo }}
+          INPUT_TARGET_RELEASE_TAG: ${{ inputs.target_release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_REF="${INPUT_SOURCE_REF:-${GITHUB_REF_NAME}}"
+          case "$SOURCE_REF" in
+            v[0-9]* ) ;;
+            *)
+              echo "source_ref must be an immutable release tag like v0.2.0, got '$SOURCE_REF'" >&2
+              exit 1
+              ;;
+          esac
+
+          RUNTIME_VERSION="${INPUT_RUNTIME_VERSION:-${SOURCE_REF#v}}"
+          case "$RUNTIME_VERSION" in
+            *[!0-9A-Za-z._-]* | "" )
+              echo "runtime_version contains unsupported characters: '$RUNTIME_VERSION'" >&2
+              exit 1
+              ;;
+          esac
+
+          TARGET_REPO="${INPUT_TARGET_RELEASE_REPO:-${GITHUB_REPOSITORY}}"
+          TARGET_TAG="${INPUT_TARGET_RELEASE_TAG:-${SOURCE_REF}}"
+          if [ -z "$TARGET_TAG" ]; then
+            TARGET_TAG="$SOURCE_REF"
+          fi
+
+          echo "runtime_version=$RUNTIME_VERSION" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
+          echo "target_release_repo=$TARGET_REPO" >> "$GITHUB_OUTPUT"
+          echo "target_release_tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create or reuse runtime release
+        env:
+          BINARIES_PUBLISH_TOKEN: ${{ secrets.BINARIES_PUBLISH_TOKEN }}
+          GITHUB_TOKEN_VALUE: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO: ${{ steps.resolve.outputs.target_release_repo }}
+          TARGET_TAG: ${{ steps.resolve.outputs.target_release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_REPO" = "$GITHUB_REPOSITORY" ]; then
+            export GH_TOKEN="$GITHUB_TOKEN_VALUE"
+          else
+            if [ -z "${BINARIES_PUBLISH_TOKEN:-}" ]; then
+              echo "Missing BINARIES_PUBLISH_TOKEN secret for cross-repository release upload" >&2
+              exit 1
+            fi
+            export GH_TOKEN="$BINARIES_PUBLISH_TOKEN"
+          fi
+
+          if gh release view "$TARGET_TAG" --repo "$TARGET_REPO" >/dev/null 2>&1; then
+            echo "Release $TARGET_REPO@$TARGET_TAG already exists"
+            exit 0
+          fi
+
+          gh release create "$TARGET_TAG" \
+            --repo "$TARGET_REPO" \
+            --target "${{ steps.resolve.outputs.source_commit }}" \
+            --title "$TARGET_TAG" \
+            --notes "terminal-platform runtime ${{ steps.resolve.outputs.runtime_version }}"
+
+  build-runtime:
+    needs: prepare-release
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-14
+            archive_kind: tar.gz
+            binary_name: terminal-daemon
+          - platform: darwin-x64
+            runner: macos-15-intel
+            archive_kind: tar.gz
+            binary_name: terminal-daemon
+          - platform: linux-x64
+            runner: ubuntu-latest
+            archive_kind: tar.gz
+            binary_name: terminal-daemon
+          - platform: win32-x64
+            runner: windows-latest
+            archive_kind: zip
+            binary_name: terminal-daemon.exe
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout source ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.source_commit }}
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Build daemon and native node package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release -p terminal-daemon
+          node crates/terminal-node-napi/package/scripts/build-local-package.mjs \
+            --release \
+            --out "$RUNNER_TEMP/terminal-platform-node"
+          node crates/terminal-node-napi/package/scripts/verify-package.mjs \
+            --package-dir "$RUNNER_TEMP/terminal-platform-node"
+
+      - name: Package runtime archive
+        id: package-unix
+        if: runner.os != 'Windows'
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          RUNTIME_VERSION: ${{ needs.prepare-release.outputs.runtime_version }}
+          SOURCE_COMMIT: ${{ needs.prepare-release.outputs.source_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD_ROOT="$RUNNER_TEMP/terminal-platform-payload"
+          PAYLOAD_DIR="$PAYLOAD_ROOT/terminal-platform"
+          ARCHIVE_NAME="terminal-platform-runtime-${PLATFORM}-v${RUNTIME_VERSION}.tar.gz"
+          ARCHIVE_PATH="$RUNNER_TEMP/$ARCHIVE_NAME"
+
+          rm -rf "$PAYLOAD_ROOT"
+          mkdir -p "$PAYLOAD_DIR"
+          cp "target/release/terminal-daemon" "$PAYLOAD_DIR/terminal-daemon"
+          chmod +x "$PAYLOAD_DIR/terminal-daemon"
+          cp -R "$RUNNER_TEMP/terminal-platform-node" "$PAYLOAD_DIR/terminal-platform-node"
+          printf '%s\n' "$RUNTIME_VERSION" > "$PAYLOAD_DIR/VERSION"
+          printf '%s\n' "$SOURCE_COMMIT" > "$PAYLOAD_DIR/COMMIT_SHA"
+
+          test -x "$PAYLOAD_DIR/terminal-daemon"
+          test -f "$PAYLOAD_DIR/terminal-platform-node/index.mjs"
+          test -f "$PAYLOAD_DIR/terminal-platform-node/native/manifest.json"
+          tar -czf "$ARCHIVE_PATH" -C "$PAYLOAD_ROOT" terminal-platform
+
+          echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+          echo "archive_path=$ARCHIVE_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Package runtime archive
+        id: package-windows
+        if: runner.os == 'Windows'
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          RUNTIME_VERSION: ${{ needs.prepare-release.outputs.runtime_version }}
+          SOURCE_COMMIT: ${{ needs.prepare-release.outputs.source_commit }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $payloadRoot = Join-Path $env:RUNNER_TEMP "terminal-platform-payload"
+          $payloadDir = Join-Path $payloadRoot "terminal-platform"
+          $packageDir = Join-Path $env:RUNNER_TEMP "terminal-platform-node"
+          $archiveName = "terminal-platform-runtime-$($env:PLATFORM)-v$($env:RUNTIME_VERSION).zip"
+          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
+
+          Remove-Item -Recurse -Force $payloadRoot -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $payloadDir | Out-Null
+          Copy-Item "target/release/terminal-daemon.exe" (Join-Path $payloadDir "terminal-daemon.exe")
+          Copy-Item $packageDir (Join-Path $payloadDir "terminal-platform-node") -Recurse
+          Set-Content -Encoding utf8 -NoNewline -Path (Join-Path $payloadDir "VERSION") -Value "$env:RUNTIME_VERSION`n"
+          Set-Content -Encoding utf8 -NoNewline -Path (Join-Path $payloadDir "COMMIT_SHA") -Value "$env:SOURCE_COMMIT`n"
+
+          if (-not (Test-Path (Join-Path $payloadDir "terminal-daemon.exe") -PathType Leaf)) {
+            throw "Missing terminal-daemon.exe in payload"
+          }
+          if (-not (Test-Path (Join-Path $payloadDir "terminal-platform-node/index.mjs") -PathType Leaf)) {
+            throw "Missing terminal-platform-node/index.mjs in payload"
+          }
+          if (-not (Test-Path (Join-Path $payloadDir "terminal-platform-node/native/manifest.json") -PathType Leaf)) {
+            throw "Missing terminal-platform-node/native/manifest.json in payload"
+          }
+
+          Compress-Archive -Path $payloadDir -DestinationPath $archivePath -Force
+
+          "archive_name=$archiveName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "archive_path=$archivePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload runtime archive workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package-unix.outputs.archive_name || steps.package-windows.outputs.archive_name }}
+          path: ${{ steps.package-unix.outputs.archive_path || steps.package-windows.outputs.archive_path }}
+          retention-days: 2
+
+      - name: Upload runtime archive to release
+        if: runner.os != 'Windows'
+        env:
+          ARCHIVE_PATH: ${{ steps.package-unix.outputs.archive_path }}
+          BINARIES_PUBLISH_TOKEN: ${{ secrets.BINARIES_PUBLISH_TOKEN }}
+          GITHUB_TOKEN_VALUE: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO: ${{ needs.prepare-release.outputs.target_release_repo }}
+          TARGET_TAG: ${{ needs.prepare-release.outputs.target_release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_REPO" = "$GITHUB_REPOSITORY" ]; then
+            export GH_TOKEN="$GITHUB_TOKEN_VALUE"
+          else
+            if [ -z "${BINARIES_PUBLISH_TOKEN:-}" ]; then
+              echo "Missing BINARIES_PUBLISH_TOKEN secret for cross-repository release upload" >&2
+              exit 1
+            fi
+            export GH_TOKEN="$BINARIES_PUBLISH_TOKEN"
+          fi
+          gh release upload "$TARGET_TAG" "$ARCHIVE_PATH" --repo "$TARGET_REPO" --clobber
+
+      - name: Upload runtime archive to release
+        if: runner.os == 'Windows'
+        env:
+          ARCHIVE_PATH: ${{ steps.package-windows.outputs.archive_path }}
+          BINARIES_PUBLISH_TOKEN: ${{ secrets.BINARIES_PUBLISH_TOKEN }}
+          GITHUB_TOKEN_VALUE: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO: ${{ needs.prepare-release.outputs.target_release_repo }}
+          TARGET_TAG: ${{ needs.prepare-release.outputs.target_release_tag }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:TARGET_REPO -eq $env:GITHUB_REPOSITORY) {
+            $env:GH_TOKEN = $env:GITHUB_TOKEN_VALUE
+          } else {
+            if ([string]::IsNullOrWhiteSpace($env:BINARIES_PUBLISH_TOKEN)) {
+              throw "Missing BINARIES_PUBLISH_TOKEN secret for cross-repository release upload"
+            }
+            $env:GH_TOKEN = $env:BINARIES_PUBLISH_TOKEN
+          }
+          gh release upload $env:TARGET_TAG $env:ARCHIVE_PATH --repo $env:TARGET_REPO --clobber
+
+  publish-manifest:
+    needs: [prepare-release, build-runtime]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout source ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.source_commit }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Download runtime archive artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: terminal-platform-runtime-*
+          path: ${{ runner.temp }}/runtime-assets
+
+      - name: Generate manifest and checksums
+        env:
+          RUNTIME_VERSION: ${{ needs.prepare-release.outputs.runtime_version }}
+          SOURCE_COMMIT: ${{ needs.prepare-release.outputs.source_commit }}
+          SOURCE_REF: ${{ needs.prepare-release.outputs.source_ref }}
+          TARGET_REPO: ${{ needs.prepare-release.outputs.target_release_repo }}
+          TARGET_TAG: ${{ needs.prepare-release.outputs.target_release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/generate-runtime-release-manifest.mjs \
+            --assets-dir "$RUNNER_TEMP/runtime-assets" \
+            --out "$RUNNER_TEMP/terminal-platform-runtime-manifest-v${RUNTIME_VERSION}.json" \
+            --checksums-out "$RUNNER_TEMP/terminal-platform-runtime-SHA256SUMS-v${RUNTIME_VERSION}" \
+            --version "$RUNTIME_VERSION" \
+            --source-repository "$GITHUB_REPOSITORY" \
+            --source-ref "$SOURCE_REF" \
+            --source-commit "$SOURCE_COMMIT" \
+            --release-repository "$TARGET_REPO" \
+            --release-tag "$TARGET_TAG"
+
+      - name: Upload manifest and checksums to release
+        env:
+          BINARIES_PUBLISH_TOKEN: ${{ secrets.BINARIES_PUBLISH_TOKEN }}
+          GITHUB_TOKEN_VALUE: ${{ secrets.GITHUB_TOKEN }}
+          RUNTIME_VERSION: ${{ needs.prepare-release.outputs.runtime_version }}
+          TARGET_REPO: ${{ needs.prepare-release.outputs.target_release_repo }}
+          TARGET_TAG: ${{ needs.prepare-release.outputs.target_release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_REPO" = "$GITHUB_REPOSITORY" ]; then
+            export GH_TOKEN="$GITHUB_TOKEN_VALUE"
+          else
+            if [ -z "${BINARIES_PUBLISH_TOKEN:-}" ]; then
+              echo "Missing BINARIES_PUBLISH_TOKEN secret for cross-repository release upload" >&2
+              exit 1
+            fi
+            export GH_TOKEN="$BINARIES_PUBLISH_TOKEN"
+          fi
+
+          gh release upload "$TARGET_TAG" \
+            "$RUNNER_TEMP/terminal-platform-runtime-manifest-v${RUNTIME_VERSION}.json" \
+            "$RUNNER_TEMP/terminal-platform-runtime-SHA256SUMS-v${RUNTIME_VERSION}" \
+            --repo "$TARGET_REPO" \
+            --clobber
