@@ -5,6 +5,7 @@ import { terminalElementStyles } from "../styles/terminal-element-styles.js";
 import { readClipboardText } from "./terminal-clipboard.js";
 import type { TerminalCommandComposerElement } from "./terminal-command-composer-element.js";
 import type {
+  TerminalCommandComposerAutocompleteAcceptDetail,
   TerminalCommandComposerDraftChangeDetail,
   TerminalCommandComposerHistoryNavigateDetail,
   TerminalCommandComposerShortcutDetail,
@@ -56,6 +57,10 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   static override properties = {
     ...WorkspaceKernelConsumerElement.properties,
     quickCommands: { attribute: false },
+    autocompleteSuggestion: {
+      attribute: "autocomplete-suggestion",
+      type: String,
+    },
     autoFocusInput: { attribute: "auto-focus-input", type: Boolean },
     placement: { type: String },
     pending: { state: true },
@@ -70,7 +75,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         display: grid;
         gap: var(--tp-space-2);
         padding: var(--tp-space-3);
-        background: linear-gradient(
+        background:
+          linear-gradient(
             180deg,
             color-mix(in srgb, var(--tp-color-panel-raised) 82%, transparent),
             transparent
@@ -85,7 +91,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         box-shadow: none;
         color: var(--tp-terminal-color-text);
         gap: var(--tp-space-2);
-        background: linear-gradient(
+        background:
+          linear-gradient(
             180deg,
             color-mix(in srgb, var(--tp-terminal-color-bg) 86%, transparent),
             var(--tp-terminal-color-bg)
@@ -319,7 +326,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         );
         border-top-width: 0;
         border-radius: 0 0 var(--tp-radius-md) var(--tp-radius-md);
-        background: linear-gradient(
+        background:
+          linear-gradient(
             180deg,
             color-mix(
               in srgb,
@@ -423,8 +431,57 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         padding-top: 0;
       }
 
+      .command-input-stack {
+        display: grid;
+        align-self: stretch;
+        min-width: 0;
+        position: relative;
+      }
+
+      .dock[data-placement="terminal"] .command-input-stack {
+        align-self: center;
+      }
+
+      .command-input-stack textarea,
+      .autocomplete-ghost {
+        grid-area: 1 / 1;
+      }
+
+      .autocomplete-ghost {
+        min-width: 0;
+        overflow: hidden;
+        pointer-events: none;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: transparent;
+        font: var(--tp-terminal-command-font-size, 0.94rem) / 1.45
+          var(--tp-font-family-mono);
+      }
+
+      .dock[data-placement="terminal"] .autocomplete-ghost {
+        align-self: center;
+        color: transparent;
+        font: var(--tp-terminal-command-font-size, 0.94rem) / 1.35
+          var(--tp-font-family-mono);
+        min-height: 1.65rem;
+        padding: 0.12rem 0;
+      }
+
+      .autocomplete-ghost-suffix {
+        color: color-mix(in srgb, var(--tp-color-text-muted) 48%, transparent);
+      }
+
+      .dock[data-placement="terminal"] .autocomplete-ghost-suffix {
+        color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-text-muted) 52%,
+          transparent
+        );
+      }
+
       textarea {
         min-width: 0;
+        width: 100%;
         min-height: 3.15rem;
         max-height: min(12rem, 34vh);
         overflow-y: auto;
@@ -433,13 +490,15 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         outline: 0;
         background: transparent;
         color: var(--tp-color-text);
-        font: 0.94rem/1.45 var(--tp-font-family-mono);
+        font: var(--tp-terminal-command-font-size, 0.94rem) / 1.45
+          var(--tp-font-family-mono);
       }
 
       .dock[data-placement="terminal"] textarea {
         align-self: center;
         color: var(--tp-terminal-color-text);
-        font: 0.94rem/1.35 var(--tp-font-family-mono);
+        font: var(--tp-terminal-command-font-size, 0.94rem) / 1.35
+          var(--tp-font-family-mono);
         min-height: 1.65rem;
         max-height: min(9rem, 28vh);
         padding: 0.12rem 0;
@@ -725,11 +784,12 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     | readonly TerminalCommandQuickCommand[]
     | null
     | undefined;
+  declare autocompleteSuggestion: string | null;
   declare autoFocusInput: boolean;
   declare placement: TerminalCommandDockPlacement;
-  protected declare pending: boolean;
-  protected declare actionError: string | null;
-  protected declare historyClearConfirmationArmed: boolean;
+  declare protected pending: boolean;
+  declare protected actionError: string | null;
+  declare protected historyClearConfirmationArmed: boolean;
 
   #historyNavigation: TerminalCommandHistoryNavigationState =
     createTerminalCommandHistoryNavigationState();
@@ -740,6 +800,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   constructor() {
     super();
     this.quickCommands = defaultTerminalCommandQuickCommands;
+    this.autocompleteSuggestion = null;
     this.autoFocusInput = false;
     this.placement = "panel";
     this.pending = false;
@@ -771,7 +832,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         : null,
     });
     const quickCommands = resolveTerminalCommandQuickCommands(
-      this.quickCommands
+      this.quickCommands,
     );
     const inputStatus = resolveTerminalCommandInputStatus(controls);
     const statusBadges = resolveTerminalCommandDockStatusBadges(
@@ -779,7 +840,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       inputStatus,
       {
         placement: this.placement,
-      }
+      },
     );
     const pasteTitle =
       controls.pasteCapabilityStatus === "known" && !controls.canPasteClipboard
@@ -834,7 +895,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
               >
                 ${badge.label}
               </span>
-            `
+            `,
           )}
         </div>
       </div>
@@ -865,7 +926,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                   >
                     ${command.label}
                   </button>
-                `
+                `,
               )}
             </div>
           `
@@ -898,7 +959,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
                     >
                       <span class="history-command">${command.label}</span>
                     </button>
-                  `
+                  `,
                 )}
               </div>
             </div>
@@ -914,22 +975,26 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         .canSend=${controls.canSend}
         .canInterrupt=${controls.canInterrupt}
         .canPasteClipboard=${controls.canPasteClipboard}
+        .autocompleteSuggestion=${this.autocompleteSuggestion}
         .placeholder=${inputStatus.placeholder}
         .inputDescriptionId=${TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID}
         .pasteTitle=${pasteTitle}
         .placement=${this.placement}
         @tp-terminal-command-draft-change=${(
-          event: CustomEvent<TerminalCommandComposerDraftChangeDetail>
+          event: CustomEvent<TerminalCommandComposerDraftChangeDetail>,
         ) => this.handleComposerDraftChange(event)}
         @tp-terminal-command-history-navigate=${(
-          event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>
+          event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>,
         ) => this.handleComposerHistoryNavigate(event)}
+        @tp-terminal-command-autocomplete-accept=${(
+          event: CustomEvent<TerminalCommandComposerAutocompleteAcceptDetail>,
+        ) => this.handleComposerAutocompleteAccept(event)}
         @tp-terminal-command-submit=${() =>
           this.sendDraft({ focusInput: true })}
         @tp-terminal-command-paste=${() =>
           this.pasteClipboard({ focusInput: true })}
         @tp-terminal-command-shortcut=${(
-          event: CustomEvent<TerminalCommandComposerShortcutDetail>
+          event: CustomEvent<TerminalCommandComposerShortcutDetail>,
         ) => this.handleComposerShortcut(event)}
       ></tp-terminal-command-composer>
     `;
@@ -978,7 +1043,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             >
               ${action.label}
             </button>
-          `
+          `,
         )}
       </div>
     `;
@@ -1042,7 +1107,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
   private setDraft(
     value: string,
-    options: TerminalCommandInputFocusOptions = {}
+    options: TerminalCommandInputFocusOptions = {},
   ): void {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, {
       pending: this.pending,
@@ -1061,34 +1126,40 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private handleComposerDraftChange(
-    event: CustomEvent<TerminalCommandComposerDraftChangeDetail>
+    event: CustomEvent<TerminalCommandComposerDraftChangeDetail>,
   ): void {
     this.setDraft(event.detail.value);
   }
 
   private handleComposerHistoryNavigate(
-    event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>
+    event: CustomEvent<TerminalCommandComposerHistoryNavigateDetail>,
   ): void {
     const composer = event.currentTarget as TerminalCommandComposerElement;
     if (
       this.navigateCommandHistory(
         event.detail.direction,
         event.detail.input,
-        composer
+        composer,
       )
     ) {
       event.preventDefault();
     }
   }
 
+  private handleComposerAutocompleteAccept(
+    event: CustomEvent<TerminalCommandComposerAutocompleteAcceptDetail>,
+  ): void {
+    this.setDraft(event.detail.value, { focusInput: true });
+  }
+
   private handleComposerShortcut(
-    event: CustomEvent<TerminalCommandComposerShortcutDetail>
+    event: CustomEvent<TerminalCommandComposerShortcutDetail>,
   ): void {
     void this.sendShortcut(event.detail.data, { focusInput: true });
   }
 
   private async sendDraft(
-    options: TerminalCommandInputFocusOptions = {}
+    options: TerminalCommandInputFocusOptions = {},
   ): Promise<void> {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, {
       pending: this.pending,
@@ -1117,7 +1188,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           sessionId: controls.activeSessionId,
           startedAtMs,
         },
-      })
+      }),
     );
     await this.dispatchInput(
       controls.activeSessionId,
@@ -1127,7 +1198,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         clientEventId,
         command: controls.draft,
         startedAtMs,
-      }
+      },
     );
     this.kernel?.commands.clearDraft(controls.activePaneId);
     if (options.focusInput) {
@@ -1138,7 +1209,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   private navigateCommandHistory(
     direction: TerminalCommandHistoryNavigationDirection,
     input: TerminalCommandHistoryInputState,
-    composer: TerminalCommandComposerElement
+    composer: TerminalCommandComposerElement,
   ): boolean {
     const paneId =
       this.snapshot.selection.activePaneId ??
@@ -1153,7 +1224,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       direction,
       input,
       commandHistory,
-      this.#historyNavigation
+      this.#historyNavigation,
     );
     this.#historyNavigation = result.state;
 
@@ -1168,7 +1239,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   private applyHistoryDraft(
     paneId: string,
     composer: TerminalCommandComposerElement,
-    value: string
+    value: string,
   ): void {
     this.clearHistoryClearConfirmation();
     composer.applyDraft(value);
@@ -1208,8 +1279,8 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
   private focusCommandInput(
     composer = this.shadowRoot?.querySelector<TerminalCommandComposerElement>(
-      "tp-terminal-command-composer"
-    )
+      "tp-terminal-command-composer",
+    ),
   ): boolean {
     return composer?.focusInput() ?? false;
   }
@@ -1221,7 +1292,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private async pasteClipboard(
-    options: TerminalCommandInputFocusOptions = {}
+    options: TerminalCommandInputFocusOptions = {},
   ): Promise<void> {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, {
       pending: this.pending,
@@ -1256,7 +1327,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             paneId: controls.activePaneId,
             error,
           },
-        })
+        }),
       );
       return;
     }
@@ -1272,7 +1343,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     await this.dispatchPaste(
       controls.activeSessionId,
       controls.activePaneId,
-      pastedText
+      pastedText,
     );
     if (options.focusInput) {
       this.refocusCommandInputAfterUpdate();
@@ -1281,7 +1352,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
   private async sendShortcut(
     data: string,
-    options: TerminalCommandInputFocusOptions = {}
+    options: TerminalCommandInputFocusOptions = {},
   ): Promise<void> {
     const controls = resolveTerminalCommandDockControlState(this.snapshot, {
       pending: this.pending,
@@ -1298,7 +1369,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     await this.dispatchInput(
       controls.activeSessionId,
       controls.activePaneId,
-      data
+      data,
     );
     if (options.focusInput) {
       this.refocusCommandInputAfterUpdate();
@@ -1308,7 +1379,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   private async dispatchPaste(
     sessionId: string,
     paneId: string,
-    data: string
+    data: string,
   ): Promise<void> {
     this.pending = true;
     this.actionError = null;
@@ -1327,7 +1398,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: { sessionId, paneId, inputLength: data.length },
-        })
+        }),
       );
     } catch (error) {
       this.actionError = getErrorMessage(error);
@@ -1336,7 +1407,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: { sessionId, paneId, error },
-        })
+        }),
       );
     } finally {
       this.pending = false;
@@ -1347,7 +1418,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     sessionId: string,
     paneId: string,
     data: string,
-    options: TerminalCommandDispatchInputOptions = {}
+    options: TerminalCommandDispatchInputOptions = {},
   ): Promise<void> {
     this.pending = true;
     this.actionError = null;
@@ -1374,7 +1445,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             sessionId,
             startedAtMs: options.startedAtMs ?? null,
           },
-        })
+        }),
       );
     } catch (error) {
       this.actionError = getErrorMessage(error);
@@ -1390,7 +1461,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             sessionId,
             startedAtMs: options.startedAtMs ?? null,
           },
-        })
+        }),
       );
     } finally {
       this.pending = false;
@@ -1425,7 +1496,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
             savedSessionCount: savedSessions.length,
             savedSessionId: savedSessions[0]?.session_id ?? null,
           },
-        })
+        }),
       );
     } catch (error) {
       this.actionError = getErrorMessage(error);
@@ -1434,7 +1505,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: { sessionId: controls.activeSessionId, error },
-        })
+        }),
       );
     } finally {
       this.pending = false;
@@ -1461,7 +1532,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: { sessionId },
-        })
+        }),
       );
     } catch (error) {
       this.actionError = getErrorMessage(error);
@@ -1470,7 +1541,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
           bubbles: true,
           composed: true,
           detail: { sessionId, error },
-        })
+        }),
       );
     } finally {
       this.pending = false;
@@ -1478,7 +1549,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
   }
 
   private handleSessionActionClick(
-    actionId: TerminalCommandDockSessionActionId
+    actionId: TerminalCommandDockSessionActionId,
   ): void {
     switch (actionId) {
       case TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout:
@@ -1518,7 +1589,7 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       new CustomEvent("tp-terminal-command-history-cleared", {
         bubbles: true,
         composed: true,
-      })
+      }),
     );
   }
 

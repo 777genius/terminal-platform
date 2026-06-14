@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   TERMINAL_COMMAND_COMPOSER_ACTIONS,
   TERMINAL_COMMAND_COMPOSER_ACTION_IDS,
+  TERMINAL_COMMAND_COMPOSER_AUTOCOMPLETE_DEFAULT_MAX_LENGTH,
+  TERMINAL_COMMAND_COMPOSER_AUTOCOMPLETE_DEFAULT_MIN_LENGTH,
   TERMINAL_COMMAND_DOCK_ACCESSORY_MODES,
   TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT,
   TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS,
@@ -37,6 +39,7 @@ import {
   defaultTerminalCommandQuickCommands,
   findRestorableSavedSession,
   hasSavedSession,
+  resolveTerminalCommandComposerAutocomplete,
   resolveTerminalCommandComposerActions,
   resolveTerminalCommandComposerActionPlacement,
   resolveActiveBackendCapabilities,
@@ -78,6 +81,11 @@ import {
   type TerminalCommandComposerActionPlacement,
   type TerminalCommandComposerActionPresentation,
   type TerminalCommandComposerActionTone,
+  type TerminalCommandComposerAutocompleteAcceptDetail,
+  type TerminalCommandComposerAutocompleteDismissDetail,
+  type TerminalCommandComposerAutocompleteInputState,
+  type TerminalCommandComposerAutocompleteOptions,
+  type TerminalCommandComposerAutocompletePresentation,
   type TerminalCommandDockCapabilityStatus,
   type TerminalCommandDockControlState,
   type TerminalCommandDockSessionActionId,
@@ -187,6 +195,11 @@ type PublicControlTypes =
   | TerminalCommandComposerActionPlacement
   | TerminalCommandComposerActionPresentation
   | TerminalCommandComposerActionTone
+  | TerminalCommandComposerAutocompleteAcceptDetail
+  | TerminalCommandComposerAutocompleteDismissDetail
+  | TerminalCommandComposerAutocompleteInputState
+  | TerminalCommandComposerAutocompleteOptions
+  | TerminalCommandComposerAutocompletePresentation
   | TerminalCommandDockCapabilityStatus
   | TerminalCommandDockControlState
   | TerminalCommandDockSessionActionId
@@ -293,6 +306,7 @@ describe("workspace elements public api", () => {
     const resolvers = [
       TerminalCommandComposerElement,
       TerminalTabStripElement,
+      resolveTerminalCommandComposerAutocomplete,
       resolveTerminalCommandComposerActions,
       resolveTerminalCommandComposerActionPlacement,
       findRestorableSavedSession,
@@ -335,25 +349,45 @@ describe("workspace elements public api", () => {
       createTerminalCommandHistoryNavigationState,
     ];
 
-    expect(resolvers.every((resolver) => typeof resolver === "function")).toBe(true);
+    expect(resolvers.every((resolver) => typeof resolver === "function")).toBe(
+      true,
+    );
   });
 
   it("exports stable control constants", () => {
     expect(TERMINAL_COMMAND_QUICK_COMMAND_LIMIT).toBeGreaterThan(0);
-    expect(TERMINAL_COMMAND_COMPOSER_ACTIONS[0]?.id).toBe(TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit);
-    expect(TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe("tp-terminal-command-submit");
+    expect(TERMINAL_COMMAND_COMPOSER_ACTIONS[0]?.id).toBe(
+      TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit,
+    );
+    expect(TERMINAL_COMMAND_COMPOSER_AUTOCOMPLETE_DEFAULT_MIN_LENGTH).toBe(2);
+    expect(
+      TERMINAL_COMMAND_COMPOSER_AUTOCOMPLETE_DEFAULT_MAX_LENGTH,
+    ).toBeGreaterThan(100);
+    expect(TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe(
+      "tp-terminal-command-submit",
+    );
     expect(TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe("bar");
     expect(TERMINAL_COMMAND_DOCK_DEFAULT_RECENT_COMMAND_LIMIT).toBe(5);
     expect(TERMINAL_COMMAND_DOCK_TERMINAL_RECENT_COMMAND_LIMIT).toBe(2);
-    expect(TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe("save-layout");
-    expect(TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.historyCount).toBe("history-count");
-    expect(TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID).toBe("tp-command-input-status");
+    expect(TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout).toBe(
+      "save-layout",
+    );
+    expect(TERMINAL_COMMAND_DOCK_STATUS_BADGE_IDS.historyCount).toBe(
+      "history-count",
+    );
+    expect(TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID).toBe(
+      "tp-command-input-status",
+    );
     expect(TERMINAL_COMMAND_QUICK_COMMAND_TONES.primary).toBe("primary");
     expect(TERMINAL_SCREEN_ACTION_IDS.copyVisible).toBe("copy-visible");
     expect(TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
     expect(TERMINAL_SCREEN_SEARCH_ACTION_IDS.nextMatch).toBe("next-match");
-    expect(TERMINAL_SCREEN_EVENTS.inputSubmitted).toBe("tp-terminal-screen-input-submitted");
-    expect(TERMINAL_SCREEN_EVENTS.pasteSubmitted).toBe("tp-terminal-screen-paste-submitted");
+    expect(TERMINAL_SCREEN_EVENTS.inputSubmitted).toBe(
+      "tp-terminal-screen-input-submitted",
+    );
+    expect(TERMINAL_SCREEN_EVENTS.pasteSubmitted).toBe(
+      "tp-terminal-screen-paste-submitted",
+    );
     expect(TERMINAL_SAVED_SESSIONS_DEFAULT_VISIBLE_COUNT).toBeGreaterThan(0);
     expect(TERMINAL_PANE_MIN_ROWS).toBeLessThan(TERMINAL_PANE_MAX_ROWS);
     expect(TERMINAL_PANE_MIN_COLS).toBeLessThan(TERMINAL_PANE_MAX_COLS);
@@ -369,6 +403,8 @@ describe("workspace elements public api", () => {
   });
 });
 
-function assertPublicControlTypesAreImportable(_value: PublicControlTypes): void {}
+function assertPublicControlTypesAreImportable(
+  _value: PublicControlTypes,
+): void {}
 
 assertPublicControlTypesAreImportable(null as never);

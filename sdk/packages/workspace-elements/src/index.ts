@@ -15,7 +15,17 @@ export {
 } from "./elements/terminal-command-composer-actions.js";
 export { TerminalCommandComposerElement } from "./elements/terminal-command-composer-element.js";
 export {
+  TERMINAL_COMMAND_COMPOSER_AUTOCOMPLETE_DEFAULT_MAX_LENGTH,
+  TERMINAL_COMMAND_COMPOSER_AUTOCOMPLETE_DEFAULT_MIN_LENGTH,
+  resolveTerminalCommandComposerAutocomplete,
+  type TerminalCommandComposerAutocompleteInputState,
+  type TerminalCommandComposerAutocompleteOptions,
+  type TerminalCommandComposerAutocompletePresentation,
+} from "./elements/terminal-command-composer-autocomplete.js";
+export {
   TERMINAL_COMMAND_COMPOSER_EVENTS,
+  type TerminalCommandComposerAutocompleteAcceptDetail,
+  type TerminalCommandComposerAutocompleteDismissDetail,
   type TerminalCommandComposerDraftChangeDetail,
   type TerminalCommandComposerEventMap,
   type TerminalCommandComposerEventType,

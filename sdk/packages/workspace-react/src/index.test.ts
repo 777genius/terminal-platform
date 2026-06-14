@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   TerminalCommandComposer,
+  TerminalCommandDock,
   TerminalScreen,
   TerminalWorkspace,
   TerminalCommandComposerActionId,
@@ -10,6 +11,11 @@ import type {
   TerminalCommandComposerActionOptions,
   TerminalCommandComposerActionPresentation,
   TerminalCommandComposerActionTone,
+  TerminalCommandComposerAutocompleteAcceptDetail,
+  TerminalCommandComposerAutocompleteDismissDetail,
+  TerminalCommandComposerAutocompleteInputState,
+  TerminalCommandComposerAutocompleteOptions,
+  TerminalCommandComposerAutocompletePresentation,
   TerminalCommandComposerDraftChangeDetail,
   TerminalCommandComposerHistoryNavigateDetail,
   TerminalCommandComposerReactEventHandlers,
@@ -64,19 +70,18 @@ import type {
 
 type Assert<T extends true> = T;
 
-type Equal<Actual, Expected> = (<T>() => T extends Actual ? 1 : 2) extends <
-  T
->() => T extends Expected ? 1 : 2
-  ? true
-  : false;
+type Equal<Actual, Expected> =
+  (<T>() => T extends Actual ? 1 : 2) extends <T>() => T extends Expected
+    ? 1
+    : 2
+    ? true
+    : false;
 
-type EventParameter<Handler> = NonNullable<Handler> extends (
-  event: infer Event
-) => void
-  ? Event
-  : never;
+type EventParameter<Handler> =
+  NonNullable<Handler> extends (event: infer Event) => void ? Event : never;
 
 type ComposerProps = React.ComponentProps<typeof TerminalCommandComposer>;
+type DockProps = React.ComponentProps<typeof TerminalCommandDock>;
 type ScreenProps = React.ComponentProps<typeof TerminalScreen>;
 
 type _ComposerRefTargetsElement = Assert<
@@ -94,8 +99,26 @@ type _ComposerMinRowsProp = Assert<
 type _ComposerMaxRowsProp = Assert<
   Equal<ComposerProps["maxRows"], number | undefined>
 >;
+type _ComposerAutocompleteSuggestionProp = Assert<
+  Equal<ComposerProps["autocompleteSuggestion"], string | null | undefined>
+>;
 type _ComposerInputDescriptionIdProp = Assert<
   Equal<ComposerProps["inputDescriptionId"], string | undefined>
+>;
+type _DockAutocompleteSuggestionProp = Assert<
+  Equal<DockProps["autocompleteSuggestion"], string | null | undefined>
+>;
+type _ComposerAutocompleteAcceptEvent = Assert<
+  Equal<
+    EventParameter<ComposerProps["onCommandAutocompleteAccept"]>,
+    CustomEvent<TerminalCommandComposerAutocompleteAcceptDetail>
+  >
+>;
+type _ComposerAutocompleteDismissEvent = Assert<
+  Equal<
+    EventParameter<ComposerProps["onCommandAutocompleteDismiss"]>,
+    CustomEvent<TerminalCommandComposerAutocompleteDismissDetail>
+  >
 >;
 type _ComposerDraftChangeEvent = Assert<
   Equal<
@@ -168,6 +191,16 @@ type _ComposerReactHandlerType = Assert<
     (event: CustomEvent<TerminalCommandComposerDraftChangeDetail>) => void
   >
 >;
+type _ComposerReactAutocompleteHandlerType = Assert<
+  Equal<
+    NonNullable<
+      TerminalCommandComposerReactEventHandlers["onCommandAutocompleteAccept"]
+    >,
+    (
+      event: CustomEvent<TerminalCommandComposerAutocompleteAcceptDetail>,
+    ) => void
+  >
+>;
 type _ScreenReactHandlerType = Assert<
   Equal<
     NonNullable<TerminalScreenReactEventHandlers["onScreenInputSubmitted"]>,
@@ -200,6 +233,11 @@ type _ComposerActionContractTypesRemainImportable =
   | TerminalCommandComposerActionOptions
   | TerminalCommandComposerActionPresentation
   | TerminalCommandComposerActionTone
+  | TerminalCommandComposerAutocompleteAcceptDetail
+  | TerminalCommandComposerAutocompleteDismissDetail
+  | TerminalCommandComposerAutocompleteInputState
+  | TerminalCommandComposerAutocompleteOptions
+  | TerminalCommandComposerAutocompletePresentation
   | TerminalCommandDockAccessoryMode
   | TerminalCommandDockAccessoryOptions
   | TerminalCommandDockAccessoryState
@@ -243,45 +281,45 @@ describe("workspace react public api", () => {
     const workspaceReact = await import("./index.js");
 
     expect(workspaceReact.TerminalCommandComposer.displayName).toBe(
-      "TerminalCommandComposer"
+      "TerminalCommandComposer",
     );
     expect(workspaceReact.TerminalScreen.displayName).toBe("TerminalScreen");
     expect(
-      workspaceReact.terminalCommandComposerReactEvents.onCommandSubmit
+      workspaceReact.terminalCommandComposerReactEvents.onCommandSubmit,
     ).toBe("tp-terminal-command-submit");
     expect(
-      workspaceReact.terminalScreenReactEvents.onScreenInputSubmitted
+      workspaceReact.terminalScreenReactEvents.onScreenInputSubmitted,
     ).toBe("tp-terminal-screen-input-submitted");
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit).toBe(
-      "submit"
+      "submit",
     );
     expect(
       workspaceReact.TERMINAL_COMMAND_COMPOSER_ACTIONS.map(
-        (action) => action.id
-      ).join("|")
+        (action) => action.id,
+      ).join("|"),
     ).toBe("submit|paste|interrupt|enter");
     expect(
       workspaceReact.TERMINAL_COMMAND_COMPOSER_ACTIONS.map(
-        (action) => action.tone
-      ).join("|")
+        (action) => action.tone,
+      ).join("|"),
     ).toBe("primary|secondary|secondary|secondary");
     expect(
       workspaceReact
         .resolveTerminalCommandComposerActions({ placement: "terminal" })
         .map((action) => action.labelMode)
-        .join("|")
+        .join("|"),
     ).toBe("label|label|label|label");
     expect(
-      workspaceReact.resolveTerminalCommandComposerActions()[0]?.keyHint
+      workspaceReact.resolveTerminalCommandComposerActions()[0]?.keyHint,
     ).toBe("Enter");
     expect(workspaceReact.TERMINAL_COMMAND_COMPOSER_EVENTS.submit).toBe(
-      "tp-terminal-command-submit"
+      "tp-terminal-command-submit",
     );
     expect(workspaceReact.TERMINAL_SCREEN_EVENTS.pasteFailed).toBe(
-      "tp-terminal-screen-paste-failed"
+      "tp-terminal-screen-paste-failed",
     );
     expect(workspaceReact.TERMINAL_SCREEN_ACTION_IDS.followOutput).toBe(
-      "follow-output"
+      "follow-output",
     );
     expect(
       workspaceReact
@@ -290,10 +328,10 @@ describe("workspace react public api", () => {
           followOutput: true,
         })
         .map((action) => action.labelMode)
-        .join("|")
+        .join("|"),
     ).toBe("glyph|glyph|glyph");
     expect(workspaceReact.TERMINAL_SCREEN_SEARCH_ACTION_IDS.nextMatch).toBe(
-      "next-match"
+      "next-match",
     );
     expect(
       workspaceReact
@@ -303,21 +341,21 @@ describe("workspace react public api", () => {
           query: "ok",
         })
         .map((action) => action.labelMode)
-        .join("|")
+        .join("|"),
     ).toBe("glyph|glyph|glyph");
     expect(workspaceReact.TERMINAL_COMMAND_DOCK_ACCESSORY_MODES.bar).toBe(
-      "bar"
+      "bar",
     );
     expect(workspaceReact.TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID).toBe(
-      "tp-command-input-status"
+      "tp-command-input-status",
     );
     expect(
       workspaceReact.resolveTerminalCommandDockAccessoryMode({
         placement: "terminal",
-      })
+      }),
     ).toBe("bar");
     expect(
-      workspaceReact.TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout
+      workspaceReact.TERMINAL_COMMAND_DOCK_SESSION_ACTION_IDS.saveLayout,
     ).toBe("save-layout");
     expect(
       workspaceReact
@@ -349,17 +387,17 @@ describe("workspace react public api", () => {
             recentCommands: ["pwd"],
             saveCapabilityStatus: "known",
           },
-          { placement: "terminal" }
+          { placement: "terminal" },
         )
         .map((action) => action.labelMode)
-        .join("|")
+        .join("|"),
     ).toBe("glyph|glyph|glyph");
     expect(
       workspaceReact.resolveTerminalCommandDockAccessoryState({
         placement: "terminal",
         quickCommandCount: 5,
         recentCommandCount: 0,
-      })
+      }),
     ).toMatchObject({
       mode: "bar",
       hasQuickCommands: true,
@@ -367,34 +405,34 @@ describe("workspace react public api", () => {
     });
     expect(workspaceReact.TERMINAL_SCREEN_CHROME_MODES.compact).toBe("compact");
     expect(typeof workspaceReact.resolveTerminalScreenChromeState).toBe(
-      "function"
+      "function",
     );
     expect(
-      workspaceReact.resolveTerminalCommandComposerRows("echo one\necho two")
+      workspaceReact.resolveTerminalCommandComposerRows("echo one\necho two"),
     ).toBe(2);
     expect(workspaceReact.TERMINAL_WORKSPACE_CHROME_TONES.terminal).toBe(
-      "terminal"
+      "terminal",
     );
     expect(workspaceReact.TERMINAL_WORKSPACE_INSPECTOR_MODES.collapsed).toBe(
-      "collapsed"
+      "collapsed",
     );
     expect(workspaceReact.TERMINAL_WORKSPACE_LAYOUT_PRESETS.terminal).toBe(
-      "terminal"
+      "terminal",
     );
     expect(workspaceReact.TERMINAL_WORKSPACE_NAVIGATION_MODES.collapsed).toBe(
-      "collapsed"
+      "collapsed",
     );
     expect(workspaceReact.TERMINAL_WORKSPACE_PARTS.commandRegion).toBe(
-      "command-region"
+      "command-region",
     );
     expect(
-      workspaceReact.TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal
+      workspaceReact.TERMINAL_WORKSPACE_SECONDARY_CHROME_MODES.terminal,
     ).toBe("terminal");
     expect(workspaceReact.TERMINAL_WORKSPACE_SLOTS.commandDock).toBe(
-      "command-dock"
+      "command-dock",
     );
     expect(
-      workspaceReact.resolveTerminalWorkspaceChromeState("terminal")
+      workspaceReact.resolveTerminalWorkspaceChromeState("terminal"),
     ).toMatchObject({
       tone: "terminal",
       secondaryChrome: "terminal",
@@ -402,21 +440,21 @@ describe("workspace react public api", () => {
     expect(
       workspaceReact.resolveTerminalWorkspaceLayoutState({
         layoutPreset: "terminal",
-      }).navigation.mode
+      }).navigation.mode,
     ).toBe("collapsed");
     expect(
       workspaceReact.resolveTerminalWorkspaceInspectorState("hidden")
-        .renderInspector
+        .renderInspector,
     ).toBe(false);
     expect(
       workspaceReact.resolveTerminalWorkspaceNavigationState("hidden")
-        .renderNavigation
+        .renderNavigation,
     ).toBe(false);
   });
 });
 
 function assertComposerActionContractTypesAreImportable(
-  _value: _ComposerActionContractTypesRemainImportable
+  _value: _ComposerActionContractTypesRemainImportable,
 ): void {}
 
 assertComposerActionContractTypesAreImportable(null as never);

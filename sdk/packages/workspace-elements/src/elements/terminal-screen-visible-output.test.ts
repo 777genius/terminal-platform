@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
 import {
+  createTerminalCommandContextCopyText,
   createTerminalHistoryEntries,
   createVisibleOutputLines,
+  doesCommandPresentationMatchHistoryEntry,
   resolveScrollTopAfterHistoryPrepend,
   shouldAutoLoadMoreHistoryFromViewport,
 } from "./terminal-screen-element.js";
@@ -246,6 +248,27 @@ describe("terminal screen visible output", () => {
         output: [{ line: { text: "222", source: "live" }, lineIndex: 3 }],
       },
     ]);
+  });
+
+  it("creates command block context menu copy payloads", () => {
+    const [entry] = createTerminalHistoryEntries([
+      {
+        text: "venv312 ~/dev/quanta % printf 'hello\\nworld\\n'",
+        source: "live",
+      },
+      { text: "hello", source: "live" },
+      { text: "world", source: "live" },
+    ]);
+
+    if (!entry || entry.kind !== "command") {
+      throw new Error("Expected a command history entry");
+    }
+
+    expect(createTerminalCommandContextCopyText(entry)).toEqual({
+      blockText: "printf 'hello\\nworld\\n'\nhello\nworld",
+      commandText: "printf 'hello\\nworld\\n'",
+      outputText: "hello\nworld",
+    });
   });
 
   it("groups wrapped input command lines with their output for terminal rendering", () => {
@@ -515,6 +538,55 @@ describe("terminal screen visible output", () => {
     );
 
     expect(lines).toEqual([{ text: "TP_SHEET", source: "live" }]);
+  });
+
+  it("drops no-output command fragments when a later full command block has output", () => {
+    expect(
+      createTerminalHistoryEntries([
+        {
+          text: "(venv312) shell % ls __tp_missing_",
+          source: "live",
+        },
+        {
+          text: "~/dev/project % ls __tp_missing_1781452725003",
+          source: "live",
+        },
+        {
+          text: "ls: __tp_missing_1781452725003: No such file or directory",
+          source: "live",
+        },
+      ])
+    ).toEqual([
+      {
+        kind: "command",
+        prompt: "~/dev/project",
+        commandLine: {
+          text: "~/dev/project % ls __tp_missing_1781452725003",
+          source: "live",
+        },
+        commandLineIndex: 1,
+        command: "ls __tp_missing_1781452725003",
+        output: [
+          {
+            line: {
+              text: "ls: __tp_missing_1781452725003: No such file or directory",
+              source: "live",
+            },
+            lineIndex: 2,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("matches command presentation metadata against wrapped command prefixes", () => {
+    expect(
+      doesCommandPresentationMatchHistoryEntry(
+        "echo TP_LONG_VERIFY_1781453698047_ABCDEFGHIJKLMNOPQRSTU",
+        "echo TP_LONG_VERIFY_1781453698047_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      )
+    ).toBe(true);
+    expect(doesCommandPresentationMatchHistoryEntry("git", "git status")).toBe(false);
   });
 
   it("auto-loads older history only near the top while idle", () => {
