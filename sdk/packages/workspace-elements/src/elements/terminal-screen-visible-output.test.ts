@@ -472,6 +472,34 @@ describe("terminal screen visible output", () => {
     ]);
   });
 
+  it("drops command-only live duplicates when restored history already has command output", () => {
+    const entries = createTerminalHistoryEntries([
+      { text: "~/dev/project % pp", source: "history" },
+      { text: "zsh: command not found: pp", source: "history" },
+      { text: "~/dev/project (1.28s) % pp", source: "live" },
+      { text: "", source: "live" },
+    ]);
+
+    expect(entries).toEqual([
+      {
+        kind: "command",
+        prompt: "~/dev/project",
+        commandLine: {
+          text: "~/dev/project % pp",
+          source: "history",
+        },
+        commandLineIndex: 0,
+        command: "pp",
+        output: [
+          {
+            line: { text: "zsh: command not found: pp", source: "history" },
+            lineIndex: 1,
+          },
+        ],
+      },
+    ]);
+  });
+
   it("hides wrapped shell prompt fragments from command echo lines when requested", () => {
     const lines = createVisibleOutputLines(
       null,

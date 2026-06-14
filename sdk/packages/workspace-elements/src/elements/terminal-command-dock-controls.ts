@@ -45,6 +45,7 @@ export function resolveTerminalCommandDockControlState(
   const canWriteInput = Boolean(canUsePane && inputCapability.canWrite);
   const recentCommandLimit = normalizeRecentCommandLimit(options.recentCommandLimit);
   const recentCommandEntries = resolveTerminalCommandRecentCommands(snapshot.commandHistory.entries, recentCommandLimit);
+  const hasTerminalHistory = hasFocusedPaneTerminalHistory(snapshot, activePaneId);
 
   return {
     activeSessionId,
@@ -54,7 +55,7 @@ export function resolveTerminalCommandDockControlState(
     recentCommands: recentCommandEntries.map((entry) => entry.value),
     recentCommandEntries,
     canSend: Boolean(canWriteInput && draft.trim().length > 0),
-    canInterrupt: Boolean(canWriteInput && snapshot.commandHistory.entries.length > 0),
+    canInterrupt: Boolean(canWriteInput && hasTerminalHistory),
     canUsePane,
     canWriteInput,
     canPasteClipboard: Boolean(canUsePane && pasteCapability.canPaste),
@@ -75,6 +76,33 @@ function normalizeRecentCommandLimit(value: number | null | undefined): number {
   }
 
   return Math.max(0, Math.trunc(value));
+}
+
+function hasFocusedPaneTerminalHistory(snapshot: WorkspaceSnapshot, paneId: string | null): boolean {
+  if (!paneId) {
+    return false;
+  }
+
+  const focusedScreen = snapshot.attachedSession?.focused_screen ?? null;
+  if (
+    focusedScreen?.pane_id === paneId
+    && focusedScreen.surface.lines.some((line) => isTerminalHistoryLine(line.text))
+  ) {
+    return true;
+  }
+
+  return Boolean(
+    snapshot.historicalPanes?.[paneId]?.lines.some((line) => isTerminalHistoryLine(line)),
+  );
+}
+
+function isTerminalHistoryLine(line: string): boolean {
+  const text = line.trim();
+  return text.length > 0 && !isPromptOnlyTerminalLine(text);
+}
+
+function isPromptOnlyTerminalLine(text: string): boolean {
+  return /(?:^|\s)[#$%>]\s*$/.test(text);
 }
 
 function resolveInputCapability(

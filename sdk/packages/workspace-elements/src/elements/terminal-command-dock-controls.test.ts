@@ -94,10 +94,36 @@ describe("terminal command dock controls", () => {
     expect(controls.recentCommandEntries).toEqual([]);
   });
 
-  it("enables interrupt fallback only when writable command history exists", () => {
-    const idleControls = resolveTerminalCommandDockControlState(createWorkspaceSnapshot(), { pending: false });
-    const historyControls = resolveTerminalCommandDockControlState(
+  it("enables interrupt fallback only when focused pane terminal history exists", () => {
+    const idleControls = resolveTerminalCommandDockControlState(
       createWorkspaceSnapshot({
+        attachedSession: {
+          ...createWorkspaceSnapshot().attachedSession,
+          focused_screen: {
+            ...createWorkspaceSnapshot().attachedSession!.focused_screen,
+            surface: {
+              title: "shell",
+              cursor: null,
+              lines: [{ text: "" }],
+            },
+          },
+        },
+      }),
+      { pending: false },
+    );
+    const commandHistoryOnlyControls = resolveTerminalCommandDockControlState(
+      createWorkspaceSnapshot({
+        attachedSession: {
+          ...createWorkspaceSnapshot().attachedSession,
+          focused_screen: {
+            ...createWorkspaceSnapshot().attachedSession!.focused_screen,
+            surface: {
+              title: "shell",
+              cursor: null,
+              lines: [{ text: "" }],
+            },
+          },
+        },
         commandHistory: {
           entries: ["npm test"],
           limit: 50,
@@ -105,9 +131,64 @@ describe("terminal command dock controls", () => {
       }),
       { pending: false },
     );
+    const promptOnlyControls = resolveTerminalCommandDockControlState(
+      createWorkspaceSnapshot({
+        attachedSession: {
+          ...createWorkspaceSnapshot().attachedSession,
+          focused_screen: {
+            ...createWorkspaceSnapshot().attachedSession!.focused_screen,
+            surface: {
+              title: "shell",
+              cursor: null,
+              lines: [{ text: "(venv312) ~/dev/quanta %" }],
+            },
+          },
+        },
+      }),
+      { pending: false },
+    );
+    const visibleHistoryControls = resolveTerminalCommandDockControlState(createWorkspaceSnapshot(), { pending: false });
+    const restoredHistoryControls = resolveTerminalCommandDockControlState(
+      createWorkspaceSnapshot({
+        attachedSession: {
+          ...createWorkspaceSnapshot().attachedSession,
+          focused_screen: {
+            ...createWorkspaceSnapshot().attachedSession!.focused_screen,
+            surface: {
+              title: "shell",
+              cursor: null,
+              lines: [{ text: "" }],
+            },
+          },
+        },
+        historicalPanes: {
+          "pane-1": {
+            sessionId: "session-1",
+            paneId: "pane-1",
+            sourceSessionId: "session-1",
+            sourcePaneId: "pane-1",
+            lines: ["restored command output"],
+            capturedAtMs: 1n,
+            source: "v2_pane_history",
+            replayStrategy: "full_history",
+            restoreGuaranteeLevel: "basic_history",
+            hasGaps: false,
+            hasMoreSegments: false,
+            fromEventSeq: null,
+            nextEventSeq: null,
+            segmentCount: 1,
+            loadedPayloadBytes: 24n,
+          },
+        },
+      }),
+      { pending: false },
+    );
 
     expect(idleControls.canInterrupt).toBe(false);
-    expect(historyControls.canInterrupt).toBe(true);
+    expect(commandHistoryOnlyControls.canInterrupt).toBe(false);
+    expect(promptOnlyControls.canInterrupt).toBe(false);
+    expect(visibleHistoryControls.canInterrupt).toBe(true);
+    expect(restoredHistoryControls.canInterrupt).toBe(true);
   });
 
   it("disables command input when loaded backend capabilities reject pane input writes", () => {

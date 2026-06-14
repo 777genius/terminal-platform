@@ -1123,10 +1123,18 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                     )}
               </div>
             `
-          : html`<div class="empty-state" part="empty">
-              No active screen yet. Start or attach a session to see output
-              here.
-            </div>`}
+          : isTerminalPlacement
+            ? html`<div
+                class="viewport"
+                part="screen-lines"
+                data-testid="tp-screen-viewport"
+                role="region"
+                aria-label="Terminal output"
+              ></div>`
+            : html`<div class="empty-state" part="empty">
+                No active screen yet. Start or attach a session to see output
+                here.
+              </div>`}
       </div>
     `;
   }
@@ -2301,7 +2309,27 @@ function dedupeHistoryCommandEntriesAgainstLive(
     return [...entries];
   }
 
+  const historyCommandsWithOutput = new Set(
+    entries
+      .filter(
+        (entry): entry is Extract<TerminalHistoryEntry, { kind: "command" }> =>
+          entry.kind === "command" &&
+          entry.commandLine.source === "history" &&
+          hasMeaningfulTerminalCommandOutput(entry)
+      )
+      .map((entry) => entry.command)
+  );
+
   return entries.filter((entry) => {
+    if (
+      entry.kind === "command" &&
+      entry.commandLine.source === "live" &&
+      !hasMeaningfulTerminalCommandOutput(entry) &&
+      historyCommandsWithOutput.has(entry.command)
+    ) {
+      return false;
+    }
+
     if (entry.kind !== "command" || entry.commandLine.source !== "history") {
       return true;
     }
@@ -2309,6 +2337,12 @@ function dedupeHistoryCommandEntriesAgainstLive(
       createTerminalCommandEntrySignature(entry)
     );
   });
+}
+
+function hasMeaningfulTerminalCommandOutput(
+  entry: Extract<TerminalHistoryEntry, { kind: "command" }>
+): boolean {
+  return entry.output.some(({ line }) => line.text.trim().length > 0);
 }
 
 function createTerminalCommandEntrySignature(
