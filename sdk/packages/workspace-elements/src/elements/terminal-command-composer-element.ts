@@ -6,6 +6,7 @@ import {
   resolveTerminalCommandComposerActionPlacement,
   resolveTerminalCommandComposerActions,
   type TerminalCommandComposerActionId,
+  type TerminalCommandComposerActionLabelOverride,
   type TerminalCommandComposerActionPlacement,
   type TerminalCommandComposerActionPresentation,
   type TerminalCommandComposerShortcut,
@@ -54,6 +55,8 @@ export class TerminalCommandComposerElement extends LitElement {
     maxRows: { attribute: "max-rows", type: Number },
     minRows: { attribute: "min-rows", type: Number },
     inputDescriptionId: { attribute: "input-description-id", type: String },
+    actionLabels: { attribute: false },
+    actionsLabel: { attribute: "actions-label", type: String },
     placeholder: { type: String },
     pasteTitle: { attribute: "paste-title", type: String },
     placement: { type: String },
@@ -68,6 +71,16 @@ export class TerminalCommandComposerElement extends LitElement {
   declare maxRows: number;
   declare minRows: number;
   declare inputDescriptionId: string;
+  declare actionLabels:
+    | Partial<
+        Record<
+          TerminalCommandComposerActionId,
+          TerminalCommandComposerActionLabelOverride
+        >
+      >
+    | null
+    | undefined;
+  declare actionsLabel: string;
   declare placeholder: string;
   declare pasteTitle: string;
   declare placement: TerminalCommandComposerActionPlacement;
@@ -89,6 +102,8 @@ export class TerminalCommandComposerElement extends LitElement {
     this.maxRows = TERMINAL_COMMAND_COMPOSER_DEFAULT_MAX_ROWS;
     this.minRows = TERMINAL_COMMAND_COMPOSER_DEFAULT_MIN_ROWS;
     this.inputDescriptionId = "";
+    this.actionLabels = null;
+    this.actionsLabel = "Command actions";
     this.placeholder = "";
     this.pasteTitle = TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE;
     this.placement = "panel";
@@ -104,6 +119,7 @@ export class TerminalCommandComposerElement extends LitElement {
       this.placement,
     );
     const actions = resolveTerminalCommandComposerActions({
+      actionLabels: this.actionLabels ?? null,
       pasteTitle: this.pasteTitle,
       placement,
       terminalActions: {
@@ -119,7 +135,7 @@ export class TerminalCommandComposerElement extends LitElement {
               part="composer-actions"
               data-action-placement=${placement}
               data-testid="tp-command-composer-actions"
-              aria-label="Command actions"
+              aria-label=${this.actionsLabel || "Command actions"}
             >
               ${actions.map((action) => this.renderAction(action))}
             </div>
@@ -130,20 +146,9 @@ export class TerminalCommandComposerElement extends LitElement {
       selectionStart: this.#inputSelectionStart,
       selectionEnd: this.#inputSelectionEnd,
     });
+    // prettier-ignore
     const autocompleteTemplate = autocomplete
-      ? html`
-          <div
-            class="autocomplete-ghost"
-            part="autocomplete-ghost"
-            data-testid="tp-command-autocomplete-ghost"
-            aria-hidden="true"
-          >
-            <span class="autocomplete-ghost-prefix">${autocomplete.draft}</span
-            ><span class="autocomplete-ghost-suffix"
-              >${autocomplete.suffix}</span
-            >
-          </div>
-        `
+      ? html`<div class="autocomplete-ghost" part="autocomplete-ghost" data-testid="tp-command-autocomplete-ghost" data-prefix-length=${autocomplete.draft.length} style=${`--tp-command-autocomplete-prefix-width: ${autocomplete.draft.length}ch;`} aria-hidden="true"><span class="autocomplete-ghost-prefix">${autocomplete.draft}</span><span class="autocomplete-ghost-suffix">${autocomplete.suffix}</span></div>`
       : nothing;
 
     return html`

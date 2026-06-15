@@ -87,6 +87,7 @@ export interface TerminalCommandPresentationMetadata {
 export interface TerminalHistoryRenderOptions {
   activeCommandContextLineIndex?: number | null;
   commandMetadata?: readonly TerminalCommandPresentationMetadata[] | null;
+  nowMs?: number;
   onCommandContextMenu?: (
     event: MouseEvent,
     entry: Extract<TerminalHistoryEntry, { kind: "command" }>,
@@ -1211,6 +1212,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                           this.commandContextMenu?.commandLineIndex ?? null,
                         commandMetadata:
                           this.commandPresentationMetadata ?? null,
+                        nowMs: Date.now(),
                         onCommandContextMenu: (event, entry) =>
                           this.openCommandContextMenu(event, entry),
                       },
@@ -2077,12 +2079,14 @@ function renderTerminalHistoryEntries(
   searchResult: TerminalOutputSearchResult,
   options: TerminalHistoryRenderOptions = {},
 ): TemplateResult[] {
-  const commandMetadataByEntryIndex = matchCommandPresentationMetadata(
+  const prepared = prepareTerminalHistoryEntriesForRender(
     entries,
     options.commandMetadata ?? [],
+    options.nowMs,
   );
+  const commandMetadataByEntryIndex = prepared.metadataByEntryIndex;
 
-  return entries.map((entry) => {
+  return prepared.entries.map((entry) => {
     if (entry.kind === "line") {
       return renderLine(
         entry.lineIndex + 1,
@@ -2133,6 +2137,143 @@ function renderTerminalHistoryEntries(
       </section>
     `;
   });
+}
+
+export function prepareTerminalHistoryEntriesForRender(
+  entries: readonly TerminalHistoryEntry[],
+  metadata: readonly TerminalCommandPresentationMetadata[] = [],
+  nowMs = Date.now(),
+): {
+  entries: readonly TerminalHistoryEntry[];
+  metadataByEntryIndex: ReadonlyMap<number, TerminalCommandPresentationMetadata>;
+} {
+  const matched = matchCommandPresentationMetadata(entries, metadata);
+  const matchedItems = new Set(matched.values());
+  const pendingItems = metadata
+    .filter((item) => isPendingTerminalCommandMetadata(item, nowMs))
+    .filter((item) => !matchedItems.has(item))
+    .slice(-4);
+
+  if (pendingItems.length === 0) {
+    return {
+      entries,
+      metadataByEntryIndex: matched,
+    };
+  }
+
+  const filteredEntries = removeTrailingRawPendingCommandLines(
+    entries,
+    pendingItems,
+  );
+  const syntheticEntries = createPendingTerminalCommandEntries(
+    filteredEntries,
+    pendingItems,
+  );
+  const nextMetadata = new Map<number, TerminalCommandPresentationMetadata>(
+    matchCommandPresentationMetadata(filteredEntries, metadata),
+  );
+
+  syntheticEntries.forEach((entry, index) => {
+    nextMetadata.set(entry.commandLineIndex, pendingItems[index]!);
+  });
+
+  return {
+    entries: [...filteredEntries, ...syntheticEntries],
+    metadataByEntryIndex: nextMetadata,
+  };
+}
+
+function isPendingTerminalCommandMetadata(
+  metadata: TerminalCommandPresentationMetadata,
+  nowMs: number,
+): boolean {
+  const command = normalizeCommandPresentationMatch(metadata.command);
+  if (!command) {
+    return false;
+  }
+
+  if ((metadata.status ?? "unknown") !== "running") {
+    return false;
+  }
+
+  if (
+    typeof metadata.startedAtMs !== "number" ||
+    !Number.isFinite(metadata.startedAtMs)
+  ) {
+    return true;
+  }
+
+  return nowMs - metadata.startedAtMs <= 120_000;
+}
+
+function removeTrailingRawPendingCommandLines(
+  entries: readonly TerminalHistoryEntry[],
+  pendingItems: readonly TerminalCommandPresentationMetadata[],
+): TerminalHistoryEntry[] {
+  const pendingCommands = new Set(
+    pendingItems
+      .map((item) => normalizeCommandPresentationMatch(item.command))
+      .filter(Boolean),
+  );
+  const next = [...entries];
+
+  while (next.length > 0) {
+    const lastEntry = next[next.length - 1];
+    if (
+      lastEntry?.kind !== "line" ||
+      lastEntry.line.source !== "live" ||
+      !pendingCommands.has(normalizeCommandPresentationMatch(lastEntry.line.text))
+    ) {
+      break;
+    }
+
+    next.pop();
+  }
+
+  return next;
+}
+
+function createPendingTerminalCommandEntries(
+  entries: readonly TerminalHistoryEntry[],
+  pendingItems: readonly TerminalCommandPresentationMetadata[],
+): Extract<TerminalHistoryEntry, { kind: "command" }>[] {
+  const nextLineIndex = resolveNextTerminalHistoryLineIndex(entries);
+
+  return pendingItems.map((metadata, index) => {
+    const command = metadata.command.trim();
+    const commandLineIndex = nextLineIndex + index;
+
+    return {
+      kind: "command",
+      prompt: "shell",
+      commandLine: {
+        text: `shell % ${command}`,
+        source: "live",
+      },
+      commandLineIndex,
+      command,
+      output: [],
+    };
+  });
+}
+
+function resolveNextTerminalHistoryLineIndex(
+  entries: readonly TerminalHistoryEntry[],
+): number {
+  let maxLineIndex = -1;
+  entries.forEach((entry) => {
+    if (entry.kind === "line") {
+      maxLineIndex = Math.max(maxLineIndex, entry.lineIndex);
+      return;
+    }
+
+    maxLineIndex = Math.max(
+      maxLineIndex,
+      entry.commandLineIndex,
+      ...entry.output.map((output) => output.lineIndex),
+    );
+  });
+  return maxLineIndex + 1;
 }
 
 function matchCommandPresentationMetadata(
@@ -2191,11 +2332,9 @@ function renderCommandPresentationMetadata(
   }
 
   const status = metadata.status ?? "unknown";
+  const durationMs = resolveCommandPresentationDurationMs(metadata);
   const durationLabel =
-    typeof metadata.durationMs === "number" &&
-    Number.isFinite(metadata.durationMs)
-      ? formatCommandDuration(metadata.durationMs)
-      : null;
+    typeof durationMs === "number" ? formatCommandDuration(durationMs) : null;
   const exitCodeLabel =
     typeof metadata.exitCode === "number" && Number.isFinite(metadata.exitCode)
       ? `exit ${Math.trunc(metadata.exitCode)}`
@@ -2222,6 +2361,27 @@ function renderCommandPresentationMetadata(
         </span>
       `
     : nothing;
+}
+
+function resolveCommandPresentationDurationMs(
+  metadata: TerminalCommandPresentationMetadata,
+): number | null {
+  if (
+    typeof metadata.durationMs === "number" &&
+    Number.isFinite(metadata.durationMs)
+  ) {
+    return metadata.durationMs;
+  }
+
+  if (
+    metadata.status === "running" &&
+    typeof metadata.startedAtMs === "number" &&
+    Number.isFinite(metadata.startedAtMs)
+  ) {
+    return Math.max(0, Date.now() - metadata.startedAtMs);
+  }
+
+  return null;
 }
 
 function formatCommandMetadataLabel(

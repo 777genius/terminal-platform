@@ -7,48 +7,80 @@ describe("terminal command input status", () => {
   it("reports ready when the focused pane accepts command input", () => {
     expect(resolveTerminalCommandInputStatus(createControls())).toMatchObject({
       label: "Ready",
+      placeholder: "Type a command...",
+      tone: "ready",
+    });
+  });
+
+  it("allows hosts to localize the command placeholder", () => {
+    expect(
+      resolveTerminalCommandInputStatus(createControls(), {
+        commandPlaceholder: "Введите команду...",
+      }),
+    ).toMatchObject({
+      placeholder: "Введите команду...",
       tone: "ready",
     });
   });
 
   it("reports pending while backend input capability is loading", () => {
-    expect(resolveTerminalCommandInputStatus(createControls({
-      inputCapabilityStatus: "unknown",
-    }))).toMatchObject({
+    expect(
+      resolveTerminalCommandInputStatus(
+        createControls({
+          inputCapabilityStatus: "unknown",
+        }),
+        {
+          commandPlaceholder: "Command...",
+        },
+      ),
+    ).toMatchObject({
       label: "Input pending",
+      placeholder: "Command...",
       tone: "pending",
     });
   });
 
   it("reports read only when the backend rejects pane input writes", () => {
-    expect(resolveTerminalCommandInputStatus(createControls({
-      canSend: false,
-      canWriteInput: false,
-    }))).toMatchObject({
+    expect(
+      resolveTerminalCommandInputStatus(
+        createControls({
+          canSend: false,
+          canWriteInput: false,
+        }),
+      ),
+    ).toMatchObject({
       label: "Read only",
       tone: "idle",
     });
   });
 
   it("reports busy while a command action is pending", () => {
-    expect(resolveTerminalCommandInputStatus(createControls({
-      canSend: false,
-      canUsePane: false,
-      canWriteInput: false,
-    }))).toMatchObject({
+    expect(
+      resolveTerminalCommandInputStatus(
+        createControls({
+          canSend: false,
+          canUsePane: false,
+          canWriteInput: false,
+        }),
+      ),
+    ).toMatchObject({
       label: "Sending",
       tone: "pending",
     });
   });
 
   it("reports pick a pane without an active target", () => {
-    expect(resolveTerminalCommandInputStatus(createControls({
-      activeSessionId: null,
-      activePaneId: null,
-      canSend: false,
-      canUsePane: false,
-      canWriteInput: false,
-    }))).toMatchObject({
+    expect(
+      resolveTerminalCommandInputStatus(
+        createControls({
+          activeSessionId: null,
+          activePaneId: null,
+          canSend: false,
+          canUsePane: false,
+          canWriteInput: false,
+        }),
+      ),
+    ).toMatchObject({
       label: "Pick a pane",
       tone: "idle",
     });

@@ -32,7 +32,19 @@ export type TerminalCommandComposerActionPresentation = {
   readonly tone: TerminalCommandComposerActionTone;
 };
 
+export type TerminalCommandComposerActionLabelOverride = {
+  readonly ariaLabel?: string | null;
+  readonly label?: string | null;
+  readonly title?: string | null;
+};
+
 export type TerminalCommandComposerActionOptions = {
+  actionLabels?: Partial<
+    Record<
+      TerminalCommandComposerActionId,
+      TerminalCommandComposerActionLabelOverride
+    >
+  > | null;
   pasteTitle?: string | null;
   placement?: string | null;
   terminalActions?: {
@@ -41,14 +53,24 @@ export type TerminalCommandComposerActionOptions = {
   } | null;
 };
 
-export const TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE = "Paste clipboard into the focused pane";
+export const TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE =
+  "Paste clipboard into the focused pane";
 
-type TerminalCommandComposerActionDefinition =
-  Omit<TerminalCommandComposerActionPresentation, "label" | "labelMode" | "placement"> & {
-    readonly label: string;
-    readonly labelModes: Readonly<Record<TerminalCommandComposerActionPlacement, TerminalCommandComposerActionLabelMode>>;
-    readonly labels: Readonly<Record<TerminalCommandComposerActionPlacement, string>>;
-  };
+type TerminalCommandComposerActionDefinition = Omit<
+  TerminalCommandComposerActionPresentation,
+  "label" | "labelMode" | "placement"
+> & {
+  readonly label: string;
+  readonly labelModes: Readonly<
+    Record<
+      TerminalCommandComposerActionPlacement,
+      TerminalCommandComposerActionLabelMode
+    >
+  >;
+  readonly labels: Readonly<
+    Record<TerminalCommandComposerActionPlacement, string>
+  >;
+};
 
 const terminalCommandComposerActions = [
   {
@@ -137,13 +159,26 @@ export const TERMINAL_COMMAND_COMPOSER_ACTIONS: readonly TerminalCommandComposer
 export function resolveTerminalCommandComposerActions(
   options: TerminalCommandComposerActionOptions = {},
 ): readonly TerminalCommandComposerActionPresentation[] {
-  const pasteTitle = normalizeOptionalLabel(options.pasteTitle) ?? TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE;
-  const placement = resolveTerminalCommandComposerActionPlacement(options.placement);
-  const actions = resolveTerminalCommandComposerActionDefinitions(placement, options.terminalActions);
+  const pasteTitle =
+    normalizeOptionalLabel(options.pasteTitle) ??
+    TERMINAL_COMMAND_COMPOSER_DEFAULT_PASTE_TITLE;
+  const placement = resolveTerminalCommandComposerActionPlacement(
+    options.placement,
+  );
+  const actions = resolveTerminalCommandComposerActionDefinitions(
+    placement,
+    options.terminalActions,
+  );
 
   return actions.map((action) => {
-    const label = resolveTerminalCommandComposerActionLabel(action, placement);
-    const labelMode = resolveTerminalCommandComposerActionLabelMode(action, placement);
+    const labelOverride = options.actionLabels?.[action.id] ?? null;
+    const label =
+      normalizeOptionalLabel(labelOverride?.label) ??
+      resolveTerminalCommandComposerActionLabel(action, placement);
+    const labelMode = resolveTerminalCommandComposerActionLabelMode(
+      action,
+      placement,
+    );
     const { labelModes: _labelModes, labels: _labels, ...baseAction } = action;
     const presentation = {
       ...baseAction,
@@ -151,14 +186,25 @@ export function resolveTerminalCommandComposerActions(
       labelMode,
       placement,
     };
+    const title =
+      normalizeOptionalLabel(labelOverride?.title) ?? presentation.title;
+    const ariaLabel =
+      normalizeOptionalLabel(labelOverride?.ariaLabel) ??
+      normalizeOptionalLabel(labelOverride?.title) ??
+      presentation.ariaLabel;
 
     return action.id === TERMINAL_COMMAND_COMPOSER_ACTION_IDS.paste
       ? {
           ...presentation,
+          label,
           ariaLabel: pasteTitle,
           title: pasteTitle,
         }
-      : presentation;
+      : {
+          ...presentation,
+          ariaLabel,
+          title,
+        };
   });
 }
 
@@ -168,7 +214,9 @@ export function resolveTerminalCommandComposerActionPlacement(
   return placement === "terminal" ? "terminal" : "panel";
 }
 
-function normalizeOptionalLabel(value: string | null | undefined): string | null {
+function normalizeOptionalLabel(
+  value: string | null | undefined,
+): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
 }

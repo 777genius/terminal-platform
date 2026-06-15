@@ -8,9 +8,16 @@ export interface TerminalCommandInputStatus {
   readonly hint: string;
 }
 
+export interface TerminalCommandInputStatusLabels {
+  readonly commandPlaceholder?: string | null;
+}
+
 export function resolveTerminalCommandInputStatus(
   controls: TerminalCommandDockControlState,
+  labels: TerminalCommandInputStatusLabels = {},
 ): TerminalCommandInputStatus {
+  const commandPlaceholder =
+    normalizeLabel(labels.commandPlaceholder) ?? "Type a command...";
   if (!controls.activeSessionId || !controls.activePaneId) {
     return {
       label: "Pick a pane",
@@ -46,7 +53,7 @@ export function resolveTerminalCommandInputStatus(
       label: "Input pending",
       tone: "pending",
       title: "Backend input capability is still loading.",
-      placeholder: "Type a command...",
+      placeholder: commandPlaceholder,
       hint: "Input capability is still loading. Commands are accepted optimistically.",
     };
   }
@@ -55,7 +62,12 @@ export function resolveTerminalCommandInputStatus(
     label: "Ready",
     tone: "ready",
     title: "Focused pane accepts command input.",
-    placeholder: "Type a command...",
+    placeholder: commandPlaceholder,
     hint: "Enter sends the command. Shift+Enter inserts a newline.",
   };
+}
+
+function normalizeLabel(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
 }

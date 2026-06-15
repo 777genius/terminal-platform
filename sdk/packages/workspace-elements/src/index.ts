@@ -7,6 +7,7 @@ export {
   resolveTerminalCommandComposerActionPlacement,
   resolveTerminalCommandComposerActions,
   type TerminalCommandComposerActionId,
+  type TerminalCommandComposerActionLabelOverride,
   type TerminalCommandComposerActionLabelMode,
   type TerminalCommandComposerActionOptions,
   type TerminalCommandComposerActionPlacement,
@@ -82,6 +83,7 @@ export {
 export {
   resolveTerminalCommandInputStatus,
   type TerminalCommandInputStatus,
+  type TerminalCommandInputStatusLabels,
 } from "./elements/terminal-command-input-status.js";
 export {
   TERMINAL_COMMAND_QUICK_COMMAND_LIMIT,

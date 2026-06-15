@@ -7,6 +7,7 @@ import {
   createTerminalHistoryEntries,
   createVisibleOutputLines,
   doesCommandPresentationMatchHistoryEntry,
+  prepareTerminalHistoryEntriesForRender,
   resolveScrollTopAfterHistoryPrepend,
   shouldAutoLoadMoreHistoryFromViewport,
 } from "./terminal-screen-element.js";
@@ -269,6 +270,77 @@ describe("terminal screen visible output", () => {
       commandText: "printf 'hello\\nworld\\n'",
       outputText: "hello\nworld",
     });
+  });
+
+  it("renders a pending command block instead of a trailing raw command echo", () => {
+    const entries = createTerminalHistoryEntries([
+      {
+        text: "tff",
+        source: "live",
+      },
+    ]);
+    const prepared = prepareTerminalHistoryEntriesForRender(
+      entries,
+      [
+        {
+          command: "tff",
+          startedAtMs: 1_000,
+          status: "running",
+        },
+      ],
+      4_000
+    );
+
+    expect(prepared.entries).toEqual([
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: {
+          text: "shell % tff",
+          source: "live",
+        },
+        commandLineIndex: 0,
+        command: "tff",
+        output: [],
+      },
+    ]);
+    expect(prepared.metadataByEntryIndex.get(0)).toEqual({
+      command: "tff",
+      startedAtMs: 1_000,
+      status: "running",
+    });
+  });
+
+  it("does not append stale or already matched running command metadata", () => {
+    const entries = createTerminalHistoryEntries([
+      {
+        text: "shell % pnpm test",
+        source: "live",
+      },
+      {
+        text: "ok",
+        source: "live",
+      },
+    ]);
+
+    expect(
+      prepareTerminalHistoryEntriesForRender(
+        entries,
+        [
+          {
+            command: "old command",
+            startedAtMs: 1_000,
+            status: "running",
+          },
+          {
+            command: "pnpm test",
+            startedAtMs: 125_000,
+            status: "running",
+          },
+        ],
+        125_500
+      ).entries
+    ).toEqual(entries);
   });
 
   it("groups wrapped input command lines with their output for terminal rendering", () => {

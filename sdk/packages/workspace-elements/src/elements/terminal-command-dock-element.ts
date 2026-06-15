@@ -40,6 +40,7 @@ import {
   resolveTerminalCommandDockSessionActions,
   type TerminalCommandDockSessionActionId,
 } from "./terminal-command-dock-session-actions.js";
+import { TERMINAL_COMMAND_COMPOSER_ACTION_IDS } from "./terminal-command-composer-actions.js";
 
 type TerminalCommandInputFocusOptions = {
   focusInput?: boolean;
@@ -62,7 +63,13 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       type: String,
     },
     autoFocusInput: { attribute: "auto-focus-input", type: Boolean },
+    commandActionsLabel: { attribute: "command-actions-label", type: String },
+    commandPlaceholder: { attribute: "command-placeholder", type: String },
+    interruptLabel: { attribute: "interrupt-label", type: String },
+    interruptTitle: { attribute: "interrupt-title", type: String },
     placement: { type: String },
+    submitLabel: { attribute: "submit-label", type: String },
+    submitTitle: { attribute: "submit-title", type: String },
     pending: { state: true },
     actionError: { state: true },
     historyClearConfirmationArmed: { state: true },
@@ -448,14 +455,23 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
       }
 
       .autocomplete-ghost {
+        display: block;
+        inline-size: 100%;
+        justify-self: stretch;
+        max-inline-size: 100%;
         min-width: 0;
         overflow: hidden;
         pointer-events: none;
-        white-space: pre-wrap;
-        word-break: break-word;
+        text-align: left;
+        white-space: pre;
+        word-break: normal;
         color: transparent;
         font: var(--tp-terminal-command-font-size, 0.94rem) / 1.45
           var(--tp-font-family-mono);
+      }
+
+      .autocomplete-ghost-prefix {
+        display: none;
       }
 
       .dock[data-placement="terminal"] .autocomplete-ghost {
@@ -469,6 +485,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
 
       .autocomplete-ghost-suffix {
         color: color-mix(in srgb, var(--tp-color-text-muted) 48%, transparent);
+        display: inline-block;
+        margin-inline-start: var(--tp-command-autocomplete-prefix-width, 0ch);
+        white-space: pre;
       }
 
       .dock[data-placement="terminal"] .autocomplete-ghost-suffix {
@@ -786,7 +805,13 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     | undefined;
   declare autocompleteSuggestion: string | null;
   declare autoFocusInput: boolean;
+  declare commandActionsLabel: string;
+  declare commandPlaceholder: string;
+  declare interruptLabel: string;
+  declare interruptTitle: string;
   declare placement: TerminalCommandDockPlacement;
+  declare submitLabel: string;
+  declare submitTitle: string;
   declare protected pending: boolean;
   declare protected actionError: string | null;
   declare protected historyClearConfirmationArmed: boolean;
@@ -802,7 +827,13 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     this.quickCommands = defaultTerminalCommandQuickCommands;
     this.autocompleteSuggestion = null;
     this.autoFocusInput = false;
+    this.commandActionsLabel = "Command actions";
+    this.commandPlaceholder = "";
+    this.interruptLabel = "Ctrl+C";
+    this.interruptTitle = "Send Ctrl+C to the focused pane";
     this.placement = "panel";
+    this.submitLabel = "Run";
+    this.submitTitle = "Send command to the focused pane";
     this.pending = false;
     this.actionError = null;
     this.historyClearConfirmationArmed = false;
@@ -834,7 +865,9 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
     const quickCommands = resolveTerminalCommandQuickCommands(
       this.quickCommands,
     );
-    const inputStatus = resolveTerminalCommandInputStatus(controls);
+    const inputStatus = resolveTerminalCommandInputStatus(controls, {
+      commandPlaceholder: this.commandPlaceholder,
+    });
     const statusBadges = resolveTerminalCommandDockStatusBadges(
       controls,
       inputStatus,
@@ -976,6 +1009,19 @@ export class TerminalCommandDockElement extends WorkspaceKernelConsumerElement {
         .canInterrupt=${controls.canInterrupt}
         .canPasteClipboard=${controls.canPasteClipboard}
         .autocompleteSuggestion=${this.autocompleteSuggestion}
+        .actionLabels=${{
+          [TERMINAL_COMMAND_COMPOSER_ACTION_IDS.submit]: {
+            ariaLabel: this.submitTitle,
+            label: this.submitLabel,
+            title: this.submitTitle,
+          },
+          [TERMINAL_COMMAND_COMPOSER_ACTION_IDS.interrupt]: {
+            ariaLabel: this.interruptTitle,
+            label: this.interruptLabel,
+            title: this.interruptTitle,
+          },
+        }}
+        .actionsLabel=${this.commandActionsLabel}
         .placeholder=${inputStatus.placeholder}
         .inputDescriptionId=${TERMINAL_COMMAND_INPUT_STATUS_DESCRIPTION_ID}
         .pasteTitle=${pasteTitle}
