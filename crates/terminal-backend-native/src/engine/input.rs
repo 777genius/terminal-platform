@@ -11,6 +11,13 @@ impl NativePaneRuntime {
         self.write_all(normalized.as_bytes())
     }
 
+    pub(super) fn write_paste(&self, text: &str) -> Result<(), BackendError> {
+        let normalized = normalize_pty_input(text);
+        let payload =
+            paste_input_payload(normalized.as_ref(), self.emulator.bracketed_paste_enabled());
+        self.write_all(payload.as_bytes())
+    }
+
     fn write_all(&self, bytes: &[u8]) -> Result<(), BackendError> {
         let process = self
             .process
@@ -64,6 +71,14 @@ fn normalize_pty_input(text: &str) -> Cow<'_, str> {
     }
 }
 
+fn paste_input_payload(text: &str, bracketed_paste: bool) -> Cow<'_, str> {
+    if !bracketed_paste {
+        return Cow::Borrowed(text);
+    }
+
+    Cow::Owned(format!("\x1b[200~{text}\x1b[201~"))
+}
+
 #[cfg(any(test, windows))]
 fn normalize_windows_pty_input(text: &str) -> Cow<'_, str> {
     if !text.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
@@ -90,7 +105,7 @@ fn normalize_windows_pty_input(text: &str) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_windows_pty_input;
+    use super::{normalize_windows_pty_input, paste_input_payload};
 
     #[test]
     fn normalize_windows_pty_input_preserves_plain_text() {
@@ -102,5 +117,18 @@ mod tests {
         assert_eq!(normalize_windows_pty_input("alpha\r\nbeta").as_ref(), "alpha\rbeta");
         assert_eq!(normalize_windows_pty_input("alpha\nbeta").as_ref(), "alpha\rbeta");
         assert_eq!(normalize_windows_pty_input("alpha\rbeta").as_ref(), "alpha\rbeta");
+    }
+
+    #[test]
+    fn paste_input_payload_preserves_plain_paste_when_bracketed_mode_is_off() {
+        assert_eq!(paste_input_payload("alpha\nbeta", false).as_ref(), "alpha\nbeta");
+    }
+
+    #[test]
+    fn paste_input_payload_wraps_paste_when_bracketed_mode_is_on() {
+        assert_eq!(
+            paste_input_payload("alpha\nbeta", true).as_ref(),
+            "\x1b[200~alpha\nbeta\x1b[201~"
+        );
     }
 }

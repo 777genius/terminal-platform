@@ -18,11 +18,26 @@ pub(super) fn native_capabilities() -> BackendCapabilities {
         raw_output_stream: true,
         rendered_viewport_stream: true,
         rendered_viewport_snapshot: true,
+        rich_screen_surface: true,
         layout_dump: true,
         layout_override: true,
         explicit_session_save: true,
         explicit_session_restore: true,
         advisory_metadata_subscriptions: true,
         ..BackendCapabilities::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_capabilities_advertise_rich_screen_surface() {
+        let capabilities = native_capabilities();
+
+        assert!(capabilities.raw_output_stream);
+        assert!(capabilities.rendered_viewport_snapshot);
+        assert!(capabilities.rich_screen_surface);
     }
 }

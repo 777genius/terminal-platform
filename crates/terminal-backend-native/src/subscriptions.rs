@@ -112,7 +112,7 @@ fn open_pane_surface_subscription(
 
     tokio::spawn(async move {
         if events_tx
-            .send(BackendSubscriptionEvent::ScreenDelta(
+            .send(BackendSubscriptionEvent::screen_delta(
                 terminal_projection::ScreenDelta::full_replace(0, &initial),
             ))
             .await
@@ -136,7 +136,7 @@ fn open_pane_surface_subscription(
                         continue;
                     }
                     last_sequence = delta.to_sequence;
-                    if events_tx.send(BackendSubscriptionEvent::ScreenDelta(delta)).await.is_err() {
+                    if events_tx.send(BackendSubscriptionEvent::screen_delta(delta)).await.is_err() {
                         break;
                     }
                 }

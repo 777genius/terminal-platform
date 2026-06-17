@@ -1548,12 +1548,14 @@ name = "terminal-backend-native"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "base64",
  "portable-pty",
  "terminal-backend-api",
  "terminal-domain",
  "terminal-mux-domain",
  "terminal-projection",
  "tokio",
+ "unicode-width",
 ]
 
 [[package]]
@@ -1712,9 +1714,12 @@ dependencies = [
 name = "terminal-projection"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "serde",
+ "serde_json",
  "terminal-domain",
  "terminal-mux-domain",
+ "unicode-width",
 ]
 
 [[package]]

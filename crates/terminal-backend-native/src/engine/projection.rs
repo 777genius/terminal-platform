@@ -28,6 +28,7 @@ impl NativePaneRuntime {
             && current.rows == rows
             && current.cols == cols
             && current.source == ProjectionSource::NativeEmulator
+            && current.buffer_kind == rendered.buffer_kind
             && current.surface == rendered.surface
         {
             return Ok(current.clone());
@@ -40,6 +41,7 @@ impl NativePaneRuntime {
             rows,
             cols,
             source: ProjectionSource::NativeEmulator,
+            buffer_kind: rendered.buffer_kind,
             surface: rendered.surface,
         };
 

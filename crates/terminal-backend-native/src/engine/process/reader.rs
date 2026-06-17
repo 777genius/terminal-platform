@@ -15,25 +15,38 @@ use crate::{emulator::EmulatorBuffer, transcript::TranscriptBuffer};
 
 use super::super::signals::bump_watch;
 
-pub(super) fn spawn_reader_thread(
-    pane_id: PaneId,
-    mut reader: Box<dyn std::io::Read + Send>,
-    writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
-    transcript: Arc<TranscriptBuffer>,
-    emulator: Arc<EmulatorBuffer>,
-    raw_output_sequence: Arc<AtomicU64>,
-    raw_output_tick: broadcast::Sender<BackendRawOutputEvent>,
-    surface_tick: watch::Sender<u64>,
-) {
+pub(super) struct ReaderThreadParts {
+    pub pane_id: PaneId,
+    pub reader: Box<dyn std::io::Read + Send>,
+    pub writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
+    pub transcript: Arc<TranscriptBuffer>,
+    pub emulator: Arc<EmulatorBuffer>,
+    pub raw_output_sequence: Arc<AtomicU64>,
+    pub raw_output_tick: broadcast::Sender<BackendRawOutputEvent>,
+    pub surface_tick: watch::Sender<u64>,
+}
+
+pub(super) fn spawn_reader_thread(parts: ReaderThreadParts) {
+    let ReaderThreadParts {
+        pane_id,
+        mut reader,
+        writer,
+        transcript,
+        emulator,
+        raw_output_sequence,
+        raw_output_tick,
+        surface_tick,
+    } = parts;
+
     thread::spawn(move || {
         let mut chunk = [0_u8; 4096];
         loop {
             match reader.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(read) => {
-                    respond_to_cursor_inherit_query(&chunk[..read], &writer);
                     transcript.append(&chunk[..read]);
                     emulator.advance(&chunk[..read]);
+                    flush_terminal_response_bytes(&emulator, &writer);
                     let sequence = raw_output_sequence.fetch_add(1, Ordering::Relaxed) + 1;
                     let _ =
                         raw_output_tick.send(BackendRawOutputEvent::Bytes(BackendRawOutputBytes {
@@ -50,24 +63,55 @@ pub(super) fn spawn_reader_thread(
     });
 }
 
-fn respond_to_cursor_inherit_query(
-    chunk: &[u8],
+fn flush_terminal_response_bytes(
+    emulator: &Arc<EmulatorBuffer>,
     writer: &Arc<Mutex<Box<dyn std::io::Write + Send>>>,
 ) {
-    #[cfg(windows)]
-    {
-        // CreatePseudoConsole warns that inheriting the cursor can deadlock unless the host
-        // answers the cursor-position query received on the output pipe. v1 now pins the
-        // vendored portable-pty path to dwFlags = 0, but keep this safeguard so unexpected
-        // ConPTY hosts or future vendor drift do not wedge the pipe.
-        if chunk.windows(4).any(|window| window == b"\x1b[6n")
-            && let Ok(mut writer) = writer.lock()
-        {
-            let _ = writer.write_all(b"\x1b[1;1R");
-            let _ = writer.flush();
+    let responses = emulator.take_response_bytes();
+    if responses.is_empty() {
+        return;
+    }
+
+    if let Ok(mut writer) = writer.lock() {
+        for response in responses {
+            let _ = writer.write_all(&response);
+        }
+        let _ = writer.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct SharedBufferWriter {
+        bytes: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl std::io::Write for SharedBufferWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.bytes.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
         }
     }
 
-    #[cfg(not(windows))]
-    let _ = (chunk, writer);
+    #[test]
+    fn flushes_terminal_response_bytes_to_pty_writer() {
+        let emulator = Arc::new(EmulatorBuffer::new(4, 80));
+        emulator.advance(b"\x1b[c");
+        let writer = SharedBufferWriter::default();
+        let bytes = Arc::clone(&writer.bytes);
+        let writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> =
+            Arc::new(Mutex::new(Box::new(writer)));
+
+        flush_terminal_response_bytes(&emulator, &writer);
+
+        assert_eq!(&*bytes.lock().unwrap(), b"\x1b[?6c");
+        assert!(emulator.take_response_bytes().is_empty());
+    }
 }

@@ -75,7 +75,7 @@ async fn streams_initial_surface_and_title_patch_updates() {
 
     let initial = subscription.events.recv().await.expect("initial event should arrive");
     let initial = match initial {
-        BackendSubscriptionEvent::ScreenDelta(delta) => delta,
+        BackendSubscriptionEvent::ScreenDelta(delta) => *delta,
         other => panic!("unexpected initial event: {other:?}"),
     };
     let result = session
@@ -84,7 +84,7 @@ async fn streams_initial_surface_and_title_patch_updates() {
         .expect("rename tab should succeed");
     let updated = subscription.events.recv().await.expect("surface update should arrive");
     let updated = match updated {
-        BackendSubscriptionEvent::ScreenDelta(delta) => delta,
+        BackendSubscriptionEvent::ScreenDelta(delta) => *delta,
         other => panic!("unexpected surface event: {other:?}"),
     };
     let patch = updated.patch.expect("delta patch should exist");
@@ -142,12 +142,12 @@ async fn streams_surface_updates_for_all_affected_panes_after_resize() {
 
     let original_initial =
         match original_subscription.events.recv().await.expect("initial event should arrive") {
-            BackendSubscriptionEvent::ScreenDelta(delta) => delta,
+            BackendSubscriptionEvent::ScreenDelta(delta) => *delta,
             other => panic!("unexpected initial original event: {other:?}"),
         };
     let resized_initial =
         match resized_subscription.events.recv().await.expect("initial event should arrive") {
-            BackendSubscriptionEvent::ScreenDelta(delta) => delta,
+            BackendSubscriptionEvent::ScreenDelta(delta) => *delta,
             other => panic!("unexpected initial resized event: {other:?}"),
         };
 
@@ -171,12 +171,12 @@ async fn streams_surface_updates_for_all_affected_panes_after_resize() {
 
     let original_updated =
         match original_subscription.events.recv().await.expect("updated event should arrive") {
-            BackendSubscriptionEvent::ScreenDelta(delta) => delta,
+            BackendSubscriptionEvent::ScreenDelta(delta) => *delta,
             other => panic!("unexpected original update event: {other:?}"),
         };
     let resized_updated =
         match resized_subscription.events.recv().await.expect("updated event should arrive") {
-            BackendSubscriptionEvent::ScreenDelta(delta) => delta,
+            BackendSubscriptionEvent::ScreenDelta(delta) => *delta,
             other => panic!("unexpected resized update event: {other:?}"),
         };
 
