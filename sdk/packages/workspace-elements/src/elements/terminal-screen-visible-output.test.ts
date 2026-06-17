@@ -1,15 +1,39 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+  ScreenCursor,
+  ScreenLineMedia,
+  ScreenLineSemanticMark,
+  ScreenLineSideEffect,
+  ScreenLineSpan,
+  ScreenSurfacePalette,
+  ScreenTextStyle,
+} from "@terminal-platform/runtime-types";
 import type { WorkspaceSnapshot } from "@terminal-platform/workspace-core";
 
 import {
   createTerminalCommandContextCopyText,
+  createTerminalCommandLineRichText,
   createTerminalHistoryEntries,
+  createTerminalOutputAutolinkRuns,
+  createTerminalOutputStyledSearchRuns,
   createVisibleOutputLines,
   doesCommandPresentationMatchHistoryEntry,
+  normalizeTerminalBellCount,
+  normalizeTerminalHyperlink,
+  resolveTerminalCursorTextIndex,
   prepareTerminalHistoryEntriesForRender,
+  terminalOutputMediaDataUri,
+  terminalOutputMediaImageStyle,
+  terminalOutputSideEffectLabel,
+  terminalOutputSideEffectTitle,
+  resolveTerminalOutputStyle,
+  resolveTerminalSurfacePaletteStyle,
   resolveScrollTopAfterHistoryPrepend,
   shouldAutoLoadMoreHistoryFromViewport,
+  shouldTriggerTerminalVisualBell,
+  terminalColorToCss,
+  terminalOutputMediaTitle,
 } from "./terminal-screen-element.js";
 
 type FocusedScreen = NonNullable<
@@ -18,6 +42,1020 @@ type FocusedScreen = NonNullable<
 type HistoricalPane = NonNullable<WorkspaceSnapshot["historicalPanes"]>[string];
 
 describe("terminal screen visible output", () => {
+  it("maps terminal colors and text attributes to themed CSS styles", () => {
+    expect(terminalColorToCss({ kind: "named", name: "red" })).toBe("#ef4444");
+    expect(terminalColorToCss({ kind: "named", name: "bright_red" })).toBe(
+      "#f87171"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "bright_blue" })).toBe(
+      "#60a5fa"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "Bright Red" })).toBe(
+      "#f87171"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "bright-blue" })).toBe(
+      "#60a5fa"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "brightRed" })).toBe(
+      "#f87171"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "dimForeground" })).toBe(
+      "var(--tp-terminal-color-text-muted)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "light blue" })).toBe(
+      "rgb(173 216 230)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "light-blue" })).toBe(
+      "rgb(173 216 230)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "slate_grey" })).toBe(
+      "rgb(112 128 144)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "tomato" })).toBe(
+      "rgb(255 99 71)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "orchid" })).toBe(
+      "rgb(218 112 214)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "dodger blue" })).toBe(
+      "rgb(30 144 255)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "light sea green" })).toBe(
+      "rgb(32 178 170)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "LightSeaGreen" })).toBe(
+      "rgb(32 178 170)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "dark-slate-gray" })).toBe(
+      "rgb(47 79 79)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "rebecca_purple" })).toBe(
+      "rgb(102 51 153)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "blanched almond" })).toBe(
+      "rgb(255 235 205)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "gray" })).toBe(
+      "rgb(128 128 128)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "gray90" })).toBe(
+      "rgb(230 230 230)"
+    );
+    expect(terminalColorToCss({ kind: "named", name: "grey-50" })).toBe(
+      "rgb(128 128 128)"
+    );
+    expect(
+      terminalColorToCss({ kind: "named", name: "gray101" })
+    ).toBeUndefined();
+    expect(terminalColorToCss({ kind: "rgb", r: 12, g: 34, b: 56 })).toBe(
+      "rgb(12 34 56)"
+    );
+    expect(terminalColorToCss({ kind: "rgb", r: -1, g: 260, b: 42.8 })).toBe(
+      "rgb(0 255 42)"
+    );
+    expect(
+      terminalColorToCss({ kind: "rgb", r: Number.NaN, g: 0, b: 0 })
+    ).toBeUndefined();
+    expect(terminalColorToCss({ kind: "indexed", index: 0 })).toBe("#111827");
+    expect(terminalColorToCss({ kind: "indexed", index: 15 })).toBe("#f9fafb");
+    expect(terminalColorToCss({ kind: "indexed", index: 16 })).toBe(
+      "rgb(0 0 0)"
+    );
+    expect(terminalColorToCss({ kind: "indexed", index: 22 })).toBe(
+      "rgb(0 95 0)"
+    );
+    expect(terminalColorToCss({ kind: "indexed", index: 231 })).toBe(
+      "rgb(255 255 255)"
+    );
+    expect(terminalColorToCss({ kind: "indexed", index: 232 })).toBe(
+      "rgb(8 8 8)"
+    );
+    expect(terminalColorToCss({ kind: "indexed", index: 255 })).toBe(
+      "rgb(238 238 238)"
+    );
+    expect(terminalColorToCss({ kind: "indexed", index: 256 })).toBeUndefined();
+    expect(
+      terminalColorToCss({ kind: "indexed", index: Number.POSITIVE_INFINITY })
+    ).toBeUndefined();
+
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          background: { kind: "indexed", index: 22 },
+          foreground: { kind: "named", name: "red" },
+          inverse: true,
+          underline: "curly",
+          underline_color: { kind: "rgb", r: 1, g: 2, b: 3 },
+        })
+      )
+    ).toMatchObject({
+      backgroundColor: "#ef4444",
+      color: "rgb(0 95 0)",
+      textDecorationColor: "rgb(1 2 3)",
+      textDecorationLine: "underline",
+      textDecorationStyle: "wavy",
+    });
+
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          inverse: true,
+        })
+      )
+    ).toMatchObject({
+      backgroundColor:
+        "var(--tp-terminal-surface-foreground-color, var(--tp-terminal-color-text))",
+      color:
+        "var(--tp-terminal-surface-background-color, var(--tp-terminal-color-bg))",
+    });
+
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          bold: true,
+          dim: true,
+          hidden: true,
+          italic: true,
+          blink: true,
+          overline: true,
+          border: "encircled",
+          strikethrough: true,
+          underline: "dashed",
+        })
+      )
+    ).toMatchObject({
+      animation: "terminal-output-blink 1s steps(1, end) infinite",
+      color: "transparent",
+      fontStyle: "italic",
+      fontWeight: "760",
+      opacity: "0.72",
+      outline: "1px solid currentColor",
+      outlineOffset: "-1px",
+      borderRadius: "999px",
+      textDecorationLine: "underline overline line-through",
+      textDecorationStyle: "dashed",
+      textShadow: "none",
+    });
+
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          border: "framed",
+        })
+      )
+    ).toMatchObject({
+      borderRadius: "0.12rem",
+      outline: "1px solid currentColor",
+    });
+
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          baseline: "superscript",
+        })
+      )
+    ).toMatchObject({
+      fontSize: "0.78em",
+      verticalAlign: "super",
+    });
+
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          baseline: "subscript",
+        })
+      )
+    ).toMatchObject({
+      fontSize: "0.78em",
+      verticalAlign: "sub",
+    });
+
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          underline: "double",
+        })
+      )
+    ).toMatchObject({
+      textDecorationLine: "underline",
+      textDecorationStyle: "double",
+    });
+
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          underline: "dotted",
+        })
+      )
+    ).toMatchObject({
+      textDecorationLine: "underline",
+      textDecorationStyle: "dotted",
+    });
+  });
+
+  it("maps terminal surface palette overrides to viewport CSS styles", () => {
+    expect(
+      resolveTerminalSurfacePaletteStyle({
+        foreground: { kind: "rgb", r: 1, g: 2, b: 3 },
+        background: { kind: "rgb", r: 4, g: 5, b: 6 },
+        cursor: { kind: "rgb", r: 7, g: 8, b: 9 },
+      })
+    ).toMatchObject({
+      background: "rgb(4 5 6)",
+      caretColor: "rgb(7 8 9)",
+      color: "rgb(1 2 3)",
+      "--tp-terminal-surface-background-color": "rgb(4 5 6)",
+      "--tp-terminal-surface-cursor-color": "rgb(7 8 9)",
+      "--tp-terminal-surface-foreground-color": "rgb(1 2 3)",
+    });
+  });
+
+  it("maps mixed rich terminal visual styles to CSS without losing color intent", () => {
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          background: { kind: "rgb", r: 4, g: 5, b: 6 },
+          foreground: { kind: "indexed", index: 22 },
+          inverse: true,
+          overline: true,
+          strikethrough: true,
+          underline: "curly",
+          underline_color: { kind: "rgb", r: 9, g: 8, b: 7 },
+        })
+      )
+    ).toMatchObject({
+      backgroundColor: "rgb(0 95 0)",
+      color: "rgb(4 5 6)",
+      textDecorationColor: "rgb(9 8 7)",
+      textDecorationLine: "underline overline line-through",
+      textDecorationStyle: "wavy",
+    });
+
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          background: { kind: "rgb", r: 4, g: 5, b: 6 },
+          foreground: { kind: "named", name: "bright-magenta" },
+          hidden: true,
+        })
+      )
+    ).toMatchObject({
+      backgroundColor: "rgb(4 5 6)",
+      color: "transparent",
+      textShadow: "none",
+    });
+  });
+
+  it("uses terminal surface palette as the inverse video fallback", () => {
+    expect(
+      resolveTerminalOutputStyle(
+        terminalStyle({
+          inverse: true,
+        })
+      )
+    ).toMatchObject({
+      backgroundColor:
+        "var(--tp-terminal-surface-foreground-color, var(--tp-terminal-color-text))",
+      color:
+        "var(--tp-terminal-surface-background-color, var(--tp-terminal-color-bg))",
+    });
+  });
+
+  it("preserves terminal surface palette on restored history lines", () => {
+    const surfacePalette: ScreenSurfacePalette = {
+      foreground: { kind: "rgb", r: 1, g: 2, b: 3 },
+      background: { kind: "rgb", r: 4, g: 5, b: 6 },
+      cursor: { kind: "rgb", r: 7, g: 8, b: 9 },
+    };
+    const lines = createVisibleOutputLines(
+      createHistory({
+        hasMoreSegments: false,
+        lines: ["plain"],
+        surfacePalette,
+      }),
+      createScreen([])
+    );
+
+    expect(lines).toEqual([
+      {
+        text: "plain",
+        source: "history",
+        palette: surfacePalette,
+      },
+    ]);
+  });
+
+  it("preserves terminal surface palette through command history grouping", () => {
+    const surfacePalette: ScreenSurfacePalette = {
+      foreground: { kind: "rgb", r: 1, g: 2, b: 3 },
+      background: { kind: "rgb", r: 4, g: 5, b: 6 },
+      cursor: { kind: "rgb", r: 7, g: 8, b: 9 },
+    };
+    const lines = createVisibleOutputLines(
+      createHistory({
+        hasMoreSegments: false,
+        lines: ["shell % printf 123", "123"],
+        surfacePalette,
+      }),
+      createScreen([])
+    );
+    const entries = createTerminalHistoryEntries(lines);
+
+    expect(entries).toEqual([
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: {
+          text: "shell % printf 123",
+          source: "history",
+          palette: surfacePalette,
+        },
+        commandLineIndex: 0,
+        command: "printf 123",
+        output: [
+          {
+            line: {
+              text: "123",
+              source: "history",
+              palette: surfacePalette,
+            },
+            lineIndex: 1,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("preserves live terminal cursor metadata and empty cursor rows", () => {
+    expect(
+      createVisibleOutputLines(
+        createHistory({ hasMoreSegments: false, lines: [] }),
+        createScreen(["ready"], {
+          cursor: { row: 0, col: 2, shape: "beam", blinking: true },
+        })
+      )
+    ).toEqual([
+      {
+        text: "ready",
+        source: "live",
+        cursor: { col: 2, shape: "beam", blinking: true },
+      },
+    ]);
+
+    expect(
+      createVisibleOutputLines(
+        null,
+        createScreen([], {
+          cursor: { row: 2, col: 0, shape: "underline" },
+        })
+      )
+    ).toEqual([
+      { text: "", source: "live" },
+      { text: "", source: "live" },
+      {
+        text: "",
+        source: "live",
+        cursor: { col: 0, shape: "underline" },
+      },
+    ]);
+  });
+
+  it("keeps hidden cursors out of visible output", () => {
+    expect(
+      createVisibleOutputLines(
+        null,
+        createScreen(["ready"], {
+          cursor: { row: 0, col: 2, shape: "hidden", blinking: true },
+        })
+      )
+    ).toEqual([{ text: "ready", source: "live" }]);
+  });
+
+  it("maps terminal cursor columns across wide and combining characters", () => {
+    expect(resolveTerminalCursorTextIndex("abc", 2)).toBe(2);
+    expect(resolveTerminalCursorTextIndex("表A", 1)).toBe(0);
+    expect(resolveTerminalCursorTextIndex("表A", 2)).toBe(1);
+    expect(resolveTerminalCursorTextIndex(`e${"\u0301"}A`, 1)).toBe(2);
+    expect(resolveTerminalCursorTextIndex("🧪A", 1)).toBe(0);
+    expect(resolveTerminalCursorTextIndex("🧪A", 2)).toBe("🧪".length);
+    expect(resolveTerminalCursorTextIndex("👩‍💻A", 2)).toBe("👩‍💻".length);
+    expect(resolveTerminalCursorTextIndex("❤️A", 2)).toBe("❤️".length);
+    expect(resolveTerminalCursorTextIndex("🇺🇦A", 2)).toBe("🇺🇦".length);
+  });
+
+  it("normalizes terminal bell counts for visual bell rendering", () => {
+    expect(normalizeTerminalBellCount(undefined)).toBe(0);
+    expect(normalizeTerminalBellCount(null)).toBe(0);
+    expect(normalizeTerminalBellCount(Number.NaN)).toBe(0);
+    expect(normalizeTerminalBellCount(-1)).toBe(0);
+    expect(normalizeTerminalBellCount(2.8)).toBe(2);
+    expect(normalizeTerminalBellCount(-3n)).toBe(0);
+    expect(normalizeTerminalBellCount(3n)).toBe(3);
+  });
+
+  it("triggers visual bell only for count increases on the same pane", () => {
+    expect(shouldTriggerTerminalVisualBell(null, null, "pane-1", 1)).toBe(
+      false
+    );
+    expect(shouldTriggerTerminalVisualBell("pane-1", 1, "pane-1", 1)).toBe(
+      false
+    );
+    expect(shouldTriggerTerminalVisualBell("pane-1", 1, "pane-1", 2)).toBe(
+      true
+    );
+    expect(shouldTriggerTerminalVisualBell("pane-1", 2, "pane-1", 1)).toBe(
+      false
+    );
+    expect(shouldTriggerTerminalVisualBell("pane-1", 1, "pane-2", 2)).toBe(
+      false
+    );
+    expect(shouldTriggerTerminalVisualBell("pane-1", 1, null, 2)).toBe(false);
+  });
+
+  it("keeps terminal media markers visible even when the text line is empty", () => {
+    expect(
+      createVisibleOutputLines(
+        null,
+        createScreen([
+          {
+            text: "",
+            media: [
+              {
+                kind: "iterm2_image",
+                name: "tiny.png",
+                inline: true,
+                mime_type: "image/png",
+                data_base64: "iVBORw0KGgo=",
+              },
+            ],
+          },
+        ])
+      )
+    ).toEqual([
+      {
+        text: "",
+        media: [
+          {
+            kind: "iterm2_image",
+            name: "tiny.png",
+            inline: true,
+            mime_type: "image/png",
+            data_base64: "iVBORw0KGgo=",
+          },
+        ],
+        source: "live",
+      },
+    ]);
+  });
+
+  it("creates safe inline terminal media previews only for allowed image payloads", () => {
+    const pngMedia: ScreenLineMedia = {
+      kind: "kitty_graphics",
+      inline: true,
+      mime_type: "image/png",
+      data_base64: "iVBORw0KGgo=",
+      width: "6000px",
+      height: "150%",
+      preserve_aspect_ratio: false,
+    };
+
+    expect(terminalOutputMediaDataUri(pngMedia)).toBe(
+      "data:image/png;base64,iVBORw0KGgo="
+    );
+    expect(
+      terminalOutputMediaDataUri({
+        ...pngMedia,
+        mime_type: " IMAGE/PNG ",
+        data_base64: "iVBORw0K\nGgo=",
+      })
+    ).toBe("data:image/png;base64,iVBORw0KGgo=");
+    expect(terminalOutputMediaTitle({ ...pngMedia, byte_size: 12.8 })).toBe(
+      "Kitty graphics sequence received: image/png, 12 bytes"
+    );
+    expect(terminalOutputMediaTitle({ ...pngMedia, name: " graph.png " })).toBe(
+      "Kitty graphics sequence received: graph.png, image/png"
+    );
+    expect(terminalOutputMediaTitle({ kind: "sixel" })).toBe(
+      "Sixel graphic sequence received"
+    );
+    expect(
+      terminalOutputMediaTitle({
+        ...pngMedia,
+        name: " graph\u0007one.png ",
+        mime_type: " IMAGE/PNG ",
+      })
+    ).toBe("Kitty graphics sequence received: graph one.png, image/png");
+    expect(
+      terminalOutputMediaTitle({
+        ...pngMedia,
+        name: `${"x".repeat(220)}.png`,
+      })
+    ).toBe(`Kitty graphics sequence received: ${"x".repeat(160)}, image/png`);
+    expect(
+      terminalOutputMediaTitle({
+        ...pngMedia,
+        byte_size: Number.NaN,
+        truncated: true,
+      })
+    ).toBe("Kitty graphics sequence received: image/png, truncated");
+    expect(terminalOutputMediaImageStyle(pngMedia)).toBe(
+      "width:4096px;height:100%;object-fit:fill"
+    );
+    expect(
+      terminalOutputMediaImageStyle({
+        ...pngMedia,
+        width: "12",
+        height: "5",
+        preserve_aspect_ratio: true,
+      })
+    ).toBe("width:12ch;height:6em;object-fit:contain");
+    expect(
+      terminalOutputMediaImageStyle({
+        ...pngMedia,
+        width: "calc(100vw)",
+        height: "none",
+      })
+    ).toBe("object-fit:fill");
+    expect(
+      terminalOutputMediaImageStyle({
+        ...pngMedia,
+        width: "0px",
+        height: "0%",
+      })
+    ).toBe("object-fit:fill");
+    expect(
+      terminalOutputMediaDataUri({
+        ...pngMedia,
+        mime_type: "image/svg+xml",
+      })
+    ).toBe("");
+    expect(
+      terminalOutputMediaDataUri({
+        ...pngMedia,
+        data_base64: "iVBORw0KGgo=\n<script>",
+      })
+    ).toBe("");
+    expect(
+      terminalOutputMediaDataUri({
+        ...pngMedia,
+        inline: false,
+      })
+    ).toBe("");
+  });
+
+  it("keeps terminal side-effect markers visible even when the text line is empty", () => {
+    const blockedNotification: ScreenLineSideEffect = {
+      kind: "desktop_notification",
+      disposition: "blocked",
+      target: "desktop_notification",
+      message: "Build finished",
+    };
+
+    expect(
+      createVisibleOutputLines(
+        null,
+        createScreen([
+          {
+            text: "",
+            side_effects: [blockedNotification],
+          },
+        ])
+      )
+    ).toEqual([
+      {
+        text: "",
+        sideEffects: [blockedNotification],
+        source: "live",
+      },
+    ]);
+  });
+
+  it("creates clear labels for blocked terminal side effects", () => {
+    expect(
+      terminalOutputSideEffectLabel({
+        kind: "clipboard_write",
+        disposition: "blocked",
+        target: "clipboard",
+      })
+    ).toBe("Clipboard write blocked");
+    expect(
+      terminalOutputSideEffectLabel({
+        kind: "clipboard_read",
+        disposition: "blocked",
+        target: "selection",
+      })
+    ).toBe("Clipboard read blocked");
+    expect(
+      terminalOutputSideEffectLabel({
+        kind: "desktop_notification",
+        disposition: "blocked",
+        target: "desktop_notification",
+      })
+    ).toBe("Notification blocked");
+    expect(
+      terminalOutputSideEffectTitle({
+        kind: "desktop_notification",
+        disposition: "blocked",
+        target: "desktop_notification",
+        message: "Build\u0007finished",
+      })
+    ).toBe("Notification blocked: desktop notification: Build finished");
+  });
+
+  it("keeps terminal semantic marks visible even when the text line is empty", () => {
+    const semanticMarks: ScreenLineSemanticMark[] = [
+      {
+        kind: "command_finished",
+        col: 0,
+        exit_code: 1,
+      },
+    ];
+
+    expect(
+      createVisibleOutputLines(
+        null,
+        createScreen([
+          {
+            text: "",
+            semantic_marks: semanticMarks,
+          },
+        ])
+      )
+    ).toEqual([
+      {
+        text: "",
+        semanticMarks,
+        source: "live",
+      },
+    ]);
+  });
+
+  it("uses shell integration semantic marks to group command history", () => {
+    const lines = createVisibleOutputLines(
+      null,
+      createScreen([
+        {
+          text: "λ git status",
+          semantic_marks: [
+            { kind: "prompt_start", col: 0 },
+            { kind: "input_start", col: 2 },
+          ],
+        },
+        {
+          text: "On branch main",
+          semantic_marks: [{ kind: "output_start", col: 0 }],
+        },
+        {
+          text: "",
+          semantic_marks: [{ kind: "command_finished", col: 0, exit_code: 0 }],
+        },
+      ])
+    );
+    const entries = createTerminalHistoryEntries(lines);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: "command",
+      prompt: "λ",
+      command: "git status",
+      output: [{ line: { text: "On branch main" }, lineIndex: 1 }],
+    });
+  });
+
+  it("keeps terminal hyperlinks explicit and rejects unsafe protocols", () => {
+    expect(normalizeTerminalHyperlink(" https://example.com/path ")).toBe(
+      "https://example.com/path"
+    );
+    expect(normalizeTerminalHyperlink("mailto:team@example.com")).toBe(
+      "mailto:team@example.com"
+    );
+    expect(normalizeTerminalHyperlink("file:///tmp/report.txt")).toBe(
+      "file:///tmp/report.txt"
+    );
+    expect(normalizeTerminalHyperlink("ftp://example.com/pub/log.txt")).toBe(
+      "ftp://example.com/pub/log.txt"
+    );
+    expect(
+      normalizeTerminalHyperlink("https://example.com/\u0007x")
+    ).toBeNull();
+    expect(normalizeTerminalHyperlink("javascript:alert(1)")).toBeNull();
+    expect(normalizeTerminalHyperlink("../relative")).toBeNull();
+  });
+
+  it("detects safe plain output links without absorbing terminal punctuation", () => {
+    expect(
+      createTerminalOutputAutolinkRuns(
+        "Docs: https://example.com/docs, mailto:team@example.com, file:///tmp/report.txt and ftp://example.com/pub/log.txt."
+      )
+    ).toEqual([
+      { kind: "text", text: "Docs: " },
+      {
+        href: "https://example.com/docs",
+        kind: "link",
+        text: "https://example.com/docs",
+      },
+      { kind: "text", text: ", " },
+      {
+        href: "mailto:team@example.com",
+        kind: "link",
+        text: "mailto:team@example.com",
+      },
+      { kind: "text", text: ", " },
+      {
+        href: "file:///tmp/report.txt",
+        kind: "link",
+        text: "file:///tmp/report.txt",
+      },
+      { kind: "text", text: " and " },
+      {
+        href: "ftp://example.com/pub/log.txt",
+        kind: "link",
+        text: "ftp://example.com/pub/log.txt",
+      },
+      { kind: "text", text: "." },
+    ]);
+  });
+
+  it("ignores unsafe or relative plain output link candidates", () => {
+    expect(
+      createTerminalOutputAutolinkRuns(
+        "bad javascript:alert(1) relative ./file and safe http://127.0.0.1:3000/log"
+      )
+    ).toEqual([
+      {
+        kind: "text",
+        text: "bad javascript:alert(1) relative ./file and safe ",
+      },
+      {
+        href: "http://127.0.0.1:3000/log",
+        kind: "link",
+        text: "http://127.0.0.1:3000/log",
+      },
+    ]);
+  });
+
+  it("preserves terminal styles when search highlights rich output spans", () => {
+    const promptStyle = terminalStyle({
+      foreground: { kind: "named", name: "green" },
+    });
+    const outputStyle = terminalStyle({
+      foreground: { kind: "rgb", r: 1, g: 2, b: 3 },
+      hyperlink: "https://example.com/log",
+      underline: "single",
+    });
+    const runs = createTerminalOutputStyledSearchRuns(
+      {
+        text: "ok failed",
+        spans: [
+          { text: "ok ", style: promptStyle },
+          { text: "failed", style: outputStyle },
+        ],
+      },
+      [
+        { kind: "text", value: "ok " },
+        { kind: "match", value: "failed", matchIndex: 0, active: true },
+      ]
+    );
+
+    expect(runs).toEqual([
+      {
+        activeSearchMatch: false,
+        searchMatch: false,
+        style: promptStyle,
+        text: "ok ",
+      },
+      {
+        activeSearchMatch: true,
+        searchMatch: true,
+        style: outputStyle,
+        text: "failed",
+      },
+    ]);
+  });
+
+  it("splits search highlights that cross styled span boundaries", () => {
+    const redStyle = terminalStyle({
+      foreground: { kind: "named", name: "red" },
+    });
+    const blueStyle = terminalStyle({
+      foreground: { kind: "named", name: "blue" },
+    });
+    const runs = createTerminalOutputStyledSearchRuns(
+      {
+        text: "abcde",
+        spans: [
+          { text: "ab", style: redStyle },
+          { text: "cde", style: blueStyle },
+        ],
+      },
+      [
+        { kind: "text", value: "a" },
+        { kind: "match", value: "bcd", matchIndex: 0, active: false },
+        { kind: "text", value: "e" },
+      ]
+    );
+
+    expect(runs).toEqual([
+      {
+        activeSearchMatch: false,
+        searchMatch: false,
+        style: redStyle,
+        text: "a",
+      },
+      {
+        activeSearchMatch: false,
+        searchMatch: true,
+        style: redStyle,
+        text: "b",
+      },
+      {
+        activeSearchMatch: false,
+        searchMatch: true,
+        style: blueStyle,
+        text: "cd",
+      },
+      {
+        activeSearchMatch: false,
+        searchMatch: false,
+        style: blueStyle,
+        text: "e",
+      },
+    ]);
+  });
+
+  it("falls back from styled search runs when text and spans disagree", () => {
+    const style = terminalStyle();
+
+    expect(
+      createTerminalOutputStyledSearchRuns(
+        { text: "actual", spans: [{ text: "actual", style }] },
+        [{ kind: "match", value: "stale", matchIndex: 0, active: false }]
+      )
+    ).toBeNull();
+    expect(
+      createTerminalOutputStyledSearchRuns(
+        { text: "actual", spans: [{ text: "stale", style }] },
+        [{ kind: "match", value: "actual", matchIndex: 0, active: false }]
+      )
+    ).toBeNull();
+  });
+
+  it("preserves live rich output spans through command grouping", () => {
+    const richSpans: ScreenLineSpan[] = [
+      {
+        text: "red",
+        style: terminalStyle({
+          foreground: { kind: "named", name: "red" },
+          bold: true,
+        }),
+      },
+    ];
+    const lines = createVisibleOutputLines(
+      createHistory({ hasMoreSegments: false, lines: [] }),
+      createScreen([
+        "shell % printf red",
+        {
+          text: "red",
+          spans: richSpans,
+        },
+      ])
+    );
+    const entries = createTerminalHistoryEntries(lines);
+    const commandEntry = entries.find((entry) => entry.kind === "command");
+
+    expect(lines.at(-1)).toEqual({
+      text: "red",
+      source: "live",
+      spans: richSpans,
+    });
+    expect(commandEntry?.kind).toBe("command");
+    expect(commandEntry?.output[0]?.line.spans).toEqual(richSpans);
+  });
+
+  it("preserves rich command-line spans after command history grouping", () => {
+    const promptStyle = terminalStyle({
+      foreground: { kind: "named", name: "green" },
+      dim: true,
+    });
+    const commandStyle = terminalStyle({
+      foreground: { kind: "rgb", r: 245, g: 158, b: 11 },
+      hyperlink: "https://example.com/command",
+      underline: "single",
+    });
+    const commandSpans: ScreenLineSpan[] = [
+      { text: "shell % ", style: promptStyle },
+      { text: "printf ", style: commandStyle },
+      { text: "color", style: { ...commandStyle, bold: true } },
+    ];
+    const entries = createTerminalHistoryEntries([
+      {
+        text: "shell % printf color",
+        source: "live",
+        spans: commandSpans,
+      },
+      { text: "color", source: "live" },
+    ]);
+    const commandEntry = entries.find((entry) => entry.kind === "command");
+
+    if (!commandEntry || commandEntry.kind !== "command") {
+      throw new Error("Expected a command history entry");
+    }
+
+    expect(createTerminalCommandLineRichText(commandEntry)).toEqual({
+      source: "live",
+      text: "printf color",
+      spans: [
+        { text: "printf ", style: commandStyle },
+        { text: "color", style: { ...commandStyle, bold: true } },
+      ],
+    });
+  });
+
+  it("preserves styled trailing terminal cells", () => {
+    const richSpans: ScreenLineSpan[] = [
+      {
+        text: "   ",
+        style: terminalStyle({
+          background: { kind: "named", name: "red" },
+        }),
+      },
+    ];
+    const lines = createVisibleOutputLines(
+      createHistory({ hasMoreSegments: false, lines: [] }),
+      createScreen([
+        {
+          text: "   ",
+          spans: richSpans,
+        },
+      ])
+    );
+
+    expect(lines).toEqual([
+      {
+        text: "   ",
+        source: "live",
+        spans: richSpans,
+      },
+    ]);
+  });
+
+  it("preserves restored rich history spans for rendered snapshot history", () => {
+    const richSpans: ScreenLineSpan[] = [
+      {
+        text: "red",
+        style: terminalStyle({
+          foreground: { kind: "named", name: "red" },
+        }),
+      },
+    ];
+    const lines = createVisibleOutputLines(
+      createHistory({
+        hasMoreSegments: false,
+        lines: ["red"],
+        richLines: [{ text: "red", spans: richSpans }],
+      }),
+      createScreen([])
+    );
+
+    expect(lines).toEqual([
+      {
+        text: "red",
+        source: "history",
+        spans: richSpans,
+      },
+    ]);
+  });
+
+  it("preserves soft-wrap metadata for live and restored history lines", () => {
+    const liveLines = createVisibleOutputLines(
+      createHistory({ hasMoreSegments: false, lines: [] }),
+      createScreen([{ text: "wrapped live", wrapped: true }])
+    );
+    const historyLines = createVisibleOutputLines(
+      createHistory({
+        hasMoreSegments: false,
+        lines: ["wrapped history"],
+        richLines: [{ text: "wrapped history", spans: [], wrapped: true }],
+      }),
+      createScreen([])
+    );
+
+    expect(liveLines).toEqual([
+      {
+        text: "wrapped live",
+        source: "live",
+        softWrapped: true,
+      },
+    ]);
+    expect(historyLines).toEqual([
+      {
+        text: "wrapped history",
+        source: "history",
+        softWrapped: true,
+      },
+    ]);
+  });
+
   it("marks partial restored history before live output", () => {
     const lines = createVisibleOutputLines(
       createHistory({ hasMoreSegments: true }),
@@ -108,6 +1146,55 @@ describe("terminal screen visible output", () => {
       { text: "three", source: "live" },
       { text: "four", source: "live" },
     ]);
+  });
+
+  it("keeps restored rich history when overlapping live output has less render metadata", () => {
+    const richSpans: ScreenLineSpan[] = [
+      {
+        text: "red",
+        style: terminalStyle({
+          foreground: { kind: "named", name: "red" },
+        }),
+      },
+    ];
+    const lines = createVisibleOutputLines(
+      createHistory({
+        hasMoreSegments: false,
+        lines: ["red"],
+        richLines: [{ text: "red", spans: richSpans }],
+      }),
+      createScreen(["red"])
+    );
+
+    expect(lines).toEqual([
+      {
+        text: "red",
+        source: "history",
+        spans: richSpans,
+      },
+      {
+        text: "--- restored history above; live process below ---",
+        source: "boundary",
+      },
+      { text: "red", source: "live" },
+    ]);
+  });
+
+  it("dedupes restored plain spans against equivalent live text", () => {
+    const plainSpans: ScreenLineSpan[] = [
+      { text: "pla", style: terminalStyle() },
+      { text: "in", style: terminalStyle() },
+    ];
+    const lines = createVisibleOutputLines(
+      createHistory({
+        hasMoreSegments: false,
+        lines: ["plain"],
+        richLines: [{ text: "plain", spans: plainSpans }],
+      }),
+      createScreen(["plain"])
+    );
+
+    expect(lines).toEqual([{ text: "plain", source: "live" }]);
   });
 
   it("hides restored history boundary when live output fully covers restored history", () => {
@@ -269,6 +1356,38 @@ describe("terminal screen visible output", () => {
       blockText: "printf 'hello\\nworld\\n'\nhello\nworld",
       commandText: "printf 'hello\\nworld\\n'",
       outputText: "hello\nworld",
+    });
+  });
+
+  it("keeps styled blank terminal cells in command block copy payloads", () => {
+    const styledBlankSpans: ScreenLineSpan[] = [
+      {
+        text: "   ",
+        style: terminalStyle({
+          background: { kind: "named", name: "green" },
+        }),
+      },
+    ];
+    const [entry] = createTerminalHistoryEntries([
+      {
+        text: "venv312 ~/dev/quanta % render blanks",
+        source: "live",
+      },
+      {
+        text: "   ",
+        source: "live",
+        spans: styledBlankSpans,
+      },
+    ]);
+
+    if (!entry || entry.kind !== "command") {
+      throw new Error("Expected a command history entry");
+    }
+
+    expect(createTerminalCommandContextCopyText(entry)).toEqual({
+      blockText: "render blanks\n   ",
+      commandText: "render blanks",
+      outputText: "   ",
     });
   });
 
@@ -567,6 +1686,53 @@ describe("terminal screen visible output", () => {
     ]);
   });
 
+  it("keeps restored rich command entries when live duplicates have less render metadata", () => {
+    const richSpans: ScreenLineSpan[] = [
+      {
+        text: "TP_VERIFY_RICH",
+        style: terminalStyle({
+          foreground: { kind: "named", name: "bright_red" },
+        }),
+      },
+    ];
+    const entries = createTerminalHistoryEntries([
+      { text: "shell % echo TP_VERIFY_RICH", source: "history" },
+      {
+        text: "TP_VERIFY_RICH",
+        source: "history",
+        spans: richSpans,
+      },
+      { text: "shell % echo TP_VERIFY_RICH", source: "live" },
+      { text: "TP_VERIFY_RICH", source: "live" },
+    ]);
+
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      kind: "command",
+      commandLine: {
+        text: "shell % echo TP_VERIFY_RICH",
+        source: "history",
+      },
+      output: [
+        {
+          line: {
+            text: "TP_VERIFY_RICH",
+            source: "history",
+            spans: richSpans,
+          },
+        },
+      ],
+    });
+    expect(entries[1]).toMatchObject({
+      kind: "command",
+      commandLine: {
+        text: "shell % echo TP_VERIFY_RICH",
+        source: "live",
+      },
+      output: [{ line: { text: "TP_VERIFY_RICH", source: "live" } }],
+    });
+  });
+
   it("drops command-only live duplicates when restored history already has command output", () => {
     const entries = createTerminalHistoryEntries([
       { text: "~/dev/project % pp", source: "history" },
@@ -588,6 +1754,46 @@ describe("terminal screen visible output", () => {
         output: [
           {
             line: { text: "zsh: command not found: pp", source: "history" },
+            lineIndex: 1,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("treats styled blank command output as meaningful restored history", () => {
+    const styledBlankSpans: ScreenLineSpan[] = [
+      {
+        text: "   ",
+        style: terminalStyle({
+          background: { kind: "named", name: "bright_blue" },
+        }),
+      },
+    ];
+    const entries = createTerminalHistoryEntries([
+      { text: "~/dev/project % render blocks", source: "history" },
+      { text: "   ", source: "history", spans: styledBlankSpans },
+      { text: "~/dev/project (0.10s) % render blocks", source: "live" },
+      { text: "", source: "live" },
+    ]);
+
+    expect(entries).toEqual([
+      {
+        kind: "command",
+        prompt: "~/dev/project",
+        commandLine: {
+          text: "~/dev/project % render blocks",
+          source: "history",
+        },
+        commandLineIndex: 0,
+        command: "render blocks",
+        output: [
+          {
+            line: {
+              text: "   ",
+              source: "history",
+              spans: styledBlankSpans,
+            },
             lineIndex: 1,
           },
         ],
@@ -658,7 +1864,9 @@ describe("terminal screen visible output", () => {
         "echo TP_LONG_VERIFY_1781453698047_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
       )
     ).toBe(true);
-    expect(doesCommandPresentationMatchHistoryEntry("git", "git status")).toBe(false);
+    expect(doesCommandPresentationMatchHistoryEntry("git", "git status")).toBe(
+      false
+    );
   });
 
   it("auto-loads older history only near the top while idle", () => {
@@ -709,6 +1917,8 @@ describe("terminal screen visible output", () => {
 function createHistory(options: {
   hasMoreSegments: boolean;
   lines?: string[];
+  richLines?: HistoricalPane["richLines"];
+  surfacePalette?: HistoricalPane["surfacePalette"];
 }): HistoricalPane {
   return {
     sessionId: "session-1",
@@ -719,6 +1929,10 @@ function createHistory(options: {
     replayStrategy: "raw_vt_stream",
     restoreGuaranteeLevel: "basic_history",
     lines: options.lines ?? ["old command", "old output"],
+    ...(options.richLines ? { richLines: options.richLines } : {}),
+    ...(options.surfacePalette
+      ? { surfacePalette: options.surfacePalette }
+      : {}),
     capturedAtMs: 1000n,
     hasGaps: false,
     hasMoreSegments: options.hasMoreSegments,
@@ -729,7 +1943,21 @@ function createHistory(options: {
   };
 }
 
-function createScreen(lines: string[]): FocusedScreen {
+type ScreenLineFixture =
+  | string
+  | {
+      media?: ScreenLineMedia[];
+      semantic_marks?: ScreenLineSemanticMark[];
+      side_effects?: ScreenLineSideEffect[];
+      spans?: ScreenLineSpan[];
+      text: string;
+      wrapped?: boolean;
+    };
+
+function createScreen(
+  lines: ScreenLineFixture[],
+  options: { bellCount?: bigint | number; cursor?: ScreenCursor | null } = {}
+): FocusedScreen {
   return {
     cols: 96,
     pane_id: "pane-1",
@@ -737,9 +1965,34 @@ function createScreen(lines: string[]): FocusedScreen {
     sequence: 7n,
     source: "native_emulator",
     surface: {
-      cursor: null,
-      lines: lines.map((text) => ({ text })),
+      cursor: options.cursor ?? null,
+      ...(options.bellCount ? { bell_count: options.bellCount } : {}),
+      lines: lines.map((line) =>
+        typeof line === "string" ? { text: line } : line
+      ),
       title: "Shell",
     },
+  };
+}
+
+function terminalStyle(
+  overrides: Partial<ScreenTextStyle> = {}
+): ScreenTextStyle {
+  return {
+    foreground: null,
+    background: null,
+    underline_color: null,
+    bold: false,
+    dim: false,
+    italic: false,
+    blink: false,
+    underline: null,
+    overline: false,
+    border: null,
+    inverse: false,
+    hidden: false,
+    strikethrough: false,
+    hyperlink: null,
+    ...overrides,
   };
 }

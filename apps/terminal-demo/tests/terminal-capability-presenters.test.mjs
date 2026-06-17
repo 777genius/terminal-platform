@@ -104,6 +104,7 @@ test("capability presenters project runtime state into focused read models", () 
             rendered_viewport_stream: true,
             rendered_viewport_snapshot: true,
             rendered_scrollback_snapshot: false,
+            rich_screen_surface: false,
             layout_dump: false,
             layout_override: false,
             read_only_client_mode: false,

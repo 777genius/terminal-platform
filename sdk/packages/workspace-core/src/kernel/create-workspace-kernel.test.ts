@@ -11,7 +11,11 @@ import type {
   PaneHistory,
   PaneId,
   ScreenDelta,
+  ScreenLine,
+  ScreenLineSemanticMark,
+  ScreenLineSpan,
   ScreenSnapshot,
+  ScreenSurfacePalette,
   SavedSessionRecord,
   SavedSessionSummary,
   SessionId,
@@ -442,6 +446,545 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     await kernel.dispose();
   });
 
+  it("preserves rich line spans from live pane surface updates", async () => {
+    const sessionId = "live-rich-session";
+    const paneId = "live-rich-pane";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "ready",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription("live-rich-pane-sub");
+    const richSpans: ScreenLineSpan[] = [
+      {
+        text: "green",
+        style: {
+          foreground: { kind: "named", name: "green" },
+          background: null,
+          underline_color: null,
+          bold: true,
+          dim: false,
+          italic: false,
+          blink: false,
+          underline: null,
+          overline: false,
+          border: null,
+          inverse: false,
+          hidden: false,
+          strikethrough: false,
+          hyperlink: null,
+        },
+      },
+    ];
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    subscription.push(
+      createRichFullReplaceDelta(paneId, 1n, 2n, [
+        { text: "green", spans: richSpans },
+      ]),
+    );
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.surface.lines[0]
+          ?.text === "green",
+    );
+
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface.lines[0]
+        ?.spans,
+    ).toEqual(richSpans);
+
+    await kernel.dispose();
+  });
+
+  it("preserves shell integration semantic marks from live pane surface updates", async () => {
+    const sessionId = "live-semantic-session";
+    const paneId = "live-semantic-pane";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "ready",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription("live-semantic-pane-sub");
+    const semanticMarks: ScreenLineSemanticMark[] = [
+      {
+        kind: "command_finished",
+        col: 0,
+        exit_code: 127,
+      },
+    ];
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    subscription.push(
+      createRichFullReplaceDelta(paneId, 1n, 2n, [
+        { text: "", spans: [], semantic_marks: semanticMarks },
+      ]),
+    );
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.surface.lines[0]
+          ?.semantic_marks?.[0]?.kind === "command_finished",
+    );
+
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface.lines[0]
+        ?.semantic_marks,
+    ).toEqual(semanticMarks);
+
+    await kernel.dispose();
+  });
+
+  it("applies working directory URI metadata from live pane deltas", async () => {
+    const sessionId = "live-working-directory-session";
+    const paneId = "live-working-directory-pane";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "ready",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription("live-working-directory-pane-sub");
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    subscription.push({
+      kind: "screen_delta",
+      pane_id: paneId,
+      from_sequence: 1n,
+      to_sequence: 2n,
+      rows: 24,
+      cols: 80,
+      source: "native_emulator",
+      patch: {
+        title_changed: false,
+        title: "Live shell",
+        working_directory_uri_changed: true,
+        working_directory_uri: "file://localhost/tmp/project",
+        user_variables_changed: false,
+        user_variables: null,
+        cursor_changed: false,
+        cursor: null,
+        palette_changed: false,
+        palette: null,
+        bell_count_changed: false,
+        bell_count: null,
+        progress_changed: false,
+        progress: null,
+        line_updates: [],
+      },
+      full_replace: null,
+    });
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.surface
+          .working_directory_uri === "file://localhost/tmp/project",
+    );
+
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface
+        .working_directory_uri,
+    ).toBe("file://localhost/tmp/project");
+
+    await kernel.dispose();
+  });
+
+  it("applies terminal user variables from live pane deltas", async () => {
+    const sessionId = "live-user-variables-session";
+    const paneId = "live-user-variables-pane";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "ready",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription("live-user-variables-pane-sub");
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    subscription.push({
+      kind: "screen_delta",
+      pane_id: paneId,
+      from_sequence: 1n,
+      to_sequence: 2n,
+      rows: 24,
+      cols: 80,
+      source: "native_emulator",
+      patch: {
+        title_changed: false,
+        title: "Live shell",
+        working_directory_uri_changed: false,
+        working_directory_uri: null,
+        user_variables_changed: true,
+        user_variables: {
+          WEZTERM_PROG: "cargo test",
+          WEZTERM_USER: "belief",
+        },
+        cursor_changed: false,
+        cursor: null,
+        palette_changed: false,
+        palette: null,
+        bell_count_changed: false,
+        bell_count: null,
+        progress_changed: false,
+        progress: null,
+        line_updates: [],
+      },
+      full_replace: null,
+    });
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.surface
+          .user_variables?.WEZTERM_PROG === "cargo test",
+    );
+
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface.user_variables,
+    ).toEqual({
+      WEZTERM_PROG: "cargo test",
+      WEZTERM_USER: "belief",
+    });
+
+    subscription.push({
+      kind: "screen_delta",
+      pane_id: paneId,
+      from_sequence: 2n,
+      to_sequence: 3n,
+      rows: 24,
+      cols: 80,
+      source: "native_emulator",
+      patch: {
+        title_changed: false,
+        title: "Live shell",
+        working_directory_uri_changed: false,
+        working_directory_uri: null,
+        user_variables_changed: true,
+        user_variables: null,
+        cursor_changed: false,
+        cursor: null,
+        palette_changed: false,
+        palette: null,
+        bell_count_changed: false,
+        bell_count: null,
+        progress_changed: false,
+        progress: null,
+        line_updates: [],
+      },
+      full_replace: null,
+    });
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.sequence === 3n,
+    );
+
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface.user_variables,
+    ).toBeUndefined();
+
+    await kernel.dispose();
+  });
+
+  it("preserves terminal progress metadata from live pane deltas", async () => {
+    const sessionId = "live-progress-session";
+    const paneId = "live-progress-pane";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "ready",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription("live-progress-pane-sub");
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    subscription.push({
+      kind: "screen_delta",
+      pane_id: paneId,
+      from_sequence: 1n,
+      to_sequence: 2n,
+      rows: 24,
+      cols: 80,
+      source: "native_emulator",
+      patch: {
+        title_changed: false,
+        title: "Live shell",
+        working_directory_uri_changed: false,
+        working_directory_uri: null,
+        user_variables_changed: false,
+        user_variables: null,
+        cursor_changed: false,
+        cursor: null,
+        palette_changed: false,
+        palette: null,
+        bell_count_changed: false,
+        bell_count: null,
+        progress_changed: true,
+        progress: { state: "normal", value: 73 },
+        line_updates: [],
+      },
+      full_replace: null,
+    });
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.surface.progress
+          ?.value === 73,
+    );
+
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface.progress,
+    ).toEqual({ state: "normal", value: 73 });
+
+    subscription.push({
+      kind: "screen_delta",
+      pane_id: paneId,
+      from_sequence: 2n,
+      to_sequence: 3n,
+      rows: 24,
+      cols: 80,
+      source: "native_emulator",
+      patch: {
+        title_changed: false,
+        title: "Live shell",
+        working_directory_uri_changed: false,
+        working_directory_uri: null,
+        user_variables_changed: false,
+        user_variables: null,
+        cursor_changed: false,
+        cursor: null,
+        palette_changed: false,
+        palette: null,
+        bell_count_changed: false,
+        bell_count: null,
+        progress_changed: true,
+        progress: null,
+        line_updates: [],
+      },
+      full_replace: null,
+    });
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.sequence === 3n,
+    );
+
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface.progress,
+    ).toBeUndefined();
+
+    await kernel.dispose();
+  });
+
+  it("applies terminal palette and bell metadata from live pane deltas", async () => {
+    const sessionId = "live-palette-bell-session";
+    const paneId = "live-palette-bell-pane";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "ready",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription("live-palette-bell-pane-sub");
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    subscription.push({
+      kind: "screen_delta",
+      pane_id: paneId,
+      from_sequence: 1n,
+      to_sequence: 2n,
+      rows: 24,
+      cols: 80,
+      source: "native_emulator",
+      patch: {
+        title_changed: false,
+        title: "Live shell",
+        working_directory_uri_changed: false,
+        working_directory_uri: null,
+        user_variables_changed: false,
+        user_variables: null,
+        cursor_changed: false,
+        cursor: null,
+        palette_changed: true,
+        palette: {
+          foreground: { kind: "rgb", r: 1, g: 2, b: 3 },
+          background: { kind: "rgb", r: 4, g: 5, b: 6 },
+          cursor: { kind: "rgb", r: 7, g: 8, b: 9 },
+        },
+        bell_count_changed: true,
+        bell_count: 3n,
+        progress_changed: false,
+        progress: null,
+        line_updates: [],
+      },
+      full_replace: null,
+    });
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.surface.palette
+          ?.foreground?.kind === "rgb",
+    );
+
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface.palette,
+    ).toEqual({
+      foreground: { kind: "rgb", r: 1, g: 2, b: 3 },
+      background: { kind: "rgb", r: 4, g: 5, b: 6 },
+      cursor: { kind: "rgb", r: 7, g: 8, b: 9 },
+    });
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface.bell_count,
+    ).toBe(3n);
+
+    subscription.push({
+      kind: "screen_delta",
+      pane_id: paneId,
+      from_sequence: 2n,
+      to_sequence: 3n,
+      rows: 24,
+      cols: 80,
+      source: "native_emulator",
+      patch: {
+        title_changed: false,
+        title: "Live shell",
+        working_directory_uri_changed: false,
+        working_directory_uri: null,
+        user_variables_changed: false,
+        user_variables: null,
+        cursor_changed: false,
+        cursor: null,
+        palette_changed: true,
+        palette: null,
+        bell_count_changed: true,
+        bell_count: null,
+        progress_changed: false,
+        progress: null,
+        line_updates: [],
+      },
+      full_replace: null,
+    });
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.sequence === 3n,
+    );
+
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface.palette,
+    ).toBeUndefined();
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.surface.bell_count,
+    ).toBeUndefined();
+
+    await kernel.dispose();
+  });
+
+  it("preserves alternate screen buffer kind from live pane deltas", async () => {
+    const sessionId = "live-alt-screen-session";
+    const paneId = "live-alt-screen-pane";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "ready",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription("live-alt-pane-sub");
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+      } as WorkspaceTransportClient,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    subscription.push(
+      createFullReplaceDelta(paneId, 1n, 2n, "vim screen", "alternate"),
+    );
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.buffer_kind
+        === "alternate",
+    );
+
+    expect(kernel.getSnapshot().attachedSession?.focused_screen.buffer_kind).toBe(
+      "alternate",
+    );
+
+    subscription.push(createFullReplaceDelta(paneId, 2n, 3n, "shell"));
+
+    await waitUntil(
+      () =>
+        kernel.getSnapshot().attachedSession?.focused_screen.sequence === 3n,
+    );
+
+    expect(
+      kernel.getSnapshot().attachedSession?.focused_screen.buffer_kind,
+    ).toBeUndefined();
+
+    await kernel.dispose();
+  });
+
   it("hydrates pane history from persistence when attaching a session", async () => {
     const sessionId = "history-session-1";
     const paneId = "history-pane-1";
@@ -652,6 +1195,498 @@ describe("createWorkspaceKernel live session subscriptions", () => {
     expect(kernel.getSnapshot().historicalPanes?.[paneId]?.lines).not.toContain(
       "latest snapshot fallback",
     );
+
+    await kernel.dispose();
+  });
+
+  it("hydrates rich rendered snapshot fallback from v2 pane history", async () => {
+    const sessionId = "history-session-rich-snapshot";
+    const paneId = "history-pane-rich-snapshot";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const richStyle = {
+      foreground: { kind: "named", name: "red" },
+      background: null,
+      underline_color: null,
+      bold: true,
+      dim: false,
+      italic: false,
+      blink: true,
+      underline: null,
+      overline: true,
+      border: "framed",
+      inverse: false,
+      hidden: false,
+      strikethrough: false,
+      hyperlink: null,
+    } satisfies ScreenLineSpan["style"];
+    const richSpans: ScreenLineSpan[] = [
+      {
+        text: "red",
+        style: richStyle,
+      },
+      {
+        text: "   ",
+        style: {
+          foreground: null,
+          background: null,
+          underline_color: null,
+          bold: false,
+          dim: false,
+          italic: false,
+          blink: false,
+          underline: null,
+          overline: false,
+          border: null,
+          inverse: false,
+          hidden: false,
+          strikethrough: false,
+          hyperlink: null,
+        },
+      },
+    ];
+    const subscription = new TestWorkspaceSubscription(
+      "history-rich-snapshot-subscription",
+    );
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async () =>
+          createPaneHistory(sessionId, paneId, "", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: false,
+            includeSegment: false,
+            latestScreenLine: { text: "red   ", spans: richSpans },
+            nextEventSeq: null,
+          }),
+      } as WorkspaceTransportClient,
+      now: () => 7_600,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(
+      () => kernel.getSnapshot().historicalPanes?.[paneId]?.lines[0] === "red",
+    );
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["red"],
+      richLines: [
+        {
+          text: "red",
+          spans: [{ text: "red", style: richStyle }],
+        },
+      ],
+      replayStrategy: "raw_vt_stream",
+    });
+
+    await kernel.dispose();
+  });
+
+  it("does not store plain span-only rendered snapshot fallback as rich history", async () => {
+    const sessionId = "history-session-plain-span-snapshot";
+    const paneId = "history-pane-plain-span-snapshot";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const plainStyle = {
+      foreground: null,
+      background: null,
+      underline_color: null,
+      bold: false,
+      dim: false,
+      italic: false,
+      blink: false,
+      underline: null,
+      overline: false,
+      border: null,
+      inverse: false,
+      hidden: false,
+      strikethrough: false,
+      hyperlink: null,
+    } satisfies ScreenLineSpan["style"];
+    const subscription = new TestWorkspaceSubscription(
+      "history-plain-span-snapshot-subscription",
+    );
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async () =>
+          createPaneHistory(sessionId, paneId, "", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: false,
+            includeSegment: false,
+            latestScreenLine: {
+              text: "plain",
+              spans: [
+                { text: "pla", style: plainStyle },
+                { text: "in", style: plainStyle },
+              ],
+            },
+            nextEventSeq: null,
+          }),
+      } as WorkspaceTransportClient,
+      now: () => 7_650,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(
+      () => kernel.getSnapshot().historicalPanes?.[paneId]?.lines[0] === "plain",
+    );
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["plain"],
+      replayStrategy: "raw_vt_stream",
+    });
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]?.richLines).toBeUndefined();
+
+    await kernel.dispose();
+  });
+
+  it("hydrates side-effect-only rendered snapshot fallback from v2 pane history", async () => {
+    const sessionId = "history-session-side-effect-snapshot";
+    const paneId = "history-pane-side-effect-snapshot";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription(
+      "history-side-effect-snapshot-subscription",
+    );
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async () =>
+          createPaneHistory(sessionId, paneId, "", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: false,
+            includeSegment: false,
+            latestScreenLine: {
+              text: "",
+              spans: [],
+              side_effects: [
+                {
+                  kind: "desktop_notification",
+                  disposition: "blocked",
+                  target: "desktop_notification",
+                  message: "Build finished",
+                },
+              ],
+            },
+            nextEventSeq: null,
+          }),
+      } as WorkspaceTransportClient,
+      now: () => 7_700,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(
+      () => kernel.getSnapshot().historicalPanes?.[paneId]?.richLines?.length === 1,
+    );
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: [""],
+      richLines: [
+        {
+          text: "",
+          spans: [],
+          side_effects: [
+            {
+              kind: "desktop_notification",
+              disposition: "blocked",
+              target: "desktop_notification",
+              message: "Build finished",
+            },
+          ],
+        },
+      ],
+      replayStrategy: "raw_vt_stream",
+    });
+
+    await kernel.dispose();
+  });
+
+  it("hydrates media-only rendered snapshot fallback from v2 pane history", async () => {
+    const sessionId = "history-session-media-snapshot";
+    const paneId = "history-pane-media-snapshot";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription("history-media-snapshot-subscription");
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async () =>
+          createPaneHistory(sessionId, paneId, "", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: false,
+            includeSegment: false,
+            latestScreenLine: {
+              text: "",
+              spans: [],
+              media: [
+                {
+                  kind: "iterm2_image",
+                  name: "tiny.png",
+                  byte_size: 68,
+                  width: "2",
+                  height: "1",
+                  preserve_aspect_ratio: true,
+                  inline: true,
+                  mime_type: "image/png",
+                  data_base64: "iVBORw0KGgo=",
+                },
+              ],
+            },
+            nextEventSeq: null,
+          }),
+      } as WorkspaceTransportClient,
+      now: () => 7_700,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(
+      () => kernel.getSnapshot().historicalPanes?.[paneId]?.richLines?.length === 1,
+    );
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: [""],
+      richLines: [
+        {
+          text: "",
+          spans: [],
+          media: [
+            {
+              kind: "iterm2_image",
+              name: "tiny.png",
+              byte_size: 68,
+              width: "2",
+              height: "1",
+              preserve_aspect_ratio: true,
+              inline: true,
+              mime_type: "image/png",
+              data_base64: "iVBORw0KGgo=",
+            },
+          ],
+        },
+      ],
+      replayStrategy: "raw_vt_stream",
+    });
+
+    await kernel.dispose();
+  });
+
+  it("hydrates semantic-only rendered snapshot fallback from v2 pane history", async () => {
+    const sessionId = "history-session-semantic-snapshot";
+    const paneId = "history-pane-semantic-snapshot";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const subscription = new TestWorkspaceSubscription(
+      "history-semantic-snapshot-subscription",
+    );
+    const semanticMarks: ScreenLineSemanticMark[] = [
+      {
+        kind: "command_finished",
+        col: 0,
+        exit_code: 2,
+      },
+    ];
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async () =>
+          createPaneHistory(sessionId, paneId, "", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: false,
+            includeSegment: false,
+            latestScreenLine: {
+              text: "",
+              spans: [],
+              semantic_marks: semanticMarks,
+            },
+            nextEventSeq: null,
+          }),
+      } as WorkspaceTransportClient,
+      now: () => 7_700,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(
+      () => kernel.getSnapshot().historicalPanes?.[paneId]?.richLines?.length === 1,
+    );
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: [""],
+      richLines: [
+        {
+          text: "",
+          spans: [],
+          semantic_marks: semanticMarks,
+        },
+      ],
+      replayStrategy: "raw_vt_stream",
+    });
+
+    await kernel.dispose();
+  });
+
+  it("hydrates surface palette from rendered snapshot fallback", async () => {
+    const sessionId = "history-session-palette-snapshot";
+    const paneId = "history-pane-palette-snapshot";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const surfacePalette: ScreenSurfacePalette = {
+      foreground: { kind: "rgb", r: 1, g: 2, b: 3 },
+      background: { kind: "rgb", r: 4, g: 5, b: 6 },
+      cursor: { kind: "rgb", r: 7, g: 8, b: 9 },
+    };
+    const subscription = new TestWorkspaceSubscription(
+      "history-palette-snapshot-subscription",
+    );
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async () =>
+          createPaneHistory(sessionId, paneId, "", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: false,
+            includeSegment: false,
+            latestScreenText: "plain",
+            latestScreenPalette: surfacePalette,
+            nextEventSeq: null,
+          }),
+      } as WorkspaceTransportClient,
+      now: () => 7_650,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(
+      () => kernel.getSnapshot().historicalPanes?.[paneId]?.lines[0] === "plain",
+    );
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["plain"],
+      surfacePalette,
+      replayStrategy: "raw_vt_stream",
+    });
+
+    await kernel.dispose();
+  });
+
+  it("keeps rich snapshot lines when they match raw v2 pane history text", async () => {
+    const sessionId = "history-session-rich-raw-aligned";
+    const paneId = "history-pane-rich-raw-aligned";
+    const topology = createLiveTopology(sessionId, paneId);
+    const attachedSession = createAttachedSession(
+      sessionId,
+      paneId,
+      topology,
+      "live prompt",
+      1n,
+    );
+    const richStyle = {
+      foreground: { kind: "rgb", r: 12, g: 34, b: 56 },
+      background: null,
+      underline_color: null,
+      bold: true,
+      dim: false,
+      italic: false,
+      blink: false,
+      underline: null,
+      overline: false,
+      border: null,
+      inverse: false,
+      hidden: false,
+      strikethrough: false,
+      hyperlink: null,
+    } satisfies ScreenLineSpan["style"];
+    const richSpans: ScreenLineSpan[] = [{ text: "red", style: richStyle }];
+    const subscription = new TestWorkspaceSubscription(
+      "history-rich-raw-aligned-subscription",
+    );
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        attachSession: async () => structuredClone(attachedSession),
+        openSubscription: async () => subscription,
+        getPaneHistory: async () =>
+          createPaneHistory(sessionId, paneId, "red\r\n", {
+            fromEventSeq: 1n,
+            eventSeqLow: 1n,
+            eventSeqHigh: 1n,
+            hasMoreSegments: false,
+            latestScreenLine: { text: "red", spans: richSpans },
+            nextEventSeq: null,
+          }),
+      } as WorkspaceTransportClient,
+      now: () => 7_700,
+    });
+
+    await kernel.commands.attachSession(sessionId);
+    await waitUntil(
+      () => kernel.getSnapshot().historicalPanes?.[paneId]?.lines[0] === "red",
+    );
+
+    expect(kernel.getSnapshot().historicalPanes?.[paneId]).toMatchObject({
+      lines: ["red"],
+      richLines: [{ text: "red", spans: richSpans }],
+      replayStrategy: "raw_vt_stream",
+    });
 
     await kernel.dispose();
   });
@@ -956,6 +1991,79 @@ describe("createWorkspaceKernel saved session maintenance", () => {
       lines: ["historical output"],
       replayStrategy: "rendered_snapshot",
       restoreGuaranteeLevel: "visual_snapshot_only",
+    });
+
+    await kernel.dispose();
+  });
+
+  it("attaches restored sessions with saved rich visible history", async () => {
+    const savedRecord = createSavedSessionRecord(
+      "saved-rich-history",
+      "saved-pane-1",
+      "red",
+    );
+    const richSpans: ScreenLineSpan[] = [
+      {
+        text: "red",
+        style: {
+          foreground: { kind: "named", name: "red" },
+          background: null,
+          underline_color: null,
+          bold: true,
+          dim: false,
+          italic: false,
+          blink: false,
+          underline: null,
+          overline: false,
+          border: null,
+          inverse: false,
+          hidden: false,
+          strikethrough: false,
+          hyperlink: null,
+        },
+      },
+    ];
+    savedRecord.screens[0]!.surface.lines = [{ text: "red", spans: richSpans, wrapped: true }];
+    const restoredSessionId = "restored-rich-history";
+    const livePaneId = "live-pane-1";
+    const liveTopology = createLiveTopology(restoredSessionId, livePaneId);
+    const attachedSession = createAttachedSession(
+      restoredSessionId,
+      livePaneId,
+      liveTopology,
+      "new live prompt",
+      1n,
+    );
+
+    const kernel = createWorkspaceKernel({
+      transport: {
+        ...createUnusedTransport(),
+        listSavedSessions: async () => [
+          savedSessionRecordToSummary(savedRecord),
+        ],
+        getSavedSession: async () => savedRecord,
+        restoreSavedSession: async () => ({
+          saved_session_id: savedRecord.session_id,
+          manifest: savedRecord.manifest,
+          compatibility: savedRecord.compatibility,
+          session: {
+            session_id: restoredSessionId,
+            route: savedRecord.route,
+            title: savedRecord.title,
+          },
+          restore_semantics: savedRecord.restore_semantics,
+        }),
+        attachSession: async () => attachedSession,
+      } as WorkspaceTransportClient,
+      now: () => 5_000,
+    });
+
+    await kernel.commands.refreshSavedSessions();
+    await kernel.commands.restoreSavedSession(savedRecord.session_id);
+
+    expect(kernel.getSnapshot().historicalPanes?.[livePaneId]).toMatchObject({
+      lines: ["red"],
+      richLines: [{ text: "red", spans: richSpans, wrapped: true }],
     });
 
     await kernel.dispose();
@@ -1381,6 +2489,8 @@ interface CreatePaneHistoryOptions {
   readonly eventSeqHigh?: bigint;
   readonly hasMoreSegments?: boolean;
   readonly includeSegment?: boolean;
+  readonly latestScreenPalette?: ScreenSurfacePalette;
+  readonly latestScreenLine?: ScreenLine;
   readonly latestScreenText?: string;
   readonly nextEventSeq?: bigint | null;
   readonly segmentId?: string;
@@ -1418,7 +2528,7 @@ function createPaneHistory(
       ],
     },
     latest_screen_snapshot:
-      options.latestScreenText == null
+      options.latestScreenText == null && options.latestScreenLine == null
         ? null
         : {
             id: "snapshot-1",
@@ -1432,7 +2542,15 @@ function createPaneHistory(
             high_water_byte_seq: null,
             screen_json: JSON.stringify({
               surface: {
-                lines: [{ text: options.latestScreenText }],
+                ...(options.latestScreenPalette
+                  ? { palette: options.latestScreenPalette }
+                  : {}),
+                lines: [
+                  options.latestScreenLine ?? {
+                    text: options.latestScreenText ?? "",
+                    spans: [],
+                  },
+                ],
               },
             }),
             parser_version: "test-parser",
@@ -1469,6 +2587,7 @@ function createFullReplaceDelta(
   fromSequence: bigint,
   toSequence: bigint,
   line: string,
+  bufferKind?: ScreenDelta["buffer_kind"],
 ): Extract<SubscriptionEvent, { kind: "screen_delta" }> {
   const screen = createLiveScreen(paneId, line, toSequence);
   return {
@@ -1479,8 +2598,47 @@ function createFullReplaceDelta(
     rows: screen.rows,
     cols: screen.cols,
     source: screen.source,
+    ...(bufferKind ? { buffer_kind: bufferKind } : {}),
     patch: null,
     full_replace: screen.surface,
+  } satisfies Extract<SubscriptionEvent, { kind: "screen_delta" }>;
+}
+
+function createRichFullReplaceDelta(
+  paneId: PaneId,
+  fromSequence: bigint,
+  toSequence: bigint,
+  lines: Array<{
+    readonly text: string;
+    readonly spans: ScreenLineSpan[];
+    readonly semantic_marks?: ScreenLineSemanticMark[];
+    readonly wrapped?: boolean;
+  }>,
+): Extract<SubscriptionEvent, { kind: "screen_delta" }> {
+  return {
+    kind: "screen_delta",
+    pane_id: paneId,
+    from_sequence: fromSequence,
+    to_sequence: toSequence,
+    rows: 24,
+    cols: 80,
+    source: "native_emulator",
+    patch: null,
+    full_replace: {
+      title: "Live shell",
+      cursor: {
+        row: 0,
+        col: lines.at(-1)?.text.length ?? 0,
+      },
+      lines: lines.map((line) => ({
+        text: line.text,
+        spans: line.spans,
+        ...(line.semantic_marks && line.semantic_marks.length > 0
+          ? { semantic_marks: line.semantic_marks }
+          : {}),
+        ...(line.wrapped === true ? { wrapped: true } : {}),
+      })),
+    },
   } satisfies Extract<SubscriptionEvent, { kind: "screen_delta" }>;
 }
 
@@ -1555,6 +2713,7 @@ function createCapabilities(backend: BackendKind): BackendCapabilitiesInfo {
       rendered_viewport_stream: true,
       rendered_viewport_snapshot: true,
       rendered_scrollback_snapshot: false,
+      rich_screen_surface: false,
       layout_dump: true,
       layout_override: true,
       read_only_client_mode: false,

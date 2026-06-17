@@ -9,6 +9,7 @@ import type {
   TerminalPaneTreeNode,
   TerminalSavedSessionSummary,
   TerminalScreenSnapshot,
+  TerminalScreenSurface,
   TerminalSessionOrigin,
   TerminalSessionState,
   TerminalSessionSummary,
@@ -371,19 +372,142 @@ function toTerminalScreenSnapshot(
     rows: screen.rows,
     cols: screen.cols,
     source: screen.source,
+    ...(screen.buffer_kind ? { buffer_kind: screen.buffer_kind } : {}),
     surface: {
       title: screen.surface.title,
+      ...(screen.surface.working_directory_uri
+        ? { working_directory_uri: screen.surface.working_directory_uri }
+        : {}),
+      ...screenUserVariables(screen.surface.user_variables),
       cursor: screen.surface.cursor
         ? {
             row: screen.surface.cursor.row,
             col: screen.surface.cursor.col,
+            ...(screen.surface.cursor.shape ? { shape: screen.surface.cursor.shape } : {}),
+            ...(screen.surface.cursor.blinking ? { blinking: true } : {}),
           }
         : null,
+      ...(screen.surface.palette
+        ? {
+            palette: {
+              ...(screen.surface.palette.foreground
+                ? { foreground: screen.surface.palette.foreground }
+                : {}),
+              ...(screen.surface.palette.background
+                ? { background: screen.surface.palette.background }
+                : {}),
+              ...(screen.surface.palette.cursor ? { cursor: screen.surface.palette.cursor } : {}),
+            },
+          }
+        : {}),
+      ...screenBellCount(screen.surface.bell_count),
+      ...screenProgress(screen.surface.progress),
       lines: screen.surface.lines.map((line: TerminalPlatformSdk.NodeScreenLine) => ({
         text: line.text,
+        ...(line.wrapped ? { wrapped: true } : {}),
+        ...(line.media && line.media.length > 0
+          ? {
+              media: line.media.map((media: TerminalPlatformSdk.NodeScreenLineMedia) => ({
+                kind: media.kind,
+                ...(media.name ? { name: media.name } : {}),
+                ...(typeof media.byte_size === "number" ? { byte_size: media.byte_size } : {}),
+                ...(media.width ? { width: media.width } : {}),
+                ...(media.height ? { height: media.height } : {}),
+                ...(typeof media.preserve_aspect_ratio === "boolean"
+                  ? { preserve_aspect_ratio: media.preserve_aspect_ratio }
+                  : {}),
+                ...(media.inline ? { inline: true } : {}),
+                ...(media.mime_type ? { mime_type: media.mime_type } : {}),
+                ...(media.data_base64 ? { data_base64: media.data_base64 } : {}),
+                ...(media.truncated ? { truncated: true } : {}),
+              })),
+            }
+          : {}),
+        ...(line.side_effects && line.side_effects.length > 0
+          ? {
+              side_effects: line.side_effects.map(
+                (sideEffect: TerminalPlatformSdk.NodeScreenLineSideEffect) => ({
+                  kind: sideEffect.kind,
+                  disposition: sideEffect.disposition,
+                  ...(sideEffect.target ? { target: sideEffect.target } : {}),
+                  ...(sideEffect.message ? { message: sideEffect.message } : {}),
+                }),
+              ),
+            }
+          : {}),
+        ...(line.semantic_marks && line.semantic_marks.length > 0
+          ? {
+              semantic_marks: line.semantic_marks.map(
+                (mark: TerminalPlatformSdk.NodeScreenLineSemanticMark) => ({
+                  kind: mark.kind,
+                  ...(typeof mark.col === "number" ? { col: mark.col } : {}),
+                  ...(typeof mark.exit_code === "number"
+                    ? { exit_code: mark.exit_code }
+                    : {}),
+                }),
+              ),
+            }
+          : {}),
+        ...(line.spans.length > 0
+          ? {
+              spans: line.spans.map((span: TerminalPlatformSdk.NodeScreenLineSpan) => ({
+                text: span.text,
+                style: span.style,
+              })),
+            }
+          : {}),
       })),
     },
   };
+}
+
+function screenUserVariables(
+  value: Record<string, string> | null | undefined,
+): { user_variables: Record<string, string> } | Record<string, never> {
+  if (!value || Object.keys(value).length === 0) {
+    return {};
+  }
+  return { user_variables: { ...value } };
+}
+
+function screenProgress(
+  value: TerminalPlatformSdk.NodeScreenProgress | null | undefined,
+): { progress: NonNullable<TerminalScreenSurface["progress"]> } | Record<string, never> {
+  if (!value || value.state === "inactive") {
+    return {};
+  }
+
+  const progressValue =
+    typeof value.value === "number" && Number.isFinite(value.value)
+      ? Math.max(0, Math.min(100, Math.trunc(value.value)))
+      : undefined;
+
+  return {
+    progress: {
+      state: value.state,
+      ...(typeof progressValue === "number" ? { value: progressValue } : {}),
+    },
+  };
+}
+
+function screenBellCount(
+  value: bigint | number | null | undefined,
+): { bell_count: number } | Record<string, never> {
+  const bellCount = normalizeTerminalBellCount(value);
+  return bellCount > 0 ? { bell_count: bellCount } : {};
+}
+
+function normalizeTerminalBellCount(value: bigint | number | null | undefined): number {
+  if (typeof value === "bigint") {
+    if (value <= 0n) {
+      return 0;
+    }
+    return Number(value > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : value);
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.trunc(value));
 }
 
 function toSdkPaneTreeNode(

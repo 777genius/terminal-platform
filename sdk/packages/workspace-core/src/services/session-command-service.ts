@@ -13,7 +13,15 @@ import type {
   PruneSavedSessionsResult,
   SavedSessionRecord,
   ScreenDelta,
+  ScreenColor,
+  ScreenLine,
+  ScreenLineMedia,
+  ScreenLineSemanticMark,
+  ScreenLineSideEffect,
+  ScreenLineSpan,
   ScreenSnapshot,
+  ScreenSurfacePalette,
+  ScreenTextStyle,
   SessionId,
   SessionRoute,
   SubscriptionEvent,
@@ -803,6 +811,7 @@ function applyScreenDelta(snapshot: ScreenSnapshot | null, delta: ScreenDelta): 
       rows: delta.rows,
       cols: delta.cols,
       source: delta.source,
+      ...(delta.buffer_kind ? { buffer_kind: delta.buffer_kind } : {}),
       surface: structuredClone(delta.full_replace),
     };
   }
@@ -828,6 +837,11 @@ function applyScreenDelta(snapshot: ScreenSnapshot | null, delta: ScreenDelta): 
   next.rows = delta.rows;
   next.cols = delta.cols;
   next.source = delta.source;
+  if (delta.buffer_kind) {
+    next.buffer_kind = delta.buffer_kind;
+  } else {
+    delete next.buffer_kind;
+  }
 
   if (!delta.patch) {
     return next;
@@ -837,13 +851,53 @@ function applyScreenDelta(snapshot: ScreenSnapshot | null, delta: ScreenDelta): 
     next.surface.title = delta.patch.title ?? null;
   }
 
+  if (delta.patch.working_directory_uri_changed) {
+    if (delta.patch.working_directory_uri) {
+      next.surface.working_directory_uri = delta.patch.working_directory_uri;
+    } else {
+      delete next.surface.working_directory_uri;
+    }
+  }
+
+  if (delta.patch.user_variables_changed) {
+    if (delta.patch.user_variables && Object.keys(delta.patch.user_variables).length > 0) {
+      next.surface.user_variables = structuredClone(delta.patch.user_variables);
+    } else {
+      delete next.surface.user_variables;
+    }
+  }
+
   if (delta.patch.cursor_changed) {
     next.surface.cursor = structuredClone(delta.patch.cursor);
   }
 
+  if (delta.patch.palette_changed) {
+    if (delta.patch.palette) {
+      next.surface.palette = structuredClone(delta.patch.palette);
+    } else {
+      delete next.surface.palette;
+    }
+  }
+
+  if (delta.patch.bell_count_changed) {
+    if (delta.patch.bell_count) {
+      next.surface.bell_count = delta.patch.bell_count;
+    } else {
+      delete next.surface.bell_count;
+    }
+  }
+
+  if (delta.patch.progress_changed) {
+    if (delta.patch.progress) {
+      next.surface.progress = structuredClone(delta.patch.progress);
+    } else {
+      delete next.surface.progress;
+    }
+  }
+
   for (const update of delta.patch.line_updates ?? []) {
     while (next.surface.lines.length <= update.row) {
-      next.surface.lines.push({ text: "" });
+      next.surface.lines.push({ text: "", spans: [] });
     }
     next.surface.lines[update.row] = structuredClone(update.line);
   }
@@ -948,9 +1002,9 @@ function buildRestoredHistoricalPanes(
       continue;
     }
 
-    const lines = savedScreen.surface.lines
-      .map((line) => line.text)
-      .filter((line, index, source) => line.length > 0 || index < source.length - 1);
+    const richLines = normalizeHistoryScreenLines(savedScreen.surface.lines);
+    const lines = richLines.map((line) => line.text);
+    const surfacePalette = normalizeScreenSurfacePalette(savedScreen.surface.palette);
     if (lines.length === 0) {
       continue;
     }
@@ -964,6 +1018,8 @@ function buildRestoredHistoricalPanes(
       replayStrategy: "rendered_snapshot",
       restoreGuaranteeLevel: "visual_snapshot_only",
       lines,
+      ...(hasRichScreenLineSpans(richLines) ? { richLines } : {}),
+      ...(surfacePalette ? { surfacePalette } : {}),
       capturedAtMs: saved.saved_at_ms || BigInt(Math.trunc(loadedAtMs)),
       hasGaps: false,
       hasMoreSegments: false,
@@ -999,13 +1055,40 @@ function buildHydratedHistoricalPane(
     && !hasJournalLines
     && !history.has_more_segments
     && Boolean(history.latest_screen_snapshot);
-  const snapshotLines = useSnapshotFallback && history.latest_screen_snapshot
+  const snapshotOutput =
+    includeSnapshotFallback
+    && !history.has_more_segments
+    && history.latest_screen_snapshot
     ? linesFromScreenSnapshotJson(history.latest_screen_snapshot.screen_json)
-    : [];
-  const lines = normalizeHistoryLines([
-    ...(segmentLines.length > 0 ? segmentLines : snapshotLines),
-    ...gapLines,
-  ]);
+    : { lines: [] };
+  const snapshotRichLines =
+    snapshotOutput.richLines
+    && snapshotOutput.richLines.length > 0
+      ? normalizeHistoryRichLines([
+          ...snapshotOutput.richLines,
+          ...gapLines.map((line) => createPlainHistoryScreenLine(line)),
+        ])
+      : undefined;
+  const lines =
+    segmentLines.length === 0 && snapshotRichLines
+      ? snapshotRichLines.map((line) => line.text)
+      : normalizeHistoryLines([
+          ...(segmentLines.length > 0 ? segmentLines : snapshotOutput.lines),
+          ...gapLines,
+        ]);
+  const richLines =
+    snapshotRichLines && doHistoryRichLinesMatchText(snapshotRichLines, lines)
+      ? snapshotRichLines
+      : undefined;
+  const alignedRichLines =
+    richLines && doHistoryRichLinesMatchText(richLines, lines)
+      ? richLines
+      : undefined;
+  const surfacePalette =
+    (useSnapshotFallback || Boolean(alignedRichLines))
+    && snapshotOutput.surfacePalette
+      ? snapshotOutput.surfacePalette
+      : undefined;
 
   if (lines.length === 0 && !history.has_more_segments && options.allowEmptyPage !== true) {
     return null;
@@ -1035,6 +1118,10 @@ function buildHydratedHistoricalPane(
     replayStrategy: history.replay_strategy,
     restoreGuaranteeLevel: history.restore_plan.restore_guarantee_level,
     lines,
+    ...(alignedRichLines && hasRichScreenLineSpans(alignedRichLines)
+      ? { richLines: alignedRichLines }
+      : {}),
+    ...(surfacePalette ? { surfacePalette } : {}),
     capturedAtMs,
     hasGaps: history.gaps.length > 0,
     hasMoreSegments: history.has_more_segments,
@@ -1053,12 +1140,16 @@ function mergeHistoricalPanePage(
   existing: WorkspaceHistoricalPaneSnapshot,
   nextPage: WorkspaceHistoricalPaneSnapshot,
 ): WorkspaceHistoricalPaneSnapshot {
+  const { richLines: _existingRichLines, ...existingWithoutRichLines } = existing;
+  const lines = mergeHistoricalPaneLines(existing, nextPage);
+  const richLines = mergeHistoricalPaneRichLines(existing, nextPage, lines);
   return {
-    ...existing,
+    ...existingWithoutRichLines,
     source: nextPage.source,
     replayStrategy: nextPage.replayStrategy,
     restoreGuaranteeLevel: nextPage.restoreGuaranteeLevel,
-    lines: mergeHistoricalPaneLines(existing, nextPage),
+    lines,
+    ...(richLines ? { richLines } : {}),
     capturedAtMs: nextPage.capturedAtMs > existing.capturedAtMs
       ? nextPage.capturedAtMs
       : existing.capturedAtMs,
@@ -1105,6 +1196,12 @@ interface HistorySegmentText {
   readonly endsWithLineBreak?: boolean;
 }
 
+interface HistorySnapshotLines {
+  readonly lines: string[];
+  readonly richLines?: ScreenLine[];
+  readonly surfacePalette?: ScreenSurfacePalette;
+}
+
 function linesFromHistorySegments(segments: PaneHistory["segments"]): HistorySegmentText {
   if (segments.length === 0) {
     return { lines: [] };
@@ -1119,29 +1216,527 @@ function linesFromHistorySegments(segments: PaneHistory["segments"]): HistorySeg
   };
 }
 
-function linesFromScreenSnapshotJson(screenJson: string): string[] {
+function linesFromScreenSnapshotJson(screenJson: string): HistorySnapshotLines {
   try {
     const parsed = JSON.parse(screenJson) as unknown;
     if (isRecord(parsed)) {
       if (Array.isArray(parsed.lines)) {
-        return normalizeHistoryLines(parsed.lines.filter((line): line is string => typeof line === "string"));
+        const lines = normalizeHistoryLines(
+          parsed.lines.filter((line): line is string => typeof line === "string"),
+        );
+        return { lines };
       }
 
       const surface = parsed.surface;
       if (isRecord(surface) && Array.isArray(surface.lines)) {
-        return normalizeHistoryLines(surface.lines.map((line) => {
-          if (isRecord(line) && typeof line.text === "string") {
-            return line.text;
-          }
-          return "";
-        }));
+        const richLines = normalizeHistoryRichLines(
+          surface.lines.map(screenLineFromUnknown),
+        );
+        const surfacePalette = normalizeScreenSurfacePalette(
+          screenSurfacePaletteFromUnknown(surface.palette),
+        );
+        return {
+          lines: richLines.map((line) => line.text),
+          ...(hasRichScreenLineSpans(richLines) ? { richLines } : {}),
+          ...(surfacePalette ? { surfacePalette } : {}),
+        };
       }
     }
   } catch {
-    return [];
+    return { lines: [] };
   }
 
-  return [];
+  return { lines: [] };
+}
+
+function screenSurfacePaletteFromUnknown(value: unknown): ScreenSurfacePalette | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  return {
+    ...(isScreenColor(value.foreground) ? { foreground: value.foreground } : {}),
+    ...(isScreenColor(value.background) ? { background: value.background } : {}),
+    ...(isScreenColor(value.cursor) ? { cursor: value.cursor } : {}),
+  };
+}
+
+function screenLineFromUnknown(value: unknown): ScreenLine {
+  if (typeof value === "string") {
+    return createPlainHistoryScreenLine(value);
+  }
+
+  if (!isRecord(value) || typeof value.text !== "string") {
+    return createPlainHistoryScreenLine("");
+  }
+
+  const spans = Array.isArray(value.spans)
+    ? value.spans
+        .map(screenLineSpanFromUnknown)
+        .filter((span): span is ScreenLineSpan => Boolean(span))
+    : [];
+  const normalizedSpans = spans.map((span) => span.text).join("") === value.text
+    ? spans
+    : [];
+  const media = Array.isArray(value.media)
+    ? value.media
+        .map(screenLineMediaFromUnknown)
+        .filter((item): item is ScreenLineMedia => Boolean(item))
+    : [];
+  const sideEffects = Array.isArray(value.side_effects)
+    ? value.side_effects
+        .map(screenLineSideEffectFromUnknown)
+        .filter((item): item is ScreenLineSideEffect => Boolean(item))
+    : [];
+  const semanticMarks = Array.isArray(value.semantic_marks)
+    ? value.semantic_marks
+        .map(screenLineSemanticMarkFromUnknown)
+        .filter((item): item is ScreenLineSemanticMark => Boolean(item))
+    : [];
+  return {
+    text: value.text,
+    spans: normalizedSpans,
+    ...(media.length > 0 ? { media } : {}),
+    ...(sideEffects.length > 0 ? { side_effects: sideEffects } : {}),
+    ...(semanticMarks.length > 0 ? { semantic_marks: semanticMarks } : {}),
+    ...(value.wrapped === true ? { wrapped: true } : {}),
+  };
+}
+
+function screenLineMediaFromUnknown(value: unknown): ScreenLineMedia | null {
+  if (!isRecord(value) || !isScreenLineMediaKind(value.kind)) {
+    return null;
+  }
+
+  return {
+    kind: value.kind,
+    ...(typeof value.name === "string" && value.name.trim()
+      ? { name: value.name.trim() }
+      : {}),
+    ...(typeof value.byte_size === "number" &&
+    Number.isFinite(value.byte_size) &&
+    value.byte_size >= 0
+      ? { byte_size: Math.trunc(value.byte_size) }
+      : {}),
+    ...(typeof value.width === "string" && value.width.trim()
+      ? { width: value.width.trim() }
+      : {}),
+    ...(typeof value.height === "string" && value.height.trim()
+      ? { height: value.height.trim() }
+      : {}),
+    ...(typeof value.preserve_aspect_ratio === "boolean"
+      ? { preserve_aspect_ratio: value.preserve_aspect_ratio }
+      : {}),
+    ...(value.inline === true ? { inline: true } : {}),
+    ...(typeof value.mime_type === "string" && isSupportedInlineImageMimeType(value.mime_type)
+      ? { mime_type: value.mime_type }
+      : {}),
+    ...(typeof value.data_base64 === "string" && value.data_base64.trim()
+      ? { data_base64: value.data_base64.trim() }
+      : {}),
+    ...(value.truncated === true ? { truncated: true } : {}),
+  };
+}
+
+function isScreenLineMediaKind(value: unknown): value is ScreenLineMedia["kind"] {
+  return value === "iterm2_image" || value === "kitty_graphics" || value === "sixel";
+}
+
+function isSupportedInlineImageMimeType(value: string): boolean {
+  return value === "image/png" || value === "image/jpeg" || value === "image/gif" || value === "image/webp";
+}
+
+function screenLineSideEffectFromUnknown(value: unknown): ScreenLineSideEffect | null {
+  if (
+    !isRecord(value) ||
+    !isScreenLineSideEffectKind(value.kind) ||
+    !isScreenLineSideEffectDisposition(value.disposition)
+  ) {
+    return null;
+  }
+
+  return {
+    kind: value.kind,
+    disposition: value.disposition,
+    ...(isScreenLineSideEffectTarget(value.target)
+      ? { target: value.target }
+      : {}),
+    ...(typeof value.message === "string" && value.message.trim()
+      ? { message: value.message.trim() }
+      : {}),
+  };
+}
+
+function isScreenLineSideEffectKind(
+  value: unknown,
+): value is ScreenLineSideEffect["kind"] {
+  return (
+    value === "clipboard_read" ||
+    value === "clipboard_write" ||
+    value === "desktop_notification"
+  );
+}
+
+function isScreenLineSideEffectDisposition(
+  value: unknown,
+): value is ScreenLineSideEffect["disposition"] {
+  return value === "blocked";
+}
+
+function isScreenLineSideEffectTarget(
+  value: unknown,
+): value is NonNullable<ScreenLineSideEffect["target"]> {
+  return (
+    value === "clipboard" ||
+    value === "selection" ||
+    value === "desktop_notification" ||
+    value === "unknown"
+  );
+}
+
+function screenLineSemanticMarkFromUnknown(value: unknown): ScreenLineSemanticMark | null {
+  if (!isRecord(value) || !isScreenLineSemanticMarkKind(value.kind)) {
+    return null;
+  }
+
+  return {
+    kind: value.kind,
+    ...(isScreenLineSemanticMarkCol(value.col) ? { col: value.col } : {}),
+    ...(isScreenLineSemanticMarkExitCode(value.exit_code)
+      ? { exit_code: value.exit_code }
+      : {}),
+  };
+}
+
+function isScreenLineSemanticMarkKind(
+  value: unknown,
+): value is ScreenLineSemanticMark["kind"] {
+  return (
+    value === "command_finished" ||
+    value === "input_start" ||
+    value === "output_start" ||
+    value === "prompt_start"
+  );
+}
+
+function isScreenLineSemanticMarkExitCode(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 255;
+}
+
+function isScreenLineSemanticMarkCol(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function screenLineSpanFromUnknown(value: unknown): ScreenLineSpan | null {
+  if (!isRecord(value) || typeof value.text !== "string") {
+    return null;
+  }
+
+  return {
+    text: value.text,
+    style: screenTextStyleFromUnknown(value.style),
+  };
+}
+
+function screenTextStyleFromUnknown(value: unknown): ScreenTextStyle {
+  const style = isRecord(value) ? value : {};
+  return {
+    foreground: isScreenColor(style.foreground) ? style.foreground : null,
+    background: isScreenColor(style.background) ? style.background : null,
+    underline_color: isScreenColor(style.underline_color) ? style.underline_color : null,
+    bold: style.bold === true,
+    dim: style.dim === true,
+    italic: style.italic === true,
+    blink: style.blink === true,
+    underline: isScreenUnderlineStyle(style.underline) ? style.underline : null,
+    overline: style.overline === true,
+    border: isScreenTextBorderStyle(style.border) ? style.border : null,
+    ...(isScreenTextBaseline(style.baseline) ? { baseline: style.baseline } : {}),
+    inverse: style.inverse === true,
+    hidden: style.hidden === true,
+    strikethrough: style.strikethrough === true,
+    hyperlink: typeof style.hyperlink === "string" ? style.hyperlink : null,
+  };
+}
+
+function isScreenColor(value: unknown): value is ScreenColor {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    return false;
+  }
+
+  if (value.kind === "named") {
+    return typeof value.name === "string";
+  }
+  if (value.kind === "indexed") {
+    return typeof value.index === "number";
+  }
+  if (value.kind === "rgb") {
+    return (
+      typeof value.r === "number" &&
+      typeof value.g === "number" &&
+      typeof value.b === "number"
+    );
+  }
+  return false;
+}
+
+function isScreenUnderlineStyle(value: unknown): value is ScreenTextStyle["underline"] {
+  return (
+    value === "single" ||
+    value === "double" ||
+    value === "curly" ||
+    value === "dotted" ||
+    value === "dashed"
+  );
+}
+
+function isScreenTextBorderStyle(value: unknown): value is ScreenTextStyle["border"] {
+  return value === "framed" || value === "encircled";
+}
+
+function isScreenTextBaseline(value: unknown): value is NonNullable<ScreenTextStyle["baseline"]> {
+  return value === "superscript" || value === "subscript";
+}
+
+function normalizeScreenSurfacePalette(
+  value: ScreenSurfacePalette | null | undefined,
+): ScreenSurfacePalette | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return value.foreground || value.background || value.cursor
+    ? value
+    : undefined;
+}
+
+function normalizeHistoryScreenLines(lines: readonly ScreenLine[]): ScreenLine[] {
+  return normalizeHistoryRichLines(lines);
+}
+
+function normalizeHistoryRichLines(lines: readonly ScreenLine[]): ScreenLine[] {
+  const normalized = lines.map(trimHistoryScreenLineEnd);
+  while (
+    normalized.length > 0 &&
+    normalized[normalized.length - 1]?.text === "" &&
+    !hasHistoryScreenLineMetadata(normalized[normalized.length - 1])
+  ) {
+    normalized.pop();
+  }
+  return normalized;
+}
+
+function trimHistoryScreenLineEnd(line: ScreenLine): ScreenLine {
+  const spans = line.spans ?? [];
+  const text = line.text.slice(0, richHistoryLineTrimmedLength(line.text, spans));
+  const metadata = historyScreenLineMetadata(line);
+  if (text === line.text) {
+    return spans.length > 0
+      ? {
+          text: line.text,
+          spans,
+          ...metadata,
+          ...(line.wrapped === true ? { wrapped: true } : {}),
+        }
+      : {
+          ...createPlainHistoryScreenLine(line.text, line.wrapped === true),
+          ...metadata,
+        };
+  }
+
+  return {
+    text,
+    spans: trimScreenLineSpansToText(spans, text),
+    ...metadata,
+    ...(line.wrapped === true ? { wrapped: true } : {}),
+  };
+}
+
+function historyScreenLineMetadata(
+  line: ScreenLine,
+): Partial<Pick<ScreenLine, "media" | "semantic_marks" | "side_effects">> {
+  return {
+    ...(line.media && line.media.length > 0 ? { media: line.media } : {}),
+    ...(line.side_effects && line.side_effects.length > 0
+      ? { side_effects: line.side_effects }
+      : {}),
+    ...(line.semantic_marks && line.semantic_marks.length > 0
+      ? { semantic_marks: line.semantic_marks }
+      : {}),
+  };
+}
+
+function hasHistoryScreenLineMetadata(line: ScreenLine | undefined): boolean {
+  return Boolean(
+    (line?.media && line.media.length > 0) ||
+      (line?.side_effects && line.side_effects.length > 0) ||
+      (line?.semantic_marks && line.semantic_marks.length > 0),
+  );
+}
+
+function trimScreenLineSpansToText(
+  spans: readonly ScreenLineSpan[],
+  text: string,
+): ScreenLineSpan[] {
+  const nextSpans: ScreenLineSpan[] = [];
+  let remaining = text.length;
+  for (const span of spans) {
+    if (remaining <= 0) {
+      break;
+    }
+    const nextText = span.text.slice(0, remaining);
+    if (nextText.length > 0) {
+      nextSpans.push({ ...span, text: nextText });
+    }
+    remaining -= span.text.length;
+  }
+  return nextSpans.map((span) => span.text).join("") === text ? nextSpans : [];
+}
+
+function richHistoryLineTrimmedLength(
+  text: string,
+  spans: readonly ScreenLineSpan[],
+): number {
+  if (spans.length === 0) {
+    return text.trimEnd().length;
+  }
+
+  let end = text.length;
+  for (const span of [...spans].reverse()) {
+    const spanStart = Math.max(0, end - span.text.length);
+    if (!isPlainScreenTextStyle(span.style)) {
+      break;
+    }
+
+    const trimmedSpanLength = span.text.trimEnd().length;
+    if (trimmedSpanLength === span.text.length) {
+      break;
+    }
+
+    end = spanStart + trimmedSpanLength;
+    if (trimmedSpanLength > 0) {
+      break;
+    }
+  }
+  return end;
+}
+
+function isPlainScreenTextStyle(style: ScreenTextStyle): boolean {
+  return (
+    !style.foreground &&
+    !style.background &&
+    !style.underline_color &&
+    !style.bold &&
+    !style.dim &&
+    !style.italic &&
+    !style.blink &&
+    !style.underline &&
+    !style.overline &&
+    !style.border &&
+    !style.baseline &&
+    !style.inverse &&
+    !style.hidden &&
+    !style.strikethrough &&
+    !style.hyperlink
+  );
+}
+
+function createPlainHistoryScreenLine(text: string, wrapped = false): ScreenLine {
+  return { text, spans: [], ...(wrapped ? { wrapped: true } : {}) };
+}
+
+function hasRichScreenLineSpans(lines: readonly ScreenLine[]): boolean {
+  return lines.some(
+    (line) =>
+      line.spans.some((span) => !isPlainScreenTextStyle(span.style)) ||
+      line.wrapped === true ||
+      hasHistoryScreenLineMetadata(line),
+  );
+}
+
+function doHistoryRichLinesMatchText(
+  richLines: readonly ScreenLine[],
+  lines: readonly string[],
+): boolean {
+  return (
+    richLines.length === lines.length &&
+    richLines.every((line, index) => line.text === lines[index])
+  );
+}
+
+function mergeHistoricalPaneRichLines(
+  existing: WorkspaceHistoricalPaneSnapshot,
+  nextPage: WorkspaceHistoricalPaneSnapshot,
+  lines: readonly string[],
+): ScreenLine[] | undefined {
+  if (!existing.richLines || !nextPage.richLines) {
+    return undefined;
+  }
+
+  const candidate = normalizeHistoryRichLines(mergeHistoricalPaneRichLineContent(existing, nextPage));
+  return doHistoryRichLinesMatchText(candidate, lines) && hasRichScreenLineSpans(candidate)
+    ? candidate
+    : undefined;
+}
+
+function mergeHistoricalPaneRichLineContent(
+  existing: WorkspaceHistoricalPaneSnapshot,
+  nextPage: WorkspaceHistoricalPaneSnapshot,
+): ScreenLine[] {
+  if (
+    existing.streamEndsWithLineBreak !== false ||
+    existing.richLines?.length === 0
+  ) {
+    const nextLines = nextPage.streamStartsWithLineBreak === true
+      ? dropLeadingEmptyHistoryRichLine(nextPage.richLines ?? [])
+      : (nextPage.richLines ?? []);
+    return [...(existing.richLines ?? []), ...nextLines];
+  }
+
+  const existingLines = existing.richLines ?? [];
+  const nextLines = nextPage.richLines ?? [];
+  const existingPrefix = existingLines.slice(0, -1);
+  const existingLastLine = existingLines[existingLines.length - 1] ?? createPlainHistoryScreenLine("");
+  const [nextFirstLine = createPlainHistoryScreenLine(""), ...nextRestLines] = nextLines;
+  if (nextPage.streamStartsWithLineBreak === true) {
+    const linesAfterBreak = nextFirstLine.text === "" ? nextRestLines : nextLines;
+    return [...existingPrefix, existingLastLine, ...linesAfterBreak];
+  }
+
+  return [
+    ...existingPrefix,
+    joinHistoryScreenLines(existingLastLine, nextFirstLine),
+    ...nextRestLines,
+  ];
+}
+
+function dropLeadingEmptyHistoryRichLine(lines: readonly ScreenLine[]): ScreenLine[] {
+  return lines[0]?.text === "" && !hasHistoryScreenLineMetadata(lines[0])
+    ? [...lines.slice(1)]
+    : [...lines];
+}
+
+function joinHistoryScreenLines(first: ScreenLine, second: ScreenLine): ScreenLine {
+  return {
+    text: `${first.text}${second.text}`,
+    spans: [...first.spans, ...second.spans],
+    ...combinedHistoryScreenLineMetadata(first, second),
+    ...(first.wrapped === true || second.wrapped === true ? { wrapped: true } : {}),
+  };
+}
+
+function combinedHistoryScreenLineMetadata(first: ScreenLine, second: ScreenLine) {
+  const media = [...(first.media ?? []), ...(second.media ?? [])];
+  const sideEffects = [...(first.side_effects ?? []), ...(second.side_effects ?? [])];
+  const semanticMarks = [
+    ...(first.semantic_marks ?? []),
+    ...(second.semantic_marks ?? []),
+  ];
+  return {
+    ...(media.length > 0 ? { media } : {}),
+    ...(sideEffects.length > 0 ? { side_effects: sideEffects } : {}),
+    ...(semanticMarks.length > 0 ? { semantic_marks: semanticMarks } : {}),
+  };
 }
 
 function sanitizeTerminalHistoryText(text: string): string {

@@ -6,6 +6,7 @@ import type {
   PaneTreeNode,
   PaneId,
   SavedSessionSummary,
+  ScreenLine,
   ScreenSnapshot,
   SessionId,
   SplitDirection,
@@ -361,7 +362,7 @@ function appendStaticPreviewInput(
 
   const nextLines = [
     ...focusedScreen.surface.lines,
-    ...previewLines.map((text) => ({ text })),
+    ...previewLines.map(createPlainScreenLine),
   ].slice(-focusedScreen.rows);
   const nextScreen: ScreenSnapshot = {
     ...focusedScreen,
@@ -784,6 +785,7 @@ function resizeStaticPreviewPane(
       lines: currentScreen.surface.lines.slice(-nextRows),
       cursor: currentScreen.surface.cursor
         ? {
+            ...currentScreen.surface.cursor,
             row: Math.min(currentScreen.surface.cursor.row, nextRows - 1),
             col: Math.min(currentScreen.surface.cursor.col, nextCols - 1),
           }
@@ -929,7 +931,7 @@ function createStaticPreviewScreen(
     surface: {
       title,
       cursor: null,
-      lines: lines.map((text) => ({ text })).slice(-rows),
+      lines: lines.map(createPlainScreenLine).slice(-rows),
     },
   };
 }
@@ -1172,11 +1174,11 @@ export function createDemoPreviewWorkspaceSnapshot(config: TerminalDemoPreviewBo
           title: "Shell",
           cursor: null,
           lines: [
-            { text: "terminal-platform demo static preview" },
-            { text: "$ npm run build:renderer" },
-            { text: "[ok] renderer bundle ready" },
-            { text: "$ npm run smoke:browser" },
-            { text: "waiting for native runtime and Chrome CDP..." },
+            createPlainScreenLine("terminal-platform demo static preview"),
+            createPlainScreenLine("$ npm run build:renderer"),
+            createPlainScreenLine("[ok] renderer bundle ready"),
+            createPlainScreenLine("$ npm run smoke:browser"),
+            createPlainScreenLine("waiting for native runtime and Chrome CDP..."),
           ],
         },
       },
@@ -1189,6 +1191,10 @@ export function createDemoPreviewWorkspaceSnapshot(config: TerminalDemoPreviewBo
       limit: DEFAULT_COMMAND_HISTORY_LIMIT,
     },
   };
+}
+
+function createPlainScreenLine(text: string): ScreenLine {
+  return { text, spans: [], wrapped: false };
 }
 
 export function createDemoPreviewBackendCapabilities(backend: BackendKind): BackendCapabilitiesInfo {
@@ -1213,6 +1219,7 @@ export function createDemoPreviewBackendCapabilities(backend: BackendKind): Back
       rendered_viewport_stream: true,
       rendered_viewport_snapshot: true,
       rendered_scrollback_snapshot: false,
+      rich_screen_surface: backend === "native",
       layout_dump: true,
       layout_override: true,
       read_only_client_mode: false,

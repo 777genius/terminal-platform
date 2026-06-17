@@ -151,6 +151,7 @@ export interface TerminalBackendCapabilities {
   rendered_viewport_stream: boolean;
   rendered_viewport_snapshot: boolean;
   rendered_scrollback_snapshot: boolean;
+  rich_screen_surface: boolean;
   layout_dump: boolean;
   layout_override: boolean;
   read_only_client_mode: boolean;
@@ -231,18 +232,134 @@ export type TerminalProjectionSource =
   | "zellij_viewport_subscribe"
   | "zellij_dump_snapshot";
 
+export type TerminalScreenBufferKind = "normal" | "alternate" | "unknown";
+
 export interface TerminalScreenCursor {
   row: number;
   col: number;
+  shape?: "block" | "underline" | "beam" | "hollow_block" | "hidden";
+  blinking?: boolean;
+}
+
+export type TerminalScreenColor =
+  | { kind: "named"; name: string }
+  | { kind: "indexed"; index: number }
+  | { kind: "rgb"; r: number; g: number; b: number };
+
+export interface TerminalScreenSurfacePalette {
+  foreground?: TerminalScreenColor | null;
+  background?: TerminalScreenColor | null;
+  cursor?: TerminalScreenColor | null;
+}
+
+export type TerminalScreenProgressState =
+  | "inactive"
+  | "normal"
+  | "error"
+  | "indeterminate"
+  | "warning";
+
+export interface TerminalScreenProgress {
+  state: TerminalScreenProgressState;
+  value?: number;
+}
+
+export type TerminalScreenUnderlineStyle = "single" | "double" | "curly" | "dotted" | "dashed";
+
+export type TerminalScreenTextBorderStyle = "framed" | "encircled";
+
+export type TerminalScreenTextBaseline = "superscript" | "subscript";
+
+export interface TerminalScreenTextStyle {
+  foreground: TerminalScreenColor | null;
+  background: TerminalScreenColor | null;
+  underline_color: TerminalScreenColor | null;
+  bold: boolean;
+  dim: boolean;
+  italic: boolean;
+  blink: boolean;
+  underline: TerminalScreenUnderlineStyle | null;
+  overline: boolean;
+  border: TerminalScreenTextBorderStyle | null;
+  baseline?: TerminalScreenTextBaseline | null;
+  inverse: boolean;
+  hidden: boolean;
+  strikethrough: boolean;
+  hyperlink: string | null;
+}
+
+export interface TerminalScreenLineSpan {
+  text: string;
+  style: TerminalScreenTextStyle;
+}
+
+export type TerminalScreenLineMediaKind =
+  | "iterm2_image"
+  | "kitty_graphics"
+  | "sixel";
+
+export interface TerminalScreenLineMedia {
+  kind: TerminalScreenLineMediaKind;
+  name?: string;
+  byte_size?: number;
+  width?: string;
+  height?: string;
+  preserve_aspect_ratio?: boolean;
+  inline?: boolean;
+  mime_type?: string;
+  data_base64?: string;
+  truncated?: boolean;
+}
+
+export type TerminalScreenLineSideEffectKind =
+  | "clipboard_read"
+  | "clipboard_write"
+  | "desktop_notification";
+
+export type TerminalScreenLineSideEffectDisposition = "blocked";
+
+export type TerminalScreenLineSideEffectTarget =
+  | "clipboard"
+  | "desktop_notification"
+  | "selection"
+  | "unknown";
+
+export interface TerminalScreenLineSideEffect {
+  kind: TerminalScreenLineSideEffectKind;
+  disposition: TerminalScreenLineSideEffectDisposition;
+  target?: TerminalScreenLineSideEffectTarget;
+  message?: string;
+}
+
+export type TerminalScreenLineSemanticMarkKind =
+  | "command_finished"
+  | "input_start"
+  | "output_start"
+  | "prompt_start";
+
+export interface TerminalScreenLineSemanticMark {
+  kind: TerminalScreenLineSemanticMarkKind;
+  col?: number;
+  exit_code?: number;
 }
 
 export interface TerminalScreenLine {
   text: string;
+  spans?: TerminalScreenLineSpan[];
+  media?: TerminalScreenLineMedia[];
+  side_effects?: TerminalScreenLineSideEffect[];
+  semantic_marks?: TerminalScreenLineSemanticMark[];
+  wrapped?: boolean;
 }
 
 export interface TerminalScreenSurface {
   title: string | null;
+  working_directory_uri?: string | null;
+  user_variables?: Record<string, string>;
   cursor: TerminalScreenCursor | null;
+  palette?: TerminalScreenSurfacePalette;
+  bell_count?: number;
+  progress?: TerminalScreenProgress;
   lines: TerminalScreenLine[];
 }
 
@@ -252,6 +369,7 @@ export interface TerminalScreenSnapshot {
   rows: number;
   cols: number;
   source: TerminalProjectionSource;
+  buffer_kind?: TerminalScreenBufferKind;
   surface: TerminalScreenSurface;
 }
 

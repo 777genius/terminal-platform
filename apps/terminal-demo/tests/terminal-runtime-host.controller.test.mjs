@@ -49,6 +49,7 @@ function createCapabilities(backend, overrides = {}) {
       rendered_viewport_stream: true,
       rendered_viewport_snapshot: true,
       rendered_scrollback_snapshot: false,
+      rich_screen_surface: false,
       layout_dump: false,
       layout_override: false,
       read_only_client_mode: false,
@@ -116,7 +117,31 @@ function createGateway(overrides = {}) {
         title: null,
         cursor: null,
         lines: [
-          { text: "demo" },
+          {
+            text: "demo",
+            wrapped: true,
+            spans: [
+              {
+                text: "demo",
+                style: {
+                  foreground: { kind: "named", name: "green" },
+                  background: null,
+                  underline_color: null,
+                  bold: true,
+                  dim: false,
+                  italic: false,
+                  blink: false,
+                  underline: null,
+                  overline: false,
+                  border: null,
+                  inverse: false,
+                  hidden: false,
+                  strikethrough: false,
+                  hyperlink: null,
+                },
+              },
+            ],
+          },
         ],
       },
     },
@@ -242,6 +267,26 @@ test("bootstrap loads catalog and attaches first session state", async () => {
   assert.equal(state.capabilities.native?.backend, "native");
   assert.equal(state.discoveredSessions.tmux?.length, 1);
   assert.equal(state.activeSessionState?.focusedScreen?.pane_id, "pane-1");
+  assert.equal(state.activeSessionState?.focusedScreen?.surface.lines[0]?.wrapped, true);
+  assert.deepEqual(state.activeSessionState?.focusedScreen?.surface.lines[0]?.spans?.[0], {
+    text: "demo",
+    style: {
+      foreground: { kind: "named", name: "green" },
+      background: null,
+      underline_color: null,
+      bold: true,
+      dim: false,
+      italic: false,
+      blink: false,
+      underline: null,
+      overline: false,
+      border: null,
+      inverse: false,
+      hidden: false,
+      strikethrough: false,
+      hyperlink: null,
+    },
+  });
   assert.deepEqual(gateway.subscribeCalls, ["session-1"]);
 });
 

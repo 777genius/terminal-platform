@@ -1,5 +1,6 @@
 import { css, html, nothing } from "lit";
 import type { PropertyValues, TemplateResult } from "lit";
+import { styleMap } from "lit/directives/style-map.js";
 
 import {
   createTerminalOutputSearchResult,
@@ -9,6 +10,16 @@ import {
   type TerminalOutputSearchResult,
   type TerminalOutputSearchSegment,
 } from "@terminal-platform/workspace-core";
+import type {
+  ScreenCursor,
+  ScreenLine,
+  ScreenLineMedia,
+  ScreenLineSemanticMark,
+  ScreenLineSideEffect,
+  ScreenLineSpan,
+  ScreenSurfacePalette,
+  ScreenTextStyle,
+} from "@terminal-platform/runtime-types";
 
 import { WorkspaceKernelConsumerElement } from "../context/workspace-kernel-consumer-element.js";
 import { terminalElementStyles } from "../styles/terminal-element-styles.js";
@@ -24,6 +35,18 @@ import {
 import { terminalInputForKeyboardEvent } from "./terminal-keyboard-input.js";
 import { resolveTerminalScreenControlState } from "./terminal-screen-controls.js";
 import { isTerminalScreenSearchShortcut } from "./terminal-screen-shortcuts.js";
+import {
+  normalizeTerminalHyperlink,
+  resolveTerminalOutputStyle,
+  resolveTerminalSurfacePaletteStyle,
+} from "./terminal-output-style.js";
+export {
+  normalizeTerminalHyperlink,
+  resolveTerminalOutputStyle,
+  resolveTerminalSurfacePaletteStyle,
+  terminalColorToCss,
+} from "./terminal-output-style.js";
+export type { TerminalOutputStyleMap } from "./terminal-output-style.js";
 import {
   TERMINAL_SCREEN_SEARCH_ACTION_IDS,
   resolveTerminalScreenSearchActions,
@@ -56,6 +79,13 @@ type TerminalScreenPlacement = "panel" | "terminal";
 export type VisibleOutputLineSource = "history" | "boundary" | "live";
 
 export interface VisibleOutputLine {
+  cursor?: ResolvedTerminalOutputCursor;
+  media?: readonly ScreenLineMedia[];
+  palette?: ScreenSurfacePalette;
+  semanticMarks?: readonly ScreenLineSemanticMark[];
+  sideEffects?: readonly ScreenLineSideEffect[];
+  softWrapped?: boolean;
+  spans?: readonly ScreenLineSpan[];
   text: string;
   source: VisibleOutputLineSource;
 }
@@ -90,7 +120,7 @@ export interface TerminalHistoryRenderOptions {
   nowMs?: number;
   onCommandContextMenu?: (
     event: MouseEvent,
-    entry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+    entry: Extract<TerminalHistoryEntry, { kind: "command" }>
   ) => void;
 }
 
@@ -107,6 +137,30 @@ interface TerminalCommandContextMenuState {
   x: number;
   y: number;
 }
+
+export interface ResolvedTerminalOutputCursor {
+  blinking?: boolean;
+  col: number;
+  shape: Exclude<NonNullable<ScreenCursor["shape"]>, "hidden">;
+}
+
+export interface TerminalOutputStyledSearchRun {
+  activeSearchMatch: boolean;
+  searchMatch: boolean;
+  style: ScreenTextStyle;
+  text: string;
+}
+
+export type TerminalOutputAutolinkRun =
+  | {
+      kind: "text";
+      text: string;
+    }
+  | {
+      href: string;
+      kind: "link";
+      text: string;
+    };
 
 export interface TerminalHistoryCommandOutputLine {
   line: VisibleOutputLine;
@@ -189,8 +243,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           --tp-terminal-screen-panel-shadow,
           var(--tp-shadow-panel)
         );
-        background:
-          linear-gradient(
+        background: linear-gradient(
             180deg,
             color-mix(in srgb, var(--tp-color-bg-inset) 92%, transparent),
             var(--tp-color-bg)
@@ -205,8 +258,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         height: 100%;
         min-height: 0;
         color: var(--tp-terminal-color-text);
-        background:
-          linear-gradient(
+        background: linear-gradient(
             180deg,
             color-mix(
               in srgb,
@@ -229,8 +281,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           color-mix(in srgb, var(--tp-terminal-color-border) 78%, transparent);
         border-bottom-width: 0;
         border-radius: var(--tp-radius-md) var(--tp-radius-md) 0 0;
-        background:
-          linear-gradient(
+        background: linear-gradient(
             180deg,
             color-mix(
               in srgb,
@@ -750,8 +801,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           var(--tp-terminal-color-bg-raised) 96%,
           black 8%
         );
-        box-shadow:
-          0 18px 44px rgba(0, 0, 0, 0.42),
+        box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42),
           inset 0 1px 0 rgba(255, 255, 255, 0.04);
         padding: 0.32rem;
       }
@@ -811,6 +861,130 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
         line-height: inherit;
       }
 
+      .terminal-output-segment {
+        -webkit-box-decoration-break: clone;
+        box-decoration-break: clone;
+        font-variant-ligatures: none;
+      }
+
+      .terminal-output-link {
+        color: inherit;
+        text-decoration: underline;
+        text-decoration-color: color-mix(
+          in srgb,
+          var(--tp-terminal-color-accent) 76%,
+          transparent
+        );
+        text-underline-offset: 0.16em;
+      }
+
+      .terminal-output-link:hover {
+        color: var(--tp-terminal-color-accent);
+      }
+
+      .terminal-output-cursor {
+        display: inline-block;
+        inline-size: 0.62ch;
+        block-size: 1.12em;
+        margin-inline-end: -0.62ch;
+        transform: translateY(0.17em);
+        background: var(
+          --tp-terminal-surface-cursor-color,
+          var(--tp-terminal-color-accent)
+        );
+        opacity: 0.88;
+        pointer-events: none;
+      }
+
+      .terminal-output-cursor[data-cursor-shape="beam"] {
+        inline-size: 0.12ch;
+        margin-inline-end: -0.12ch;
+      }
+
+      .terminal-output-cursor[data-cursor-shape="underline"] {
+        block-size: 0.14em;
+        transform: translateY(0.98em);
+      }
+
+      .terminal-output-cursor[data-cursor-shape="hollow_block"] {
+        border: 1px solid
+          var(
+            --tp-terminal-surface-cursor-color,
+            var(--tp-terminal-color-accent)
+          );
+        background: transparent;
+      }
+
+      .terminal-output-cursor[data-cursor-blinking="true"] {
+        animation: terminal-output-cursor-blink 1s steps(1, end) infinite;
+      }
+
+      @keyframes terminal-output-cursor-blink {
+        0%,
+        48% {
+          opacity: 0.88;
+        }
+        49%,
+        100% {
+          opacity: 0.18;
+        }
+      }
+
+      @keyframes terminal-output-blink {
+        0%,
+        48% {
+          opacity: 1;
+        }
+        49%,
+        100% {
+          opacity: 0.28;
+        }
+      }
+
+      .terminal-output-media,
+      .terminal-output-media-image-frame,
+      .terminal-output-side-effect {
+        display: inline-flex;
+        align-items: center;
+        vertical-align: middle;
+        margin-inline: 0.28rem;
+        border: 1px solid
+          color-mix(in srgb, var(--tp-terminal-color-border) 72%, transparent);
+        border-radius: 0.32rem;
+        background: color-mix(
+          in srgb,
+          var(--tp-terminal-color-bg-raised) 78%,
+          transparent
+        );
+        color: var(--tp-terminal-color-text-muted);
+      }
+
+      .terminal-output-media,
+      .terminal-output-side-effect {
+        min-height: 1.35rem;
+        padding: 0.08rem 0.42rem;
+        font-size: 0.84em;
+      }
+
+      .terminal-output-side-effect[data-side-effect-disposition="blocked"] {
+        border-color: color-mix(in srgb, #fca5a5 52%, transparent);
+        color: #fca5a5;
+      }
+
+      .terminal-output-media-image-frame {
+        max-inline-size: min(100%, 42rem);
+        max-block-size: 28rem;
+        overflow: auto;
+        padding: 0.24rem;
+      }
+
+      .terminal-output-media-image {
+        display: block;
+        max-inline-size: 100%;
+        max-block-size: 24rem;
+        border-radius: 0.22rem;
+      }
+
       .screen[data-line-wrap="false"] .history-entry-prompt,
       .screen[data-line-wrap="false"] .history-entry-text {
         white-space: pre;
@@ -844,6 +1018,17 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           var(--tp-color-warning) 58%,
           var(--tp-color-bg)
         );
+      }
+
+      mark.terminal-output-search-run {
+        box-shadow: inset 0 0 0 9999px
+          color-mix(in srgb, var(--tp-color-warning) 28%, transparent);
+      }
+
+      mark.terminal-output-search-run[data-active="true"] {
+        box-shadow: inset 0 0 0 9999px
+            color-mix(in srgb, var(--tp-color-warning) 42%, transparent),
+          0 0 0 1px color-mix(in srgb, var(--tp-color-warning) 78%, transparent);
       }
 
       .screen[data-placement="terminal"] mark {
@@ -1047,13 +1232,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     | readonly TerminalCommandPresentationMetadata[]
     | null
     | undefined;
-  declare protected followOutput: boolean;
-  declare protected searchQuery: string;
-  declare protected activeSearchMatchIndex: number | null;
-  declare protected copyState: TerminalScreenCopyState;
-  declare protected directInputActivity: TerminalScreenInputActivity;
-  declare protected historyLoadState: TerminalScreenHistoryLoadState;
-  declare protected commandContextMenu: TerminalCommandContextMenuState | null;
+  protected declare followOutput: boolean;
+  protected declare searchQuery: string;
+  protected declare activeSearchMatchIndex: number | null;
+  protected declare copyState: TerminalScreenCopyState;
+  protected declare directInputActivity: TerminalScreenInputActivity;
+  protected declare historyLoadState: TerminalScreenHistoryLoadState;
+  protected declare commandContextMenu: TerminalCommandContextMenuState | null;
 
   #autoScrolling = false;
   #copyStateResetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1123,11 +1308,11 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     const screen = controls.screen;
     const inputStatus = resolveTerminalScreenInputStatus(
       controls,
-      this.directInputActivity,
+      this.directInputActivity
     );
     const isTerminalPlacement = this.placement === "terminal";
     const terminalPromptLabel = normalizeTerminalPromptLabel(
-      this.terminalPromptLabel,
+      this.terminalPromptLabel
     );
     const outputLines = createVisibleOutputLines(controls.history, screen, {
       hideShellPromptNoise: this.hideShellPromptNoise || isTerminalPlacement,
@@ -1136,7 +1321,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     });
     const searchResult = this.createSearchResult(
       undefined,
-      outputLines.map((line) => line.text),
+      outputLines.map((line) => line.text)
     );
     const terminalHistoryEntries = isTerminalPlacement
       ? createTerminalHistoryEntries(outputLines, { terminalPromptLabel })
@@ -1172,13 +1357,13 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                       chrome,
                       inputStatus,
                       searchResult,
-                      controls,
+                      controls
                     )
                   : this.renderFullChrome(
                       chrome,
                       inputStatus,
                       searchResult,
-                      controls,
+                      controls
                     )
                 : nothing}
               <div
@@ -1202,6 +1387,9 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                   this.handleViewportPaste(event)}
                 @pointerdown=${() => this.closeCommandContextMenu()}
                 @scroll=${(event: Event) => this.handleViewportScroll(event)}
+                style=${styleMap(
+                  resolveTerminalSurfacePaletteStyle(screen.surface.palette)
+                )}
               >
                 ${isTerminalPlacement
                   ? renderTerminalHistoryEntries(
@@ -1215,30 +1403,33 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
                         nowMs: Date.now(),
                         onCommandContextMenu: (event, entry) =>
                           this.openCommandContextMenu(event, entry),
-                      },
+                      }
                     )
                   : searchResult.lines.map((line) =>
                       renderLine(
                         line.lineIndex + 1,
                         line.segments,
-                        outputLines[line.lineIndex]?.source ?? "live",
-                      ),
+                        outputLines[line.lineIndex] ?? {
+                          text: line.text,
+                          source: "live",
+                        }
+                      )
                     )}
               </div>
               ${this.renderCommandContextMenu()}
             `
           : isTerminalPlacement
-            ? html`<div
-                class="viewport"
-                part="screen-lines"
-                data-testid="tp-screen-viewport"
-                role="region"
-                aria-label="Terminal output"
-              ></div>`
-            : html`<div class="empty-state" part="empty">
-                No active screen yet. Start or attach a session to see output
-                here.
-              </div>`}
+          ? html`<div
+              class="viewport"
+              part="screen-lines"
+              data-testid="tp-screen-viewport"
+              role="region"
+              aria-label="Terminal output"
+            ></div>`
+          : html`<div class="empty-state" part="empty">
+              No active screen yet. Start or attach a session to see output
+              here.
+            </div>`}
       </div>
     `;
   }
@@ -1247,7 +1438,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     chrome: TerminalScreenChromeState,
     inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
     searchResult: TerminalOutputSearchResult,
-    controls: ReturnType<typeof resolveTerminalScreenControlState>,
+    controls: ReturnType<typeof resolveTerminalScreenControlState>
   ): TemplateResult {
     return html`
       <div class="screen-header">
@@ -1270,7 +1461,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     chrome: TerminalScreenChromeState,
     inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
     searchResult: TerminalOutputSearchResult,
-    controls: ReturnType<typeof resolveTerminalScreenControlState>,
+    controls: ReturnType<typeof resolveTerminalScreenControlState>
   ): TemplateResult {
     return html`
       <div
@@ -1297,7 +1488,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   private renderScreenMeta(
     chrome: TerminalScreenChromeState,
-    inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>,
+    inputStatus: ReturnType<typeof resolveTerminalScreenInputStatus>
   ): TemplateResult {
     return html`
       <div class="screen-meta" part="meta" data-chrome-mode=${chrome.mode}>
@@ -1317,7 +1508,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private renderScreenMetaItem(
-    item: TerminalScreenChromeMetaItem,
+    item: TerminalScreenChromeMetaItem
   ): TemplateResult {
     return html`<span data-meta-id=${item.id} title=${item.title ?? item.label}
       >${item.label}</span
@@ -1325,7 +1516,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private renderScreenActions(
-    controls: ReturnType<typeof resolveTerminalScreenControlState>,
+    controls: ReturnType<typeof resolveTerminalScreenControlState>
   ): TemplateResult {
     const actions = resolveTerminalScreenActions({
       canCopyVisibleOutput: controls.canCopyVisibleOutput,
@@ -1357,7 +1548,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
             >
               ${action.label}
             </button>
-          `,
+          `
         )}
       </div>
     `;
@@ -1381,7 +1572,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private async loadMoreHistory(
-    options: { preserveScrollAnchor?: boolean; viewport?: HTMLElement } = {},
+    options: { preserveScrollAnchor?: boolean; viewport?: HTMLElement } = {}
   ): Promise<void> {
     if (this.historyLoadState === "loading") {
       return;
@@ -1402,14 +1593,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       ? captureHistoryScrollAnchor(
           options.viewport ??
             this.shadowRoot?.querySelector<HTMLElement>(
-              '[data-testid="tp-screen-viewport"]',
+              '[data-testid="tp-screen-viewport"]'
             ) ??
-            null,
+            null
         )
       : null;
     try {
       const loaded = await this.kernel.commands.loadMorePaneHistory(
-        controls.activePaneId,
+        controls.activePaneId
       );
       if (loaded && anchor) {
         await this.updateComplete;
@@ -1422,7 +1613,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private renderSearch(
-    searchResult: TerminalOutputSearchResult,
+    searchResult: TerminalOutputSearchResult
   ): TemplateResult {
     return html`
       <label class="search" part="search">
@@ -1455,7 +1646,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           ${formatTerminalOutputSearchCount(
             searchResult.query,
             searchResult.matchCount,
-            searchResult.activeMatchIndex,
+            searchResult.activeMatchIndex
           )}
         </span>
       </label>
@@ -1463,7 +1654,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private renderSearchActions(
-    searchResult: TerminalOutputSearchResult,
+    searchResult: TerminalOutputSearchResult
   ): TemplateResult {
     const actions = resolveTerminalScreenSearchActions({
       matchCount: searchResult.matchCount,
@@ -1489,14 +1680,14 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
             >
               ${action.label}
             </button>
-          `,
+          `
         )}
       </div>
     `;
   }
 
   private handleSearchActionClick(
-    actionId: TerminalScreenSearchActionId,
+    actionId: TerminalScreenSearchActionId
   ): void {
     switch (actionId) {
       case TERMINAL_SCREEN_SEARCH_ACTION_IDS.previousMatch:
@@ -1557,19 +1748,19 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
           "Copy",
           "⌘C",
           menu.blockText,
-          "tp-command-context-copy",
+          "tp-command-context-copy"
         )}
         ${this.renderCommandContextMenuItem(
           "Copy command",
           "⇧⌘C",
           menu.commandText,
-          "tp-command-context-copy-command",
+          "tp-command-context-copy-command"
         )}
         ${this.renderCommandContextMenuItem(
           "Copy output",
           "⌥⇧⌘C",
           menu.outputText,
-          "tp-command-context-copy-output",
+          "tp-command-context-copy-output"
         )}
       </div>
     `;
@@ -1579,7 +1770,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     label: string,
     shortcut: string,
     text: string,
-    testId: string,
+    testId: string
   ): TemplateResult {
     return html`
       <button
@@ -1599,7 +1790,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   private openCommandContextMenu(
     event: MouseEvent,
-    entry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+    entry: Extract<TerminalHistoryEntry, { kind: "command" }>
   ): void {
     event.preventDefault();
     const copyText = createTerminalCommandContextCopyText(entry);
@@ -1614,7 +1805,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     requestAnimationFrame(() => {
       this.shadowRoot
         ?.querySelector<HTMLButtonElement>(
-          '[data-testid="tp-command-context-copy"]',
+          '[data-testid="tp-command-context-copy"]'
         )
         ?.focus({ preventScroll: true });
     });
@@ -1687,7 +1878,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       hideShellPromptNoise: this.hideShellPromptNoise,
     });
     const output = serializeTerminalOutputLines(
-      outputLines.map((line) => line.text),
+      outputLines.map((line) => line.text)
     );
     try {
       await writeClipboardText(output);
@@ -1699,8 +1890,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
             bubbles: true,
             composed: true,
             detail: { paneId: screen.pane_id, lineCount: outputLines.length },
-          },
-        ),
+          }
+        )
       );
     } catch (error) {
       this.setCopyState("failed");
@@ -1711,8 +1902,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
             bubbles: true,
             composed: true,
             detail: { paneId: screen.pane_id, error },
-          },
-        ),
+          }
+        )
       );
     }
   }
@@ -1734,7 +1925,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
   }
 
   private setHistoryLoadState(
-    historyLoadState: TerminalScreenHistoryLoadState,
+    historyLoadState: TerminalScreenHistoryLoadState
   ): void {
     this.historyLoadState = historyLoadState;
     this.clearHistoryLoadStateResetTimer();
@@ -1784,7 +1975,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
     const activeSearchMatchIndex =
       resolveTerminalOutputSearchMatchIndex(
         this.activeSearchMatchIndex,
-        searchResult.matchCount,
+        searchResult.matchCount
       ) ?? 0;
     if (activeSearchMatchIndex !== this.activeSearchMatchIndex) {
       this.activeSearchMatchIndex = activeSearchMatchIndex;
@@ -1797,7 +1988,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   private scrollActiveSearchMatchIntoView(): void {
     const activeMatch = this.shadowRoot?.querySelector<HTMLElement>(
-      '[data-testid="tp-screen-active-search-match"]',
+      '[data-testid="tp-screen-active-search-match"]'
     );
     activeMatch?.scrollIntoView({
       block: "center",
@@ -1807,28 +1998,28 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   private createSearchResult(
     searchQuery = this.searchQuery,
-    lines?: readonly string[],
+    lines?: readonly string[]
   ): TerminalOutputSearchResult {
     const fallbackControls = resolveTerminalScreenControlState(this.snapshot);
     const fallbackLines = createVisibleOutputLines(
       fallbackControls.history,
-      fallbackControls.screen,
+      fallbackControls.screen
     ).map((line) => line.text);
     return createTerminalOutputSearchResult(
       lines ?? fallbackLines,
       searchQuery,
-      { activeMatchIndex: this.activeSearchMatchIndex },
+      { activeMatchIndex: this.activeSearchMatchIndex }
     );
   }
 
   private syncTerminalDisplayAttributes(): void {
     this.setAttribute(
       "data-font-scale",
-      this.snapshot.terminalDisplay.fontScale,
+      this.snapshot.terminalDisplay.fontScale
     );
     this.setAttribute(
       "data-line-wrap",
-      String(this.snapshot.terminalDisplay.lineWrap),
+      String(this.snapshot.terminalDisplay.lineWrap)
     );
   }
 
@@ -1847,7 +2038,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
       shouldAutoLoadMoreHistoryFromViewport(
         viewport,
         resolveTerminalScreenControlState(this.snapshot).canLoadMoreHistory,
-        this.historyLoadState,
+        this.historyLoadState
       )
     ) {
       void this.loadMoreHistory({ preserveScrollAnchor: true, viewport });
@@ -1940,8 +2131,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
               paneId: controls.activePaneId,
               inputLength: input.length,
             },
-          },
-        ),
+          }
+        )
       );
     } catch (error) {
       this.setDirectInputActivity("failed");
@@ -1956,8 +2147,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
               paneId: controls.activePaneId,
               error,
             },
-          },
-        ),
+          }
+        )
       );
     }
   }
@@ -1994,8 +2185,8 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
               paneId: controls.activePaneId,
               inputLength: data.length,
             },
-          },
-        ),
+          }
+        )
       );
     } catch (error) {
       this.setDirectInputActivity("failed");
@@ -2010,15 +2201,15 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
               paneId: controls.activePaneId,
               error,
             },
-          },
-        ),
+          }
+        )
       );
     }
   }
 
   private scrollViewportToBottom(): void {
     const viewport = this.shadowRoot?.querySelector<HTMLElement>(
-      '[data-testid="tp-screen-viewport"]',
+      '[data-testid="tp-screen-viewport"]'
     );
     if (!viewport) {
       return;
@@ -2041,7 +2232,7 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   private focusSearchInput(): void {
     const searchInput = this.shadowRoot?.querySelector<HTMLInputElement>(
-      '[data-testid="tp-screen-search"]',
+      '[data-testid="tp-screen-search"]'
     );
     if (!searchInput || searchInput.disabled) {
       return;
@@ -2053,22 +2244,431 @@ export class TerminalScreenElement extends WorkspaceKernelConsumerElement {
 
   private focusViewport(): void {
     const viewport = this.shadowRoot?.querySelector<HTMLElement>(
-      '[data-testid="tp-screen-viewport"]',
+      '[data-testid="tp-screen-viewport"]'
     );
     viewport?.focus({ preventScroll: true });
   }
 }
 
+const TERMINAL_OUTPUT_AUTOLINK_PATTERN =
+  /\b(?:https?:\/\/[^\s<>"'`]+|mailto:[^\s<>"'`]+|file:\/\/[^\s<>"'`]+|ftp:\/\/[^\s<>"'`]+)/giu;
+
+export function createTerminalOutputAutolinkRuns(
+  text: string
+): TerminalOutputAutolinkRun[] {
+  if (!text) {
+    return [];
+  }
+
+  const runs: TerminalOutputAutolinkRun[] = [];
+  let offset = 0;
+  TERMINAL_OUTPUT_AUTOLINK_PATTERN.lastIndex = 0;
+
+  for (const match of text.matchAll(TERMINAL_OUTPUT_AUTOLINK_PATTERN)) {
+    const matchIndex = match.index ?? 0;
+    const rawValue = match[0] ?? "";
+    const { linkText, trailingText } =
+      splitTerminalAutolinkTrailingText(rawValue);
+    const href = normalizeTerminalHyperlink(linkText);
+    if (!href || linkText.length === 0) {
+      continue;
+    }
+
+    if (matchIndex > offset) {
+      runs.push({ kind: "text", text: text.slice(offset, matchIndex) });
+    }
+    runs.push({ href, kind: "link", text: linkText });
+    if (trailingText) {
+      runs.push({ kind: "text", text: trailingText });
+    }
+    offset = matchIndex + rawValue.length;
+  }
+
+  if (offset < text.length) {
+    runs.push({ kind: "text", text: text.slice(offset) });
+  }
+
+  return mergeAdjacentTerminalAutolinkTextRuns(runs);
+}
+
+function splitTerminalAutolinkTrailingText(value: string): {
+  linkText: string;
+  trailingText: string;
+} {
+  let linkEnd = value.length;
+  while (linkEnd > 0 && /[),.;:!?}\]]/u.test(value[linkEnd - 1] ?? "")) {
+    linkEnd -= 1;
+  }
+  return {
+    linkText: value.slice(0, linkEnd),
+    trailingText: value.slice(linkEnd),
+  };
+}
+
+function mergeAdjacentTerminalAutolinkTextRuns(
+  runs: TerminalOutputAutolinkRun[]
+): TerminalOutputAutolinkRun[] {
+  const merged: TerminalOutputAutolinkRun[] = [];
+  for (const run of runs) {
+    const previous = merged.at(-1);
+    if (run.kind === "text" && previous?.kind === "text") {
+      previous.text += run.text;
+    } else {
+      merged.push(run);
+    }
+  }
+  return merged;
+}
+
+export function normalizeTerminalBellCount(value: unknown): number {
+  if (typeof value === "bigint") {
+    if (value <= 0n) {
+      return 0;
+    }
+    return Number(
+      value > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : value
+    );
+  }
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.trunc(value))
+    : 0;
+}
+
+export function shouldTriggerTerminalVisualBell(
+  previousPaneId: string | null,
+  previousBellCount: number | null,
+  nextPaneId: string | null,
+  nextBellCount: number
+): boolean {
+  return (
+    Boolean(previousPaneId) &&
+    previousPaneId === nextPaneId &&
+    typeof previousBellCount === "number" &&
+    nextBellCount > previousBellCount
+  );
+}
+
+export function resolveTerminalCursorTextIndex(
+  text: string,
+  col: number
+): number {
+  const target = Math.max(0, Math.trunc(col));
+  let cell = 0;
+  let index = 0;
+  for (const grapheme of terminalGraphemeSegments(text)) {
+    const width = terminalGraphemeCellWidth(grapheme);
+    const nextIndex = index + grapheme.length;
+    if (width === 0) {
+      index = nextIndex;
+      continue;
+    }
+    const nextCell = cell + width;
+    if (target < nextCell) {
+      return index;
+    }
+    if (target === nextCell) {
+      cell = nextCell;
+      index = nextIndex;
+      continue;
+    }
+    cell = nextCell;
+    index = nextIndex;
+  }
+  return text.length;
+}
+
+type TerminalIntlSegmenter = {
+  segment(value: string): Iterable<{ segment: string }>;
+};
+
+type TerminalIntlSegmenterConstructor = new (
+  locales?: string | readonly string[],
+  options?: { granularity: "grapheme" }
+) => TerminalIntlSegmenter;
+
+function terminalGraphemeSegments(text: string): string[] {
+  const Segmenter = (
+    Intl as typeof Intl & {
+      Segmenter?: TerminalIntlSegmenterConstructor;
+    }
+  ).Segmenter;
+  if (!Segmenter) {
+    return [...text];
+  }
+
+  return Array.from(
+    new Segmenter(undefined, { granularity: "grapheme" }).segment(text),
+    (part) => part.segment
+  );
+}
+
+export function terminalOutputMediaTitle(media: ScreenLineMedia): string {
+  const details = [
+    normalizeTerminalMediaName(media.name),
+    normalizeTerminalMediaMimeTypeLabel(media.mime_type),
+    typeof media.byte_size === "number" && Number.isFinite(media.byte_size)
+      ? `${Math.max(0, Math.trunc(media.byte_size))} bytes`
+      : "",
+    media.truncated ? "truncated" : "",
+  ].filter(Boolean);
+  return `${terminalOutputMediaLabel(media)} sequence received${
+    details.length > 0 ? `: ${details.join(", ")}` : ""
+  }`;
+}
+
+export function terminalOutputMediaDataUri(media: ScreenLineMedia): string {
+  const mimeType = normalizeTerminalInlineImageMimeType(media.mime_type);
+  if (media.inline !== true || !mimeType) {
+    return "";
+  }
+
+  const dataBase64 =
+    typeof media.data_base64 === "string"
+      ? media.data_base64.replace(/\s+/gu, "")
+      : "";
+  if (
+    !dataBase64 ||
+    dataBase64.length > 512 * 1024 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/u.test(dataBase64)
+  ) {
+    return "";
+  }
+
+  return `data:${mimeType};base64,${dataBase64}`;
+}
+
+export function terminalOutputMediaImageStyle(media: ScreenLineMedia): string {
+  const width = terminalOutputMediaCssDimension(media.width, "width");
+  const height = terminalOutputMediaCssDimension(media.height, "height");
+  const objectFit = media.preserve_aspect_ratio === false ? "fill" : "contain";
+  return [
+    width ? `width:${width}` : "",
+    height ? `height:${height}` : "",
+    `object-fit:${objectFit}`,
+  ]
+    .filter(Boolean)
+    .join(";");
+}
+
+export function terminalOutputSideEffectLabel(
+  sideEffect: ScreenLineSideEffect
+): string {
+  switch (sideEffect.kind) {
+    case "clipboard_write":
+      return "Clipboard write blocked";
+    case "clipboard_read":
+      return "Clipboard read blocked";
+    case "desktop_notification":
+      return "Notification blocked";
+    default:
+      return "Terminal side effect blocked";
+  }
+}
+
+export function terminalOutputSideEffectTitle(
+  sideEffect: ScreenLineSideEffect
+): string {
+  const details = [
+    terminalOutputSideEffectLabel(sideEffect),
+    terminalOutputSideEffectTargetLabel(sideEffect.target),
+    normalizeTerminalSideEffectMessage(sideEffect.message),
+  ].filter(Boolean);
+  return details.join(": ");
+}
+
+function terminalCharCellWidth(char: string): number {
+  const codePoint = char.codePointAt(0) ?? 0;
+  if (isTerminalZeroWidthCodePoint(codePoint) || /^\p{Mark}$/u.test(char)) {
+    return 0;
+  }
+  return isTerminalWideCodePoint(codePoint) ? 2 : 1;
+}
+
+function terminalGraphemeCellWidth(grapheme: string): number {
+  const codePoints = [...grapheme].map((char) => char.codePointAt(0) ?? 0);
+  if (
+    codePoints.length === 0 ||
+    codePoints.every((codePoint) => isTerminalZeroWidthCodePoint(codePoint))
+  ) {
+    return 0;
+  }
+
+  if (
+    codePoints.some(isTerminalEmojiCodePoint) &&
+    (codePoints.includes(0x200d) ||
+      codePoints.some(isTerminalVariationSelectorCodePoint) ||
+      codePoints.every(isTerminalRegionalIndicatorCodePoint))
+  ) {
+    return 2;
+  }
+
+  if (codePoints.some(isTerminalWideCodePoint)) {
+    return 2;
+  }
+
+  return [...grapheme].reduce(
+    (width, char) => width + terminalCharCellWidth(char),
+    0
+  );
+}
+
+function isTerminalZeroWidthCodePoint(codePoint: number): boolean {
+  return (
+    codePoint === 0x200d ||
+    isTerminalVariationSelectorCodePoint(codePoint) ||
+    (codePoint >= 0x0300 && codePoint <= 0x036f) ||
+    (codePoint >= 0x1ab0 && codePoint <= 0x1aff) ||
+    (codePoint >= 0x1dc0 && codePoint <= 0x1dff) ||
+    (codePoint >= 0x20d0 && codePoint <= 0x20ff) ||
+    (codePoint >= 0xfe20 && codePoint <= 0xfe2f)
+  );
+}
+
+function isTerminalVariationSelectorCodePoint(codePoint: number): boolean {
+  return (
+    (codePoint >= 0xfe00 && codePoint <= 0xfe0f) ||
+    (codePoint >= 0xe0100 && codePoint <= 0xe01ef)
+  );
+}
+
+function isTerminalRegionalIndicatorCodePoint(codePoint: number): boolean {
+  return codePoint >= 0x1f1e6 && codePoint <= 0x1f1ff;
+}
+
+function isTerminalEmojiCodePoint(codePoint: number): boolean {
+  return (
+    isTerminalRegionalIndicatorCodePoint(codePoint) ||
+    (codePoint >= 0x1f000 && codePoint <= 0x1faff) ||
+    (codePoint >= 0x2600 && codePoint <= 0x27bf)
+  );
+}
+
+function isTerminalWideCodePoint(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x1100 && codePoint <= 0x115f) ||
+    codePoint === 0x2329 ||
+    codePoint === 0x232a ||
+    (codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f) ||
+    (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+    (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+    (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+    (codePoint >= 0xff00 && codePoint <= 0xff60) ||
+    (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+    isTerminalEmojiCodePoint(codePoint) ||
+    (codePoint >= 0x20000 && codePoint <= 0x3fffd)
+  );
+}
+
+function terminalOutputMediaLabel(media: ScreenLineMedia): string {
+  switch (media.kind) {
+    case "iterm2_image":
+      return "iTerm2 image";
+    case "kitty_graphics":
+      return "Kitty graphics";
+    case "sixel":
+      return "Sixel graphic";
+    default:
+      return "Terminal media";
+  }
+}
+
+function terminalOutputSideEffectTargetLabel(
+  target: ScreenLineSideEffect["target"] | null | undefined
+): string {
+  switch (target) {
+    case "clipboard":
+      return "clipboard";
+    case "selection":
+      return "selection";
+    case "desktop_notification":
+      return "desktop notification";
+    case "unknown":
+      return "unknown target";
+    default:
+      return "";
+  }
+}
+
+function normalizeTerminalSideEffectMessage(
+  value: string | null | undefined
+): string {
+  if (!value) {
+    return "";
+  }
+  return value
+    .replace(/[\u0000-\u001f\u007f]+/gu, " ")
+    .trim()
+    .slice(0, 160);
+}
+
+function normalizeTerminalMediaName(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .replace(/[\u0000-\u001f\u007f]+/gu, " ")
+    .slice(0, 160);
+}
+
+function normalizeTerminalMediaMimeTypeLabel(
+  value: string | null | undefined
+): string {
+  return normalizeTerminalInlineImageMimeType(value) ?? "";
+}
+
+function normalizeTerminalInlineImageMimeType(
+  value: string | null | undefined
+): string | null {
+  const normalized = (value ?? "").trim().toLowerCase();
+  return ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+    normalized
+  )
+    ? normalized
+    : null;
+}
+
+function terminalOutputMediaCssDimension(
+  value: string | null | undefined,
+  axis: "height" | "width"
+): string | null {
+  const normalized = (value ?? "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const textCells = normalized.match(/^(\d+)$/u);
+  if (textCells) {
+    const count = Math.max(1, Math.min(200, Number(textCells[1])));
+    return axis === "width" ? `${count}ch` : `${Math.ceil(count * 1.2)}em`;
+  }
+
+  const px = normalized.match(/^(\d+(?:\.\d+)?)px$/u);
+  if (px) {
+    const count = Math.max(0, Math.min(4096, Number(px[1])));
+    return count > 0 ? `${Math.trunc(count)}px` : null;
+  }
+
+  const percent = normalized.match(/^(\d+(?:\.\d+)?)%$/u);
+  if (percent) {
+    const count = Math.max(0, Math.min(100, Number(percent[1])));
+    return count > 0 ? `${Math.trunc(count)}%` : null;
+  }
+
+  return null;
+}
+
 function renderLine(
   index: number,
   segments: readonly TerminalOutputSearchSegment[],
-  source: VisibleOutputLineSource = "live",
+  line: VisibleOutputLine
 ): TemplateResult {
   return html`
-    <div class="line" part="screen-line" data-line-source=${source}>
+    <div class="line" part="screen-line" data-line-source=${line.source}>
       <span class="gutter" part="line-number" aria-hidden="true">${index}</span>
-      <span class="text" part="line-text"
-        >${renderHighlightedSegments(segments)}</span
+      <span
+        class="text"
+        part="line-text"
+        style=${styleMap(resolveTerminalSurfacePaletteStyle(line.palette))}
+        >${renderVisibleOutputLineText(line, segments)}</span
       >
     </div>
   `;
@@ -2077,12 +2677,12 @@ function renderLine(
 function renderTerminalHistoryEntries(
   entries: readonly TerminalHistoryEntry[],
   searchResult: TerminalOutputSearchResult,
-  options: TerminalHistoryRenderOptions = {},
+  options: TerminalHistoryRenderOptions = {}
 ): TemplateResult[] {
   const prepared = prepareTerminalHistoryEntriesForRender(
     entries,
     options.commandMetadata ?? [],
-    options.nowMs,
+    options.nowMs
   );
   const commandMetadataByEntryIndex = prepared.metadataByEntryIndex;
 
@@ -2091,7 +2691,7 @@ function renderTerminalHistoryEntries(
       return renderLine(
         entry.lineIndex + 1,
         getSearchSegments(searchResult, entry.lineIndex),
-        entry.line.source,
+        entry.line
       );
     }
 
@@ -2101,22 +2701,25 @@ function renderTerminalHistoryEntries(
         part="history-entry"
         data-line-source=${entry.commandLine.source}
         data-command-context-menu=${String(
-          options.activeCommandContextLineIndex === entry.commandLineIndex,
+          options.activeCommandContextLineIndex === entry.commandLineIndex
         )}
         data-command-status=${commandMetadataByEntryIndex.get(
-          entry.commandLineIndex,
+          entry.commandLineIndex
         )?.status ?? "unknown"}
+        style=${styleMap(
+          resolveTerminalSurfacePaletteStyle(entry.commandLine.palette)
+        )}
         @contextmenu=${(event: MouseEvent) =>
           options.onCommandContextMenu?.(event, entry)}
       >
         <div class="history-entry-prompt" part="history-entry-prompt">
           <span>${entry.prompt}</span>${renderCommandPresentationMetadata(
-            commandMetadataByEntryIndex.get(entry.commandLineIndex),
+            commandMetadataByEntryIndex.get(entry.commandLineIndex)
           )}
         </div>
         <div class="history-entry-command" part="history-entry-command">
           <span class="history-entry-text" part="history-entry-command-text">
-            ${renderCommandSegments(entry.command, searchResult.query)}
+            ${renderCommandLineText(entry, searchResult.query)}
           </span>
         </div>
         ${entry.output.map(
@@ -2125,14 +2728,18 @@ function renderTerminalHistoryEntries(
               class="history-entry-output"
               part="history-entry-output"
               data-line-source=${outputLine.line.source}
+              style=${styleMap(
+                resolveTerminalSurfacePaletteStyle(outputLine.line.palette)
+              )}
             >
               <span class="history-entry-text" part="history-entry-output-text">
-                ${renderHighlightedSegments(
-                  getSearchSegments(searchResult, outputLine.lineIndex),
+                ${renderVisibleOutputLineText(
+                  outputLine.line,
+                  getSearchSegments(searchResult, outputLine.lineIndex)
                 )}
               </span>
             </div>
-          `,
+          `
         )}
       </section>
     `;
@@ -2142,10 +2749,13 @@ function renderTerminalHistoryEntries(
 export function prepareTerminalHistoryEntriesForRender(
   entries: readonly TerminalHistoryEntry[],
   metadata: readonly TerminalCommandPresentationMetadata[] = [],
-  nowMs = Date.now(),
+  nowMs = Date.now()
 ): {
   entries: readonly TerminalHistoryEntry[];
-  metadataByEntryIndex: ReadonlyMap<number, TerminalCommandPresentationMetadata>;
+  metadataByEntryIndex: ReadonlyMap<
+    number,
+    TerminalCommandPresentationMetadata
+  >;
 } {
   const matched = matchCommandPresentationMetadata(entries, metadata);
   const matchedItems = new Set(matched.values());
@@ -2163,14 +2773,14 @@ export function prepareTerminalHistoryEntriesForRender(
 
   const filteredEntries = removeTrailingRawPendingCommandLines(
     entries,
-    pendingItems,
+    pendingItems
   );
   const syntheticEntries = createPendingTerminalCommandEntries(
     filteredEntries,
-    pendingItems,
+    pendingItems
   );
   const nextMetadata = new Map<number, TerminalCommandPresentationMetadata>(
-    matchCommandPresentationMetadata(filteredEntries, metadata),
+    matchCommandPresentationMetadata(filteredEntries, metadata)
   );
 
   syntheticEntries.forEach((entry, index) => {
@@ -2185,7 +2795,7 @@ export function prepareTerminalHistoryEntriesForRender(
 
 function isPendingTerminalCommandMetadata(
   metadata: TerminalCommandPresentationMetadata,
-  nowMs: number,
+  nowMs: number
 ): boolean {
   const command = normalizeCommandPresentationMatch(metadata.command);
   if (!command) {
@@ -2208,12 +2818,12 @@ function isPendingTerminalCommandMetadata(
 
 function removeTrailingRawPendingCommandLines(
   entries: readonly TerminalHistoryEntry[],
-  pendingItems: readonly TerminalCommandPresentationMetadata[],
+  pendingItems: readonly TerminalCommandPresentationMetadata[]
 ): TerminalHistoryEntry[] {
   const pendingCommands = new Set(
     pendingItems
       .map((item) => normalizeCommandPresentationMatch(item.command))
-      .filter(Boolean),
+      .filter(Boolean)
   );
   const next = [...entries];
 
@@ -2222,7 +2832,9 @@ function removeTrailingRawPendingCommandLines(
     if (
       lastEntry?.kind !== "line" ||
       lastEntry.line.source !== "live" ||
-      !pendingCommands.has(normalizeCommandPresentationMatch(lastEntry.line.text))
+      !pendingCommands.has(
+        normalizeCommandPresentationMatch(lastEntry.line.text)
+      )
     ) {
       break;
     }
@@ -2235,7 +2847,7 @@ function removeTrailingRawPendingCommandLines(
 
 function createPendingTerminalCommandEntries(
   entries: readonly TerminalHistoryEntry[],
-  pendingItems: readonly TerminalCommandPresentationMetadata[],
+  pendingItems: readonly TerminalCommandPresentationMetadata[]
 ): Extract<TerminalHistoryEntry, { kind: "command" }>[] {
   const nextLineIndex = resolveNextTerminalHistoryLineIndex(entries);
 
@@ -2258,7 +2870,7 @@ function createPendingTerminalCommandEntries(
 }
 
 function resolveNextTerminalHistoryLineIndex(
-  entries: readonly TerminalHistoryEntry[],
+  entries: readonly TerminalHistoryEntry[]
 ): number {
   let maxLineIndex = -1;
   entries.forEach((entry) => {
@@ -2270,7 +2882,7 @@ function resolveNextTerminalHistoryLineIndex(
     maxLineIndex = Math.max(
       maxLineIndex,
       entry.commandLineIndex,
-      ...entry.output.map((output) => output.lineIndex),
+      ...entry.output.map((output) => output.lineIndex)
     );
   });
   return maxLineIndex + 1;
@@ -2278,7 +2890,7 @@ function resolveNextTerminalHistoryLineIndex(
 
 function matchCommandPresentationMetadata(
   entries: readonly TerminalHistoryEntry[],
-  metadata: readonly TerminalCommandPresentationMetadata[],
+  metadata: readonly TerminalCommandPresentationMetadata[]
 ): Map<number, TerminalCommandPresentationMetadata> {
   const matched = new Map<number, TerminalCommandPresentationMetadata>();
   if (metadata.length === 0) {
@@ -2325,7 +2937,7 @@ function matchCommandPresentationMetadata(
 }
 
 function renderCommandPresentationMetadata(
-  metadata: TerminalCommandPresentationMetadata | undefined,
+  metadata: TerminalCommandPresentationMetadata | undefined
 ): TemplateResult | typeof nothing {
   if (!metadata) {
     return nothing;
@@ -2342,7 +2954,7 @@ function renderCommandPresentationMetadata(
   const label = formatCommandMetadataLabel(
     status,
     durationLabel,
-    exitCodeLabel,
+    exitCodeLabel
   );
 
   return label
@@ -2354,7 +2966,7 @@ function renderCommandPresentationMetadata(
           title=${formatCommandMetadataTitle(
             status,
             durationLabel,
-            exitCodeLabel,
+            exitCodeLabel
           )}
         >
           ${label}
@@ -2364,7 +2976,7 @@ function renderCommandPresentationMetadata(
 }
 
 function resolveCommandPresentationDurationMs(
-  metadata: TerminalCommandPresentationMetadata,
+  metadata: TerminalCommandPresentationMetadata
 ): number | null {
   if (
     typeof metadata.durationMs === "number" &&
@@ -2387,7 +2999,7 @@ function resolveCommandPresentationDurationMs(
 function formatCommandMetadataLabel(
   status: TerminalCommandPresentationStatus,
   durationLabel: string | null,
-  exitCodeLabel: string | null,
+  exitCodeLabel: string | null
 ): string | null {
   if (status === "running") {
     return durationLabel ? `running (${durationLabel})` : "running";
@@ -2412,16 +3024,16 @@ function formatCommandMetadataLabel(
 function formatCommandMetadataTitle(
   status: TerminalCommandPresentationStatus,
   durationLabel: string | null,
-  exitCodeLabel: string | null,
+  exitCodeLabel: string | null
 ): string {
   const statusLabel =
     status === "failed"
       ? "Command failed"
       : status === "running"
-        ? "Command is running"
-        : status === "succeeded"
-          ? "Command completed"
-          : "Command status unknown";
+      ? "Command is running"
+      : status === "succeeded"
+      ? "Command completed"
+      : "Command status unknown";
   return [
     statusLabel,
     durationLabel ? `Duration ${durationLabel}` : null,
@@ -2447,7 +3059,7 @@ function formatCommandDuration(durationMs: number): string {
 function clampContextMenuCoordinate(
   coordinate: number,
   viewportSize: number,
-  menuSize: number,
+  menuSize: number
 ): number {
   if (!Number.isFinite(coordinate) || !Number.isFinite(viewportSize)) {
     return 0;
@@ -2455,7 +3067,7 @@ function clampContextMenuCoordinate(
 
   return Math.max(
     8,
-    Math.min(coordinate, Math.max(8, viewportSize - menuSize - 8)),
+    Math.min(coordinate, Math.max(8, viewportSize - menuSize - 8))
   );
 }
 
@@ -2465,7 +3077,7 @@ function normalizeCommandPresentationMatch(command: string): string {
 
 export function doesCommandPresentationMatchHistoryEntry(
   entryCommand: string,
-  metadataCommand: string,
+  metadataCommand: string
 ): boolean {
   const entry = normalizeCommandPresentationMatch(entryCommand);
   const metadata = normalizeCommandPresentationMatch(metadataCommand);
@@ -2486,40 +3098,381 @@ export function doesCommandPresentationMatchHistoryEntry(
 
 function getSearchSegments(
   searchResult: TerminalOutputSearchResult,
-  lineIndex: number,
+  lineIndex: number
 ): readonly TerminalOutputSearchSegment[] {
   return (
     searchResult.lines[lineIndex]?.segments ?? [{ kind: "text", value: "" }]
   );
 }
 
-function renderCommandSegments(command: string, query: string): TemplateResult {
-  const result = createTerminalOutputSearchResult([command], query);
-  return renderHighlightedSegments(
-    result.lines[0]?.segments ?? [{ kind: "text", value: command }],
+function renderVisibleOutputLineText(
+  line: VisibleOutputLine,
+  segments: readonly TerminalOutputSearchSegment[]
+): TemplateResult {
+  const hasSearchMatch = segments.some((segment) => segment.kind === "match");
+  const styledSearchRuns = hasSearchMatch
+    ? createTerminalOutputStyledSearchRuns(line, segments)
+    : null;
+  const content = styledSearchRuns
+    ? renderTerminalOutputRuns(line, styledSearchRuns)
+    : !hasSearchMatch && line.spans && line.spans.length > 0
+    ? renderTerminalOutputSpans(line)
+    : !hasSearchMatch && line.cursor
+    ? renderTerminalPlainTextWithCursor(line)
+    : renderHighlightedSegments(segments);
+  return html`${content}${renderTerminalOutputMediaMarkers(
+    line.media
+  )}${renderTerminalOutputSideEffectMarkers(line.sideEffects)}`;
+}
+
+function renderCommandLineText(
+  entry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+  query: string
+): TemplateResult {
+  const commandLine = createTerminalCommandLineRichText(entry);
+  const result = createTerminalOutputSearchResult([commandLine.text], query);
+  return renderVisibleOutputLineText(
+    commandLine,
+    result.lines[0]?.segments ?? [{ kind: "text", value: commandLine.text }]
   );
+}
+
+export function createTerminalCommandLineRichText(
+  entry: Extract<TerminalHistoryEntry, { kind: "command" }>
+): VisibleOutputLine {
+  const commandStart = entry.commandLine.text.lastIndexOf(entry.command);
+  if (commandStart < 0) {
+    return {
+      source: entry.commandLine.source,
+      text: entry.command,
+    };
+  }
+
+  return sliceVisibleOutputLineText(
+    entry.commandLine,
+    commandStart,
+    commandStart + entry.command.length
+  );
+}
+
+function sliceVisibleOutputLineText(
+  line: VisibleOutputLine,
+  start: number,
+  end: number
+): VisibleOutputLine {
+  const text = line.text.slice(start, end);
+  const spans = sliceScreenLineSpans(line.spans, line.text, start, end);
+  return {
+    source: line.source,
+    text,
+    ...(spans.length > 0 ? { spans } : {}),
+  };
+}
+
+function sliceScreenLineSpans(
+  spans: readonly ScreenLineSpan[] | undefined,
+  lineText: string,
+  start: number,
+  end: number
+): ScreenLineSpan[] {
+  if (
+    !spans ||
+    spans.length === 0 ||
+    spans.map((span) => span.text).join("") !== lineText
+  ) {
+    return [];
+  }
+
+  const sliced: ScreenLineSpan[] = [];
+  let spanStart = 0;
+  for (const span of spans) {
+    const spanEnd = spanStart + span.text.length;
+    const sliceStart = Math.max(start, spanStart);
+    const sliceEnd = Math.min(end, spanEnd);
+    if (sliceStart < sliceEnd) {
+      sliced.push({
+        text: span.text.slice(sliceStart - spanStart, sliceEnd - spanStart),
+        style: span.style,
+      });
+    }
+    spanStart = spanEnd;
+  }
+  return sliced;
+}
+
+export function createTerminalOutputStyledSearchRuns(
+  line: Pick<VisibleOutputLine, "spans" | "text">,
+  segments: readonly TerminalOutputSearchSegment[]
+): TerminalOutputStyledSearchRun[] | null {
+  const spans = line.spans ?? [];
+  if (spans.length === 0) {
+    return null;
+  }
+
+  if (segments.map((segment) => segment.value).join("") !== line.text) {
+    return null;
+  }
+
+  if (spans.map((span) => span.text).join("") !== line.text) {
+    return null;
+  }
+
+  const segmentRanges = createTerminalOutputSearchSegmentRanges(segments);
+  const runs: TerminalOutputStyledSearchRun[] = [];
+  let spanStart = 0;
+
+  for (const span of spans) {
+    const spanEnd = spanStart + span.text.length;
+    for (const segmentRange of segmentRanges) {
+      const start = Math.max(spanStart, segmentRange.start);
+      const end = Math.min(spanEnd, segmentRange.end);
+      if (start >= end) {
+        continue;
+      }
+
+      runs.push({
+        activeSearchMatch: segmentRange.active,
+        searchMatch: segmentRange.match,
+        style: span.style,
+        text: span.text.slice(start - spanStart, end - spanStart),
+      });
+    }
+
+    spanStart = spanEnd;
+  }
+
+  return runs;
+}
+
+function createTerminalOutputSearchSegmentRanges(
+  segments: readonly TerminalOutputSearchSegment[]
+): {
+  active: boolean;
+  end: number;
+  match: boolean;
+  start: number;
+}[] {
+  let offset = 0;
+  return segments.map((segment) => {
+    const start = offset;
+    const end = start + segment.value.length;
+    offset = end;
+    return {
+      active: segment.kind === "match" && segment.active,
+      end,
+      match: segment.kind === "match",
+      start,
+    };
+  });
+}
+
+function renderTerminalOutputSpans(line: VisibleOutputLine): TemplateResult {
+  const spans = line.spans ?? [];
+  return renderTerminalOutputRuns(
+    line,
+    spans.map((span) => ({
+      activeSearchMatch: false,
+      searchMatch: false,
+      style: span.style,
+      text: span.text,
+    }))
+  );
+}
+
+function renderTerminalOutputRuns(
+  line: VisibleOutputLine,
+  runs: readonly TerminalOutputStyledSearchRun[]
+): TemplateResult {
+  const cursorIndex = line.cursor
+    ? resolveTerminalCursorTextIndex(line.text, line.cursor.col)
+    : null;
+  let offset = 0;
+  let cursorRendered = false;
+  const parts: TemplateResult[] = [];
+
+  for (const run of runs) {
+    const start = offset;
+    const end = start + run.text.length;
+    if (
+      cursorIndex === null ||
+      cursorRendered ||
+      cursorIndex < start ||
+      cursorIndex > end
+    ) {
+      parts.push(renderTerminalOutputRun(run));
+    } else {
+      const before = run.text.slice(0, cursorIndex - start);
+      const after = run.text.slice(cursorIndex - start);
+      if (before.length > 0) {
+        parts.push(renderTerminalOutputRun({ ...run, text: before }));
+      }
+      parts.push(renderTerminalOutputCursor(line.cursor!));
+      cursorRendered = true;
+      if (after.length > 0) {
+        parts.push(renderTerminalOutputRun({ ...run, text: after }));
+      }
+    }
+    offset = end;
+  }
+
+  if (line.cursor && !cursorRendered) {
+    parts.push(renderTerminalOutputCursor(line.cursor));
+  }
+
+  return html`${parts}`;
+}
+
+function renderTerminalOutputRun(
+  run: TerminalOutputStyledSearchRun
+): TemplateResult {
+  const href = normalizeTerminalHyperlink(run.style.hyperlink);
+  return href
+    ? renderTerminalOutputLink(renderTerminalOutputRunNode(run, run.text), href)
+    : renderTerminalOutputAutolinkRun(run);
+}
+
+function renderTerminalOutputAutolinkRun(
+  run: TerminalOutputStyledSearchRun
+): TemplateResult {
+  if (run.searchMatch) {
+    return renderTerminalOutputRunNode(run, run.text);
+  }
+
+  const autolinkRuns = createTerminalOutputAutolinkRuns(run.text);
+  if (
+    autolinkRuns.length === 0 ||
+    (autolinkRuns.length === 1 && autolinkRuns[0]?.kind === "text")
+  ) {
+    return renderTerminalOutputRunNode(run, run.text);
+  }
+
+  return html`${autolinkRuns.map((autolinkRun) => {
+    const node = renderTerminalOutputRunNode(run, autolinkRun.text);
+    return autolinkRun.kind === "link"
+      ? renderTerminalOutputLink(node, autolinkRun.href)
+      : node;
+  })}`;
+}
+
+function renderTerminalOutputRunNode(
+  run: TerminalOutputStyledSearchRun,
+  text: string
+): TemplateResult {
+  const style = styleMap(resolveTerminalOutputStyle(run.style));
+  return run.searchMatch
+    ? html`<mark
+        class="terminal-output-segment terminal-output-search-run"
+        part=${run.activeSearchMatch
+          ? "search-match active-search-match"
+          : "search-match"}
+        data-active=${String(run.activeSearchMatch)}
+        data-testid=${run.activeSearchMatch
+          ? "tp-screen-active-search-match"
+          : nothing}
+        style=${style}
+        >${text}</mark
+      >`
+    : html`<span class="terminal-output-segment" style=${style}>${text}</span>`;
+}
+
+function renderTerminalOutputLink(
+  node: TemplateResult,
+  href: string
+): TemplateResult {
+  return html`<a
+    class="terminal-output-link"
+    href=${href}
+    rel="noopener noreferrer"
+    target="_blank"
+    >${node}</a
+  >`;
+}
+
+function renderTerminalPlainTextWithCursor(
+  line: VisibleOutputLine
+): TemplateResult {
+  const cursor = line.cursor;
+  if (!cursor) {
+    return html`${line.text}`;
+  }
+  const cursorIndex = resolveTerminalCursorTextIndex(line.text, cursor.col);
+  return html`${line.text.slice(0, cursorIndex)}${renderTerminalOutputCursor(
+    cursor
+  )}${line.text.slice(cursorIndex)}`;
+}
+
+function renderTerminalOutputCursor(
+  cursor: ResolvedTerminalOutputCursor
+): TemplateResult {
+  return html`<span
+    class="terminal-output-cursor"
+    part="terminal-cursor"
+    data-cursor-blinking=${cursor.blinking ? "true" : "false"}
+    data-cursor-shape=${cursor.shape}
+    aria-hidden="true"
+  ></span>`;
+}
+
+function renderTerminalOutputMediaMarkers(
+  media: readonly ScreenLineMedia[] | undefined
+): TemplateResult | typeof nothing {
+  if (!media || media.length === 0) {
+    return nothing;
+  }
+  return html`${media.map((item) => {
+    const dataUri = terminalOutputMediaDataUri(item);
+    if (dataUri) {
+      return html`<span
+        class="terminal-output-media-image-frame"
+        part="line-media line-media-image"
+        data-media-kind=${item.kind}
+        title=${terminalOutputMediaTitle(item)}
+        ><img
+          class="terminal-output-media-image"
+          alt=${terminalOutputMediaLabel(item)}
+          src=${dataUri}
+          style=${terminalOutputMediaImageStyle(item)}
+          loading="lazy"
+          decoding="async"
+      /></span>`;
+    }
+    return html`<span
+      class="terminal-output-media"
+      part="line-media"
+      data-media-kind=${item.kind}
+      title=${terminalOutputMediaTitle(item)}
+      >${terminalOutputMediaLabel(item)}</span
+    >`;
+  })}`;
+}
+
+function renderTerminalOutputSideEffectMarkers(
+  sideEffects: readonly ScreenLineSideEffect[] | undefined
+): TemplateResult | typeof nothing {
+  if (!sideEffects || sideEffects.length === 0) {
+    return nothing;
+  }
+  return html`${sideEffects.map(
+    (item) => html`<span
+      class="terminal-output-side-effect"
+      part="line-side-effect"
+      data-side-effect-kind=${item.kind}
+      data-side-effect-disposition=${item.disposition}
+      title=${terminalOutputSideEffectTitle(item)}
+      >${terminalOutputSideEffectLabel(item)}</span
+    >`
+  )}`;
 }
 
 export function createVisibleOutputLines(
   history: ReturnType<typeof resolveTerminalScreenControlState>["history"],
   screen: ReturnType<typeof resolveTerminalScreenControlState>["screen"],
-  options: VisibleOutputLineOptions = {},
+  options: VisibleOutputLineOptions = {}
 ): VisibleOutputLine[] {
   const liveLines = trimTrailingEmptyLiveLines(
-    screen?.surface.lines.map((line) => ({
-      text: line.text,
-      source: "live" as const,
-    })) ?? [],
+    createLiveVisibleOutputLines(screen)
   );
-  const historyLines =
-    history?.lines
-      .filter(
-        (line, index, lines) => line.length > 0 || index < lines.length - 1,
-      )
-      .map((line) => ({
-        text: line,
-        source: "history" as const,
-      })) ?? [];
+  const historyLines = createHistoryVisibleOutputLines(history);
   const dedupedHistoryLines =
     liveLines.length > 0
       ? removeHistorySuffixOverlappingLivePrefix(historyLines, liveLines)
@@ -2531,7 +3484,7 @@ export function createVisibleOutputLines(
 
   if (dedupedHistoryLines.length === 0 && historyBoundaryLines.length === 0) {
     return dedupeVisibleHistoryLiveOverlap(
-      filterVisibleOutputLines(liveLines, options),
+      filterVisibleOutputLines(liveLines, options)
     );
   }
 
@@ -2539,8 +3492,8 @@ export function createVisibleOutputLines(
     return dedupeVisibleHistoryLiveOverlap(
       filterVisibleOutputLines(
         [...dedupedHistoryLines, ...historyBoundaryLines],
-        options,
-      ),
+        options
+      )
     );
   }
 
@@ -2559,14 +3512,122 @@ export function createVisibleOutputLines(
           : []),
         ...liveLines,
       ],
-      options,
-    ),
+      options
+    )
   );
+}
+
+function createLiveVisibleOutputLines(
+  screen: ReturnType<typeof resolveTerminalScreenControlState>["screen"]
+): VisibleOutputLine[] {
+  const rawLines = screen?.surface.lines ?? [];
+  const lines = rawLines.map((line, index) =>
+    createVisibleLiveOutputLine(line, index, screen?.surface.cursor ?? null)
+  );
+  const cursor = screen?.surface.cursor ?? null;
+  if (
+    cursor &&
+    cursor.shape !== "hidden" &&
+    cursor.row >= 0 &&
+    cursor.row >= lines.length
+  ) {
+    while (lines.length <= cursor.row) {
+      lines.push(
+        createVisibleLiveOutputLine(
+          { text: "", spans: [] },
+          lines.length,
+          cursor
+        )
+      );
+    }
+  }
+  return lines;
+}
+
+function createVisibleLiveOutputLine(
+  line: Pick<
+    ScreenLine,
+    "media" | "semantic_marks" | "side_effects" | "spans" | "text" | "wrapped"
+  >,
+  index: number,
+  cursor: ScreenCursor | null
+): VisibleOutputLine {
+  return {
+    text: line.text,
+    source: "live",
+    ...visibleOutputLineMetadata(line),
+    ...(cursor && cursor.row === index && cursor.shape !== "hidden"
+      ? {
+          cursor: {
+            col: Math.max(0, Math.trunc(cursor.col)),
+            shape: cursor.shape ?? "block",
+            ...(cursor.blinking === true ? { blinking: true } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+function createHistoryVisibleOutputLines(
+  history: ReturnType<typeof resolveTerminalScreenControlState>["history"]
+): VisibleOutputLine[] {
+  if (!history) {
+    return [];
+  }
+
+  const lines = history.lines ?? [];
+  const richLines =
+    history.richLines && history.richLines.length === lines.length
+      ? history.richLines
+      : null;
+  const visibleLines = lines.map((line, index) => {
+    const richLine = richLines?.[index];
+    return {
+      text: richLine?.text ?? line,
+      source: "history" as const,
+      ...(richLine ? visibleOutputLineMetadata(richLine) : {}),
+      ...(history.surfacePalette ? { palette: history.surfacePalette } : {}),
+    };
+  });
+
+  let endIndex = visibleLines.length;
+  while (
+    endIndex > 0 &&
+    !isMeaningfulVisibleOutputLine(visibleLines[endIndex - 1], {
+      trimPlainBlankText: true,
+    })
+  ) {
+    endIndex -= 1;
+  }
+  return visibleLines.slice(0, endIndex);
+}
+
+function visibleOutputLineMetadata(
+  line: Pick<
+    ScreenLine,
+    "media" | "semantic_marks" | "side_effects" | "spans" | "wrapped"
+  >
+): Partial<VisibleOutputLine> {
+  return {
+    ...(line.spans &&
+    line.spans.length > 0 &&
+    !arePlainTerminalSpans(line.spans)
+      ? { spans: line.spans }
+      : {}),
+    ...(line.media && line.media.length > 0 ? { media: line.media } : {}),
+    ...(line.side_effects && line.side_effects.length > 0
+      ? { sideEffects: line.side_effects }
+      : {}),
+    ...(line.semantic_marks && line.semantic_marks.length > 0
+      ? { semanticMarks: line.semantic_marks }
+      : {}),
+    ...(line.wrapped === true ? { softWrapped: true } : {}),
+  };
 }
 
 function removeHistorySuffixOverlappingLivePrefix(
   historyLines: readonly VisibleOutputLine[],
-  liveLines: readonly VisibleOutputLine[],
+  liveLines: readonly VisibleOutputLine[]
 ): VisibleOutputLine[] {
   const overlap = findHistoryLiveLineOverlap(historyLines, liveLines);
   return overlap > 0 ? historyLines.slice(0, -overlap) : [...historyLines];
@@ -2574,7 +3635,7 @@ function removeHistorySuffixOverlappingLivePrefix(
 
 function findHistoryLiveLineOverlap(
   historyLines: readonly VisibleOutputLine[],
-  liveLines: readonly VisibleOutputLine[],
+  liveLines: readonly VisibleOutputLine[]
 ): number {
   const maxOverlap = Math.min(historyLines.length, liveLines.length, 240);
   for (let size = maxOverlap; size > 0; size -= 1) {
@@ -2583,7 +3644,12 @@ function findHistoryLiveLineOverlap(
       const historyText =
         historyLines[historyLines.length - size + index]?.text ?? "";
       const liveText = liveLines[index]?.text ?? "";
-      if (historyText !== liveText) {
+      const historyLine = historyLines[historyLines.length - size + index];
+      const liveLine = liveLines[index];
+      if (
+        historyText !== liveText ||
+        !areVisibleOutputLinesEquivalentForDedupe(historyLine, liveLine)
+      ) {
         matches = false;
         break;
       }
@@ -2597,7 +3663,7 @@ function findHistoryLiveLineOverlap(
 }
 
 function dedupeVisibleHistoryLiveOverlap(
-  lines: readonly VisibleOutputLine[],
+  lines: readonly VisibleOutputLine[]
 ): VisibleOutputLine[] {
   const firstLiveIndex = lines.findIndex((line) => line.source === "live");
   if (firstLiveIndex <= 0) {
@@ -2630,13 +3696,13 @@ function dedupeVisibleHistoryLiveOverlap(
 
 export function createTerminalHistoryEntries(
   lines: readonly VisibleOutputLine[],
-  options: TerminalHistoryEntryOptions = {},
+  options: TerminalHistoryEntryOptions = {}
 ): TerminalHistoryEntry[] {
   const entries: TerminalHistoryEntry[] = [];
   let activeEntry: Extract<TerminalHistoryEntry, { kind: "command" }> | null =
     null;
   const terminalPromptLabel = normalizeTerminalPromptLabel(
-    options.terminalPromptLabel,
+    options.terminalPromptLabel
   );
 
   const flushActiveEntry = () => {
@@ -2650,6 +3716,25 @@ export function createTerminalHistoryEntries(
     if (line.source === "boundary") {
       flushActiveEntry();
       entries.push({ kind: "line", line, lineIndex });
+      return;
+    }
+
+    const semanticCommand = parseSemanticPromptCommandLine(line);
+    if (semanticCommand) {
+      flushActiveEntry();
+      activeEntry = {
+        kind: "command",
+        prompt: semanticCommand.prompt,
+        commandLine: line,
+        commandLineIndex: lineIndex,
+        command: semanticCommand.command,
+        output: [],
+      };
+      return;
+    }
+
+    if (activeEntry && hasTerminalSemanticMark(line, "command_finished")) {
+      flushActiveEntry();
       return;
     }
 
@@ -2669,7 +3754,7 @@ export function createTerminalHistoryEntries(
 
     const wrappedInputCommand = parseWrappedInputCommandLine(
       line.text,
-      terminalPromptLabel,
+      terminalPromptLabel
     );
     if (wrappedInputCommand) {
       flushActiveEntry();
@@ -2698,12 +3783,12 @@ export function createTerminalHistoryEntries(
 
   flushActiveEntry();
   return dedupeHistoryCommandEntriesAgainstLive(
-    removeRedundantTerminalCommandFragments(entries),
+    removeRedundantTerminalCommandFragments(entries)
   );
 }
 
 export function createTerminalCommandContextCopyText(
-  entry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+  entry: Extract<TerminalHistoryEntry, { kind: "command" }>
 ): {
   blockText: string;
   commandText: string;
@@ -2711,22 +3796,29 @@ export function createTerminalCommandContextCopyText(
 } {
   const outputLines = entry.output.map((outputLine) => outputLine.line.text);
   return {
-    blockText: serializeTerminalOutputLines([entry.command, ...outputLines]),
+    blockText: serializeTerminalCommandCopyLines([
+      entry.command,
+      ...outputLines,
+    ]),
     commandText: entry.command,
-    outputText: serializeTerminalOutputLines(outputLines),
+    outputText: serializeTerminalCommandCopyLines(outputLines),
   };
 }
 
+function serializeTerminalCommandCopyLines(lines: readonly string[]): string {
+  return lines.length > 0 ? lines.join("\n") : "";
+}
+
 function dedupeHistoryCommandEntriesAgainstLive(
-  entries: readonly TerminalHistoryEntry[],
+  entries: readonly TerminalHistoryEntry[]
 ): TerminalHistoryEntry[] {
   const liveCommandSignatures = new Set(
     entries
       .filter(
         (entry): entry is Extract<TerminalHistoryEntry, { kind: "command" }> =>
-          entry.kind === "command" && entry.commandLine.source === "live",
+          entry.kind === "command" && entry.commandLine.source === "live"
       )
-      .map(createTerminalCommandEntrySignature),
+      .map(createTerminalCommandEntrySignature)
   );
 
   if (liveCommandSignatures.size === 0) {
@@ -2739,9 +3831,9 @@ function dedupeHistoryCommandEntriesAgainstLive(
         (entry): entry is Extract<TerminalHistoryEntry, { kind: "command" }> =>
           entry.kind === "command" &&
           entry.commandLine.source === "history" &&
-          hasMeaningfulTerminalCommandOutput(entry),
+          hasMeaningfulTerminalCommandOutput(entry)
       )
-      .map((entry) => entry.command),
+      .map((entry) => entry.command)
   );
 
   return entries.filter((entry) => {
@@ -2758,19 +3850,19 @@ function dedupeHistoryCommandEntriesAgainstLive(
       return true;
     }
     return !liveCommandSignatures.has(
-      createTerminalCommandEntrySignature(entry),
+      createTerminalCommandEntrySignature(entry)
     );
   });
 }
 
 function hasMeaningfulTerminalCommandOutput(
-  entry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+  entry: Extract<TerminalHistoryEntry, { kind: "command" }>
 ): boolean {
-  return entry.output.some(({ line }) => line.text.trim().length > 0);
+  return entry.output.some(({ line }) => isMeaningfulVisibleOutputLine(line));
 }
 
 function removeRedundantTerminalCommandFragments(
-  entries: readonly TerminalHistoryEntry[],
+  entries: readonly TerminalHistoryEntry[]
 ): TerminalHistoryEntry[] {
   return entries.filter((entry, index) => {
     if (entry.kind !== "command" || hasMeaningfulTerminalCommandOutput(entry)) {
@@ -2783,14 +3875,14 @@ function removeRedundantTerminalCommandFragments(
         (candidate) =>
           candidate.kind === "command" &&
           hasMeaningfulTerminalCommandOutput(candidate) &&
-          isLikelyRedundantTerminalCommandFragment(entry, candidate),
+          isLikelyRedundantTerminalCommandFragment(entry, candidate)
       );
   });
 }
 
 function isLikelyRedundantTerminalCommandFragment(
   fragmentEntry: Extract<TerminalHistoryEntry, { kind: "command" }>,
-  fullEntry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+  fullEntry: Extract<TerminalHistoryEntry, { kind: "command" }>
 ): boolean {
   if (fragmentEntry.commandLine.source !== fullEntry.commandLine.source) {
     return false;
@@ -2815,20 +3907,104 @@ function isLikelyRedundantTerminalCommandFragment(
 }
 
 function createTerminalCommandEntrySignature(
-  entry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+  entry: Extract<TerminalHistoryEntry, { kind: "command" }>
 ): string {
   const outputText = entry.output
-    .map(({ line }) => line.text.trim())
-    .filter(Boolean)
+    .map(
+      ({ line }) =>
+        `${line.text.trim()}\u0001${visibleOutputLineMetadataKey(line)}`
+    )
+    .filter((line) => line !== "\u0001")
     .join("\u0000");
-  return `${entry.prompt}\u0000${entry.command}\u0000${outputText}`;
+  return `${entry.prompt}\u0000${
+    entry.command
+  }\u0000${visibleOutputLineMetadataKey(entry.commandLine)}\u0000${outputText}`;
+}
+
+function areVisibleOutputLinesEquivalentForDedupe(
+  first: VisibleOutputLine | undefined,
+  second: VisibleOutputLine | undefined
+): boolean {
+  return (
+    Boolean(first) &&
+    Boolean(second) &&
+    visibleOutputLineMetadataKey(first!) ===
+      visibleOutputLineMetadataKey(second!)
+  );
+}
+
+function visibleOutputLineMetadataKey(line: VisibleOutputLine): string {
+  const parts = [
+    line.softWrapped ? "wrapped" : "",
+    line.palette ? `palette:${JSON.stringify(line.palette)}` : "",
+    line.cursor ? `cursor:${JSON.stringify(line.cursor)}` : "",
+    line.media && line.media.length > 0
+      ? `media:${JSON.stringify(line.media)}`
+      : "",
+    line.sideEffects && line.sideEffects.length > 0
+      ? `side:${JSON.stringify(line.sideEffects)}`
+      : "",
+    line.semanticMarks && line.semanticMarks.length > 0
+      ? `marks:${JSON.stringify(line.semanticMarks)}`
+      : "",
+    line.spans && line.spans.length > 0 && !arePlainTerminalSpans(line.spans)
+      ? `spans:${JSON.stringify(line.spans)}`
+      : "",
+  ].filter(Boolean);
+  return parts.join("\u0002");
+}
+
+function isMeaningfulVisibleOutputLine(
+  line: VisibleOutputLine | undefined,
+  options: { trimPlainBlankText?: boolean } = {}
+): boolean {
+  if (!line) {
+    return false;
+  }
+  if (
+    options.trimPlainBlankText
+      ? line.text.trim().length > 0
+      : line.text.length > 0
+  ) {
+    return true;
+  }
+  return visibleOutputLineMetadataKey(line).length > 0;
+}
+
+function arePlainTerminalSpans(spans: readonly ScreenLineSpan[]): boolean {
+  return spans.every((span) => isPlainTerminalTextStyle(span.style));
+}
+
+function isPlainTerminalTextStyle(style: ScreenTextStyle): boolean {
+  return (
+    !style.foreground &&
+    !style.background &&
+    !style.underline_color &&
+    style.bold === false &&
+    style.dim === false &&
+    style.italic === false &&
+    style.blink === false &&
+    !style.underline &&
+    style.overline === false &&
+    !style.border &&
+    !style.baseline &&
+    style.inverse === false &&
+    style.hidden === false &&
+    style.strikethrough === false &&
+    !style.hyperlink
+  );
 }
 
 function trimTrailingEmptyLiveLines(
-  lines: readonly VisibleOutputLine[],
+  lines: readonly VisibleOutputLine[]
 ): VisibleOutputLine[] {
   let endIndex = lines.length;
-  while (endIndex > 0 && isBlankTerminalLine(lines[endIndex - 1]?.text ?? "")) {
+  while (
+    endIndex > 0 &&
+    !isMeaningfulVisibleOutputLine(lines[endIndex - 1], {
+      trimPlainBlankText: true,
+    })
+  ) {
     endIndex -= 1;
   }
   return lines.slice(0, endIndex);
@@ -2840,7 +4016,7 @@ function isBlankTerminalLine(text: string): boolean {
 
 function filterVisibleOutputLines(
   lines: readonly VisibleOutputLine[],
-  options: VisibleOutputLineOptions,
+  options: VisibleOutputLineOptions
 ): VisibleOutputLine[] {
   if (!options.hideShellPromptNoise) {
     return [...lines];
@@ -2859,7 +4035,7 @@ function filterVisibleOutputLines(
 
 function normalizeShellPromptNoiseLine(
   line: VisibleOutputLine,
-  options: VisibleOutputLineOptions,
+  options: VisibleOutputLineOptions
 ): VisibleOutputLine | null {
   const text = line.text.trim();
   if (!text) {
@@ -2884,7 +4060,7 @@ function normalizeShellPromptNoiseLine(
 
   const wrappedInputCommand = parseWrappedInputCommandLine(
     line.text,
-    options.terminalPromptLabel,
+    options.terminalPromptLabel
   );
   if (wrappedInputCommand) {
     return isInternalSmokeCommand(wrappedInputCommand.command) ||
@@ -2920,8 +4096,37 @@ function normalizeShellPromptNoiseLine(
   return wrappedPromptOnlyPattern.test(text) ? null : line;
 }
 
+function parseSemanticPromptCommandLine(
+  line: VisibleOutputLine
+): ShellPromptCommandLine | null {
+  const marks = line.semanticMarks ?? [];
+  const inputStart = marks.find((mark) => mark.kind === "input_start");
+  if (!inputStart || typeof inputStart.col !== "number") {
+    return null;
+  }
+
+  const inputIndex = resolveTerminalCursorTextIndex(line.text, inputStart.col);
+  const prompt = line.text.slice(0, inputIndex).trim();
+  const command = line.text.slice(inputIndex).trim();
+  if (!command) {
+    return null;
+  }
+
+  return {
+    prompt: normalizeShellPromptDisplay(prompt),
+    command,
+  };
+}
+
+function hasTerminalSemanticMark(
+  line: VisibleOutputLine,
+  kind: ScreenLineSemanticMark["kind"]
+): boolean {
+  return line.semanticMarks?.some((mark) => mark.kind === kind) === true;
+}
+
 function parseShellPromptCommandLine(
-  value: string,
+  value: string
 ): ShellPromptCommandLine | null {
   const trimmed = value.trimEnd();
   for (let index = trimmed.length - 1; index >= 0; index -= 1) {
@@ -2949,7 +4154,7 @@ function parseShellPromptCommandLine(
 
 function parseWrappedInputCommandLine(
   value: string,
-  promptLabel?: string,
+  promptLabel?: string
 ): (ShellPromptCommandLine & { text: string }) | null {
   const match = /^<\s{4,}(.+)$/u.exec(value.trimEnd());
   const command = match?.[1]?.trim();
@@ -2966,7 +4171,7 @@ function parseWrappedInputCommandLine(
 }
 
 function normalizeTerminalPromptLabel(
-  value: string | null | undefined,
+  value: string | null | undefined
 ): string {
   const trimmed = value?.trim() ?? "";
   return trimmed.length > 0 ? trimmed : "shell";
@@ -3064,13 +4269,11 @@ function isInternalSmokeCommand(command: string): boolean {
 }
 
 function renderHighlightedSegments(
-  segments: readonly TerminalOutputSearchSegment[],
+  segments: readonly TerminalOutputSearchSegment[]
 ): TemplateResult {
   return html`${segments.map((segment) => {
     if (segment.kind === "text") {
-      return html`<span class="terminal-output-segment"
-        >${segment.value}</span
-      >`;
+      return renderTerminalPlainTextAutolinks(segment.value);
     }
 
     return html`<mark
@@ -3085,6 +4288,20 @@ function renderHighlightedSegments(
   })}`;
 }
 
+function renderTerminalPlainTextAutolinks(text: string): TemplateResult {
+  const autolinkRuns = createTerminalOutputAutolinkRuns(text);
+  if (autolinkRuns.length === 0) {
+    return html`<span class="terminal-output-segment">${text}</span>`;
+  }
+
+  return html`${autolinkRuns.map((run) => {
+    const node = html`<span class="terminal-output-segment">${run.text}</span>`;
+    return run.kind === "link"
+      ? renderTerminalOutputLink(node, run.href)
+      : node;
+  })}`;
+}
+
 function isViewportAtBottom(viewport: HTMLElement): boolean {
   return (
     viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 2
@@ -3094,7 +4311,7 @@ function isViewportAtBottom(viewport: HTMLElement): boolean {
 export function shouldAutoLoadMoreHistoryFromViewport(
   viewport: Pick<HTMLElement, "scrollTop">,
   canLoadMoreHistory: boolean,
-  historyLoadState: TerminalScreenHistoryLoadState,
+  historyLoadState: TerminalScreenHistoryLoadState
 ): boolean {
   return (
     canLoadMoreHistory &&
@@ -3110,7 +4327,7 @@ interface HistoryScrollAnchor {
 }
 
 function captureHistoryScrollAnchor(
-  viewport: HTMLElement | null,
+  viewport: HTMLElement | null
 ): HistoryScrollAnchor | null {
   if (!viewport) {
     return null;
@@ -3127,18 +4344,18 @@ function restoreHistoryScrollAnchor(anchor: HistoryScrollAnchor): void {
   anchor.viewport.scrollTop = resolveScrollTopAfterHistoryPrepend(
     anchor.scrollHeight,
     anchor.scrollTop,
-    anchor.viewport.scrollHeight,
+    anchor.viewport.scrollHeight
   );
 }
 
 export function resolveScrollTopAfterHistoryPrepend(
   previousScrollHeight: number,
   previousScrollTop: number,
-  nextScrollHeight: number,
+  nextScrollHeight: number
 ): number {
   return Math.max(
     0,
-    previousScrollTop + Math.max(0, nextScrollHeight - previousScrollHeight),
+    previousScrollTop + Math.max(0, nextScrollHeight - previousScrollHeight)
   );
 }
 

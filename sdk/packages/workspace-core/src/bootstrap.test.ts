@@ -242,6 +242,7 @@ function createCapabilities(backend: BackendKind): BackendCapabilitiesInfo {
       rendered_viewport_stream: true,
       rendered_viewport_snapshot: true,
       rendered_scrollback_snapshot: false,
+      rich_screen_surface: false,
       layout_dump: true,
       layout_override: true,
       read_only_client_mode: false,

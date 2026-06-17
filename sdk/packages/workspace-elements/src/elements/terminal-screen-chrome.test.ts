@@ -24,7 +24,7 @@ describe("terminal screen chrome", () => {
       "native_emulator",
       "default",
       "wrapped",
-      "cursor 2:8",
+      "cursor 2:8 beam blinking",
     ]);
   });
 
@@ -46,12 +46,79 @@ describe("terminal screen chrome", () => {
       ["sequence", "seq 7"],
       ["fontScale", "compact"],
       ["wrap", "nowrap"],
-      ["cursor", "2:8"],
+      ["cursor", "2:8 beam blinking"],
     ]);
+  });
+
+  it("shows OSC 7 working directory metadata when present", () => {
+    const state = resolveTerminalScreenChromeState(createScreen({
+      workingDirectoryUri: "file://localhost/tmp/dev%20space",
+    }), {
+      fontScale: "default",
+      lineWrap: true,
+    });
+
+    expect(state.metaItems.at(-1)).toEqual({
+      id: "workingDirectory",
+      label: "cwd /tmp/dev space",
+      title: "file://localhost/tmp/dev%20space",
+    });
+  });
+
+  it("shows terminal progress metadata when present", () => {
+    const state = resolveTerminalScreenChromeState(
+      createScreen({ progress: { state: "normal", value: 42 } }),
+      {
+        fontScale: "default",
+        lineWrap: true,
+      },
+      { mode: TERMINAL_SCREEN_CHROME_MODES.compact },
+    );
+
+    expect(state.metaItems.find((item) => item.id === "progress")).toEqual({
+      id: "progress",
+      label: "42%",
+      title: "Terminal progress 42%",
+    });
+  });
+
+  it("shows warning and indeterminate terminal progress labels", () => {
+    const warning = resolveTerminalScreenChromeState(
+      createScreen({ progress: { state: "warning", value: 180 } }),
+      {
+        fontScale: "default",
+        lineWrap: true,
+      },
+      { mode: TERMINAL_SCREEN_CHROME_MODES.compact },
+    );
+    const indeterminate = resolveTerminalScreenChromeState(
+      createScreen({ progress: { state: "indeterminate" } }),
+      {
+        fontScale: "default",
+        lineWrap: true,
+      },
+    );
+
+    expect(warning.metaItems.find((item) => item.id === "progress")).toEqual({
+      id: "progress",
+      label: "warn 100%",
+      title: "Terminal progress warning 100%",
+    });
+    expect(indeterminate.metaItems.find((item) => item.id === "progress")).toEqual({
+      id: "progress",
+      label: "progress pending",
+      title: "Terminal progress indeterminate",
+    });
   });
 });
 
-function createScreen(options: { title?: string | null } = {}): FocusedScreen {
+function createScreen(
+  options: {
+    title?: string | null;
+    workingDirectoryUri?: string;
+    progress?: FocusedScreen["surface"]["progress"];
+  } = {},
+): FocusedScreen {
   return {
     cols: 96,
     pane_id: "pane-main",
@@ -59,9 +126,13 @@ function createScreen(options: { title?: string | null } = {}): FocusedScreen {
     sequence: 7n,
     source: "native_emulator",
     surface: {
-      cursor: { col: 7, row: 1 },
+      cursor: { blinking: true, col: 7, row: 1, shape: "beam" },
       lines: [],
       title: options.title ?? "Shell",
+      ...(options.workingDirectoryUri
+        ? { working_directory_uri: options.workingDirectoryUri }
+        : {}),
+      ...(options.progress ? { progress: options.progress } : {}),
     },
   };
 }

@@ -6,6 +6,8 @@ import type {
   Handshake,
   PaneId,
   SavedSessionSummary,
+  ScreenLine,
+  ScreenSurfacePalette,
   SessionId,
   SessionSummary,
 } from "@terminal-platform/runtime-types";
@@ -94,6 +96,8 @@ export interface WorkspaceHistoricalPaneSnapshot {
     | "degraded";
   restoreGuaranteeLevel: string;
   lines: string[];
+  richLines?: ScreenLine[];
+  surfacePalette?: ScreenSurfacePalette;
   capturedAtMs: bigint;
   hasGaps: boolean;
   hasMoreSegments: boolean;

@@ -14,9 +14,11 @@ export type TerminalScreenChromeMode =
 export type TerminalScreenChromeMetaItemId =
   | "cursor"
   | "fontScale"
+  | "progress"
   | "sequence"
   | "source"
   | "size"
+  | "workingDirectory"
   | "wrap";
 
 export type TerminalScreenChromeMetaItem = {
@@ -69,10 +71,24 @@ function resolveCompactMetaItems(
   ];
 
   if (screen.surface.cursor) {
+    const cursorLabel = formatCursorLabel(screen.surface.cursor);
     items.push({
       id: "cursor",
-      label: `${screen.surface.cursor.row + 1}:${screen.surface.cursor.col + 1}`,
-      title: `cursor ${screen.surface.cursor.row + 1}:${screen.surface.cursor.col + 1}`,
+      label: cursorLabel,
+      title: `cursor ${cursorLabel}`,
+    });
+  }
+  const progress = formatTerminalProgress(screen.surface.progress, "compact");
+  if (progress) {
+    items.push(progress);
+  }
+  const workingDirectoryUri = screen.surface.working_directory_uri;
+  const workingDirectory = formatWorkingDirectoryUri(workingDirectoryUri);
+  if (workingDirectory && workingDirectoryUri) {
+    items.push({
+      id: "workingDirectory",
+      label: workingDirectory,
+      title: workingDirectoryUri,
     });
   }
 
@@ -95,11 +111,113 @@ function resolveFullMetaItems(
   if (screen.surface.cursor) {
     items.push({
       id: "cursor",
-      label: `cursor ${screen.surface.cursor.row + 1}:${screen.surface.cursor.col + 1}`,
+      label: `cursor ${formatCursorLabel(screen.surface.cursor)}`,
+    });
+  }
+  const progress = formatTerminalProgress(screen.surface.progress, "full");
+  if (progress) {
+    items.push(progress);
+  }
+  const workingDirectoryUri = screen.surface.working_directory_uri;
+  const workingDirectory = formatWorkingDirectoryUri(workingDirectoryUri);
+  if (workingDirectory && workingDirectoryUri) {
+    items.push({
+      id: "workingDirectory",
+      label: `cwd ${workingDirectory}`,
+      title: workingDirectoryUri,
     });
   }
 
   return items;
+}
+
+function formatWorkingDirectoryUri(uri: string | null | undefined): string {
+  const normalized = uri?.trim();
+  if (!normalized) {
+    return "";
+  }
+  if (!normalized.startsWith("file://")) {
+    return normalized;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    const path = decodeURIComponent(parsed.pathname || "/");
+    const host = parsed.hostname;
+    return host && host !== "localhost" ? `${host}:${path}` : path;
+  } catch {
+    return normalized;
+  }
+}
+
+function formatTerminalProgress(
+  progress: FocusedScreen["surface"]["progress"],
+  mode: TerminalScreenChromeMode,
+): TerminalScreenChromeMetaItem | null {
+  if (!progress || progress.state === "inactive") {
+    return null;
+  }
+
+  const normalizedValue =
+    typeof progress.value === "number" && Number.isFinite(progress.value)
+      ? Math.max(0, Math.min(100, Math.trunc(progress.value)))
+      : null;
+  const suffix = normalizedValue === null ? "" : ` ${normalizedValue}%`;
+
+  switch (progress.state) {
+    case "normal":
+      return {
+        id: "progress",
+        label: normalizedValue === null
+          ? mode === TERMINAL_SCREEN_CHROME_MODES.compact ? "progress" : "progress active"
+          : mode === TERMINAL_SCREEN_CHROME_MODES.compact
+            ? `${normalizedValue}%`
+            : `progress ${normalizedValue}%`,
+        title: normalizedValue === null
+          ? "Terminal progress active"
+          : `Terminal progress ${normalizedValue}%`,
+      };
+    case "error":
+      return {
+        id: "progress",
+        label: mode === TERMINAL_SCREEN_CHROME_MODES.compact
+          ? `error${suffix}`
+          : `progress error${suffix}`,
+        title: `Terminal progress error${suffix}`,
+      };
+    case "warning":
+      return {
+        id: "progress",
+        label: mode === TERMINAL_SCREEN_CHROME_MODES.compact
+          ? `warn${suffix}`
+          : `progress warning${suffix}`,
+        title: `Terminal progress warning${suffix}`,
+      };
+    case "indeterminate":
+      return {
+        id: "progress",
+        label: mode === TERMINAL_SCREEN_CHROME_MODES.compact
+          ? "pending"
+          : "progress pending",
+        title: "Terminal progress indeterminate",
+      };
+    default:
+      return null;
+  }
+}
+
+function formatCursorLabel(
+  cursor: FocusedScreen["surface"]["cursor"],
+): string {
+  if (!cursor) {
+    return "";
+  }
+
+  const location = `${cursor.row + 1}:${cursor.col + 1}`;
+  const shape = cursor.shape ? cursor.shape.replace(/_/g, " ") : "";
+  const blink = cursor.blinking ? " blinking" : "";
+
+  return shape ? `${location} ${shape}${blink}` : `${location}${blink}`;
 }
 
 function normalizeTerminalScreenChromeMode(

@@ -143,6 +143,7 @@ function toCapabilitiesModel(
       { label: `${info.backend} caps`, tone: "brand" },
       { label: info.capabilities.rendered_viewport_snapshot ? "snapshot yes" : "snapshot no", tone: info.capabilities.rendered_viewport_snapshot ? "brand" : "neutral" },
       { label: info.capabilities.raw_output_stream ? "raw yes" : "raw no", tone: info.capabilities.raw_output_stream ? "brand" : "neutral" },
+      { label: info.capabilities.rich_screen_surface ? "rich yes" : "rich no", tone: info.capabilities.rich_screen_surface ? "brand" : "neutral" },
     ],
     degradedReasons: toDegradedReasonModels([
       ...session.degradedSemantics,

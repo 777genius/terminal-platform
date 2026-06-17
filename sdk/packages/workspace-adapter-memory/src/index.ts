@@ -177,6 +177,7 @@ export function createMemoryWorkspaceTransport(
         rows: snapshot.rows,
         cols: snapshot.cols,
         source: snapshot.source,
+        ...(snapshot.buffer_kind ? { buffer_kind: snapshot.buffer_kind } : {}),
         patch: null,
         full_replace: snapshot.surface,
       };
@@ -394,6 +395,7 @@ function createDefaultBackendCapabilities(): BackendCapabilitiesInfo["capabiliti
     rendered_viewport_stream: true,
     rendered_viewport_snapshot: true,
     rendered_scrollback_snapshot: false,
+    rich_screen_surface: false,
     layout_dump: true,
     layout_override: true,
     read_only_client_mode: false,
@@ -475,7 +477,7 @@ function createScreenSurface(title: string | null, line: string): ScreenSurface 
       row: 0,
       col: 0,
     },
-    lines: [{ text: line }],
+    lines: [{ text: line, spans: [] }],
   };
 }
 
@@ -1039,17 +1041,18 @@ function renderSyntheticInputLines(
 ): ScreenSurface["lines"] {
   const normalizedData = data.replace(/\r\n?/gu, "\n");
   if (normalizedData === "\u0003") {
-    return [{ text: "^C" }];
+    return [{ text: "^C", spans: [] }];
   }
 
   const trimmedData = normalizedData.replace(/\s+$/u, "");
   if (!trimmedData) {
-    return [{ text: "" }];
+    return [{ text: "", spans: [] }];
   }
 
   const prefix = kind === "send_paste" ? "paste" : "$";
   return trimmedData.split("\n").map((line, index) => ({
     text: index === 0 ? `${prefix} ${line}` : line,
+    spans: [],
   }));
 }
 
