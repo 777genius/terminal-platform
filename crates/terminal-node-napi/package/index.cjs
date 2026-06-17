@@ -239,7 +239,75 @@ function focusedPaneId(topology) {
 }
 
 function cloneScreenCursor(cursor) {
-  return cursor ? { row: cursor.row, col: cursor.col } : null;
+  return cursor
+    ? {
+        row: cursor.row,
+        col: cursor.col,
+        ...(cursor.shape ? { shape: cursor.shape } : {}),
+        ...(cursor.blinking ? { blinking: true } : {}),
+      }
+    : null;
+}
+
+function cloneScreenColor(color) {
+  if (!color) {
+    return null;
+  }
+
+  if (color.kind === "named") {
+    return { kind: "named", name: color.name };
+  }
+
+  if (color.kind === "indexed") {
+    return { kind: "indexed", index: color.index };
+  }
+
+  if (color.kind === "rgb") {
+    return { kind: "rgb", r: color.r, g: color.g, b: color.b };
+  }
+
+  return null;
+}
+
+function cloneScreenTextStyle(style) {
+  return {
+    foreground: cloneScreenColor(style?.foreground),
+    background: cloneScreenColor(style?.background),
+    underline_color: cloneScreenColor(style?.underline_color),
+    bold: Boolean(style?.bold),
+    dim: Boolean(style?.dim),
+    italic: Boolean(style?.italic),
+    blink: Boolean(style?.blink),
+    underline: style?.underline ?? null,
+    overline: Boolean(style?.overline),
+    border: style?.border ?? null,
+    ...(style?.baseline ? { baseline: style.baseline } : {}),
+    inverse: Boolean(style?.inverse),
+    hidden: Boolean(style?.hidden),
+    strikethrough: Boolean(style?.strikethrough),
+    hyperlink: style?.hyperlink ?? null,
+  };
+}
+
+function cloneScreenSurfacePalette(palette) {
+  if (!palette) {
+    return undefined;
+  }
+
+  const cloned = {
+    foreground: cloneScreenColor(palette.foreground),
+    background: cloneScreenColor(palette.background),
+    cursor: cloneScreenColor(palette.cursor),
+  };
+
+  return cloned.foreground || cloned.background || cloned.cursor ? cloned : undefined;
+}
+
+function cloneScreenLineSpan(span) {
+  return {
+    text: span?.text ?? "",
+    style: cloneScreenTextStyle(span?.style),
+  };
 }
 
 function cloneExternalSessionRef(external) {
@@ -276,15 +344,101 @@ function cloneSessionHealthSnapshot(health) {
 }
 
 function cloneScreenLine(line) {
-  return { text: line.text };
+  return {
+    text: line.text,
+    spans: Array.isArray(line.spans) ? line.spans.map(cloneScreenLineSpan) : [],
+    ...(Array.isArray(line.media) && line.media.length > 0
+      ? { media: line.media.map(cloneScreenLineMedia) }
+      : {}),
+    ...(Array.isArray(line.side_effects) && line.side_effects.length > 0
+      ? { side_effects: line.side_effects.map(cloneScreenLineSideEffect) }
+      : {}),
+    ...(Array.isArray(line.semantic_marks) && line.semantic_marks.length > 0
+      ? { semantic_marks: line.semantic_marks.map(cloneScreenLineSemanticMark) }
+      : {}),
+    ...(line.wrapped ? { wrapped: true } : {}),
+  };
+}
+
+function cloneScreenLineMedia(media) {
+  return {
+    kind: media.kind,
+    ...(typeof media.name === "string" ? { name: media.name } : {}),
+    ...(typeof media.byte_size === "number" ? { byte_size: media.byte_size } : {}),
+    ...(typeof media.width === "string" ? { width: media.width } : {}),
+    ...(typeof media.height === "string" ? { height: media.height } : {}),
+    ...(typeof media.preserve_aspect_ratio === "boolean"
+      ? { preserve_aspect_ratio: media.preserve_aspect_ratio }
+      : {}),
+    ...(media.inline === true ? { inline: true } : {}),
+    ...(typeof media.mime_type === "string" ? { mime_type: media.mime_type } : {}),
+    ...(typeof media.data_base64 === "string" ? { data_base64: media.data_base64 } : {}),
+    ...(media.truncated === true ? { truncated: true } : {}),
+  };
+}
+
+function cloneScreenLineSideEffect(sideEffect) {
+  return {
+    kind: sideEffect.kind,
+    disposition: sideEffect.disposition,
+    ...(sideEffect.target ? { target: sideEffect.target } : {}),
+    ...(typeof sideEffect.message === "string" ? { message: sideEffect.message } : {}),
+  };
+}
+
+function cloneScreenLineSemanticMark(mark) {
+  return {
+    kind: mark.kind,
+    ...(typeof mark.col === "number" ? { col: mark.col } : {}),
+    ...(typeof mark.exit_code === "number" ? { exit_code: mark.exit_code } : {}),
+  };
+}
+
+function cloneScreenProgress(progress) {
+  if (!progress || progress.state === "inactive") {
+    return null;
+  }
+  return {
+    state: progress.state,
+    ...(typeof progress.value === "number" ? { value: Math.max(0, Math.min(100, Math.trunc(progress.value))) } : {}),
+  };
 }
 
 function cloneScreenSurface(surface) {
+  const palette = cloneScreenSurfacePalette(surface.palette);
+  const bellCount = cloneScreenBellCount(surface.bell_count);
+  const progress = cloneScreenProgress(surface.progress);
+  const userVariables = cloneScreenUserVariables(surface.user_variables);
   return {
     title: surface.title ?? null,
+    ...(surface.working_directory_uri ? { working_directory_uri: surface.working_directory_uri } : {}),
+    ...(userVariables ? { user_variables: userVariables } : {}),
     cursor: cloneScreenCursor(surface.cursor),
+    ...(palette ? { palette } : {}),
+    ...(bellCount !== null ? { bell_count: bellCount } : {}),
+    ...(progress ? { progress } : {}),
     lines: Array.isArray(surface.lines) ? surface.lines.map(cloneScreenLine) : [],
   };
+}
+
+function cloneScreenUserVariables(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const entries = Object.entries(value).filter(
+    ([key, item]) => typeof key === "string" && key.length > 0 && typeof item === "string",
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
+function cloneScreenBellCount(value) {
+  if (typeof value === "bigint") {
+    return value > 0n ? value : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.trunc(value);
+  }
+  return null;
 }
 
 function cloneScreenSnapshot(snapshot) {
@@ -294,6 +448,7 @@ function cloneScreenSnapshot(snapshot) {
     rows: snapshot.rows,
     cols: snapshot.cols,
     source: snapshot.source,
+    ...(snapshot.buffer_kind ? { buffer_kind: snapshot.buffer_kind } : {}),
     surface: cloneScreenSurface(snapshot.surface),
   };
 }
@@ -359,6 +514,7 @@ function applyScreenDelta(snapshot, delta) {
       rows: delta.rows,
       cols: delta.cols,
       source: delta.source,
+      ...(delta.buffer_kind ? { buffer_kind: delta.buffer_kind } : {}),
       surface: cloneScreenSurface(delta.full_replace),
     };
   }
@@ -380,6 +536,11 @@ function applyScreenDelta(snapshot, delta) {
   next.rows = delta.rows;
   next.cols = delta.cols;
   next.source = delta.source;
+  if (delta.buffer_kind) {
+    next.buffer_kind = delta.buffer_kind;
+  } else {
+    delete next.buffer_kind;
+  }
 
   if (!delta.patch) {
     return next;
@@ -389,13 +550,57 @@ function applyScreenDelta(snapshot, delta) {
     next.surface.title = delta.patch.title ?? null;
   }
 
+  if (delta.patch.working_directory_uri_changed) {
+    if (delta.patch.working_directory_uri) {
+      next.surface.working_directory_uri = delta.patch.working_directory_uri;
+    } else {
+      delete next.surface.working_directory_uri;
+    }
+  }
+
+  if (delta.patch.user_variables_changed) {
+    const userVariables = cloneScreenUserVariables(delta.patch.user_variables);
+    if (userVariables) {
+      next.surface.user_variables = userVariables;
+    } else {
+      delete next.surface.user_variables;
+    }
+  }
+
   if (delta.patch.cursor_changed) {
     next.surface.cursor = cloneScreenCursor(delta.patch.cursor);
   }
 
+  if (delta.patch.palette_changed) {
+    const palette = cloneScreenSurfacePalette(delta.patch.palette);
+    if (palette) {
+      next.surface.palette = palette;
+    } else {
+      delete next.surface.palette;
+    }
+  }
+
+  if (delta.patch.bell_count_changed) {
+    const bellCount = cloneScreenBellCount(delta.patch.bell_count);
+    if (bellCount !== null) {
+      next.surface.bell_count = bellCount;
+    } else {
+      delete next.surface.bell_count;
+    }
+  }
+
+  if (delta.patch.progress_changed) {
+    const progress = cloneScreenProgress(delta.patch.progress);
+    if (progress) {
+      next.surface.progress = progress;
+    } else {
+      delete next.surface.progress;
+    }
+  }
+
   for (const update of delta.patch.line_updates ?? []) {
     while (next.surface.lines.length <= update.row) {
-      next.surface.lines.push({ text: "" });
+      next.surface.lines.push({ text: "", spans: [] });
     }
     next.surface.lines[update.row] = cloneScreenLine(update.line);
   }

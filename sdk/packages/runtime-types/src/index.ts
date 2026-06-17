@@ -98,13 +98,59 @@ export type {
   NodeHistoryReplayState as HistoryReplayState,
 } from "./generated/raw/NodeHistoryReplayState.js";
 export type { NodeSavedSessionSummary as SavedSessionSummary } from "./generated/raw/NodeSavedSessionSummary.js";
+export type {
+  NodeScreenBufferKind as ScreenBufferKind,
+} from "./generated/raw/NodeScreenBufferKind.js";
+export type { NodeScreenColor as ScreenColor } from "./generated/raw/NodeScreenColor.js";
 export type { NodeScreenCursor as ScreenCursor } from "./generated/raw/NodeScreenCursor.js";
+export type {
+  NodeScreenCursorShape as ScreenCursorShape,
+} from "./generated/raw/NodeScreenCursorShape.js";
 export type { NodeScreenDelta as ScreenDelta } from "./generated/raw/NodeScreenDelta.js";
 export type { NodeScreenLine as ScreenLine } from "./generated/raw/NodeScreenLine.js";
+export type {
+  NodeScreenLineMedia as ScreenLineMedia,
+} from "./generated/raw/NodeScreenLineMedia.js";
+export type {
+  NodeScreenLineMediaKind as ScreenLineMediaKind,
+} from "./generated/raw/NodeScreenLineMediaKind.js";
+export type {
+  NodeScreenLineSideEffect as ScreenLineSideEffect,
+} from "./generated/raw/NodeScreenLineSideEffect.js";
+export type {
+  NodeScreenLineSemanticMark as ScreenLineSemanticMark,
+} from "./generated/raw/NodeScreenLineSemanticMark.js";
+export type {
+  NodeScreenLineSemanticMarkKind as ScreenLineSemanticMarkKind,
+} from "./generated/raw/NodeScreenLineSemanticMarkKind.js";
+export type {
+  NodeScreenLineSideEffectDisposition as ScreenLineSideEffectDisposition,
+} from "./generated/raw/NodeScreenLineSideEffectDisposition.js";
+export type {
+  NodeScreenLineSideEffectKind as ScreenLineSideEffectKind,
+} from "./generated/raw/NodeScreenLineSideEffectKind.js";
+export type {
+  NodeScreenLineSideEffectTarget as ScreenLineSideEffectTarget,
+} from "./generated/raw/NodeScreenLineSideEffectTarget.js";
 export type { NodeScreenLinePatch as ScreenLinePatch } from "./generated/raw/NodeScreenLinePatch.js";
+export type { NodeScreenLineSpan as ScreenLineSpan } from "./generated/raw/NodeScreenLineSpan.js";
 export type { NodeScreenPatch as ScreenPatch } from "./generated/raw/NodeScreenPatch.js";
+export type { NodeScreenProgress as ScreenProgress } from "./generated/raw/NodeScreenProgress.js";
+export type {
+  NodeScreenProgressState as ScreenProgressState,
+} from "./generated/raw/NodeScreenProgressState.js";
 export type { NodeScreenSnapshot as ScreenSnapshot } from "./generated/raw/NodeScreenSnapshot.js";
 export type { NodeScreenSurface as ScreenSurface } from "./generated/raw/NodeScreenSurface.js";
+export type {
+  NodeScreenSurfacePalette as ScreenSurfacePalette,
+} from "./generated/raw/NodeScreenSurfacePalette.js";
+export type {
+  NodeScreenTextBaseline as ScreenTextBaseline,
+} from "./generated/raw/NodeScreenTextBaseline.js";
+export type { NodeScreenTextStyle as ScreenTextStyle } from "./generated/raw/NodeScreenTextStyle.js";
+export type {
+  NodeScreenUnderlineStyle as ScreenUnderlineStyle,
+} from "./generated/raw/NodeScreenUnderlineStyle.js";
 export type { NodeSendInputCommand as SendInputCommand } from "./generated/raw/NodeSendInputCommand.js";
 export type { NodeSendPasteCommand as SendPasteCommand } from "./generated/raw/NodeSendPasteCommand.js";
 export type {

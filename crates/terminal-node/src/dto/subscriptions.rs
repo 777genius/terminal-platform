@@ -42,6 +42,7 @@ pub struct NodeSessionHealthSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[allow(clippy::large_enum_variant)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export)]
 pub enum NodeSubscriptionEvent {

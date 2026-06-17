@@ -63,6 +63,7 @@ impl From<&BackendCapabilities> for NodeBackendCapabilities {
             rendered_viewport_stream: value.rendered_viewport_stream,
             rendered_viewport_snapshot: value.rendered_viewport_snapshot,
             rendered_scrollback_snapshot: value.rendered_scrollback_snapshot,
+            rich_screen_surface: value.rich_screen_surface,
             layout_dump: value.layout_dump,
             layout_override: value.layout_override,
             read_only_client_mode: value.read_only_client_mode,

@@ -12,9 +12,13 @@ pub(super) use terminal_domain::{
 };
 pub(super) use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 pub(super) use terminal_projection::{
-    ProjectionSource, ScreenCursor, ScreenDelta, ScreenLine, ScreenLinePatch, ScreenPatch,
-    ScreenSnapshot, ScreenSurface, SessionHealthPhase, SessionHealthReason, SessionHealthSnapshot,
-    TopologySnapshot,
+    ProjectionSource, ScreenBufferKind, ScreenColor, ScreenCursor, ScreenCursorShape, ScreenDelta,
+    ScreenLine, ScreenLineMedia, ScreenLineMediaKind, ScreenLinePatch, ScreenLineSemanticMark,
+    ScreenLineSemanticMarkKind, ScreenLineSideEffect, ScreenLineSideEffectDisposition,
+    ScreenLineSideEffectKind, ScreenLineSideEffectTarget, ScreenLineSpan, ScreenPatch,
+    ScreenProgress, ScreenProgressState, ScreenSnapshot, ScreenSurface, ScreenSurfacePalette,
+    ScreenTextBaseline, ScreenTextBorderStyle, ScreenTextStyle, ScreenUnderlineStyle,
+    SessionHealthPhase, SessionHealthReason, SessionHealthSnapshot, TopologySnapshot,
 };
 pub(super) use terminal_protocol::{
     BackendCapabilitiesResponse, CommandHistoryEntry, DaemonCapabilities, DaemonPhase,

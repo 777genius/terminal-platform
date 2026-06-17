@@ -105,6 +105,7 @@ pub(super) async fn next_topology_snapshot(
     None
 }
 
+#[cfg(all(any(unix, windows), feature = "zellij-backend"))]
 pub(super) async fn wait_for_topology_state(
     node: &NodeHostClient,
     session_id: &str,
@@ -177,14 +178,17 @@ pub(super) fn operation_timeout() -> Duration {
     if cfg!(windows) { Duration::from_secs(60) } else { Duration::from_secs(5) }
 }
 
+#[cfg(all(any(unix, windows), feature = "zellij-backend"))]
 pub(super) fn extended_timeout() -> Duration {
     if cfg!(windows) { Duration::from_secs(45) } else { Duration::from_secs(10) }
 }
 
+#[cfg(all(any(unix, windows), feature = "zellij-backend"))]
 pub(super) fn zellij_operation_timeout() -> Duration {
     if cfg!(windows) { Duration::from_secs(60) } else { Duration::from_secs(90) }
 }
 
+#[cfg(all(any(unix, windows), feature = "zellij-backend"))]
 pub(super) fn zellij_attempt_timeout() -> Duration {
     if cfg!(windows) { Duration::from_secs(120) } else { Duration::from_secs(90) }
 }
@@ -197,6 +201,7 @@ pub(super) fn interactive_probe_interval() -> usize {
     if cfg!(windows) { 20 } else { 10 }
 }
 
+#[cfg(all(any(unix, windows), feature = "zellij-backend"))]
 pub(super) fn zellij_topology_wait_attempts() -> usize {
     if cfg!(windows) { 80 } else { 120 }
 }
@@ -230,6 +235,7 @@ pub(super) fn spawn_daemon_with_retry(
     Err(last_error.unwrap_or_else(|| std::io::Error::other("daemon never rebound on address")))
 }
 
+#[cfg(all(any(unix, windows), feature = "zellij-backend"))]
 pub(super) fn first_node_pane_id(root: &NodePaneTreeNode) -> Option<String> {
     match root {
         NodePaneTreeNode::Leaf { pane_id } => Some(pane_id.clone()),
@@ -252,6 +258,7 @@ pub(super) fn subscription_delta_contains(delta: &NodeScreenDelta, needle: &str)
             .unwrap_or(false)
 }
 
+#[cfg(all(any(unix, windows), feature = "zellij-backend"))]
 pub(super) fn assert_zellij_delta_compatible_with_snapshot(
     snapshot: &NodeScreenSnapshot,
     delta: &NodeScreenDelta,
@@ -270,6 +277,7 @@ pub(super) fn assert_zellij_delta_compatible_with_snapshot(
     }
 }
 
+#[cfg(all(any(unix, windows), feature = "zellij-backend"))]
 pub(super) async fn wait_for_discovered_zellij_session(
     node: &NodeHostClient,
     session_name: &str,
@@ -296,10 +304,12 @@ pub(super) async fn wait_for_discovered_zellij_session(
     fallback_zellij_candidate(session_name)
 }
 
+#[cfg(all(any(unix, windows), feature = "zellij-backend"))]
 pub(super) fn zellij_discovery_timeout() -> Duration {
     if cfg!(windows) { Duration::from_secs(30) } else { Duration::from_secs(20) }
 }
 
+#[cfg(all(any(unix, windows), feature = "zellij-backend"))]
 pub(super) fn fallback_zellij_candidate(session_name: &str) -> NodeDiscoveredSession {
     NodeDiscoveredSession {
         route: NodeSessionRoute {
