@@ -169,5 +169,5 @@ async fn send_screen_delta(
     events_tx: &mpsc::Sender<BackendSubscriptionEvent>,
     delta: ScreenDelta,
 ) -> Result<(), mpsc::error::SendError<BackendSubscriptionEvent>> {
-    events_tx.send(BackendSubscriptionEvent::ScreenDelta(delta)).await
+    events_tx.send(BackendSubscriptionEvent::screen_delta(delta)).await
 }

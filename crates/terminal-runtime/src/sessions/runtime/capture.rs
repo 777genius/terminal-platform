@@ -9,6 +9,9 @@ use tokio::sync::oneshot;
 use crate::registry::{SessionDescriptor, SessionRegistry};
 
 use super::helpers::{collect_pane_ids_from_topology, tab_id_for_pane};
+use crate::sessions::capture_semantics::{
+    RENDERED_PLAINTEXT_SNAPSHOT, rendered_screen_capture_semantics,
+};
 
 mod events;
 mod raw;
@@ -135,12 +138,16 @@ async fn start_capture_for_topology(
                 if let Ok(subscription) =
                     session.subscribe(SubscriptionSpec::PaneSurface { pane_id }).await
                 {
+                    let capture_semantics = initial_screen
+                        .as_ref()
+                        .map(rendered_screen_capture_semantics)
+                        .unwrap_or(RENDERED_PLAINTEXT_SNAPSHOT);
                     persist_backend_capability_report(
                         persistence,
                         diagnostics,
                         descriptor,
                         "rendered_stream",
-                        "rendered_plaintext_snapshot",
+                        capture_semantics,
                         can_capture_scrollback,
                         "low",
                         rendered_capture_evidence_reason(can_capture_scrollback),

@@ -98,3 +98,16 @@ async fn discover_sessions_returns_empty_when_tmux_server_is_absent() {
 
     assert!(discovered.is_empty());
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn tmux_capabilities_advertise_rich_screen_surface() {
+    let backend =
+        TmuxBackend::with_socket_name(format!("terminal-platform-caps-{}", uuid::Uuid::new_v4()));
+
+    let capabilities = backend.capabilities().await.expect("tmux capabilities should load");
+
+    assert!(capabilities.rendered_viewport_snapshot);
+    assert!(!capabilities.raw_output_stream);
+    assert!(capabilities.rich_screen_surface);
+}

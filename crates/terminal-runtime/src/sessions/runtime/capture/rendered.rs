@@ -26,7 +26,7 @@ pub(super) fn spawn_v2_rendered_capture_loop(
                 event = subscription.events.recv() => {
                     match event {
                         Some(BackendSubscriptionEvent::ScreenDelta(delta)) => {
-                            if let Some(snapshot) = snapshot_from_delta(&mut current, delta) {
+                            if let Some(snapshot) = snapshot_from_delta(&mut current, *delta) {
                                 pending_snapshot = Some(snapshot);
                             }
                         }
@@ -74,6 +74,7 @@ fn snapshot_from_delta(
             rows: delta.rows,
             cols: delta.cols,
             source: delta.source,
+            buffer_kind: delta.buffer_kind,
             surface,
         };
         *current = Some(snapshot.clone());
@@ -81,10 +82,19 @@ fn snapshot_from_delta(
     }
 
     let patch = delta.patch?;
-    let mut surface = current
-        .as_ref()
-        .map(|snapshot| snapshot.surface.clone())
-        .unwrap_or_else(|| ScreenSurface { title: None, cursor: None, lines: Vec::new() });
+    let mut surface =
+        current.as_ref().map(|snapshot| snapshot.surface.clone()).unwrap_or_else(|| {
+            ScreenSurface {
+                title: None,
+                working_directory_uri: None,
+                user_variables: Default::default(),
+                cursor: None,
+                palette: Default::default(),
+                bell_count: 0,
+                progress: Default::default(),
+                lines: Vec::new(),
+            }
+        });
     if patch.title_changed {
         surface.title = patch.title;
     }
@@ -93,12 +103,12 @@ fn snapshot_from_delta(
     }
     let target_rows = usize::from(delta.rows);
     if surface.lines.len() < target_rows {
-        surface.lines.resize(target_rows, ScreenLine { text: String::new() });
+        surface.lines.resize(target_rows, ScreenLine::plain(String::new()));
     }
     for line in patch.line_updates {
         let row = usize::from(line.row);
         if row >= surface.lines.len() {
-            surface.lines.resize(row + 1, ScreenLine { text: String::new() });
+            surface.lines.resize(row + 1, ScreenLine::plain(String::new()));
         }
         surface.lines[row] = line.line;
     }
@@ -112,6 +122,7 @@ fn snapshot_from_delta(
         rows: delta.rows,
         cols: delta.cols,
         source: delta.source,
+        buffer_kind: delta.buffer_kind,
         surface,
     };
     *current = Some(snapshot.clone());

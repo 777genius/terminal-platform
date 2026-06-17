@@ -11,6 +11,7 @@ use terminal_projection::{
 };
 
 use crate::registry::{SessionDescriptor, SessionRegistry};
+use crate::sessions::capture_semantics::rendered_screen_capture_semantics;
 
 #[derive(Clone)]
 pub(super) struct CapturePersistenceDiagnostics {
@@ -195,15 +196,16 @@ pub(super) async fn persist_screen_snapshot(
     tab_id: Option<String>,
     screen: ScreenSnapshot,
 ) {
+    let capture_semantics = rendered_screen_capture_semantics(&screen).to_string();
     let input = ScreenSnapshotEventInput {
         session_id: descriptor.session_id.0.to_string(),
         route: descriptor.route.clone(),
         title: descriptor.title.clone(),
         launch: descriptor.launch.clone(),
         tab_id,
+        buffer_kind: Some(screen.buffer_kind.as_str().to_string()),
         screen,
-        buffer_kind: Some("normal".to_string()),
-        capture_semantics: Some("rendered_plaintext_snapshot".to_string()),
+        capture_semantics: Some(capture_semantics),
     };
     let store = persistence.clone();
     match tokio::task::spawn_blocking(move || store.record_v2_screen_snapshot(input)).await {
@@ -226,8 +228,11 @@ fn persistence_route_kind(route: &SessionRoute) -> String {
 
 #[cfg(test)]
 mod tests {
-    use terminal_domain::{BackendKind, RouteAuthority};
-    use terminal_projection::{SessionHealthPhase, SessionHealthReason};
+    use terminal_domain::{BackendKind, PaneId, RouteAuthority, SessionId, SessionRoute};
+    use terminal_projection::{
+        ProjectionSource, ScreenBufferKind, ScreenLine, ScreenSnapshot, ScreenSurface,
+        SessionHealthPhase, SessionHealthReason,
+    };
 
     use super::*;
     use crate::registry::{InMemorySessionRegistry, SessionRegistry};
@@ -295,6 +300,79 @@ mod tests {
             let detail = detail.to_string();
             detail.contains("screen snapshot") && detail.contains("sqlite full")
         }));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn persists_screen_snapshot_buffer_kind_from_projection() {
+        let session_id = SessionId::new();
+        let pane_id = PaneId::new();
+        let path = std::env::temp_dir()
+            .join(format!("terminal-runtime-capture-buffer-kind-{}.sqlite3", session_id.0));
+        let persistence = SqliteSessionStore::open(&path).expect("test persistence should open");
+        let diagnostics = CapturePersistenceDiagnostics::new(
+            persistence.clone(),
+            Arc::new(InMemorySessionRegistry::default()),
+            session_id,
+        );
+        let descriptor = SessionDescriptor {
+            session_id,
+            route: SessionRoute {
+                backend: BackendKind::Native,
+                authority: RouteAuthority::LocalDaemon,
+                external: None,
+            },
+            title: Some("shell".to_string()),
+            launch: None,
+            health: SessionHealthSnapshot::ready(session_id),
+        };
+
+        persist_screen_snapshot(
+            &persistence,
+            &diagnostics,
+            &descriptor,
+            None,
+            ScreenSnapshot {
+                pane_id,
+                sequence: 4,
+                rows: 24,
+                cols: 80,
+                source: ProjectionSource::NativeEmulator,
+                buffer_kind: ScreenBufferKind::Alternate,
+                surface: ScreenSurface {
+                    title: Some("vim".to_string()),
+                    working_directory_uri: None,
+                    user_variables: Default::default(),
+                    cursor: None,
+                    palette: Default::default(),
+                    bell_count: 0,
+                    progress: Default::default(),
+                    lines: vec![ScreenLine::plain("alternate screen")],
+                },
+            },
+        )
+        .await;
+
+        let v2 = terminal_persistence::TerminalPersistenceV2::open_with_config(
+            &path,
+            terminal_persistence::TerminalPersistenceV2Config::test(),
+        )
+        .expect("v2 store should open");
+        let hydrated = v2
+            .hydrate_pane_history(
+                &session_id.0.to_string(),
+                &pane_id.0.to_string(),
+                Some(0),
+                Some(10),
+                Some(1024),
+            )
+            .expect("pane history should hydrate");
+
+        assert_eq!(
+            hydrated.latest_screen_snapshot.as_ref().map(|snapshot| snapshot.buffer_kind.as_str()),
+            Some("alternate")
+        );
 
         let _ = std::fs::remove_file(path);
     }

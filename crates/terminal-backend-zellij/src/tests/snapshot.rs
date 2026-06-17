@@ -90,6 +90,6 @@ fn zellij_screen_snapshot_requests_full_scrollback_for_pane() {
 
     assert_eq!(
         dump_screen_scrollback_args(pane_target),
-        vec!["action", "dump-screen", "--pane-id", "terminal_1", "--full"]
+        vec!["action", "dump-screen", "--pane-id", "terminal_1", "--full", "--ansi"]
     );
 }

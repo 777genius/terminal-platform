@@ -8,7 +8,7 @@ use terminal_domain::{
     SessionRoute, TabId,
 };
 use terminal_projection::{
-    ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
+    ProjectionSource, ScreenBufferKind, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
 };
 
 use crate::v2::{
@@ -42,10 +42,16 @@ fn sample_snapshot(session_id: SessionId, title: &str, line: &str) -> SavedNativ
             rows: 24,
             cols: 80,
             source: ProjectionSource::NativeEmulator,
+            buffer_kind: ScreenBufferKind::Normal,
             surface: ScreenSurface {
                 title: Some(title.to_string()),
+                working_directory_uri: None,
+                user_variables: Default::default(),
                 cursor: None,
-                lines: vec![ScreenLine { text: line.to_string() }],
+                palette: Default::default(),
+                bell_count: 0,
+                progress: Default::default(),
+                lines: vec![ScreenLine::plain(line)],
             },
         }],
         saved_at_ms: SqliteSessionStore::save_timestamp_ms().expect("timestamp should resolve"),

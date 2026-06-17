@@ -20,6 +20,7 @@ pub struct BackendCapabilities {
     pub rendered_viewport_stream: bool,
     pub rendered_viewport_snapshot: bool,
     pub rendered_scrollback_snapshot: bool,
+    pub rich_screen_surface: bool,
     pub layout_dump: bool,
     pub layout_override: bool,
     pub read_only_client_mode: bool,

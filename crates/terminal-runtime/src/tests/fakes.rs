@@ -141,7 +141,17 @@ impl FakeImportedSession {
                 rows: 24,
                 cols: 80,
                 source: ProjectionSource::TmuxCapturePane,
-                surface: ScreenSurface { title: Some(title), cursor: None, lines: Vec::new() },
+                buffer_kind: ScreenBufferKind::Unknown,
+                surface: ScreenSurface {
+                    title: Some(title),
+                    working_directory_uri: None,
+                    user_variables: Default::default(),
+                    cursor: None,
+                    palette: Default::default(),
+                    bell_count: 0,
+                    progress: Default::default(),
+                    lines: Vec::new(),
+                },
             },
         }
     }

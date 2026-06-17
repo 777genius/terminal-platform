@@ -1,4 +1,5 @@
 mod active_session_service;
+mod capture_semantics;
 mod catalog_service;
 mod runtime;
 mod saved_sessions_service;

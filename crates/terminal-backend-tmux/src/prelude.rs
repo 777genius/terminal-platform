@@ -17,7 +17,7 @@ pub(crate) use terminal_domain::{
 };
 pub(crate) use terminal_mux_domain::{PaneSplit, PaneTreeNode, SplitDirection, TabSnapshot};
 pub(crate) use terminal_projection::{
-    ProjectionSource, ScreenDelta, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
+    ProjectionSource, ScreenDelta, ScreenSnapshot, ScreenSurface, TopologySnapshot,
 };
 pub(crate) use tokio::{
     sync::{mpsc, oneshot},

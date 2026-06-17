@@ -2,13 +2,13 @@ use std::thread;
 
 use terminal_backend_api::BackendError;
 use terminal_domain::PaneId;
-use terminal_projection::{ProjectionSource, ScreenLine, ScreenSnapshot};
+use terminal_projection::{ProjectionSource, ScreenSnapshot};
 
 use crate::{
     cli::is_transient_zellij_backend_error,
     constants::{ZELLIJ_POLL_INTERVAL, ZELLIJ_TRANSIENT_RETRY_ATTEMPTS},
     rows::{parse_panes_json, parse_tabs_json},
-    screen::{screen_lines_from_output, screen_snapshot_from_lines},
+    screen::{screen_snapshot_from_surface, screen_surface_from_bytes, screen_surface_from_output},
     snapshot::{ZellijPaneTarget, ZellijSessionSnapshot, build_session_snapshot},
 };
 
@@ -90,12 +90,13 @@ impl ZellijAttachedSession {
         let _io_permit = self.io_lane.lock().expect("zellij io lane should not be poisoned");
         let output = self
             .backend
-            .run_owned(Some(&self.target), &dump_screen_scrollback_args(&pane_target))?;
+            .run_owned_bytes(Some(&self.target), &dump_screen_scrollback_args(&pane_target))?;
 
-        Ok(screen_snapshot_from_lines(
+        let surface = screen_surface_from_bytes(&output, pane_target.title.clone());
+        Ok(screen_snapshot_from_surface(
             pane_id,
             &pane_target,
-            screen_lines_from_output(&output),
+            surface,
             ProjectionSource::ZellijDumpSnapshot,
         ))
     }
@@ -107,9 +108,9 @@ impl ZellijAttachedSession {
         source: ProjectionSource,
     ) -> Result<ScreenSnapshot, BackendError> {
         let pane_target = self.pane_target(pane_id)?;
-        let lines = viewport.into_iter().map(|text| ScreenLine { text }).collect();
+        let surface = screen_surface_from_output(&viewport.join("\n"), pane_target.title.clone());
 
-        Ok(screen_snapshot_from_lines(pane_id, &pane_target, lines, source))
+        Ok(screen_snapshot_from_surface(pane_id, &pane_target, surface, source))
     }
 }
 
@@ -120,5 +121,6 @@ pub(crate) fn dump_screen_scrollback_args(pane_target: &ZellijPaneTarget) -> Vec
         "--pane-id".to_string(),
         pane_target.backend_ref.clone(),
         "--full".to_string(),
+        "--ansi".to_string(),
     ]
 }

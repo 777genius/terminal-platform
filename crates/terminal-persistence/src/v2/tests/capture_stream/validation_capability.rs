@@ -124,6 +124,25 @@ fn backend_capability_mapper_outputs_db_valid_domains() {
         .record_backend_capability_report(snapshot)
         .expect("rendered snapshot strategy should persist");
 
+    store
+        .record_backend_capability_report(BackendCapabilityReportInput {
+            id: Some("rich-rendered-screen-capability".to_string()),
+            session_id: None,
+            backend_kind: "native".to_string(),
+            backend_version: Some("test".to_string()),
+            backend_binary_path_hash: Some("test-path-hash".to_string()),
+            route_kind: "local_daemon".to_string(),
+            probe_status: "passed".to_string(),
+            capture_strategy: "rendered_snapshot".to_string(),
+            capture_semantics: "rendered_screen_snapshot".to_string(),
+            can_preserve_process_when_live: false,
+            can_capture_scrollback: true,
+            command_boundary_confidence: "medium".to_string(),
+            evidence: None,
+            expires_at_ms: None,
+        })
+        .expect("rich rendered screen semantics should persist");
+
     let mut raw_capabilities = BackendCapabilities::default();
     raw_capabilities.raw_output_stream = true;
     let raw = BackendCapabilityReportInput::from_backend_capabilities(

@@ -70,7 +70,9 @@ impl TmuxAttachedSession {
 
         tokio::spawn(async move {
             if events_tx
-                .send(BackendSubscriptionEvent::ScreenDelta(ScreenDelta::full_replace(0, &initial)))
+                .send(BackendSubscriptionEvent::screen_delta(ScreenDelta::full_replace(
+                    0, &initial,
+                )))
                 .await
                 .is_err()
             {
@@ -94,7 +96,7 @@ impl TmuxAttachedSession {
                         }
                         let delta = ScreenDelta::between(&last, &current);
                         last = current;
-                        if events_tx.send(BackendSubscriptionEvent::ScreenDelta(delta)).await.is_err() {
+                        if events_tx.send(BackendSubscriptionEvent::screen_delta(delta)).await.is_err() {
                             break;
                         }
                     }

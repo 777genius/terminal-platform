@@ -14,8 +14,15 @@ pub enum SubscriptionSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendSubscriptionEvent {
     TopologySnapshot(TopologySnapshot),
-    ScreenDelta(ScreenDelta),
+    ScreenDelta(Box<ScreenDelta>),
     SessionHealthSnapshot(SessionHealthSnapshot),
+}
+
+impl BackendSubscriptionEvent {
+    #[must_use]
+    pub fn screen_delta(delta: ScreenDelta) -> Self {
+        Self::ScreenDelta(Box::new(delta))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

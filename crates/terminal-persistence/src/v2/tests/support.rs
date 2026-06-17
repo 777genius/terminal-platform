@@ -3,7 +3,9 @@ pub(super) use terminal_domain::{
     BackendKind, PaneId, RouteAuthority, SavedSessionManifest, SessionId, SessionRoute, TabId,
 };
 pub(super) use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
-pub(super) use terminal_projection::{ProjectionSource, ScreenLine, ScreenSurface};
+pub(super) use terminal_projection::{
+    ProjectionSource, ScreenBufferKind, ScreenLine, ScreenSurface,
+};
 
 pub(super) fn test_store(label: &str) -> TerminalPersistenceV2 {
     let path = std::env::temp_dir()

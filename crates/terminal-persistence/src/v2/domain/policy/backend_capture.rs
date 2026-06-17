@@ -6,6 +6,7 @@ pub(in crate::v2) fn validate_capture_semantics_domain(
     const CAPTURE_SEMANTICS: &[&str] = &[
         "raw_vt_stream",
         "rendered_ansi_stream",
+        "rendered_screen_snapshot",
         "rendered_plaintext_snapshot",
         "mux_structured_surface",
         "imported_text",

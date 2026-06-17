@@ -4,6 +4,7 @@ use terminal_domain::SubscriptionId;
 use terminal_projection::{ScreenDelta, SessionHealthSnapshot, TopologySnapshot};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SubscriptionEvent {
     TopologySnapshot(TopologySnapshot),

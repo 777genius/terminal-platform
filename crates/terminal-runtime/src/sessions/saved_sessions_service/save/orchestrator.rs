@@ -98,7 +98,8 @@ mod tests {
     };
     use terminal_mux_domain::PaneTreeNode;
     use terminal_projection::{
-        ProjectionSource, ScreenLine, ScreenSnapshot, ScreenSurface, TopologySnapshot,
+        ProjectionSource, ScreenBufferKind, ScreenLine, ScreenSnapshot, ScreenSurface,
+        TopologySnapshot,
     };
 
     use super::*;
@@ -239,10 +240,16 @@ mod tests {
                 rows: 24,
                 cols: 80,
                 source: ProjectionSource::NativeEmulator,
+                buffer_kind: ScreenBufferKind::Normal,
                 surface: ScreenSurface {
                     title: Some("shell".to_string()),
+                    working_directory_uri: None,
+                    user_variables: Default::default(),
                     cursor: None,
-                    lines: vec![ScreenLine { text: "ready".to_string() }],
+                    palette: Default::default(),
+                    bell_count: 0,
+                    progress: Default::default(),
+                    lines: vec![ScreenLine::plain("ready")],
                 },
             }],
             saved_at_ms: 1_000,

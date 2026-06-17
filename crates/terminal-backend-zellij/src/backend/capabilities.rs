@@ -32,6 +32,7 @@ pub(crate) fn capabilities_for_surface(surface: ZellijSurface) -> BackendCapabil
             rendered_viewport_stream: true,
             rendered_viewport_snapshot: true,
             rendered_scrollback_snapshot: true,
+            rich_screen_surface: true,
             plugin_panes: true,
             advisory_metadata_subscriptions: true,
             read_only_client_mode: true,

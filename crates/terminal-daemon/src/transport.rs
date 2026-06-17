@@ -86,7 +86,7 @@ fn map_subscription_event(
             SubscriptionEvent::TopologySnapshot(snapshot)
         }
         terminal_backend_api::BackendSubscriptionEvent::ScreenDelta(delta) => {
-            SubscriptionEvent::ScreenDelta(delta)
+            SubscriptionEvent::ScreenDelta(*delta)
         }
         terminal_backend_api::BackendSubscriptionEvent::SessionHealthSnapshot(health) => {
             SubscriptionEvent::SessionHealthSnapshot(health)

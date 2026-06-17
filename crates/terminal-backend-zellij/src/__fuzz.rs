@@ -6,7 +6,9 @@ pub fn probe_surface_code(
     root_help: Option<&str>,
     action_help: Option<&str>,
 ) -> u8 {
-    match crate::probe::ZellijProbe::parse(version_output, root_help, action_help).surface {
+    match crate::probe::ZellijProbe::parse(version_output, root_help, action_help, None, None)
+        .surface
+    {
         crate::probe::ZellijSurface::LegacyCli043 => 1,
         crate::probe::ZellijSurface::RichCli044Plus => 2,
         crate::probe::ZellijSurface::Unknown => 0,

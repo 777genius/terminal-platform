@@ -19,7 +19,8 @@ pub(super) use terminal_domain::{
 pub(super) use terminal_mux_domain::{PaneTreeNode, SplitDirection, TabSnapshot};
 pub(super) use terminal_persistence::SqliteSessionStore;
 pub(super) use terminal_projection::{
-    ProjectionSource, ScreenDelta, ScreenSnapshot, ScreenSurface, TopologySnapshot,
+    ProjectionSource, ScreenBufferKind, ScreenDelta, ScreenSnapshot, ScreenSurface,
+    TopologySnapshot,
 };
 pub(super) use tokio::sync::{mpsc, oneshot};
 

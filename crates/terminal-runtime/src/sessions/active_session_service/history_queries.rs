@@ -5,6 +5,7 @@ use terminal_persistence::{
 };
 
 use super::ActiveSessionService;
+use crate::sessions::capture_semantics::rendered_screen_capture_semantics;
 use crate::sessions::runtime::tab_id_for_pane;
 
 impl ActiveSessionService<'_> {
@@ -74,6 +75,8 @@ impl ActiveSessionService<'_> {
             .and_then(|topology| tab_id_for_pane(topology, pane_id))
             .map(|tab_id| tab_id.0.to_string());
         let screen = session.screen_snapshot(pane_id).await?;
+        let buffer_kind = screen.buffer_kind.as_str().to_string();
+        let capture_semantics = rendered_screen_capture_semantics(&screen).to_string();
 
         let input = ScreenSnapshotEventInput {
             session_id: descriptor.session_id.0.to_string(),
@@ -82,8 +85,8 @@ impl ActiveSessionService<'_> {
             launch: descriptor.launch,
             tab_id,
             screen,
-            buffer_kind: Some("normal".to_string()),
-            capture_semantics: Some("rendered_plaintext_snapshot".to_string()),
+            buffer_kind: Some(buffer_kind),
+            capture_semantics: Some(capture_semantics),
         };
         let store = self.runtime.persistence().clone();
         tokio::task::spawn_blocking(move || store.record_v2_screen_snapshot(input))

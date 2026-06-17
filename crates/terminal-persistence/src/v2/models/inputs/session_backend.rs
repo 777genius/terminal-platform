@@ -112,6 +112,8 @@ impl BackendCapabilityReportInput {
             },
             capture_semantics: if capabilities.raw_output_stream {
                 "raw_vt_stream".to_string()
+            } else if capabilities.rich_screen_surface {
+                "rendered_screen_snapshot".to_string()
             } else {
                 "rendered_plaintext_snapshot".to_string()
             },

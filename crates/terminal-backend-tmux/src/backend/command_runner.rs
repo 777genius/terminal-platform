@@ -8,6 +8,16 @@ impl TmuxBackend {
         target: Option<&TmuxTarget>,
         args: &[&str],
     ) -> Result<String, BackendError> {
+        let stdout = self.run_bytes(target, args)?;
+        String::from_utf8(stdout)
+            .map_err(|error| BackendError::internal(format!("tmux output is not utf8: {error}")))
+    }
+
+    pub(crate) fn run_bytes(
+        &self,
+        target: Option<&TmuxTarget>,
+        args: &[&str],
+    ) -> Result<Vec<u8>, BackendError> {
         let mut command = Command::new("tmux");
         if let Some(socket_name) =
             target.and_then(|target| target.socket_name.as_deref()).or(self.socket_name.as_deref())
@@ -24,8 +34,7 @@ impl TmuxBackend {
             return Err(BackendError::transport(format!("tmux command failed: {}", stderr.trim())));
         }
 
-        String::from_utf8(output.stdout)
-            .map_err(|error| BackendError::internal(format!("tmux output is not utf8: {error}")))
+        Ok(output.stdout)
     }
 
     pub(crate) fn run_owned(

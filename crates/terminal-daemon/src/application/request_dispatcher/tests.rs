@@ -8,8 +8,8 @@ use terminal_domain::{
 };
 use terminal_persistence::{CommandHistoryEntryRecord, PaneHistoryHydrationRecord};
 use terminal_projection::{
-    ProjectionSource, ScreenDelta, ScreenSnapshot, ScreenSurface, SessionHealthSnapshot,
-    TopologySnapshot,
+    ProjectionSource, ScreenBufferKind, ScreenDelta, ScreenSnapshot, ScreenSurface,
+    SessionHealthSnapshot, TopologySnapshot,
 };
 use terminal_protocol::{
     CreateSessionRequest, DaemonCapabilities, DaemonPhase, GetSessionHealthSnapshotRequest,
@@ -159,7 +159,17 @@ impl TerminalDaemonActiveSessionPort for StubRuntime {
             rows: 1,
             cols: 1,
             source: ProjectionSource::NativeEmulator,
-            surface: ScreenSurface { title: None, cursor: None, lines: Vec::new() },
+            buffer_kind: ScreenBufferKind::Normal,
+            surface: ScreenSurface {
+                title: None,
+                working_directory_uri: None,
+                user_variables: Default::default(),
+                cursor: None,
+                palette: Default::default(),
+                bell_count: 0,
+                progress: Default::default(),
+                lines: Vec::new(),
+            },
         })
     }
 

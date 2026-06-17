@@ -17,6 +17,7 @@ pub(super) fn tmux_capabilities() -> BackendCapabilities {
         pane_paste_write: true,
         rendered_viewport_stream: true,
         rendered_viewport_snapshot: true,
+        rich_screen_surface: true,
         advisory_metadata_subscriptions: true,
         read_only_client_mode: true,
         ..BackendCapabilities::default()

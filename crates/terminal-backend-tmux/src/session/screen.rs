@@ -1,3 +1,5 @@
+use terminal_projection::{ScreenBufferKind, screen_surface_from_ansi_bytes};
+
 use super::TmuxAttachedSession;
 use crate::{prelude::*, sequence::screen_sequence};
 
@@ -13,17 +15,9 @@ impl TmuxAttachedSession {
             .ok_or_else(|| BackendError::not_found(format!("unknown tmux pane {pane_id:?}")))?;
         let output = self
             .backend
-            .run(Some(&self.target), &["capture-pane", "-p", "-J", "-t", &pane_target.target])?;
-        let lines: Vec<ScreenLine> =
-            output.lines().map(|line| ScreenLine { text: line.to_string() }).collect();
-        let surface = ScreenSurface { title: pane_target.title.clone(), cursor: None, lines };
-        let sequence = screen_sequence(
-            pane_id,
-            pane_target.rows,
-            pane_target.cols,
-            surface.title.as_deref(),
-            &surface.lines,
-        );
+            .run_bytes(Some(&self.target), &capture_pane_rich_snapshot_args(&pane_target.target))?;
+        let surface = screen_surface_from_ansi_bytes(&output, pane_target.title.clone());
+        let sequence = screen_sequence(pane_id, pane_target.rows, pane_target.cols, &surface);
 
         Ok(ScreenSnapshot {
             pane_id,
@@ -31,7 +25,25 @@ impl TmuxAttachedSession {
             rows: pane_target.rows,
             cols: pane_target.cols,
             source: ProjectionSource::TmuxCapturePane,
+            buffer_kind: ScreenBufferKind::Unknown,
             surface,
         })
+    }
+}
+
+fn capture_pane_rich_snapshot_args(pane_target: &str) -> [&str; 6] {
+    ["capture-pane", "-p", "-J", "-e", "-t", pane_target]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_pane_args_preserve_escape_sequences_for_rich_snapshots() {
+        assert_eq!(
+            capture_pane_rich_snapshot_args("%1"),
+            ["capture-pane", "-p", "-J", "-e", "-t", "%1"]
+        );
     }
 }
