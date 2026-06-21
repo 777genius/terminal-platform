@@ -10,7 +10,7 @@ use terminal_mux_domain::SplitDirection;
 use crate::NativeBackend;
 
 #[cfg(any(unix, windows))]
-use super::support::{cat_launch_spec, collect_pane_ids, wait_for_screen_line};
+use super::support::{cat_launch_spec, collect_pane_ids, quiet_launch_spec, wait_for_screen_line};
 
 #[tokio::test]
 async fn streams_initial_topology_and_new_tab_updates() {
@@ -57,7 +57,7 @@ async fn streams_initial_surface_and_title_patch_updates() {
     let binding = backend
         .create_session(CreateSessionSpec {
             title: Some("shell".to_string()),
-            ..CreateSessionSpec::default()
+            launch: Some(quiet_launch_spec()),
         })
         .await
         .expect("native session should be created");

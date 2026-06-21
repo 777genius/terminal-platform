@@ -171,9 +171,40 @@ pub(super) fn isolated_daemon_with_valid_and_corrupted_saved_rows(
     (TerminalDaemon::with_persistence(store), valid_session_id, corrupt_session_id)
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(super) fn cat_launch_spec() -> ShellLaunchSpec {
-    ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+    #[cfg(unix)]
+    {
+        ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
+    }
+
+    #[cfg(windows)]
+    {
+        let program = std::env::var("COMSPEC")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "cmd.exe".to_string());
+
+        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "echo ready"])
+    }
+}
+
+#[cfg(any(unix, windows))]
+pub(super) fn quiet_launch_spec() -> ShellLaunchSpec {
+    #[cfg(unix)]
+    {
+        ShellLaunchSpec::new("/bin/sh").with_args(["-c", "exec sleep 60"])
+    }
+
+    #[cfg(windows)]
+    {
+        let program = std::env::var("COMSPEC")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "cmd.exe".to_string());
+
+        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "rem terminal-platform"])
+    }
 }
 
 #[cfg(unix)]
@@ -181,7 +212,7 @@ pub(super) fn submitted_input(text: &str) -> String {
     if cfg!(windows) { format!("{text}\r\n") } else { format!("{text}\n") }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(super) async fn wait_for_screen_line(
     client: &LocalSocketDaemonClient,
     session_id: terminal_domain::SessionId,

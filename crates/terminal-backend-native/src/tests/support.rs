@@ -22,6 +22,23 @@ pub(super) fn cat_launch_spec() -> ShellLaunchSpec {
     }
 }
 
+pub(super) fn quiet_launch_spec() -> ShellLaunchSpec {
+    #[cfg(unix)]
+    {
+        ShellLaunchSpec::new("/bin/sh").with_args(["-c", "exec sleep 60"])
+    }
+
+    #[cfg(windows)]
+    {
+        let program = std::env::var("COMSPEC")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "cmd.exe".to_string());
+
+        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "rem terminal-platform"])
+    }
+}
+
 pub(super) fn echo_input(text: &str) -> String {
     #[cfg(unix)]
     {

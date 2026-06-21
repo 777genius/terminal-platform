@@ -6,6 +6,9 @@ use terminal_projection::ProjectionSource;
 
 use crate::NativeBackend;
 
+#[cfg(any(unix, windows))]
+use super::support::quiet_launch_spec;
+
 #[tokio::test]
 async fn creates_and_lists_empty_sessions() {
     let backend = NativeBackend::default();
@@ -102,7 +105,7 @@ async fn emits_screen_delta_for_tab_title_changes() {
     let binding = backend
         .create_session(CreateSessionSpec {
             title: Some("shell".to_string()),
-            ..CreateSessionSpec::default()
+            launch: Some(quiet_launch_spec()),
         })
         .await
         .expect("native session should be created");

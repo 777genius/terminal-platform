@@ -138,7 +138,10 @@ async fn observes_title_change_screen_delta_after_tab_rename() {
     let created = client
         .create_session(
             BackendKind::Native,
-            CreateSessionSpec { title: Some("shell".to_string()), ..CreateSessionSpec::default() },
+            CreateSessionSpec {
+                title: Some("shell".to_string()),
+                launch: Some(quiet_launch_spec()),
+            },
         )
         .await
         .expect("create_session should succeed");

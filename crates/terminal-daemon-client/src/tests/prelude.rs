@@ -7,7 +7,7 @@ pub(super) use rusqlite::{Connection, params};
 pub(super) use terminal_backend_api::{
     CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec,
 };
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(super) use terminal_backend_api::{SendInputSpec, ShellLaunchSpec};
 pub(super) use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
 pub(super) use terminal_domain::{BackendKind, CURRENT_BINARY_VERSION};
@@ -27,7 +27,7 @@ pub(super) use terminal_protocol::{
     DaemonCapabilities, DaemonPhase, Handshake, HistoryReplayState, ProtocolVersion,
     RestoreGuaranteeLevel, SubscriptionEvent,
 };
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(super) use tokio::time::sleep;
 pub(super) use tokio::time::timeout;
 
