@@ -352,28 +352,37 @@ fn is_normal_buffer_kind(value: &ScreenBufferKind) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use serde::{Serialize, de::DeserializeOwned};
+
     use super::*;
+
+    fn parse_json<T: DeserializeOwned>(value: &str) -> T {
+        serde_json::from_str(value).expect("test json should deserialize")
+    }
+
+    fn to_json<T: Serialize>(value: T) -> serde_json::Value {
+        serde_json::to_value(value).expect("test value should serialize")
+    }
 
     #[test]
     fn screen_line_defaults_missing_spans_for_legacy_payloads() {
-        let line: ScreenLine = serde_json::from_str(r#"{"text":"ready"}"#).unwrap();
+        let line: ScreenLine = parse_json(r#"{"text":"ready"}"#);
 
         assert_eq!(line, ScreenLine::plain("ready"));
     }
 
     #[test]
     fn screen_cursor_defaults_missing_shape_for_legacy_payloads() {
-        let cursor: ScreenCursor = serde_json::from_str(r#"{"row":2,"col":8}"#).unwrap();
+        let cursor: ScreenCursor = parse_json(r#"{"row":2,"col":8}"#);
 
         assert_eq!(cursor, ScreenCursor::at(2, 8));
     }
 
     #[test]
     fn screen_snapshot_defaults_missing_buffer_kind_for_legacy_payloads() {
-        let snapshot: ScreenSnapshot = serde_json::from_str(
+        let snapshot: ScreenSnapshot = parse_json(
             r#"{"pane_id":"00000000-0000-0000-0000-000000000001","sequence":1,"rows":24,"cols":80,"source":"native_emulator","surface":{"title":null,"cursor":null,"lines":[]}}"#,
-        )
-        .unwrap();
+        );
 
         assert_eq!(snapshot.buffer_kind, ScreenBufferKind::Normal);
         assert_eq!(snapshot.surface.palette, ScreenSurfacePalette::default());
@@ -400,27 +409,26 @@ mod tests {
             },
         };
 
-        let value = serde_json::to_value(snapshot).unwrap();
+        let value = to_json(snapshot);
 
         assert_eq!(value["buffer_kind"], "alternate");
     }
 
     #[test]
     fn screen_cursor_omits_default_shape_fields() {
-        let value = serde_json::to_value(ScreenCursor::at(2, 8)).unwrap();
+        let value = to_json(ScreenCursor::at(2, 8));
 
         assert_eq!(value, serde_json::json!({ "row": 2, "col": 8 }));
     }
 
     #[test]
     fn screen_cursor_serializes_shape_and_blinking_when_present() {
-        let value = serde_json::to_value(ScreenCursor {
+        let value = to_json(ScreenCursor {
             row: 2,
             col: 8,
             shape: Some(ScreenCursorShape::Beam),
             blinking: true,
-        })
-        .unwrap();
+        });
 
         assert_eq!(
             value,
@@ -435,7 +443,7 @@ mod tests {
 
     #[test]
     fn screen_surface_omits_default_palette_and_serializes_overrides() {
-        let default_value = serde_json::to_value(ScreenSurface {
+        let default_value = to_json(ScreenSurface {
             title: None,
             working_directory_uri: None,
             user_variables: Default::default(),
@@ -444,13 +452,12 @@ mod tests {
             bell_count: 0,
             progress: Default::default(),
             lines: Vec::new(),
-        })
-        .unwrap();
+        });
 
         assert!(default_value.get("palette").is_none());
         assert!(default_value.get("working_directory_uri").is_none());
 
-        let override_value = serde_json::to_value(ScreenSurface {
+        let override_value = to_json(ScreenSurface {
             title: None,
             working_directory_uri: None,
             user_variables: Default::default(),
@@ -463,8 +470,7 @@ mod tests {
             bell_count: 0,
             progress: Default::default(),
             lines: Vec::new(),
-        })
-        .unwrap();
+        });
 
         assert_eq!(
             override_value["palette"]["foreground"],
@@ -474,7 +480,7 @@ mod tests {
 
     #[test]
     fn screen_surface_serializes_working_directory_uri_only_when_present() {
-        let value = serde_json::to_value(ScreenSurface {
+        let value = to_json(ScreenSurface {
             title: None,
             working_directory_uri: Some("file://localhost/tmp/project".to_string()),
             user_variables: Default::default(),
@@ -483,15 +489,14 @@ mod tests {
             bell_count: 0,
             progress: Default::default(),
             lines: Vec::new(),
-        })
-        .unwrap();
+        });
 
         assert_eq!(value["working_directory_uri"], "file://localhost/tmp/project");
     }
 
     #[test]
     fn screen_surface_omits_default_bell_count_and_serializes_nonzero() {
-        let default_value = serde_json::to_value(ScreenSurface {
+        let default_value = to_json(ScreenSurface {
             title: None,
             working_directory_uri: None,
             user_variables: Default::default(),
@@ -500,11 +505,10 @@ mod tests {
             bell_count: 0,
             progress: Default::default(),
             lines: Vec::new(),
-        })
-        .unwrap();
+        });
         assert!(default_value.get("bell_count").is_none());
 
-        let bell_value = serde_json::to_value(ScreenSurface {
+        let bell_value = to_json(ScreenSurface {
             title: None,
             working_directory_uri: None,
             user_variables: Default::default(),
@@ -513,14 +517,13 @@ mod tests {
             bell_count: 2,
             progress: Default::default(),
             lines: Vec::new(),
-        })
-        .unwrap();
+        });
         assert_eq!(bell_value["bell_count"], serde_json::json!(2));
     }
 
     #[test]
     fn screen_surface_omits_inactive_progress_and_serializes_active_progress() {
-        let default_value = serde_json::to_value(ScreenSurface {
+        let default_value = to_json(ScreenSurface {
             title: None,
             working_directory_uri: None,
             user_variables: Default::default(),
@@ -529,11 +532,10 @@ mod tests {
             bell_count: 0,
             progress: ScreenProgress::default(),
             lines: Vec::new(),
-        })
-        .unwrap();
+        });
         assert!(default_value.get("progress").is_none());
 
-        let progress_value = serde_json::to_value(ScreenSurface {
+        let progress_value = to_json(ScreenSurface {
             title: None,
             working_directory_uri: None,
             user_variables: Default::default(),
@@ -542,8 +544,7 @@ mod tests {
             bell_count: 0,
             progress: ScreenProgress { state: ScreenProgressState::Warning, value: Some(88) },
             lines: Vec::new(),
-        })
-        .unwrap();
+        });
         assert_eq!(
             progress_value["progress"],
             serde_json::json!({ "state": "warning", "value": 88 })
@@ -552,7 +553,7 @@ mod tests {
 
     #[test]
     fn screen_surface_omits_empty_user_variables_and_serializes_nonempty() {
-        let default_value = serde_json::to_value(ScreenSurface {
+        let default_value = to_json(ScreenSurface {
             title: None,
             working_directory_uri: None,
             user_variables: Default::default(),
@@ -561,11 +562,10 @@ mod tests {
             bell_count: 0,
             progress: ScreenProgress::default(),
             lines: Vec::new(),
-        })
-        .unwrap();
+        });
         assert!(default_value.get("user_variables").is_none());
 
-        let value = serde_json::to_value(ScreenSurface {
+        let value = to_json(ScreenSurface {
             title: None,
             working_directory_uri: None,
             user_variables: [("WEZTERM_PROG".to_string(), "cargo test".to_string())].into(),
@@ -574,21 +574,20 @@ mod tests {
             bell_count: 0,
             progress: ScreenProgress::default(),
             lines: Vec::new(),
-        })
-        .unwrap();
+        });
         assert_eq!(value["user_variables"]["WEZTERM_PROG"], "cargo test");
     }
 
     #[test]
     fn screen_line_omits_empty_spans_for_plain_payloads() {
-        let value = serde_json::to_value(ScreenLine::plain("ready")).unwrap();
+        let value = to_json(ScreenLine::plain("ready"));
 
         assert_eq!(value, serde_json::json!({ "text": "ready" }));
     }
 
     #[test]
     fn screen_line_defaults_missing_wrapped_for_legacy_payloads() {
-        let line: ScreenLine = serde_json::from_str(r#"{"text":"ready","spans":[]}"#).unwrap();
+        let line: ScreenLine = parse_json(r#"{"text":"ready","spans":[]}"#);
 
         assert!(!line.wrapped);
         assert!(line.media.is_empty());
@@ -598,15 +597,14 @@ mod tests {
 
     #[test]
     fn screen_line_serializes_wrapped_only_when_true() {
-        let value = serde_json::to_value(ScreenLine {
+        let value = to_json(ScreenLine {
             text: "wrapped".to_string(),
             spans: Vec::new(),
             media: Vec::new(),
             side_effects: Vec::new(),
             semantic_marks: Vec::new(),
             wrapped: true,
-        })
-        .unwrap();
+        });
 
         assert_eq!(value, serde_json::json!({ "text": "wrapped", "wrapped": true }));
     }
@@ -642,7 +640,7 @@ mod tests {
             wrapped: false,
         };
 
-        let value = serde_json::to_value(line).unwrap();
+        let value = to_json(line);
 
         assert_eq!(
             value,
@@ -673,15 +671,14 @@ mod tests {
 
     #[test]
     fn screen_line_serializes_media_markers_only_when_present() {
-        let value = serde_json::to_value(ScreenLine {
+        let value = to_json(ScreenLine {
             text: String::new(),
             spans: Vec::new(),
             media: vec![ScreenLineMedia::marker(ScreenLineMediaKind::KittyGraphics)],
             side_effects: Vec::new(),
             semantic_marks: Vec::new(),
             wrapped: false,
-        })
-        .unwrap();
+        });
 
         assert_eq!(
             value,
@@ -694,7 +691,7 @@ mod tests {
 
     #[test]
     fn screen_line_serializes_side_effect_markers_only_when_present() {
-        let value = serde_json::to_value(ScreenLine {
+        let value = to_json(ScreenLine {
             text: String::new(),
             spans: Vec::new(),
             media: Vec::new(),
@@ -706,8 +703,7 @@ mod tests {
             }],
             semantic_marks: Vec::new(),
             wrapped: false,
-        })
-        .unwrap();
+        });
 
         assert_eq!(
             value,
@@ -724,7 +720,7 @@ mod tests {
 
     #[test]
     fn screen_line_serializes_semantic_marks_only_when_present() {
-        let value = serde_json::to_value(ScreenLine {
+        let value = to_json(ScreenLine {
             text: String::new(),
             spans: Vec::new(),
             media: Vec::new(),
@@ -742,8 +738,7 @@ mod tests {
                 },
             ],
             wrapped: false,
-        })
-        .unwrap();
+        });
 
         assert_eq!(
             value,

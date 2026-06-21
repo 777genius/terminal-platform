@@ -4,7 +4,8 @@ use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
 use terminal_domain::PaneId;
 use terminal_projection::{
-    ProjectionSource, ScreenCursor, ScreenDelta, ScreenLine, ScreenSnapshot, ScreenSurface,
+    ProjectionSource, ScreenBufferKind, ScreenCursor, ScreenDelta, ScreenLine, ScreenSnapshot,
+    ScreenSurface,
 };
 use uuid::Uuid;
 
@@ -42,9 +43,7 @@ fn bounded_lines(lines: Vec<String>) -> Vec<ScreenLine> {
     lines
         .into_iter()
         .take(64)
-        .map(|text| ScreenLine {
-            text: text.chars().take(256).collect(),
-        })
+        .map(|text| ScreenLine::plain(text.chars().take(256).collect::<String>()))
         .collect()
 }
 
@@ -53,7 +52,7 @@ fn bounded_title(title: Option<String>) -> Option<String> {
 }
 
 fn bounded_cursor(cursor: Option<(u16, u16)>) -> Option<ScreenCursor> {
-    cursor.map(|(row, col)| ScreenCursor { row, col })
+    cursor.map(|(row, col)| ScreenCursor::at(row, col))
 }
 
 fn snapshot(
@@ -72,9 +71,15 @@ fn snapshot(
         rows: rows.max(1),
         cols: cols.max(1),
         source,
+        buffer_kind: ScreenBufferKind::Normal,
         surface: ScreenSurface {
             title: bounded_title(title),
+            working_directory_uri: None,
+            user_variables: Default::default(),
             cursor: bounded_cursor(cursor),
+            palette: Default::default(),
+            bell_count: 0,
+            progress: Default::default(),
             lines: bounded_lines(lines),
         },
     }

@@ -91,7 +91,10 @@ mod tests {
 
     impl std::io::Write for SharedBufferWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.bytes.lock().unwrap().extend_from_slice(buf);
+            self.bytes
+                .lock()
+                .map_err(|_| std::io::Error::other("shared buffer lock poisoned"))?
+                .extend_from_slice(buf);
             Ok(buf.len())
         }
 
@@ -111,7 +114,8 @@ mod tests {
 
         flush_terminal_response_bytes(&emulator, &writer);
 
-        assert_eq!(&*bytes.lock().unwrap(), b"\x1b[?6c");
+        let bytes = bytes.lock().expect("shared buffer lock should not be poisoned");
+        assert_eq!(&*bytes, b"\x1b[?6c");
         assert!(emulator.take_response_bytes().is_empty());
     }
 }
