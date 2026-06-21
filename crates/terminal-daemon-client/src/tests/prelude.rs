@@ -4,11 +4,13 @@ pub(super) use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
 pub(super) use rusqlite::{Connection, params};
+#[cfg(unix)]
+pub(super) use terminal_backend_api::SendInputSpec;
+#[cfg(any(unix, windows))]
+pub(super) use terminal_backend_api::ShellLaunchSpec;
 pub(super) use terminal_backend_api::{
     CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec,
 };
-#[cfg(any(unix, windows))]
-pub(super) use terminal_backend_api::{SendInputSpec, ShellLaunchSpec};
 pub(super) use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
 pub(super) use terminal_domain::{BackendKind, CURRENT_BINARY_VERSION};
 #[cfg(unix)]
@@ -27,7 +29,7 @@ pub(super) use terminal_protocol::{
     DaemonCapabilities, DaemonPhase, Handshake, HistoryReplayState, ProtocolVersion,
     RestoreGuaranteeLevel, SubscriptionEvent,
 };
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 pub(super) use tokio::time::sleep;
 pub(super) use tokio::time::timeout;
 

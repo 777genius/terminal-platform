@@ -30,12 +30,7 @@ pub(super) fn quiet_launch_spec() -> ShellLaunchSpec {
 
     #[cfg(windows)]
     {
-        let program = std::env::var("COMSPEC")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "cmd.exe".to_string());
-
-        ShellLaunchSpec::new(program).with_args(["/D", "/Q", "/K", "rem terminal-platform"])
+        ShellLaunchSpec::new("ping.exe").with_args(["-n", "60", "127.0.0.1"])
     }
 }
 
