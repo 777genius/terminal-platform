@@ -176,17 +176,9 @@ pub(super) fn cat_launch_spec() -> ShellLaunchSpec {
     ShellLaunchSpec::new("/bin/sh").with_args(["-lc", "printf 'ready\\n'; exec cat"])
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 pub(super) fn quiet_launch_spec() -> ShellLaunchSpec {
-    #[cfg(unix)]
-    {
-        ShellLaunchSpec::new("/bin/sh").with_args(["-c", "exec sleep 60"])
-    }
-
-    #[cfg(windows)]
-    {
-        ShellLaunchSpec::new("ping.exe").with_args(["-n", "60", "127.0.0.1"])
-    }
+    ShellLaunchSpec::new("/bin/sh").with_args(["-c", "exec sleep 60"])
 }
 
 #[cfg(unix)]

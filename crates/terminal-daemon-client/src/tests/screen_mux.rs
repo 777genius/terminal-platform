@@ -129,6 +129,7 @@ async fn fetches_screen_delta_for_native_session() {
     server.shutdown().await.expect("server shutdown should succeed");
 }
 
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn observes_title_change_screen_delta_after_tab_rename() {
     let address = unique_address("daemon-client-title-delta");

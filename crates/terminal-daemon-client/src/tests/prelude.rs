@@ -6,7 +6,7 @@ pub(super) use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub(super) use rusqlite::{Connection, params};
 #[cfg(unix)]
 pub(super) use terminal_backend_api::SendInputSpec;
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 pub(super) use terminal_backend_api::ShellLaunchSpec;
 pub(super) use terminal_backend_api::{
     CreateSessionSpec, MuxCommand, NewTabSpec, SubscriptionSpec,
@@ -26,9 +26,10 @@ pub(super) use terminal_persistence::SqliteSessionStore;
 #[cfg(unix)]
 pub(super) use terminal_projection::TopologySnapshot;
 pub(super) use terminal_protocol::{
-    DaemonCapabilities, DaemonPhase, Handshake, HistoryReplayState, ProtocolVersion,
-    RestoreGuaranteeLevel, SubscriptionEvent,
+    DaemonCapabilities, DaemonPhase, Handshake, ProtocolVersion, SubscriptionEvent,
 };
+#[cfg(unix)]
+pub(super) use terminal_protocol::{HistoryReplayState, RestoreGuaranteeLevel};
 #[cfg(unix)]
 pub(super) use tokio::time::sleep;
 pub(super) use tokio::time::timeout;
