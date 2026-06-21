@@ -1,3 +1,4 @@
+mod cli;
 mod dispatch;
 mod fixtures;
 mod probe;

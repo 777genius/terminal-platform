@@ -1534,7 +1534,28 @@ function zellijSessionControlReady(sessionName) {
     throw new Error(`zellij list-panes failed: ${stderr}`);
   }
 
-  return (panes.stdout ?? "").trimStart().startsWith("[");
+  return zellijPanesJsonReady(panes.stdout ?? "");
+}
+
+function zellijPanesJsonReady(output) {
+  try {
+    const entries = JSON.parse(output);
+    return (
+      Array.isArray(entries) &&
+      entries.length > 0 &&
+      entries.every(
+        (entry) =>
+          entry &&
+          typeof entry.id === "number" &&
+          typeof entry.tab_id === "number" &&
+          typeof entry.is_plugin === "boolean" &&
+          typeof entry.pane_rows === "number" &&
+          typeof entry.pane_columns === "number",
+      )
+    );
+  } catch (_error) {
+    return false;
+  }
 }
 
 function zellijCommandPath() {

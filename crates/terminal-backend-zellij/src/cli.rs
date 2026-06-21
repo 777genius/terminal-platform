@@ -15,6 +15,7 @@ pub(crate) fn is_transient_zellij_backend_error(error: &BackendError) -> bool {
         || error.message.contains("invalid zellij list-tabs json: expected value")
         || error.message.contains("invalid zellij list-panes json: EOF while parsing a value")
         || error.message.contains("invalid zellij list-panes json: expected value")
+        || error.message.contains("invalid zellij list-panes json: missing field")
         || error
             .message
             .contains("unexpected zellij list-tabs payload while the session was settling")
