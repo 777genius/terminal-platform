@@ -52,7 +52,7 @@ jobs:
 
     steps:
       - name: Checkout source ref
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source_ref || github.ref_name }}
           fetch-depth: 0
@@ -154,7 +154,7 @@ jobs:
 
     steps:
       - name: Checkout source ref
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare-release.outputs.source_commit }}
           fetch-depth: 0
@@ -305,7 +305,7 @@ jobs:
 
     steps:
       - name: Checkout source ref
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare-release.outputs.source_commit }}
           fetch-depth: 0
