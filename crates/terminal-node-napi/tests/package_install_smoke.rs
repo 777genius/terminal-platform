@@ -271,8 +271,6 @@ async fn roundtrips_installed_tarball_through_cjs_and_esm() {
     #[cfg(not(windows))]
     let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
 
-    let fixture = daemon_fixture("node-npm-install").expect("fixture should start");
-    wait_for_daemon_ready(&fixture.client).await;
     let addon_path = support::locate_cdylib().expect("node addon should be built");
     let package_dir =
         support::stage_node_package(&addon_path).expect("package should stage successfully");
@@ -306,12 +304,16 @@ async fn roundtrips_installed_tarball_through_cjs_and_esm() {
     fs::write(install_dir.join("install_smoke.mjs"), INSTALL_SMOKE_MJS)
         .expect("esm install smoke should write");
 
-    let (address_kind, address_value) = match fixture.client.address() {
-        LocalSocketAddress::Namespaced(value) => ("namespaced", value.clone()),
-        LocalSocketAddress::Filesystem(path) => ("filesystem", path.display().to_string()),
-    };
-
-    for script in ["install_smoke.cjs", "install_smoke.mjs"] {
+    for (script, fixture_label) in [
+        ("install_smoke.cjs", "node-npm-install-cjs"),
+        ("install_smoke.mjs", "node-npm-install-mjs"),
+    ] {
+        let fixture = daemon_fixture(fixture_label).expect("fixture should start");
+        wait_for_daemon_ready(&fixture.client).await;
+        let (address_kind, address_value) = match fixture.client.address() {
+            LocalSocketAddress::Namespaced(value) => ("namespaced", value.clone()),
+            LocalSocketAddress::Filesystem(path) => ("filesystem", path.display().to_string()),
+        };
         let mut command = Command::new("node");
         command
             .arg(install_dir.join(script))
@@ -325,6 +327,7 @@ async fn roundtrips_installed_tarball_through_cjs_and_esm() {
             .env("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", &zellij_smoke.session_name);
         let output = support::command_output(&mut command, "installed package smoke")
             .expect("installed package smoke should run");
+        fixture.shutdown().await.expect("fixture should stop cleanly");
 
         assert!(
             output.status.success(),
@@ -337,8 +340,6 @@ async fn roundtrips_installed_tarball_through_cjs_and_esm() {
             "installed package smoke {script} should emit structured confirmation"
         );
     }
-
-    fixture.shutdown().await.expect("fixture should stop cleanly");
 }
 
 #[tokio::test(flavor = "multi_thread")]
