@@ -10,7 +10,7 @@ use terminal_persistence::SqliteSessionStore;
 use terminal_protocol::LocalSocketAddress;
 
 pub fn daemon() -> TerminalDaemon {
-    TerminalDaemon::default()
+    isolated_daemon("terminal-testing-daemon")
 }
 
 #[must_use]
@@ -55,7 +55,7 @@ pub fn unique_sqlite_path(label: &str) -> PathBuf {
 }
 
 pub fn daemon_fixture(label: &str) -> std::io::Result<DaemonFixture> {
-    daemon_fixture_with_daemon(label, TerminalDaemon::default())
+    daemon_fixture_with_daemon(label, isolated_daemon(label))
 }
 
 pub fn daemon_fixture_with_daemon(

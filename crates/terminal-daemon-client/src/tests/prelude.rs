@@ -21,7 +21,6 @@ pub(super) use terminal_domain::{
 };
 #[cfg(unix)]
 pub(super) use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
-#[cfg(unix)]
 pub(super) use terminal_persistence::SqliteSessionStore;
 #[cfg(unix)]
 pub(super) use terminal_projection::TopologySnapshot;

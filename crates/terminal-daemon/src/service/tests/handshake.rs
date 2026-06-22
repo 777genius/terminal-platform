@@ -1,8 +1,8 @@
-use super::prelude::*;
+use super::{prelude::*, support::*};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn routes_handshake_requests() {
-    let daemon = TerminalDaemon::default();
+    let daemon = isolated_daemon();
     let response = daemon
         .handle_request(RequestEnvelope {
             operation_id: OperationId::new(),

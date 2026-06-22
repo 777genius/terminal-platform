@@ -3,8 +3,8 @@ use super::{prelude::*, support::*};
 #[tokio::test(flavor = "multi_thread")]
 async fn roundtrips_handshake_and_empty_list_sessions() {
     let address = unique_address("daemon-client");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
 
     let handshake = client.handshake().await.expect("handshake should succeed");

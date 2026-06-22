@@ -3,8 +3,8 @@ use super::{prelude::*, support::*};
 #[tokio::test(flavor = "multi_thread")]
 async fn fetches_session_health_snapshot_for_native_session() {
     let address = unique_address("daemon-client-session-health");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
 
     let created = client
@@ -29,8 +29,8 @@ async fn fetches_session_health_snapshot_for_native_session() {
 #[tokio::test(flavor = "multi_thread")]
 async fn fetches_backend_capabilities() {
     let address = unique_address("daemon-client-capabilities");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
 
     let native = client
@@ -69,8 +69,8 @@ async fn fetches_backend_capabilities() {
 #[tokio::test(flavor = "multi_thread")]
 async fn creates_native_session_and_lists_it_back() {
     let address = unique_address("daemon-client-create");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
 
     let created = client

@@ -5,12 +5,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+use terminal_daemon::spawn_local_socket_server;
 use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_protocol::LocalSocketAddress;
 #[cfg(not(windows))]
 use terminal_testing::ZellijTestLock;
-use terminal_testing::{daemon_fixture, unique_socket_address, wait_for_daemon_ready};
+use terminal_testing::{
+    daemon_fixture, isolated_daemon, unique_socket_address, wait_for_daemon_ready,
+};
 use tokio::time::{Duration, sleep};
 
 mod support;
@@ -422,7 +424,7 @@ async fn installed_tarball_handles_shutdown_and_restart_flows() {
     ] {
         let address = unique_socket_address(label);
         let initial_client = LocalSocketDaemonClient::new(address.clone());
-        let mut server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+        let mut server = spawn_local_socket_server(isolated_daemon(label), address.clone())
             .expect("initial daemon should bind");
         wait_for_daemon_ready(&initial_client).await;
 
@@ -475,7 +477,7 @@ async fn installed_tarball_handles_shutdown_and_restart_flows() {
         }
 
         let restarted_client = LocalSocketDaemonClient::new(address.clone());
-        server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
+        server = spawn_local_socket_server(isolated_daemon(label), address.clone())
             .expect("replacement daemon should bind");
         wait_for_daemon_ready(&restarted_client).await;
         std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");
