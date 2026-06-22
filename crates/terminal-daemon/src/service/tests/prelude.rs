@@ -1,4 +1,3 @@
-#[cfg(feature = "native-backend")]
 pub(super) use std::path::PathBuf;
 
 #[cfg(feature = "native-backend")]
@@ -14,7 +13,6 @@ pub(super) use terminal_domain::{
 };
 #[cfg(feature = "native-backend")]
 pub(super) use terminal_mux_domain::{PaneTreeNode, TabSnapshot};
-#[cfg(feature = "native-backend")]
 pub(super) use terminal_persistence::SqliteSessionStore;
 #[cfg(feature = "native-backend")]
 pub(super) use terminal_projection::TopologySnapshot;

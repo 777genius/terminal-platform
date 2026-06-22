@@ -17,9 +17,12 @@ use terminal_backend_zellij::ZellijBackend;
 #[cfg(all(unix, feature = "tmux-backend"))]
 use terminal_daemon::TerminalDaemon;
 #[cfg(all(unix, feature = "tmux-backend"))]
+use terminal_persistence::SqliteSessionStore;
+#[cfg(all(unix, feature = "tmux-backend"))]
 use terminal_runtime::{BackendCatalog, TerminalRuntime};
 
 #[cfg(all(unix, feature = "tmux-backend"))]
+#[allow(clippy::vec_init_then_push)]
 pub fn tmux_daemon(socket_name: &str) -> TerminalDaemon {
     let mut backends = Vec::<Arc<dyn MuxBackendPort>>::new();
 
@@ -31,7 +34,9 @@ pub fn tmux_daemon(socket_name: &str) -> TerminalDaemon {
     #[cfg(feature = "zellij-backend")]
     backends.push(Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>);
 
-    TerminalDaemon::new(TerminalRuntime::new(BackendCatalog::new(backends)))
+    let store = SqliteSessionStore::open(crate::daemon::unique_sqlite_path("tmux-daemon"))
+        .expect("isolated sqlite session store should open");
+    TerminalDaemon::new(TerminalRuntime::with_persistence(BackendCatalog::new(backends), store))
 }
 
 #[cfg(unix)]

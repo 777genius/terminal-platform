@@ -3,8 +3,8 @@ use super::{prelude::*, support::*};
 #[tokio::test(flavor = "multi_thread")]
 async fn fetches_topology_and_screen_for_native_session() {
     let address = unique_address("daemon-client-topology");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(
@@ -33,8 +33,8 @@ async fn fetches_topology_and_screen_for_native_session() {
 #[tokio::test(flavor = "multi_thread")]
 async fn dispatches_tab_mutations_and_observes_topology_change() {
     let address = unique_address("daemon-client-dispatch");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(
@@ -66,8 +66,8 @@ async fn dispatches_tab_mutations_and_observes_topology_change() {
 #[tokio::test(flavor = "multi_thread")]
 async fn maps_backend_errors_for_invalid_close_tab_sequence() {
     let address = unique_address("daemon-client-errors");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(
@@ -94,8 +94,8 @@ async fn maps_backend_errors_for_invalid_close_tab_sequence() {
 #[tokio::test(flavor = "multi_thread")]
 async fn fetches_screen_delta_for_native_session() {
     let address = unique_address("daemon-client-delta");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(
@@ -133,8 +133,8 @@ async fn fetches_screen_delta_for_native_session() {
 #[tokio::test(flavor = "multi_thread")]
 async fn observes_title_change_screen_delta_after_tab_rename() {
     let address = unique_address("daemon-client-title-delta");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(

@@ -22,7 +22,7 @@ pub(super) fn spawn_default_daemon_with_retry(
     let mut last_error = None;
 
     for attempt in 0..attempts {
-        match spawn_local_socket_server(TerminalDaemon::default(), address.clone()) {
+        match spawn_local_socket_server(isolated_daemon(), address.clone()) {
             Ok(server) => return Ok(server),
             Err(error) if retryable_kinds.contains(&error.kind()) && attempt + 1 < attempts => {
                 last_error = Some(error);
@@ -35,7 +35,6 @@ pub(super) fn spawn_default_daemon_with_retry(
     Err(last_error.unwrap_or_else(|| std::io::Error::other("daemon never rebound on address")))
 }
 
-#[cfg(unix)]
 pub(super) fn isolated_daemon() -> TerminalDaemon {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -4,12 +4,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use terminal_daemon::{TerminalDaemon, spawn_local_socket_server};
+use terminal_daemon::spawn_local_socket_server;
 use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_protocol::LocalSocketAddress;
 #[cfg(not(windows))]
 use terminal_testing::ZellijTestLock;
-use terminal_testing::{daemon_fixture, unique_socket_address, wait_for_daemon_ready};
+use terminal_testing::{
+    daemon_fixture, isolated_daemon, unique_socket_address, wait_for_daemon_ready,
+};
 use tokio::time::{Duration, sleep};
 
 mod support;
@@ -159,8 +161,9 @@ async fn recovers_node_addon_client_after_daemon_restart() {
     let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/node_smoke.cjs");
     let address = unique_socket_address("terminal-node-addon-restart");
     let initial_client = LocalSocketDaemonClient::new(address.clone());
-    let mut server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("initial daemon should bind");
+    let mut server =
+        spawn_local_socket_server(isolated_daemon("terminal-node-addon-restart"), address.clone())
+            .expect("initial daemon should bind");
     wait_for_daemon_ready(&initial_client).await;
 
     let (address_kind, address_value) = match &address {
@@ -213,8 +216,9 @@ async fn recovers_node_addon_client_after_daemon_restart() {
     }
 
     let restarted_client = LocalSocketDaemonClient::new(address.clone());
-    server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("replacement daemon should bind");
+    server =
+        spawn_local_socket_server(isolated_daemon("terminal-node-addon-restart"), address.clone())
+            .expect("replacement daemon should bind");
     wait_for_daemon_ready(&restarted_client).await;
     std::fs::write(&restart_file, "restart\n").expect("restart signal file should write");
 

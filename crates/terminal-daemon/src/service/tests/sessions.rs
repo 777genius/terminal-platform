@@ -47,7 +47,7 @@ async fn routes_create_and_list_session_requests() {
 #[tokio::test(flavor = "multi_thread")]
 async fn routes_backend_capabilities_requests() {
     let backend = terminal_domain::BackendKind::Native;
-    let daemon = TerminalDaemon::default();
+    let daemon = isolated_daemon();
     let response = daemon
         .handle_request(RequestEnvelope {
             operation_id: OperationId::new(),

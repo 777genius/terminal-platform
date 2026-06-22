@@ -3,8 +3,8 @@ use super::{prelude::*, support::*};
 #[tokio::test(flavor = "multi_thread")]
 async fn streams_topology_updates_over_subscription_lane() {
     let address = unique_address("daemon-client-sub-topology");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(
@@ -46,8 +46,8 @@ async fn streams_topology_updates_over_subscription_lane() {
 #[tokio::test(flavor = "multi_thread")]
 async fn closes_topology_subscription_lane_explicitly() {
     let address = unique_address("daemon-client-sub-close");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(
@@ -75,8 +75,8 @@ async fn closes_topology_subscription_lane_explicitly() {
 #[tokio::test(flavor = "multi_thread")]
 async fn closes_topology_subscription_lane_with_buffered_events() {
     let address = unique_address("daemon-client-sub-close-backlog");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(
@@ -117,8 +117,8 @@ async fn closes_topology_subscription_lane_with_buffered_events() {
 #[tokio::test(flavor = "multi_thread")]
 async fn closes_topology_subscription_lane_when_server_shuts_down() {
     let address = unique_address("daemon-client-sub-server-shutdown");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(
@@ -150,8 +150,8 @@ async fn closes_topology_subscription_lane_when_server_shuts_down() {
 #[tokio::test(flavor = "multi_thread")]
 async fn closes_topology_subscription_lane_cleanly_after_server_shutdown() {
     let address = unique_address("sub-close-down");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(
@@ -176,8 +176,8 @@ async fn closes_topology_subscription_lane_cleanly_after_server_shutdown() {
 #[tokio::test(flavor = "multi_thread")]
 async fn streams_live_pane_surface_updates_over_subscription_lane() {
     let address = unique_address("daemon-client-sub-pane");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(

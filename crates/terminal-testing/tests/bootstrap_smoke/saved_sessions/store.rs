@@ -151,7 +151,13 @@ async fn bootstrap_smoke_save_publish_failure_records_unpublished_v2_evidence() 
 #[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_saves_native_session_snapshot_to_store() {
-    let fixture = daemon_fixture("bootstrap-native-save").expect("fixture should start");
+    let store_path = unique_sqlite_path("bootstrap-native-save");
+    let store = SqliteSessionStore::open(&store_path).expect("isolated sqlite store should open");
+    let fixture = daemon_fixture_with_daemon(
+        "bootstrap-native-save",
+        TerminalDaemon::with_persistence(store.clone()),
+    )
+    .expect("fixture should start");
     let created = fixture
         .client
         .create_session(
@@ -194,7 +200,6 @@ async fn bootstrap_smoke_saves_native_session_snapshot_to_store() {
         .dispatch(created.session.session_id, MuxCommand::SaveSession)
         .await
         .expect("save session should succeed");
-    let store = SqliteSessionStore::open_default().expect("default store should open");
     let saved = store
         .load_native_session(created.session.session_id)
         .expect("load should succeed")

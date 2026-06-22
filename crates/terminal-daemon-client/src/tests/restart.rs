@@ -18,8 +18,8 @@ async fn restarts_server_on_same_address_across_multiple_cycles() {
 #[tokio::test(flavor = "multi_thread")]
 async fn repeatedly_opens_and_closes_topology_subscriptions() {
     let address = unique_address("daemon-client-subscribe-cycles");
-    let server = spawn_local_socket_server(TerminalDaemon::default(), address.clone())
-        .expect("server should bind");
+    let server =
+        spawn_local_socket_server(isolated_daemon(), address.clone()).expect("server should bind");
     let client = LocalSocketDaemonClient::new(address);
     let created = client
         .create_session(

@@ -57,7 +57,13 @@ async fn bootstrap_smoke_prunes_saved_native_sessions_via_daemon_api() {
 #[cfg(any(unix, windows))]
 #[tokio::test(flavor = "multi_thread")]
 async fn bootstrap_smoke_overwrites_native_session_snapshot_on_resave() {
-    let fixture = daemon_fixture("bootstrap-native-save-overwrite").expect("fixture should start");
+    let store_path = unique_sqlite_path("bootstrap-native-save-overwrite");
+    let store = SqliteSessionStore::open(&store_path).expect("isolated sqlite store should open");
+    let fixture = daemon_fixture_with_daemon(
+        "bootstrap-native-save-overwrite",
+        TerminalDaemon::with_persistence(store.clone()),
+    )
+    .expect("fixture should start");
     let created = fixture
         .client
         .create_session(
@@ -80,7 +86,6 @@ async fn bootstrap_smoke_overwrites_native_session_snapshot_on_resave() {
         .dispatch(created.session.session_id, MuxCommand::SaveSession)
         .await
         .expect("first save should succeed");
-    let store = SqliteSessionStore::open_default().expect("default store should open");
     let first = store
         .load_native_session(created.session.session_id)
         .expect("first load should succeed")

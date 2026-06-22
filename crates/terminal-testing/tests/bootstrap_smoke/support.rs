@@ -303,11 +303,16 @@ pub(super) fn collect_pane_ids_inner(root: &PaneTreeNode, pane_ids: &mut Vec<Pan
 
 #[cfg(unix)]
 pub(super) fn tmux_daemon(socket_name: &str) -> TerminalDaemon {
-    TerminalDaemon::new(TerminalRuntime::new(BackendCatalog::new([
-        Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
-        Arc::new(TmuxBackend::with_socket_name(socket_name)) as Arc<dyn MuxBackendPort>,
-        Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>,
-    ])))
+    let store = SqliteSessionStore::open(unique_sqlite_path("bootstrap-tmux-daemon"))
+        .expect("isolated sqlite session store should open");
+    TerminalDaemon::new(TerminalRuntime::with_persistence(
+        BackendCatalog::new([
+            Arc::new(NativeBackend::default()) as Arc<dyn MuxBackendPort>,
+            Arc::new(TmuxBackend::with_socket_name(socket_name)) as Arc<dyn MuxBackendPort>,
+            Arc::new(ZellijBackend) as Arc<dyn MuxBackendPort>,
+        ]),
+        store,
+    ))
 }
 
 #[cfg(unix)]

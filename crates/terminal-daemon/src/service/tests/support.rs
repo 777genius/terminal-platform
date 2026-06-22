@@ -1,6 +1,5 @@
 use super::prelude::*;
 
-#[cfg(feature = "native-backend")]
 pub(super) fn isolated_store_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "terminal-platform-daemon-service-{label}-{}-{}.sqlite3",
@@ -27,7 +26,6 @@ pub(super) fn cat_launch_spec() -> ShellLaunchSpec {
     }
 }
 
-#[cfg(feature = "native-backend")]
 pub(super) fn isolated_daemon() -> TerminalDaemon {
     let store = SqliteSessionStore::open(isolated_store_path("test"))
         .expect("isolated sqlite session store should open");
