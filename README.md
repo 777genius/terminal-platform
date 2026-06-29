@@ -1,6 +1,9 @@
 # Terminal Platform
 
-Embeddable terminal platform for desktop apps, IDEs, and agent workspaces.
+Embeddable terminal platform for and any JS/TS apps (e.g desktop apps, IDEs) with any UI (headless).
+
+<img width="1524" height="676" alt="image" src="https://github.com/user-attachments/assets/6c9a8d0e-3446-49b3-be06-2f68faebd0c8" />
+
 
 It is built around a Rust core with a daemon-first protocol, a native PTY runtime, and honest foreign adapters for `tmux` and `Zellij`. JavaScript and Electron are first-class consumers, but the UI layer is intentionally separate so the frontend can be written however you want.
 
@@ -66,19 +69,13 @@ Current implemented surfaces include:
 
 ## Status
 
-⚠️ The project is in **v1 release-candidate closeout**, not in the raw prototype stage.
+The project is stable.
 
 That means:
 
 - core runtime and host surfaces are implemented
 - reliability and lifecycle hardening are already deep
-- the current work is mostly final acceptance, hosted CI proof, and release polish
-
-If you are evaluating the repo, the honest takeaway is:
-
 - this is already a serious architecture and codebase
-- it is not yet presented as a finished stable public release
-- the remaining gap is mostly proof and packaging polish, not missing core design
 
 Release closeout artifacts:
 
