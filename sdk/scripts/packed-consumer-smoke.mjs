@@ -16,6 +16,7 @@ const workspacePackagePaths = [
   "packages/workspace-contracts",
   "packages/workspace-core",
   "packages/workspace-adapter-websocket",
+  "packages/workspace-gateway-node",
   "packages/workspace-adapter-preload",
   "packages/workspace-adapter-memory",
   "packages/workspace-elements",
