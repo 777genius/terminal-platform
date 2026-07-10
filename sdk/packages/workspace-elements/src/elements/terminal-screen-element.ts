@@ -2761,13 +2761,17 @@ export function prepareTerminalHistoryEntriesForRender(
     entries,
     metadata
   );
-  const initiallyMatched = matchCommandPresentationMetadata(
+  const cleanedEntries = removeEmbeddedTerminalCommandEchoes(
     repairedEntries,
+    metadata
+  );
+  const initiallyMatched = matchCommandPresentationMetadata(
+    cleanedEntries,
     metadata
   );
   const initiallyMatchedItems = new Set(initiallyMatched.values());
   const promotedEntries = promoteRawTerminalCommandEntries(
-    repairedEntries,
+    cleanedEntries,
     metadata.filter((item) => !initiallyMatchedItems.has(item))
   );
   const matched = matchCommandPresentationMetadata(promotedEntries, metadata);
@@ -2804,6 +2808,111 @@ export function prepareTerminalHistoryEntriesForRender(
     entries: [...filteredEntries, ...syntheticEntries],
     metadataByEntryIndex: nextMetadata,
   };
+}
+
+function removeEmbeddedTerminalCommandEchoes(
+  entries: readonly TerminalHistoryEntry[],
+  metadata: readonly TerminalCommandPresentationMetadata[]
+): TerminalHistoryEntry[] {
+  const authoritativeCommands = new Set(
+    metadata
+      .map((item) => normalizeCommandPresentationMatch(item.command))
+      .filter(Boolean)
+  );
+  if (authoritativeCommands.size === 0) {
+    return [...entries];
+  }
+
+  const laterCommandsByEntryIndex = new Map<number, Set<string>>();
+  const laterCommands = new Set<string>();
+  for (let entryIndex = entries.length - 1; entryIndex >= 0; entryIndex -= 1) {
+    laterCommandsByEntryIndex.set(entryIndex, new Set(laterCommands));
+    const entry = entries[entryIndex];
+    if (entry?.kind !== "command") {
+      continue;
+    }
+
+    const command = normalizeCommandPresentationMatch(entry.command);
+    if (command && authoritativeCommands.has(command)) {
+      laterCommands.add(command);
+    }
+  }
+
+  return entries.map((entry, entryIndex) => {
+    if (entry.kind !== "command" || entry.output.length === 0) {
+      return entry;
+    }
+
+    const laterEntryCommands = laterCommandsByEntryIndex.get(entryIndex);
+    if (!laterEntryCommands || laterEntryCommands.size === 0) {
+      return entry;
+    }
+
+    const output = removeTerminalCommandEchoSequences(
+      entry.output,
+      laterEntryCommands
+    );
+    return output.length === entry.output.length ? entry : { ...entry, output };
+  });
+}
+
+function removeTerminalCommandEchoSequences(
+  output: readonly TerminalHistoryCommandOutputLine[],
+  laterCommands: ReadonlySet<string>
+): TerminalHistoryCommandOutputLine[] {
+  const next: TerminalHistoryCommandOutputLine[] = [];
+  let outputIndex = 0;
+
+  while (outputIndex < output.length) {
+    const matchLength = terminalCommandEchoSequenceLength(
+      output,
+      outputIndex,
+      laterCommands
+    );
+    if (matchLength > 0) {
+      outputIndex += matchLength;
+      continue;
+    }
+
+    const item = output[outputIndex];
+    if (item) next.push(item);
+    outputIndex += 1;
+  }
+
+  return next;
+}
+
+function terminalCommandEchoSequenceLength(
+  output: readonly TerminalHistoryCommandOutputLine[],
+  startIndex: number,
+  laterCommands: ReadonlySet<string>
+): number {
+  let candidate = "";
+
+  for (
+    let outputIndex = startIndex;
+    outputIndex < Math.min(output.length, startIndex + 8);
+    outputIndex += 1
+  ) {
+    const item = output[outputIndex];
+    if (!item) break;
+    candidate += item.line.text;
+
+    const normalizedCandidate = normalizeCommandPresentationMatch(candidate);
+    if (laterCommands.has(normalizedCandidate)) {
+      return outputIndex - startIndex + 1;
+    }
+
+    const canContinue = item.line.softWrapped === true;
+    const matchesCommandPrefix = [...laterCommands].some((command) =>
+      command.startsWith(normalizedCandidate)
+    );
+    if (!canContinue || !normalizedCandidate || !matchesCommandPrefix) {
+      break;
+    }
+  }
+
+  return 0;
 }
 
 function repairCorruptedRestoredCommandEntries(
@@ -3902,6 +4011,7 @@ export function createTerminalHistoryEntries(
   let activeEntry: Extract<TerminalHistoryEntry, { kind: "command" }> | null =
     null;
   let activeCommandContinues = false;
+  let activeEntrySource: VisibleOutputLineSource | null = null;
   const terminalPromptLabel = normalizeTerminalPromptLabel(
     options.terminalPromptLabel
   );
@@ -3912,6 +4022,7 @@ export function createTerminalHistoryEntries(
       activeEntry = null;
     }
     activeCommandContinues = false;
+    activeEntrySource = null;
   };
 
   lines.forEach((line, lineIndex) => {
@@ -3923,11 +4034,11 @@ export function createTerminalHistoryEntries(
 
     if (
       activeEntry &&
-      activeCommandContinues &&
-      activeEntry.commandLine.source === line.source
+      activeCommandContinues
     ) {
       activeEntry.command += line.text;
       activeCommandContinues = line.softWrapped === true;
+      activeEntrySource = line.source;
       return;
     }
 
@@ -3943,6 +4054,7 @@ export function createTerminalHistoryEntries(
         output: [],
       };
       activeCommandContinues = line.softWrapped === true;
+      activeEntrySource = line.source;
       return;
     }
 
@@ -3963,6 +4075,7 @@ export function createTerminalHistoryEntries(
         output: [],
       };
       activeCommandContinues = line.softWrapped === true;
+      activeEntrySource = line.source;
       return;
     }
 
@@ -3981,10 +4094,11 @@ export function createTerminalHistoryEntries(
         output: [],
       };
       activeCommandContinues = line.softWrapped === true;
+      activeEntrySource = line.source;
       return;
     }
 
-    if (activeEntry && activeEntry.commandLine.source !== line.source) {
+    if (activeEntry && activeEntrySource !== line.source) {
       flushActiveEntry();
     }
 
@@ -4034,6 +4148,32 @@ function dedupeHistoryCommandEntriesAgainstLive(
   const liveCommandSignatures = new Set(
     liveCommandEntries.map(createTerminalCommandEntrySignature)
   );
+  const liveCommandEntriesByContent = new Map<string, typeof liveCommandEntries>();
+  for (const entry of liveCommandEntries) {
+    const contentSignature = createTerminalCommandContentSignature(entry);
+    liveCommandEntriesByContent.set(contentSignature, [
+      ...(liveCommandEntriesByContent.get(contentSignature) ?? []),
+      entry,
+    ]);
+  }
+  const preferredHistoryContentSignatures = new Set(
+    entries
+      .filter(
+        (entry): entry is Extract<TerminalHistoryEntry, { kind: "command" }> =>
+          entry.kind === "command" && entry.commandLine.source === "history"
+      )
+      .filter((entry) => {
+        const liveMatches = liveCommandEntriesByContent.get(
+          createTerminalCommandContentSignature(entry)
+        );
+        return (
+          liveMatches &&
+          terminalCommandEntryMetadataScore(entry) >
+            Math.max(...liveMatches.map(terminalCommandEntryMetadataScore))
+        );
+      })
+      .map(createTerminalCommandContentSignature)
+  );
 
   if (liveCommandSignatures.size === 0) {
     return [...entries];
@@ -4051,6 +4191,19 @@ function dedupeHistoryCommandEntriesAgainstLive(
   );
 
   return entries.filter((entry) => {
+    const contentSignature =
+      entry.kind === "command"
+        ? createTerminalCommandContentSignature(entry)
+        : null;
+    if (
+      entry.kind === "command" &&
+      entry.commandLine.source === "live" &&
+      contentSignature &&
+      preferredHistoryContentSignatures.has(contentSignature)
+    ) {
+      return false;
+    }
+
     if (
       entry.kind === "command" &&
       entry.commandLine.source === "live" &&
@@ -4063,6 +4216,12 @@ function dedupeHistoryCommandEntriesAgainstLive(
     if (entry.kind !== "command" || entry.commandLine.source !== "history") {
       return true;
     }
+    if (
+      contentSignature &&
+      liveCommandEntriesByContent.has(contentSignature)
+    ) {
+      return preferredHistoryContentSignatures.has(contentSignature);
+    }
     return (
       !liveCommandSignatures.has(createTerminalCommandEntrySignature(entry)) &&
       !liveCommandEntries.some((liveEntry) =>
@@ -4070,6 +4229,30 @@ function dedupeHistoryCommandEntriesAgainstLive(
       )
     );
   });
+}
+
+function createTerminalCommandContentSignature(
+  entry: Extract<TerminalHistoryEntry, { kind: "command" }>
+): string {
+  return `${entry.prompt}\u0000${normalizeCommandPresentationMatch(
+    entry.command
+  )}\u0000${entry.output.map(({ line }) => line.text.trim()).join("\u0000")}`;
+}
+
+function terminalCommandEntryMetadataScore(
+  entry: Extract<TerminalHistoryEntry, { kind: "command" }>
+): number {
+  return [entry.commandLine, ...entry.output.map(({ line }) => line)].reduce(
+    (score, line) =>
+      score +
+      (line.spans && !arePlainTerminalSpans(line.spans) ? 4 : 0) +
+      (line.palette ? 4 : 0) +
+      (line.media?.length ? 4 : 0) +
+      (line.sideEffects?.length ? 4 : 0) +
+      (line.semanticMarks?.length ? 1 : 0) +
+      (line.softWrapped ? 1 : 0),
+    0
+  );
 }
 
 function isCorruptedHistoryCommandDuplicateOfLive(

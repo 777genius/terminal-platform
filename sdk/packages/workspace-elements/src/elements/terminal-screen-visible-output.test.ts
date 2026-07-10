@@ -1535,6 +1535,101 @@ describe("terminal screen visible output", () => {
     expect(prepared.metadataByEntryIndex.get(2)).toBe(metadata);
   });
 
+  it("removes type-ahead command echoes from the previous command output", () => {
+    const longCommand =
+      "printf 'WRAP_OK_%s\\n' 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'";
+    const promptCommand = "printf 'PROMPT_DOLLAR $\\nNEXT\\n'";
+    const rapidCommand = "printf 'RAPID\\n'";
+    const entries = createTerminalHistoryEntries([
+      { text: "shell % missing", source: "history" },
+      { text: "zsh: command not found: missing", source: "history" },
+      {
+        text: "printf 'WRAP_OK_%s\\n' 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop",
+        source: "history",
+        softWrapped: true,
+      },
+      { text: "qrstuvwxyz0123456789'", source: "history" },
+      {
+        text: "shell % printf 'WRAP_OK_%s\\n' 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        source: "history",
+        softWrapped: true,
+      },
+      { text: "ghijklmnopqrstuvwxyz0123456789'", source: "history" },
+      {
+        text: "WRAP_OK_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+        source: "history",
+      },
+      { text: promptCommand, source: "history" },
+      { text: rapidCommand, source: "history" },
+      { text: `shell % ${promptCommand}`, source: "history" },
+      { text: "PROMPT_DOLLAR $", source: "history" },
+      { text: "NEXT", source: "history" },
+      { text: rapidCommand, source: "history" },
+      { text: `shell % ${rapidCommand}`, source: "history" },
+      { text: "RAPID", source: "history" },
+    ]);
+
+    const prepared = prepareTerminalHistoryEntriesForRender(
+      entries,
+      ["missing", longCommand, promptCommand, rapidCommand].map((command) => ({
+        command,
+        status: "succeeded" as const,
+      })),
+      4_000
+    );
+
+    expect(
+      prepared.entries.map((entry) =>
+        entry.kind === "command"
+          ? {
+              command: entry.command,
+              output: entry.output.map((item) => item.line.text),
+            }
+          : null
+      )
+    ).toEqual([
+      {
+        command: "missing",
+        output: ["zsh: command not found: missing"],
+      },
+      {
+        command: longCommand,
+        output: [
+          "WRAP_OK_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+        ],
+      },
+      {
+        command: promptCommand,
+        output: ["PROMPT_DOLLAR $", "NEXT"],
+      },
+      { command: rapidCommand, output: ["RAPID"] },
+    ]);
+  });
+
+  it("keeps command-shaped output when no later authoritative entry exists", () => {
+    const entries = createTerminalHistoryEntries([
+      { text: "shell % echo command", source: "history" },
+      { text: "printf 'later\\n'", source: "history" },
+    ]);
+
+    const prepared = prepareTerminalHistoryEntriesForRender(
+      entries,
+      [
+        { command: "echo command", status: "succeeded" },
+        { command: "printf 'later\\n'", status: "succeeded" },
+      ],
+      4_000
+    );
+
+    expect(prepared.entries).toMatchObject([
+      {
+        kind: "command",
+        command: "echo command",
+        output: [{ line: { text: "printf 'later\\n'" } }],
+      },
+    ]);
+  });
+
   it("drops a corrupted restored wrapped fragment only when its output matches the live block", () => {
     const command =
       "printf 'WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\n'";
@@ -1816,6 +1911,48 @@ describe("terminal screen visible output", () => {
     ]);
   });
 
+  it("joins a restored soft-wrapped command with its live continuation", () => {
+    const entries = createTerminalHistoryEntries([
+      {
+        text: "shell % printf 'WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
+        source: "history",
+        softWrapped: true,
+      },
+      {
+        text: "56789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\n'",
+        source: "live",
+      },
+      {
+        text: "WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        source: "live",
+      },
+    ]);
+
+    expect(entries).toEqual([
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: {
+          text: "shell % printf 'WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
+          source: "history",
+          softWrapped: true,
+        },
+        commandLineIndex: 0,
+        command:
+          "printf 'WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\n'",
+        output: [
+          {
+            line: {
+              text: "WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+              source: "live",
+            },
+            lineIndex: 2,
+          },
+        ],
+      },
+    ]);
+  });
+
   it("keeps unrelated restored output as plain lines between command groups", () => {
     const entries = createTerminalHistoryEntries([
       { text: "shell % echo before", source: "history" },
@@ -1959,7 +2096,7 @@ describe("terminal screen visible output", () => {
     ).toEqual(["history", "live"]);
   });
 
-  it("keeps restored rich command entries when live duplicates have less render metadata", () => {
+  it("prefers a restored rich command over a plain live duplicate", () => {
     const richSpans: ScreenLineSpan[] = [
       {
         text: "TP_VERIFY_RICH",
@@ -1979,7 +2116,7 @@ describe("terminal screen visible output", () => {
       { text: "TP_VERIFY_RICH", source: "live" },
     ]);
 
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       kind: "command",
       commandLine: {
@@ -1996,13 +2133,36 @@ describe("terminal screen visible output", () => {
         },
       ],
     });
-    expect(entries[1]).toMatchObject({
-      kind: "command",
-      commandLine: {
-        text: "shell % echo TP_VERIFY_RICH",
-        source: "live",
+  });
+
+  it("prefers a live rich command when restored and live output are visually equivalent", () => {
+    const historySpans: ScreenLineSpan[] = [
+      {
+        text: "RED",
+        style: terminalStyle({ foreground: { kind: "named", name: "red" } }),
       },
-      output: [{ line: { text: "TP_VERIFY_RICH", source: "live" } }],
+    ];
+    const liveSpans: ScreenLineSpan[] = [
+      {
+        text: "RED",
+        style: terminalStyle({ foreground: { name: "red", kind: "named" } }),
+      },
+    ];
+    const entries = createTerminalHistoryEntries([
+      { text: "shell % print RED", source: "history", softWrapped: true },
+      { text: "", source: "history" },
+      { text: "RED", source: "history", spans: historySpans },
+      { text: "shell % print RED", source: "live", softWrapped: true },
+      { text: "", source: "live" },
+      { text: "RED", source: "live", spans: liveSpans },
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: "command",
+      command: "print RED",
+      commandLine: { source: "live" },
+      output: [{ line: { source: "live", text: "RED" } }],
     });
   });
 
