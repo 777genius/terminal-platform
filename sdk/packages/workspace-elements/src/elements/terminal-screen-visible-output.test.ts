@@ -1430,6 +1430,192 @@ describe("terminal screen visible output", () => {
     });
   });
 
+  it("promotes a raw command echo with its output before the active prompt cursor", () => {
+    const entries = createTerminalHistoryEntries([
+      {
+        text: "print 'fdfd'",
+        source: "live",
+      },
+      {
+        text: "fdfd",
+        source: "live",
+      },
+      {
+        text: "custom prompt",
+        source: "live",
+        cursor: { col: 0, shape: "block" },
+      },
+    ]);
+    const metadata = {
+      command: "print 'fdfd'",
+      durationMs: 35,
+      startedAtMs: 1_000,
+      status: "succeeded" as const,
+    };
+
+    const prepared = prepareTerminalHistoryEntriesForRender(
+      entries,
+      [metadata],
+      4_000
+    );
+
+    expect(prepared.entries).toEqual([
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: {
+          text: "shell % print 'fdfd'",
+          source: "live",
+        },
+        commandLineIndex: 0,
+        command: "print 'fdfd'",
+        output: [
+          {
+            line: { text: "fdfd", source: "live" },
+            lineIndex: 1,
+          },
+        ],
+      },
+      {
+        kind: "line",
+        line: {
+          text: "custom prompt",
+          source: "live",
+          cursor: { col: 0, shape: "block" },
+        },
+        lineIndex: 2,
+      },
+    ]);
+    expect(prepared.metadataByEntryIndex.get(0)).toBe(metadata);
+  });
+
+  it("moves restored output onto the authoritative live command when the live screen lags", () => {
+    const entries = createTerminalHistoryEntries([
+      { text: "shell % nnot_a_real_command", source: "history" },
+      {
+        text: "zsh: command not found: not_a_real_command",
+        source: "history",
+      },
+      { text: "shell % not_a_real_command", source: "live" },
+    ]);
+    const metadata = {
+      command: "not_a_real_command",
+      durationMs: 220,
+      startedAtMs: 1_000,
+      status: "failed" as const,
+    };
+
+    const prepared = prepareTerminalHistoryEntriesForRender(
+      entries,
+      [metadata],
+      4_000
+    );
+
+    expect(prepared.entries).toEqual([
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: {
+          text: "shell % not_a_real_command",
+          source: "live",
+        },
+        commandLineIndex: 2,
+        command: "not_a_real_command",
+        output: [
+          {
+            line: {
+              text: "zsh: command not found: not_a_real_command",
+              source: "history",
+            },
+            lineIndex: 1,
+          },
+        ],
+      },
+    ]);
+    expect(prepared.metadataByEntryIndex.get(2)).toBe(metadata);
+  });
+
+  it("drops a corrupted restored wrapped fragment only when its output matches the live block", () => {
+    const command =
+      "printf 'WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\n'";
+    const output =
+      "WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const entries = createTerminalHistoryEntries([
+      {
+        text: "shell % pprintf 'WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
+        source: "history",
+      },
+      { text: "5", source: "history" },
+      {
+        text: "56789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\n'",
+        source: "history",
+      },
+      { text: output, source: "history" },
+      {
+        text: "shell % printf 'WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
+        source: "live",
+        softWrapped: true,
+      },
+      {
+        text: "56789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\n'",
+        source: "live",
+      },
+      { text: output, source: "live" },
+    ]);
+    const metadata = {
+      command,
+      durationMs: 18,
+      startedAtMs: 1_000,
+      status: "succeeded" as const,
+    };
+
+    const prepared = prepareTerminalHistoryEntriesForRender(
+      entries,
+      [metadata],
+      4_000
+    );
+
+    expect(prepared.entries).toHaveLength(1);
+    expect(prepared.entries[0]).toMatchObject({
+      kind: "command",
+      command,
+      commandLine: { source: "live" },
+      output: [{ line: { source: "live", text: output } }],
+    });
+  });
+
+  it("keeps a corrupted restored wrapped fragment when its output differs", () => {
+    const entries = createTerminalHistoryEntries([
+      { text: "shell % pprintf 'WRAP_ABC", source: "history" },
+      { text: "restored-only", source: "history" },
+      {
+        text: "shell % printf 'WRAP_ABCDEF'",
+        source: "live",
+      },
+      { text: "live-only", source: "live" },
+    ]);
+
+    const prepared = prepareTerminalHistoryEntriesForRender(
+      entries,
+      [
+        {
+          command: "printf 'WRAP_ABCDEF'",
+          durationMs: 18,
+          startedAtMs: 1_000,
+          status: "succeeded",
+        },
+      ],
+      4_000
+    );
+
+    expect(prepared.entries).toHaveLength(2);
+    expect(
+      prepared.entries.map((entry) =>
+        entry.kind === "command" ? entry.commandLine.source : null
+      )
+    ).toEqual(["history", "live"]);
+  });
+
   it("does not append stale or already matched running command metadata", () => {
     const entries = createTerminalHistoryEntries([
       {
@@ -1588,6 +1774,48 @@ describe("terminal screen visible output", () => {
     ]);
   });
 
+  it("joins soft-wrapped command input before grouping its output", () => {
+    const entries = createTerminalHistoryEntries([
+      {
+        text: "shell % printf 'WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
+        source: "live",
+        softWrapped: true,
+      },
+      {
+        text: "56789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\n'",
+        source: "live",
+      },
+      {
+        text: "WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        source: "live",
+      },
+    ]);
+
+    expect(entries).toEqual([
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: {
+          text: "shell % printf 'WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
+          source: "live",
+          softWrapped: true,
+        },
+        commandLineIndex: 0,
+        command:
+          "printf 'WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\n'",
+        output: [
+          {
+            line: {
+              text: "WRAP_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+              source: "live",
+            },
+            lineIndex: 2,
+          },
+        ],
+      },
+    ]);
+  });
+
   it("keeps unrelated restored output as plain lines between command groups", () => {
     const entries = createTerminalHistoryEntries([
       { text: "shell % echo before", source: "history" },
@@ -1684,6 +1912,51 @@ describe("terminal screen visible output", () => {
         ],
       },
     ]);
+  });
+
+  it("prefers live command output when restored history duplicated its first input character", () => {
+    const entries = createTerminalHistoryEntries([
+      { text: "shell % pprint 'fdfd'", source: "history" },
+      { text: "fdfd", source: "history" },
+      { text: "shell % print 'fdfd'", source: "live" },
+      { text: "fdfd", source: "live" },
+    ]);
+
+    expect(entries).toEqual([
+      {
+        kind: "command",
+        prompt: "shell",
+        commandLine: {
+          text: "shell % print 'fdfd'",
+          source: "live",
+        },
+        commandLineIndex: 2,
+        command: "print 'fdfd'",
+        output: [
+          {
+            line: { text: "fdfd", source: "live" },
+            lineIndex: 3,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps a similar restored command when its output differs from live output", () => {
+    const entries = createTerminalHistoryEntries([
+      { text: "shell % eecho ok", source: "history" },
+      { text: "restored output", source: "history" },
+      { text: "shell % echo ok", source: "live" },
+      { text: "live output", source: "live" },
+    ]);
+
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.kind)).toEqual(["command", "command"]);
+    expect(
+      entries.map((entry) =>
+        entry.kind === "command" ? entry.commandLine.source : null
+      )
+    ).toEqual(["history", "live"]);
   });
 
   it("keeps restored rich command entries when live duplicates have less render metadata", () => {

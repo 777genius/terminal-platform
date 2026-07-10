@@ -2757,7 +2757,20 @@ export function prepareTerminalHistoryEntriesForRender(
     TerminalCommandPresentationMetadata
   >;
 } {
-  const matched = matchCommandPresentationMetadata(entries, metadata);
+  const repairedEntries = repairCorruptedRestoredCommandEntries(
+    entries,
+    metadata
+  );
+  const initiallyMatched = matchCommandPresentationMetadata(
+    repairedEntries,
+    metadata
+  );
+  const initiallyMatchedItems = new Set(initiallyMatched.values());
+  const promotedEntries = promoteRawTerminalCommandEntries(
+    repairedEntries,
+    metadata.filter((item) => !initiallyMatchedItems.has(item))
+  );
+  const matched = matchCommandPresentationMetadata(promotedEntries, metadata);
   const matchedItems = new Set(matched.values());
   const pendingItems = metadata
     .filter((item) => isPendingTerminalCommandMetadata(item, nowMs))
@@ -2766,13 +2779,13 @@ export function prepareTerminalHistoryEntriesForRender(
 
   if (pendingItems.length === 0) {
     return {
-      entries,
+      entries: promotedEntries,
       metadataByEntryIndex: matched,
     };
   }
 
   const filteredEntries = removeTrailingRawPendingCommandLines(
-    entries,
+    promotedEntries,
     pendingItems
   );
   const syntheticEntries = createPendingTerminalCommandEntries(
@@ -2791,6 +2804,193 @@ export function prepareTerminalHistoryEntriesForRender(
     entries: [...filteredEntries, ...syntheticEntries],
     metadataByEntryIndex: nextMetadata,
   };
+}
+
+function repairCorruptedRestoredCommandEntries(
+  entries: readonly TerminalHistoryEntry[],
+  metadata: readonly TerminalCommandPresentationMetadata[]
+): TerminalHistoryEntry[] {
+  const restoredEntriesToRemove = new Set<TerminalHistoryEntry>();
+  const restoredOutputByLiveEntry = new Map<
+    TerminalHistoryEntry,
+    TerminalHistoryCommandOutputLine[]
+  >();
+  let upperEntryIndex = entries.length;
+
+  for (
+    let metadataIndex = metadata.length - 1;
+    metadataIndex >= 0;
+    metadataIndex -= 1
+  ) {
+    const item = metadata[metadataIndex];
+    const command = normalizeCommandPresentationMatch(item?.command ?? "");
+    if (!item || !command) {
+      continue;
+    }
+
+    let liveEntryIndex = -1;
+    for (
+      let entryIndex = upperEntryIndex - 1;
+      entryIndex >= 0;
+      entryIndex -= 1
+    ) {
+      const entry = entries[entryIndex];
+      if (
+        entry?.kind === "command" &&
+        entry.commandLine.source === "live" &&
+        normalizeCommandPresentationMatch(entry.command) === command
+      ) {
+        liveEntryIndex = entryIndex;
+        upperEntryIndex = entryIndex;
+        break;
+      }
+    }
+
+    const liveEntry = entries[liveEntryIndex];
+    if (liveEntryIndex === -1 || liveEntry?.kind !== "command") {
+      continue;
+    }
+    const liveHasOutput = hasMeaningfulTerminalCommandOutput(liveEntry);
+
+    for (let entryIndex = liveEntryIndex - 1; entryIndex >= 0; entryIndex -= 1) {
+      const restoredEntry = entries[entryIndex];
+      if (
+        restoredEntry?.kind !== "command" ||
+        restoredEntry.commandLine.source !== "history" ||
+        restoredEntriesToRemove.has(restoredEntry) ||
+        !hasMeaningfulTerminalCommandOutput(restoredEntry) ||
+        !hasCorruptedHistoryCommandPrefixIdentity(restoredEntry, liveEntry) ||
+        (liveHasOutput
+          ? !doesTerminalCommandOutputEndWith(restoredEntry, liveEntry)
+          : !hasCorruptedHistoryCommandIdentity(restoredEntry, liveEntry))
+      ) {
+        continue;
+      }
+
+      restoredEntriesToRemove.add(restoredEntry);
+      if (!liveHasOutput) {
+        restoredOutputByLiveEntry.set(liveEntry, restoredEntry.output);
+      }
+      break;
+    }
+  }
+
+  if (restoredEntriesToRemove.size === 0) {
+    return [...entries];
+  }
+
+  return entries.flatMap((entry) => {
+    if (restoredEntriesToRemove.has(entry)) {
+      return [];
+    }
+
+    const restoredOutput = restoredOutputByLiveEntry.get(entry);
+    return restoredOutput && entry.kind === "command"
+      ? [{ ...entry, output: restoredOutput }]
+      : [entry];
+  });
+}
+
+function promoteRawTerminalCommandEntries(
+  entries: readonly TerminalHistoryEntry[],
+  metadata: readonly TerminalCommandPresentationMetadata[]
+): TerminalHistoryEntry[] {
+  if (metadata.length === 0) {
+    return [...entries];
+  }
+
+  const metadataByEntryIndex = new Map<
+    number,
+    TerminalCommandPresentationMetadata
+  >();
+  let upperEntryIndex = entries.length;
+
+  for (
+    let metadataIndex = metadata.length - 1;
+    metadataIndex >= 0;
+    metadataIndex -= 1
+  ) {
+    const item = metadata[metadataIndex];
+    const command = normalizeCommandPresentationMatch(item?.command ?? "");
+    if (!item || !command) {
+      continue;
+    }
+
+    for (
+      let entryIndex = upperEntryIndex - 1;
+      entryIndex >= 0;
+      entryIndex -= 1
+    ) {
+      const entry = entries[entryIndex];
+      if (
+        entry?.kind !== "line" ||
+        entry.line.source !== "live" ||
+        normalizeCommandPresentationMatch(entry.line.text) !== command
+      ) {
+        continue;
+      }
+
+      metadataByEntryIndex.set(entryIndex, item);
+      upperEntryIndex = entryIndex;
+      break;
+    }
+  }
+
+  if (metadataByEntryIndex.size === 0) {
+    return [...entries];
+  }
+
+  const promoted: TerminalHistoryEntry[] = [];
+  for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+    const entry = entries[entryIndex];
+    const item = metadataByEntryIndex.get(entryIndex);
+    if (!entry || entry.kind !== "line" || !item) {
+      if (entry) {
+        promoted.push(entry);
+      }
+      continue;
+    }
+
+    const output: TerminalHistoryCommandOutputLine[] = [];
+    let outputEntryIndex = entryIndex + 1;
+    while (outputEntryIndex < entries.length) {
+      const outputEntry = entries[outputEntryIndex];
+      if (
+        !outputEntry ||
+        outputEntry.kind !== "line" ||
+        outputEntry.line.source !== entry.line.source ||
+        metadataByEntryIndex.has(outputEntryIndex) ||
+        isTerminalActiveCursorLine(outputEntry.line)
+      ) {
+        break;
+      }
+
+      output.push({
+        line: outputEntry.line,
+        lineIndex: outputEntry.lineIndex,
+      });
+      outputEntryIndex += 1;
+    }
+
+    promoted.push({
+      kind: "command",
+      prompt: "shell",
+      commandLine: {
+        text: `shell % ${item.command.trim()}`,
+        source: entry.line.source,
+      },
+      commandLineIndex: entry.lineIndex,
+      command: item.command.trim(),
+      output,
+    });
+    entryIndex = outputEntryIndex - 1;
+  }
+
+  return promoted;
+}
+
+function isTerminalActiveCursorLine(line: VisibleOutputLine): boolean {
+  return Boolean(line.cursor);
 }
 
 function isPendingTerminalCommandMetadata(
@@ -3701,6 +3901,7 @@ export function createTerminalHistoryEntries(
   const entries: TerminalHistoryEntry[] = [];
   let activeEntry: Extract<TerminalHistoryEntry, { kind: "command" }> | null =
     null;
+  let activeCommandContinues = false;
   const terminalPromptLabel = normalizeTerminalPromptLabel(
     options.terminalPromptLabel
   );
@@ -3710,12 +3911,23 @@ export function createTerminalHistoryEntries(
       entries.push(activeEntry);
       activeEntry = null;
     }
+    activeCommandContinues = false;
   };
 
   lines.forEach((line, lineIndex) => {
     if (line.source === "boundary") {
       flushActiveEntry();
       entries.push({ kind: "line", line, lineIndex });
+      return;
+    }
+
+    if (
+      activeEntry &&
+      activeCommandContinues &&
+      activeEntry.commandLine.source === line.source
+    ) {
+      activeEntry.command += line.text;
+      activeCommandContinues = line.softWrapped === true;
       return;
     }
 
@@ -3730,6 +3942,7 @@ export function createTerminalHistoryEntries(
         command: semanticCommand.command,
         output: [],
       };
+      activeCommandContinues = line.softWrapped === true;
       return;
     }
 
@@ -3749,6 +3962,7 @@ export function createTerminalHistoryEntries(
         command: promptCommand.command,
         output: [],
       };
+      activeCommandContinues = line.softWrapped === true;
       return;
     }
 
@@ -3766,6 +3980,7 @@ export function createTerminalHistoryEntries(
         command: wrappedInputCommand.command,
         output: [],
       };
+      activeCommandContinues = line.softWrapped === true;
       return;
     }
 
@@ -3812,13 +4027,12 @@ function serializeTerminalCommandCopyLines(lines: readonly string[]): string {
 function dedupeHistoryCommandEntriesAgainstLive(
   entries: readonly TerminalHistoryEntry[]
 ): TerminalHistoryEntry[] {
+  const liveCommandEntries = entries.filter(
+    (entry): entry is Extract<TerminalHistoryEntry, { kind: "command" }> =>
+      entry.kind === "command" && entry.commandLine.source === "live"
+  );
   const liveCommandSignatures = new Set(
-    entries
-      .filter(
-        (entry): entry is Extract<TerminalHistoryEntry, { kind: "command" }> =>
-          entry.kind === "command" && entry.commandLine.source === "live"
-      )
-      .map(createTerminalCommandEntrySignature)
+    liveCommandEntries.map(createTerminalCommandEntrySignature)
   );
 
   if (liveCommandSignatures.size === 0) {
@@ -3849,10 +4063,61 @@ function dedupeHistoryCommandEntriesAgainstLive(
     if (entry.kind !== "command" || entry.commandLine.source !== "history") {
       return true;
     }
-    return !liveCommandSignatures.has(
-      createTerminalCommandEntrySignature(entry)
+    return (
+      !liveCommandSignatures.has(createTerminalCommandEntrySignature(entry)) &&
+      !liveCommandEntries.some((liveEntry) =>
+        isCorruptedHistoryCommandDuplicateOfLive(entry, liveEntry)
+      )
     );
   });
+}
+
+function isCorruptedHistoryCommandDuplicateOfLive(
+  historyEntry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+  liveEntry: Extract<TerminalHistoryEntry, { kind: "command" }>
+): boolean {
+  return (
+    hasCorruptedHistoryCommandIdentity(historyEntry, liveEntry) &&
+    visibleOutputLineMetadataKey(historyEntry.commandLine) ===
+      visibleOutputLineMetadataKey(liveEntry.commandLine) &&
+    createTerminalCommandOutputSignature(historyEntry) ===
+      createTerminalCommandOutputSignature(liveEntry)
+  );
+}
+
+function hasCorruptedHistoryCommandIdentity(
+  historyEntry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+  liveEntry: Extract<TerminalHistoryEntry, { kind: "command" }>
+): boolean {
+  const historyCommand = normalizeCommandPresentationMatch(
+    historyEntry.command
+  );
+  const liveCommand = normalizeCommandPresentationMatch(liveEntry.command);
+  return (
+    hasCorruptedHistoryCommandPrefixIdentity(historyEntry, liveEntry) &&
+    historyCommand.slice(1) === liveCommand
+  );
+}
+
+function hasCorruptedHistoryCommandPrefixIdentity(
+  historyEntry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+  liveEntry: Extract<TerminalHistoryEntry, { kind: "command" }>
+): boolean {
+  const historyCommand = normalizeCommandPresentationMatch(
+    historyEntry.command
+  );
+  const liveCommand = normalizeCommandPresentationMatch(liveEntry.command);
+  const repairedHistoryCommand = historyCommand.slice(1);
+  const nextLiveCharacter = liveCommand[repairedHistoryCommand.length] ?? "";
+
+  return (
+    liveCommand.length > 0 &&
+    historyCommand[0] === liveCommand[0] &&
+    repairedHistoryCommand.length > 0 &&
+    liveCommand.startsWith(repairedHistoryCommand) &&
+    nextLiveCharacter !== " " &&
+    historyEntry.prompt === liveEntry.prompt
+  );
 }
 
 function hasMeaningfulTerminalCommandOutput(
@@ -3909,16 +4174,35 @@ function isLikelyRedundantTerminalCommandFragment(
 function createTerminalCommandEntrySignature(
   entry: Extract<TerminalHistoryEntry, { kind: "command" }>
 ): string {
-  const outputText = entry.output
+  const outputText = createTerminalCommandOutputSignature(entry);
+  return `${entry.prompt}\u0000${
+    entry.command
+  }\u0000${visibleOutputLineMetadataKey(entry.commandLine)}\u0000${outputText}`;
+}
+
+function createTerminalCommandOutputSignature(
+  entry: Extract<TerminalHistoryEntry, { kind: "command" }>
+): string {
+  return entry.output
     .map(
       ({ line }) =>
         `${line.text.trim()}\u0001${visibleOutputLineMetadataKey(line)}`
     )
     .filter((line) => line !== "\u0001")
     .join("\u0000");
-  return `${entry.prompt}\u0000${
-    entry.command
-  }\u0000${visibleOutputLineMetadataKey(entry.commandLine)}\u0000${outputText}`;
+}
+
+function doesTerminalCommandOutputEndWith(
+  restoredEntry: Extract<TerminalHistoryEntry, { kind: "command" }>,
+  liveEntry: Extract<TerminalHistoryEntry, { kind: "command" }>
+): boolean {
+  const restoredOutput = createTerminalCommandOutputSignature(restoredEntry);
+  const liveOutput = createTerminalCommandOutputSignature(liveEntry);
+  return (
+    liveOutput.length > 0 &&
+    (restoredOutput === liveOutput ||
+      restoredOutput.endsWith(`\u0000${liveOutput}`))
+  );
 }
 
 function areVisibleOutputLinesEquivalentForDedupe(
