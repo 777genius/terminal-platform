@@ -34,6 +34,7 @@ import type { WorkspaceSnapshot } from "../read-models/workspace-snapshot.js";
 import type { WorkspaceHistoricalPaneSnapshot } from "../read-models/workspace-snapshot.js";
 import type { CatalogService } from "./catalog-service.js";
 import type { ServiceContext } from "./service-context.js";
+import { projectTerminalHistoryText } from "./terminal-history-text-projector.js";
 
 const PANE_HISTORY_INITIAL_EVENT_SEQ = 1n;
 const PANE_HISTORY_PAGE_MAX_SEGMENTS = 256;
@@ -1040,8 +1041,12 @@ function buildHydratedHistoricalPane(
   loadedAtMs: number,
   options: BuildHydratedHistoricalPaneOptions = {},
 ): WorkspaceHistoricalPaneSnapshot | null {
-  const segmentText = linesFromHistorySegments(history.segments);
-  const segmentLines = segmentText.lines;
+  const segmentText = linesFromHistorySegments(
+    history.segments,
+    terminalHistoryProjectionSize(history.latest_screen_snapshot?.screen_json),
+  );
+  const segmentRichLines = normalizeHistoryRichLines(segmentText.richLines ?? []);
+  const segmentLines = segmentRichLines.map((line) => line.text);
   const includeSnapshotFallback = options.includeSnapshotFallback ?? true;
   const gapLines = history.gaps.map((gap) => {
     const eventRange = gap.event_seq_low && gap.event_seq_high
@@ -1061,25 +1066,36 @@ function buildHydratedHistoricalPane(
     && history.latest_screen_snapshot
     ? linesFromScreenSnapshotJson(history.latest_screen_snapshot.screen_json)
     : { lines: [] };
-  const snapshotRichLines =
-    snapshotOutput.richLines
-    && snapshotOutput.richLines.length > 0
-      ? normalizeHistoryRichLines([
-          ...snapshotOutput.richLines,
-          ...gapLines.map((line) => createPlainHistoryScreenLine(line)),
-        ])
-      : undefined;
-  const lines =
-    segmentLines.length === 0 && snapshotRichLines
-      ? snapshotRichLines.map((line) => line.text)
-      : normalizeHistoryLines([
-          ...(segmentLines.length > 0 ? segmentLines : snapshotOutput.lines),
-          ...gapLines,
-        ]);
-  const richLines =
-    snapshotRichLines && doHistoryRichLinesMatchText(snapshotRichLines, lines)
+  const journalRichLines = segmentRichLines.length > 0
+    ? normalizeHistoryRichLines([
+        ...segmentRichLines,
+        ...gapLines.map((line) => createPlainHistoryScreenLine(line)),
+      ])
+    : undefined;
+  const snapshotRichLines = snapshotOutput.richLines && snapshotOutput.richLines.length > 0
+    ? normalizeHistoryRichLines([
+        ...snapshotOutput.richLines,
+        ...gapLines.map((line) => createPlainHistoryScreenLine(line)),
+      ])
+    : undefined;
+  const candidateRichLines =
+    journalRichLines &&
+    snapshotRichLines &&
+    doHistoryRichLinesMatchText(
+      snapshotRichLines,
+      journalRichLines.map((line) => line.text),
+    )
       ? snapshotRichLines
-      : undefined;
+      : journalRichLines ?? snapshotRichLines;
+  const lines = candidateRichLines
+    ? candidateRichLines.map((line) => line.text)
+    : normalizeHistoryLines([
+        ...(segmentLines.length > 0 ? segmentLines : snapshotOutput.lines),
+        ...gapLines,
+      ]);
+  const richLines = candidateRichLines && doHistoryRichLinesMatchText(candidateRichLines, lines)
+    ? candidateRichLines
+    : undefined;
   const alignedRichLines =
     richLines && doHistoryRichLinesMatchText(richLines, lines)
       ? richLines
@@ -1191,7 +1207,7 @@ function mergeHistoricalPaneLines(
 }
 
 interface HistorySegmentText {
-  readonly lines: string[];
+  readonly richLines?: ScreenLine[];
   readonly startsWithLineBreak?: boolean;
   readonly endsWithLineBreak?: boolean;
 }
@@ -1202,18 +1218,47 @@ interface HistorySnapshotLines {
   readonly surfacePalette?: ScreenSurfacePalette;
 }
 
-function linesFromHistorySegments(segments: PaneHistory["segments"]): HistorySegmentText {
+function linesFromHistorySegments(
+  segments: PaneHistory["segments"],
+  size: { columns: number; rows: number } | null,
+): HistorySegmentText {
   if (segments.length === 0) {
-    return { lines: [] };
+    return {};
   }
 
   const bytes = segments.flatMap((segment) => segment.payload);
-  const text = sanitizeTerminalHistoryText(new TextDecoder().decode(Uint8Array.from(bytes)));
+  const projection = projectTerminalHistoryText(
+    new TextDecoder().decode(Uint8Array.from(bytes)),
+    size ? { columns: size.columns, rows: size.rows } : undefined,
+  );
   return {
-    lines: normalizeHistoryLines(text.split("\n")),
-    startsWithLineBreak: text.startsWith("\n"),
-    endsWithLineBreak: text.endsWith("\n"),
+    richLines: projection.lines,
+    startsWithLineBreak: projection.startsWithLineBreak,
+    endsWithLineBreak: projection.endsWithLineBreak,
   };
+}
+
+function terminalHistoryProjectionSize(
+  screenJson: string | null | undefined,
+): { columns: number; rows: number } | null {
+  if (!screenJson) return null;
+
+  try {
+    const parsed = JSON.parse(screenJson) as unknown;
+    if (!isRecord(parsed)) return null;
+    const columns = parsed.cols;
+    const rows = parsed.rows;
+    return typeof columns === "number"
+      && Number.isInteger(columns)
+      && columns > 0
+      && typeof rows === "number"
+      && Number.isInteger(rows)
+      && rows > 0
+      ? { columns, rows }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function linesFromScreenSnapshotJson(screenJson: string): HistorySnapshotLines {
@@ -1737,16 +1782,6 @@ function combinedHistoryScreenLineMetadata(first: ScreenLine, second: ScreenLine
     ...(sideEffects.length > 0 ? { side_effects: sideEffects } : {}),
     ...(semanticMarks.length > 0 ? { semantic_marks: semanticMarks } : {}),
   };
-}
-
-function sanitizeTerminalHistoryText(text: string): string {
-  return text
-    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, "")
-    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\x1B[@-Z\\-_]/g, "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
 
 function normalizeHistoryLines(lines: readonly string[]): string[] {

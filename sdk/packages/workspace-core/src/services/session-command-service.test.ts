@@ -14,6 +14,47 @@ import type { ServiceContext } from "./service-context.js";
 import { SessionCommandService } from "./session-command-service.js";
 
 describe("SessionCommandService pane history paging", () => {
+  it("projects raw VT redraws before appending a durable history page", async () => {
+    const paneId = "pane-redraw";
+    let snapshot = createWorkspaceSnapshot(createHistoricalPane({
+      paneId,
+      lines: ["existing"],
+      nextEventSeq: 2n,
+    }));
+    const context = {
+      ensureTransport: async () => ({
+        ...createUnusedTransport(),
+        getPaneHistory: async () => createPaneHistory(
+          "session-1",
+          paneId,
+          "p\bprint 'fdfd'\r\nfdfd\r\n",
+          {
+            fromEventSeq: 2n,
+            eventSeqLow: 2n,
+            eventSeqHigh: 2n,
+          },
+        ),
+      } as WorkspaceTransportClient),
+      getSnapshot: () => snapshot,
+      updateSnapshot: (updater) => {
+        snapshot = updater(snapshot);
+      },
+      recordDiagnostic: (input) => ({ ...input, timestampMs: 10_000 }),
+      clearDiagnostics: () => {},
+      telemetry: noopTelemetrySink,
+      now: () => 10_000,
+    } satisfies ServiceContext;
+    const service = new SessionCommandService(context, new CatalogService(context));
+
+    await expect(service.loadMorePaneHistory(paneId)).resolves.toBe(true);
+
+    expect(snapshot.historicalPanes?.[paneId]?.lines).toEqual([
+      "existing",
+      "print 'fdfd'",
+      "fdfd",
+    ]);
+  });
+
   it("reports stale page loads as unapplied", async () => {
     const paneId = "pane-stale";
     const existingHistory = createHistoricalPane({
