@@ -149,6 +149,10 @@ jobs:
             runner: windows-latest
             archive_kind: zip
             binary_name: terminal-daemon.exe
+          - platform: win32-arm64
+            runner: windows-11-arm
+            archive_kind: zip
+            binary_name: terminal-daemon.exe
 
     runs-on: ${{ matrix.runner }}
 

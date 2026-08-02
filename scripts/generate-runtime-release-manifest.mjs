@@ -21,6 +21,10 @@ const supportedPlatforms = {
     archiveKind: "zip",
     binaryName: "terminal-daemon.exe",
   },
+  "win32-arm64": {
+    archiveKind: "zip",
+    binaryName: "terminal-daemon.exe",
+  },
 };
 
 function main() {
