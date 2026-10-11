@@ -24,6 +24,7 @@
     "index.cjs",
     "index.mjs",
     "index.d.ts",
+    "index.d.mts",
     "bindings",
     "native"
   ],
