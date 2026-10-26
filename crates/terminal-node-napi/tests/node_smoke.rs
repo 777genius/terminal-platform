@@ -7,8 +7,6 @@ use std::{
 use terminal_daemon::spawn_local_socket_server;
 use terminal_daemon_client::LocalSocketDaemonClient;
 use terminal_protocol::LocalSocketAddress;
-#[cfg(not(windows))]
-use terminal_testing::ZellijTestLock;
 use terminal_testing::{
     daemon_fixture, isolated_daemon, unique_socket_address, wait_for_daemon_ready,
 };
@@ -18,10 +16,7 @@ mod support;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn roundtrips_node_addon_against_daemon_fixture() {
-    #[cfg(not(windows))]
-    let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
-    #[cfg(windows)]
-    let zellij_smoke = support::windows_zellij_smoke_env("node-addon");
+    let zellij_smoke = support::zellij_smoke_env("node-addon");
 
     let fixture = daemon_fixture("terminal-node-napi-smoke").expect("fixture should start");
     wait_for_daemon_ready(&fixture.client).await;
@@ -38,7 +33,6 @@ async fn roundtrips_node_addon_against_daemon_fixture() {
         .env("TERMINAL_NODE_ADDON", &addon_path)
         .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
         .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value);
-    #[cfg(windows)]
     command
         .env("TERMINAL_NODE_RUN_ZELLIJ_SMOKE", "1")
         .env("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", &zellij_smoke.session_name);

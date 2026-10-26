@@ -8,21 +8,19 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 use super::command::zellij_command_path;
 
-pub(super) struct WindowsZellijPtyGuard {
+pub(super) struct ZellijPtyGuard {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     _master: Box<dyn portable_pty::MasterPty + Send>,
     output: Arc<Mutex<Vec<u8>>>,
 }
 
-#[cfg(windows)]
-impl std::fmt::Debug for WindowsZellijPtyGuard {
+impl std::fmt::Debug for ZellijPtyGuard {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("WindowsZellijPtyGuard").finish_non_exhaustive()
+        formatter.debug_struct("ZellijPtyGuard").finish_non_exhaustive()
     }
 }
 
-#[cfg(windows)]
-impl WindowsZellijPtyGuard {
+impl ZellijPtyGuard {
     pub(super) fn output_tail(&self) -> String {
         let output = self.output.lock().ok().map_or_else(Vec::new, |buffer| buffer.clone());
         let text = String::from_utf8_lossy(&output);
@@ -33,17 +31,14 @@ impl WindowsZellijPtyGuard {
     }
 }
 
-#[cfg(windows)]
-impl Drop for WindowsZellijPtyGuard {
+impl Drop for ZellijPtyGuard {
     fn drop(&mut self) {
         let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
-#[cfg(windows)]
-pub(super) fn spawn_windows_zellij_pty(
-    session_name: &str,
-) -> Result<WindowsZellijPtyGuard, String> {
+pub(super) fn spawn_zellij_pty(session_name: &str) -> Result<ZellijPtyGuard, String> {
     let pty_system = native_pty_system();
     let pty_pair = pty_system
         .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
@@ -92,5 +87,5 @@ pub(super) fn spawn_windows_zellij_pty(
         }
     });
 
-    Ok(WindowsZellijPtyGuard { child, _master: pty_pair.master, output })
+    Ok(ZellijPtyGuard { child, _master: pty_pair.master, output })
 }

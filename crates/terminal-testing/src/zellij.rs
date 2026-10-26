@@ -1,19 +1,17 @@
 mod command;
 mod lock;
-#[cfg(windows)]
-mod windows;
+#[cfg(any(unix, windows))]
+mod pty;
 
 use std::{
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(unix)]
-use command::{is_headless_zellij_spawn_error, run_zellij_with_timeout, zellij_create_timeout};
 use command::{run_zellij, wait_for_zellij_session};
 pub use lock::ZellijTestLock;
-#[cfg(windows)]
-use windows::{WindowsZellijPtyGuard, spawn_windows_zellij_pty};
+#[cfg(any(unix, windows))]
+use pty::{ZellijPtyGuard, spawn_zellij_pty};
 
 pub fn unique_zellij_session_name(label: &str) -> String {
     let nanos = SystemTime::now()
@@ -29,8 +27,7 @@ pub fn unique_zellij_session_name(label: &str) -> String {
 pub struct ZellijSessionGuard {
     session_name: String,
     _lock: ZellijTestLock,
-    #[cfg(windows)]
-    _pty: Option<WindowsZellijPtyGuard>,
+    _pty: Option<ZellijPtyGuard>,
 }
 
 #[cfg(any(unix, windows))]
@@ -43,57 +40,16 @@ impl ZellijSessionGuard {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn spawn_zellij_session_with_lock(
     session_name: &str,
     lock: ZellijTestLock,
 ) -> Result<ZellijSessionGuard, String> {
     let mut last_error = None;
 
-    for _ in 0..3 {
-        match run_zellij_with_timeout(
-            &["attach", "--create-background", session_name],
-            zellij_create_timeout(),
-        ) {
-            Ok(output) if output.status.success() => {}
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if !is_headless_zellij_spawn_error(&stderr) && !stderr.trim().is_empty() {
-                    last_error = Some(stderr.trim().to_string());
-                }
-            }
-            Err(error) => {
-                last_error = Some(error);
-            }
-        }
-
-        let wait_result = wait_for_zellij_session(session_name);
-        if wait_result.is_ok() {
-            return Ok(ZellijSessionGuard { session_name: session_name.to_string(), _lock: lock });
-        }
-
-        let wait_error = wait_result
-            .expect_err("wait_result should be an error once zellij session discovery fails");
-        if last_error.is_none() {
-            last_error = Some(wait_error);
-        }
-
-        let _ = run_zellij(&["kill-session", session_name]);
-        thread::sleep(Duration::from_millis(200));
-    }
-
-    Err(last_error.unwrap_or_else(|| format!("zellij session never stabilized for {session_name}")))
-}
-
-#[cfg(windows)]
-fn spawn_zellij_session_with_lock(
-    session_name: &str,
-    lock: ZellijTestLock,
-) -> Result<ZellijSessionGuard, String> {
-    let mut last_error = None;
-
-    for _ in 0..1 {
-        match spawn_windows_zellij_pty(session_name) {
+    // Detached Zellij tabs can remain without panes; keep a real client alive for commands.
+    for _ in 0..if cfg!(windows) { 1 } else { 3 } {
+        match spawn_zellij_pty(session_name) {
             Ok(pty) => {
                 let wait_result = wait_for_zellij_session(session_name);
                 if wait_result.is_ok() {
