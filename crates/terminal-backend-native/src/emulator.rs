@@ -6236,16 +6236,13 @@ impl ansi::Handler for ExtraTextStyleHandler<'_> {
     delegate_handler_method!(set_keypad_application_mode());
     delegate_handler_method!(unset_keypad_application_mode());
     delegate_handler_method!(set_active_charset(index: ansi::CharsetIndex));
-    delegate_handler_method!(configure_charset(
-        index: ansi::CharsetIndex,
-        charset: ansi::StandardCharset,
-    ));
+    delegate_handler_method!(
+        configure_charset(index: ansi::CharsetIndex, charset: ansi::StandardCharset)
+    );
     delegate_handler_method!(set_color(index: usize, color: ansi::Rgb));
-    delegate_handler_method!(dynamic_color_sequence(
-        prefix: String,
-        index: usize,
-        terminator: &str,
-    ));
+    delegate_handler_method!(
+        dynamic_color_sequence(prefix: String, index: usize, terminator: &str)
+    );
     delegate_handler_method!(reset_color(index: usize));
     fn clipboard_store(&mut self, clipboard: u8, _data: &[u8]) {
         self.mark_side_effect(
@@ -6275,16 +6272,14 @@ impl ansi::Handler for ExtraTextStyleHandler<'_> {
     delegate_handler_method!(report_keyboard_mode());
     delegate_handler_method!(push_keyboard_mode(mode: ansi::KeyboardModes));
     delegate_handler_method!(pop_keyboard_modes(to_pop: u16));
-    delegate_handler_method!(set_keyboard_mode(
-        mode: ansi::KeyboardModes,
-        behavior: ansi::KeyboardModesApplyBehavior,
-    ));
+    delegate_handler_method!(
+        set_keyboard_mode(mode: ansi::KeyboardModes, behavior: ansi::KeyboardModesApplyBehavior)
+    );
     delegate_handler_method!(set_modify_other_keys(mode: ansi::ModifyOtherKeys));
     delegate_handler_method!(report_modify_other_keys());
-    delegate_handler_method!(set_scp(
-        char_path: ansi::ScpCharPath,
-        update_mode: ansi::ScpUpdateMode,
-    ));
+    delegate_handler_method!(
+        set_scp(char_path: ansi::ScpCharPath, update_mode: ansi::ScpUpdateMode)
+    );
 
     fn input(&mut self, c: char) {
         let position = self.cursor_position();
