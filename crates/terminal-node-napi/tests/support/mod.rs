@@ -10,22 +10,19 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(windows)]
 use terminal_testing::{ZellijSessionGuard, unique_zellij_session_name};
 
-#[cfg(windows)]
-pub struct WindowsZellijSmokeEnv {
+pub struct ZellijSmokeEnv {
     pub session_name: String,
     _guard: ZellijSessionGuard,
 }
 
-#[cfg(windows)]
-pub fn windows_zellij_smoke_env(label: &str) -> WindowsZellijSmokeEnv {
+pub fn zellij_smoke_env(label: &str) -> ZellijSmokeEnv {
     let session_name = unique_zellij_session_name(label);
-    let guard = ZellijSessionGuard::spawn(&session_name)
-        .expect("windows zellij smoke session should start");
+    let guard =
+        ZellijSessionGuard::spawn(&session_name).expect("zellij smoke session should start");
 
-    WindowsZellijSmokeEnv { session_name, _guard: guard }
+    ZellijSmokeEnv { session_name, _guard: guard }
 }
 
 pub fn locate_cdylib() -> std::io::Result<PathBuf> {

@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ (github.event_name == 'pull_request' || github.event_name == 'push') && (github.event.pull_request.number || github.ref) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read
@@ -280,7 +280,7 @@ jobs:
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny@0.19.4,cargo-public-api@0.51.0,cargo-semver-checks@0.47.0,release-plz@0.3.157
+          tool: cargo-deny@0.19.4,cargo-public-api@0.51.0,cargo-semver-checks@0.51.0,release-plz@0.3.157
 
       - name: Format
         run: cargo fmt --all --check

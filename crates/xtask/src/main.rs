@@ -94,7 +94,7 @@ pub(crate) use manual::ManualRunKind;
 pub(crate) use readiness::{
     verify_manual_qa_scope, verify_node_package_scripts, verify_recorded_passes,
     verify_v1_release_configs, verify_v1_workflows, verify_windows_conpty_vendor_patch,
-    verify_windows_zellij_package_smoke,
+    verify_zellij_package_smoke,
 };
 
 #[cfg(test)]

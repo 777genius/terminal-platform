@@ -84,19 +84,6 @@ pub(super) fn zellij_command_timeout() -> Duration {
     if cfg!(windows) { Duration::from_secs(10) } else { Duration::from_secs(5) }
 }
 
-#[cfg(unix)]
-pub(super) fn zellij_create_timeout() -> Duration {
-    if cfg!(windows) { Duration::from_secs(20) } else { Duration::from_secs(10) }
-}
-
-#[cfg(unix)]
-pub(super) fn is_headless_zellij_spawn_error(stderr: &str) -> bool {
-    stderr.contains("could not get terminal attribute")
-        || stderr.contains("could not enable raw mode")
-        || stderr.contains("No such device or address")
-        || stderr.contains("The handle is invalid")
-}
-
 #[cfg(any(unix, windows))]
 pub(super) fn wait_for_zellij_session(session_name: &str) -> Result<(), String> {
     let started = Instant::now();

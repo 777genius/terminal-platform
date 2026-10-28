@@ -8,7 +8,7 @@ use crate::{
 use super::{
     verify_manual_qa_scope, verify_node_package_scripts, verify_recorded_passes,
     verify_v1_release_configs, verify_v1_workflows, verify_windows_conpty_vendor_patch,
-    verify_windows_zellij_package_smoke,
+    verify_zellij_package_smoke,
 };
 
 pub(crate) fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), String> {
@@ -314,7 +314,7 @@ pub(crate) fn verify_v1_readiness(require_recorded_passes: bool) -> Result<(), S
             "git am terminal-platform-v1-closeout-local.patch",
         ],
     )?;
-    verify_windows_zellij_package_smoke(
+    verify_zellij_package_smoke(
         &node_smoke_test_contents,
         &node_package_smoke_test_contents,
         &node_package_install_smoke_test_contents,

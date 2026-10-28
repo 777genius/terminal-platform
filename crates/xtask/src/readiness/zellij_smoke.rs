@@ -1,6 +1,6 @@
 use crate::support::assert_contains_all;
 
-pub(crate) fn verify_windows_zellij_package_smoke(
+pub(crate) fn verify_zellij_package_smoke(
     node_smoke_test: &str,
     package_smoke_test: &str,
     package_install_smoke_test: &str,
@@ -14,8 +14,7 @@ pub(crate) fn verify_windows_zellij_package_smoke(
             contents,
             label,
             &[
-                "#[cfg(windows)]",
-                "windows_zellij_smoke_env",
+                "let zellij_smoke = support::zellij_smoke_env(",
                 "TERMINAL_NODE_RUN_ZELLIJ_SMOKE",
                 "TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION",
             ],

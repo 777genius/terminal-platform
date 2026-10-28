@@ -220,11 +220,9 @@ unknown-registry = "deny"
 unknown-git = "deny"
 "#;
 
-pub(super) const VALID_WINDOWS_ZELLIJ_SMOKE_TEST: &str = r#"
-#[cfg(windows)]
-let zellij_smoke = support::windows_zellij_smoke_env("package");
+pub(super) const VALID_ZELLIJ_SMOKE_TEST: &str = r#"
+let zellij_smoke = support::zellij_smoke_env("package");
 
-#[cfg(windows)]
 command
 .env("TERMINAL_NODE_RUN_ZELLIJ_SMOKE", "1")
 .env("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", &zellij_smoke.session_name);

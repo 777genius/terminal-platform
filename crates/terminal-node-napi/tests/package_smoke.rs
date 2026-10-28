@@ -1,18 +1,13 @@
 use std::{path::PathBuf, process::Command};
 
 use terminal_protocol::LocalSocketAddress;
-#[cfg(not(windows))]
-use terminal_testing::ZellijTestLock;
 use terminal_testing::{daemon_fixture, wait_for_daemon_ready};
 
 mod support;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn roundtrips_staged_package_through_cjs_and_esm() {
-    #[cfg(windows)]
-    let zellij_smoke = support::windows_zellij_smoke_env("package-staged");
-    #[cfg(not(windows))]
-    let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
+    let zellij_smoke = support::zellij_smoke_env("package-staged");
 
     let fixture = daemon_fixture("terminal-node-package-smoke").expect("fixture should start");
     wait_for_daemon_ready(&fixture.client).await;
@@ -57,7 +52,6 @@ async fn roundtrips_staged_package_through_cjs_and_esm() {
             .env("TERMINAL_NODE_PACKAGE", &package_dir)
             .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
             .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value);
-        #[cfg(windows)]
         command
             .env("TERMINAL_NODE_RUN_ZELLIJ_SMOKE", "1")
             .env("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", &zellij_smoke.session_name);

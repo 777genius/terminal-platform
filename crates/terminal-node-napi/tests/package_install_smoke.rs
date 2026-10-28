@@ -266,10 +266,7 @@ main().catch((error) => {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn roundtrips_installed_tarball_through_cjs_and_esm() {
-    #[cfg(windows)]
-    let zellij_smoke = support::windows_zellij_smoke_env("package-installed");
-    #[cfg(not(windows))]
-    let _zellij_lock = ZellijTestLock::acquire().expect("zellij test lock should acquire");
+    let zellij_smoke = support::zellij_smoke_env("package-installed");
 
     let addon_path = support::locate_cdylib().expect("node addon should be built");
     let package_dir =
@@ -321,7 +318,6 @@ async fn roundtrips_installed_tarball_through_cjs_and_esm() {
             .env("TERMINAL_NODE_SMOKE_FLOW", &smoke_flow_path)
             .env("TERMINAL_NODE_ADDRESS_KIND", address_kind)
             .env("TERMINAL_NODE_ADDRESS_VALUE", &address_value);
-        #[cfg(windows)]
         command
             .env("TERMINAL_NODE_RUN_ZELLIJ_SMOKE", "1")
             .env("TERMINAL_NODE_EXTERNAL_ZELLIJ_SESSION", &zellij_smoke.session_name);
