@@ -29,7 +29,7 @@ jobs:
       - name: Install readiness tools
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-public-api@0.51.0,cargo-semver-checks@0.47.0,release-plz@0.3.157
+          tool: cargo-public-api@0.51.0,cargo-semver-checks@0.51.0,release-plz@0.3.157
 
       - name: Readiness audit
         run: cargo run -p xtask -- verify-v1-readiness --require-recorded-passes
