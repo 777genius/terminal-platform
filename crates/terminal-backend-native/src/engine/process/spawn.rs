@@ -157,9 +157,33 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn build_command_preserves_inherited_path_over_registry_path() {
+        const CHILD: &str = "TERMINAL_PATH_REGRESSION_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let inherited = std::env::var_os("PATH").expect("child PATH");
+            // A plain portable-pty command loads the Windows registry PATH.
+            // Prove it differs from our deliberately prefixed daemon PATH.
+            assert_ne!(
+                CommandBuilder::new("cmd.exe").get_env("PATH"),
+                Some(inherited.as_os_str())
+            );
+            let command = build_command(&ShellLaunchSpec::new("cmd.exe"));
+            assert_eq!(command.get_env("PATH"), Some(inherited.as_os_str()));
+            return;
+        }
+
         let inherited = std::env::var_os("PATH").expect("test runner PATH");
-        let command = build_command(&ShellLaunchSpec::new("cmd.exe"));
-        assert_eq!(command.get_env("PATH"), Some(inherited.as_os_str()));
+        let prefixed = format!(r"C:\agent-teams-test-managed-git\cmd;{}", inherited.to_string_lossy());
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .arg("build_command_preserves_inherited_path_over_registry_path")
+            .env(CHILD, "1")
+            .env("PATH", prefixed)
+            .output()
+            .expect("run Windows PATH regression subprocess");
+        assert!(
+            output.status.success(),
+            "child test failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
