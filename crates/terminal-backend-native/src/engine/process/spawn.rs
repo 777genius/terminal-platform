@@ -98,6 +98,12 @@ fn build_command(launch: &ShellLaunchSpec) -> CommandBuilder {
     if let Some(cwd) = &launch.cwd {
         command.cwd(cwd);
     }
+    // On Windows, portable-pty reloads the registry PATH and may replace the
+    // daemon's inherited PATH, including the app's bundled Git directory.
+    #[cfg(windows)]
+    if let Some(path) = std::env::var_os("PATH") {
+        command.env("PATH", path);
+    }
     apply_terminal_capability_environment(&mut command);
     command
 }
@@ -145,6 +151,36 @@ mod tests {
         assert_eq!(
             command.get_env("TERM_FEATURES"),
             Some(OsStr::new(crate::TERMINAL_FEATURE_REPORT))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn build_command_preserves_inherited_path_over_registry_path() {
+        const CHILD: &str = "TERMINAL_PATH_REGRESSION_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let inherited = std::env::var_os("PATH").expect("child PATH");
+            // A plain portable-pty command loads the Windows registry PATH.
+            // Prove it differs from our deliberately prefixed daemon PATH.
+            assert_ne!(CommandBuilder::new("cmd.exe").get_env("PATH"), Some(inherited.as_os_str()));
+            let command = build_command(&ShellLaunchSpec::new("cmd.exe"));
+            assert_eq!(command.get_env("PATH"), Some(inherited.as_os_str()));
+            return;
+        }
+
+        let inherited = std::env::var_os("PATH").expect("test runner PATH");
+        let prefixed =
+            format!(r"C:\agent-teams-test-managed-git\cmd;{}", inherited.to_string_lossy());
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .arg("build_command_preserves_inherited_path_over_registry_path")
+            .env(CHILD, "1")
+            .env("PATH", prefixed)
+            .output()
+            .expect("run Windows PATH regression subprocess");
+        assert!(
+            output.status.success(),
+            "child test failed: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 
