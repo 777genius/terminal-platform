@@ -172,7 +172,10 @@ mod tests {
         }
 
         let inherited = std::env::var_os("PATH").expect("test runner PATH");
-        let prefixed = format!(r"C:\agent-teams-test-managed-git\cmd;{}", inherited.to_string_lossy());
+        let prefixed = format!(
+            r"C:\agent-teams-test-managed-git\cmd;{}",
+            inherited.to_string_lossy()
+        );
         let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .arg("build_command_preserves_inherited_path_over_registry_path")
             .env(CHILD, "1")
