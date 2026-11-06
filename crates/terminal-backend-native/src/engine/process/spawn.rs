@@ -98,6 +98,12 @@ fn build_command(launch: &ShellLaunchSpec) -> CommandBuilder {
     if let Some(cwd) = &launch.cwd {
         command.cwd(cwd);
     }
+    // On Windows, portable-pty reloads the registry PATH and may replace the
+    // daemon's inherited PATH, including the app's bundled Git directory.
+    #[cfg(windows)]
+    if let Some(path) = std::env::var_os("PATH") {
+        command.env("PATH", path);
+    }
     apply_terminal_capability_environment(&mut command);
     command
 }
@@ -146,6 +152,14 @@ mod tests {
             command.get_env("TERM_FEATURES"),
             Some(OsStr::new(crate::TERMINAL_FEATURE_REPORT))
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn build_command_preserves_inherited_path_over_registry_path() {
+        let inherited = std::env::var_os("PATH").expect("test runner PATH");
+        let command = build_command(&ShellLaunchSpec::new("cmd.exe"));
+        assert_eq!(command.get_env("PATH"), Some(inherited.as_os_str()));
     }
 
     #[test]
